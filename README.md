@@ -18,7 +18,8 @@ Early development. Built incrementally:
 - [x] **Milepæl 7B** — Integrert terminal (PTY + VT100, Ctrl+`)
 - [x] **Milepæl 8** — Format-on-save (PHP) + git-gutter (endrede linjer)
 - [x] **Milepæl 9** — Document outline-panel (LSP documentSymbol) i sidebar
-- [ ] **Milepæl 10** — Terminal-farger (SGR), signature help, split-view
+- [x] **Milepæl 10** — Signature help (popup med aktiv-parameter-highlight)
+- [ ] **Milepæl 11** — Terminal-farger (SGR), split-view
 
 ## Workspace layout
 

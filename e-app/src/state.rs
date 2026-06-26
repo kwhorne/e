@@ -289,10 +289,10 @@ impl AppState {
         }
     }
 
-    pub fn terminal_snapshot(&self) -> Vec<String> {
+    pub fn terminal_runs(&self) -> Vec<Vec<e_term::Run>> {
         self.terminal
             .get_untracked()
-            .map(|t| t.borrow().snapshot())
+            .map(|t| t.borrow().snapshot_runs())
             .unwrap_or_default()
     }
 

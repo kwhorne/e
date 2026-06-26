@@ -1,10 +1,13 @@
 //! The integrated terminal panel.
 
+use std::ops::Range;
+
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
 use floem::reactive::SignalGet;
-use floem::views::{label, scroll, Decorators};
+use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
+use floem::views::{rich_text, scroll, Decorators};
 use floem::IntoView;
 
 use crate::state::AppState;
@@ -38,19 +41,41 @@ fn key_to_bytes(ke: &floem::keyboard::KeyEvent) -> Option<Vec<u8>> {
 }
 
 pub fn terminal_panel(state: AppState) -> impl IntoView {
-    let content = label(move || {
+    let content = rich_text(move || {
         // Track output ticks so the screen repaints.
         state.term_tick.get();
-        state.terminal_snapshot().join("\n")
-    })
-    .style(|s| {
-        s.width_full()
-            .padding(8.0)
-            .font_family("monospace".to_string())
+        let runs = state.terminal_runs();
+
+        let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
+        let default = Attrs::new()
+            .family(&family)
             .font_size(13.0)
-            .line_height(1.3)
-            .color(theme::FG)
-    });
+            .color(theme::FG);
+        let mut attrs_list = AttrsList::new(default);
+
+        let mut text = String::new();
+        let mut spans: Vec<(Range<usize>, Color)> = Vec::new();
+        for (li, line) in runs.iter().enumerate() {
+            if li > 0 {
+                text.push('\n');
+            }
+            for (seg, fg) in line {
+                let start = text.len();
+                text.push_str(seg);
+                if let Some((r, g, b)) = fg {
+                    spans.push((start..text.len(), Color::from_rgb8(*r, *g, *b)));
+                }
+            }
+        }
+        for (range, color) in spans {
+            attrs_list.add_span(range, Attrs::new().family(&family).font_size(13.0).color(color));
+        }
+
+        let mut layout = TextLayout::new();
+        layout.set_text(&text, attrs_list, None);
+        layout
+    })
+    .style(|s| s.padding(8.0));
 
     scroll(content)
         .style(move |s| {

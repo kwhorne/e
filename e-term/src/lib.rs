@@ -13,13 +13,28 @@ use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use vte::{Params, Parser, Perform};
 
+/// One screen cell: a character and an optional foreground colour.
+#[derive(Clone, Copy)]
+pub struct Cell {
+    pub ch: char,
+    pub fg: Option<(u8, u8, u8)>,
+}
+
+impl Cell {
+    const BLANK: Cell = Cell { ch: ' ', fg: None };
+}
+
+/// A foreground-coloured run of text within a line.
+pub type Run = (String, Option<(u8, u8, u8)>);
+
 /// A character grid with a cursor.
 pub struct Screen {
     pub rows: usize,
     pub cols: usize,
-    grid: Vec<Vec<char>>,
+    grid: Vec<Vec<Cell>>,
     cx: usize,
     cy: usize,
+    fg: Option<(u8, u8, u8)>,
 }
 
 impl Screen {
@@ -27,16 +42,17 @@ impl Screen {
         Self {
             rows,
             cols,
-            grid: vec![vec![' '; cols]; rows],
+            grid: vec![vec![Cell::BLANK; cols]; rows],
             cx: 0,
             cy: 0,
+            fg: None,
         }
     }
 
     pub fn resize(&mut self, rows: usize, cols: usize) {
-        self.grid.resize(rows, vec![' '; cols]);
+        self.grid.resize(rows, vec![Cell::BLANK; cols]);
         for row in &mut self.grid {
-            row.resize(cols, ' ');
+            row.resize(cols, Cell::BLANK);
         }
         self.rows = rows;
         self.cols = cols;
@@ -44,13 +60,32 @@ impl Screen {
         self.cx = self.cx.min(cols.saturating_sub(1));
     }
 
-    /// Snapshot the visible grid as trimmed text lines.
-    pub fn lines(&self) -> Vec<String> {
+    /// Snapshot each line as foreground-coloured runs (trailing blanks dropped).
+    pub fn runs(&self) -> Vec<Vec<Run>> {
         self.grid
             .iter()
             .map(|row| {
-                let s: String = row.iter().collect();
-                s.trim_end().to_string()
+                let last = row
+                    .iter()
+                    .rposition(|c| c.ch != ' ')
+                    .map(|i| i + 1)
+                    .unwrap_or(0);
+                let mut runs: Vec<Run> = Vec::new();
+                let mut cur = String::new();
+                let mut cur_fg = None;
+                for (i, cell) in row[..last].iter().enumerate() {
+                    if i == 0 {
+                        cur_fg = cell.fg;
+                    } else if cell.fg != cur_fg {
+                        runs.push((std::mem::take(&mut cur), cur_fg));
+                        cur_fg = cell.fg;
+                    }
+                    cur.push(cell.ch);
+                }
+                if !cur.is_empty() {
+                    runs.push((cur, cur_fg));
+                }
+                runs
             })
             .collect()
     }
@@ -58,7 +93,7 @@ impl Screen {
     fn newline(&mut self) {
         if self.cy + 1 >= self.rows {
             self.grid.remove(0);
-            self.grid.push(vec![' '; self.cols]);
+            self.grid.push(vec![Cell::BLANK; self.cols]);
         } else {
             self.cy += 1;
         }
@@ -69,9 +104,10 @@ impl Screen {
             self.cx = 0;
             self.newline();
         }
+        let fg = self.fg;
         if let Some(row) = self.grid.get_mut(self.cy) {
             if let Some(cell) = row.get_mut(self.cx) {
-                *cell = c;
+                *cell = Cell { ch: c, fg };
             }
         }
         self.cx += 1;
@@ -80,29 +116,28 @@ impl Screen {
     fn erase_in_display(&mut self, mode: u16) {
         match mode {
             0 => {
-                // Cursor to end of screen.
                 if let Some(row) = self.grid.get_mut(self.cy) {
                     for c in row.iter_mut().skip(self.cx) {
-                        *c = ' ';
+                        *c = Cell::BLANK;
                     }
                 }
                 for row in self.grid.iter_mut().skip(self.cy + 1) {
-                    row.iter_mut().for_each(|c| *c = ' ');
+                    row.iter_mut().for_each(|c| *c = Cell::BLANK);
                 }
             }
             1 => {
                 for row in self.grid.iter_mut().take(self.cy) {
-                    row.iter_mut().for_each(|c| *c = ' ');
+                    row.iter_mut().for_each(|c| *c = Cell::BLANK);
                 }
                 if let Some(row) = self.grid.get_mut(self.cy) {
                     for c in row.iter_mut().take(self.cx + 1) {
-                        *c = ' ';
+                        *c = Cell::BLANK;
                     }
                 }
             }
             _ => {
                 for row in &mut self.grid {
-                    row.iter_mut().for_each(|c| *c = ' ');
+                    row.iter_mut().for_each(|c| *c = Cell::BLANK);
                 }
                 self.cx = 0;
                 self.cy = 0;
@@ -115,9 +150,45 @@ impl Screen {
             return;
         };
         match mode {
-            0 => row.iter_mut().skip(self.cx).for_each(|c| *c = ' '),
-            1 => row.iter_mut().take(self.cx + 1).for_each(|c| *c = ' '),
-            _ => row.iter_mut().for_each(|c| *c = ' '),
+            0 => row.iter_mut().skip(self.cx).for_each(|c| *c = Cell::BLANK),
+            1 => row.iter_mut().take(self.cx + 1).for_each(|c| *c = Cell::BLANK),
+            _ => row.iter_mut().for_each(|c| *c = Cell::BLANK),
+        }
+    }
+
+    fn sgr(&mut self, params: &Params) {
+        let codes: Vec<u16> = params.iter().map(|p| p.first().copied().unwrap_or(0)).collect();
+        if codes.is_empty() {
+            self.fg = None;
+            return;
+        }
+        let mut i = 0;
+        while i < codes.len() {
+            match codes[i] {
+                0 => self.fg = None,
+                39 => self.fg = None,
+                30..=37 => self.fg = Some(ansi16(codes[i] - 30)),
+                90..=97 => self.fg = Some(ansi16_bright(codes[i] - 90)),
+                38 => match codes.get(i + 1) {
+                    Some(5) => {
+                        if let Some(&n) = codes.get(i + 2) {
+                            self.fg = Some(xterm256(n as u8));
+                        }
+                        i += 2;
+                    }
+                    Some(2) => {
+                        if let (Some(&r), Some(&g), Some(&b)) =
+                            (codes.get(i + 2), codes.get(i + 3), codes.get(i + 4))
+                        {
+                            self.fg = Some((r as u8, g as u8, b as u8));
+                        }
+                        i += 4;
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+            i += 1;
         }
     }
 }
@@ -141,6 +212,7 @@ impl Perform for Screen {
         let first = params.iter().next().and_then(|p| p.first().copied());
         let n = first.unwrap_or(0).max(1) as usize;
         match action {
+            'm' => self.sgr(params),
             'A' => self.cy = self.cy.saturating_sub(n),
             'B' => self.cy = (self.cy + n).min(self.rows.saturating_sub(1)),
             'C' => self.cx = (self.cx + n).min(self.cols.saturating_sub(1)),
@@ -231,12 +303,9 @@ impl Terminal {
         let _ = self.writer.flush();
     }
 
-    /// Current screen as text lines.
-    pub fn snapshot(&self) -> Vec<String> {
-        self.screen
-            .lock()
-            .map(|s| s.lines())
-            .unwrap_or_default()
+    /// Current screen as per-line coloured runs.
+    pub fn snapshot_runs(&self) -> Vec<Vec<Run>> {
+        self.screen.lock().map(|s| s.runs()).unwrap_or_default()
     }
 
     pub fn resize(&self, rows: usize, cols: usize) {
@@ -255,4 +324,52 @@ impl Terminal {
 /// The user's preferred shell.
 pub fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+}
+
+/// The 8 standard ANSI colours (index 0..=7).
+fn ansi16(i: u16) -> (u8, u8, u8) {
+    match i {
+        0 => (0x2b, 0x30, 0x39), // black (slightly lifted for visibility)
+        1 => (0xe0, 0x6c, 0x75), // red
+        2 => (0x98, 0xc3, 0x79), // green
+        3 => (0xe5, 0xc0, 0x7b), // yellow
+        4 => (0x61, 0xaf, 0xef), // blue
+        5 => (0xc6, 0x78, 0xdd), // magenta
+        6 => (0x56, 0xb6, 0xc2), // cyan
+        _ => (0xab, 0xb2, 0xbf), // white
+    }
+}
+
+/// The 8 bright ANSI colours (index 0..=7).
+fn ansi16_bright(i: u16) -> (u8, u8, u8) {
+    match i {
+        0 => (0x5c, 0x63, 0x70),
+        1 => (0xff, 0x8b, 0x94),
+        2 => (0xb5, 0xe8, 0x90),
+        3 => (0xff, 0xe2, 0x9a),
+        4 => (0x8a, 0xc6, 0xff),
+        5 => (0xe0, 0x9a, 0xf5),
+        6 => (0x7e, 0xd6, 0xe0),
+        _ => (0xff, 0xff, 0xff),
+    }
+}
+
+/// xterm 256-colour palette.
+fn xterm256(n: u8) -> (u8, u8, u8) {
+    match n {
+        0..=7 => ansi16(n as u16),
+        8..=15 => ansi16_bright((n - 8) as u16),
+        16..=231 => {
+            let n = n - 16;
+            let r = n / 36;
+            let g = (n % 36) / 6;
+            let b = n % 6;
+            let conv = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+            (conv(r), conv(g), conv(b))
+        }
+        _ => {
+            let v = 8 + (n - 232) * 10;
+            (v, v, v)
+        }
+    }
 }

@@ -23,6 +23,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 12** — Workspace-wide search / grep (⌘⇧F)
 - [x] **Milepæl 13** — Session-persistens (gjenåpner filer/faner/split per workspace)
 - [x] **Milepæl 14** — Breadcrumbs (sti + symbol ved cursor)
+- [x] **Milepæl 15** — Auto-save (lagrer skitne buffere etter 1,5 s inaktivitet)
 
 ## Workspace layout
 

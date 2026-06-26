@@ -119,6 +119,15 @@ pub struct AppState {
     pub outline: RwSignal<Vec<OutlineItem>>,
     /// Find-in-file state.
     pub find: FindState,
+    /// Timestamp (ms since epoch) of the last edit, for idle auto-save.
+    pub last_edit: RwSignal<u128>,
+}
+
+fn now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
 }
 
 impl AppState {
@@ -151,6 +160,32 @@ impl AppState {
             term_rx: RwSignal::new(Some(term_rx)),
             outline: RwSignal::new(Vec::new()),
             find: FindState::new(),
+            last_edit: RwSignal::new(0),
+        }
+    }
+
+    /// Save all dirty buffers to disk (no formatting) — used by idle auto-save.
+    pub fn maybe_autosave(&self) {
+        let last = self.last_edit.get_untracked();
+        if last == 0 || now_ms().saturating_sub(last) < 1500 {
+            return;
+        }
+        self.last_edit.set(0);
+        let buffers = self.buffers.get_untracked();
+        for b in &buffers {
+            if !b.dirty.get_untracked() {
+                continue;
+            }
+            let Some(path) = b.file.path.as_ref() else {
+                continue;
+            };
+            let text = b.doc.text().to_string();
+            if buffer::write(path, &text).is_ok() {
+                b.dirty.set(false);
+                if let (Some(uri), Some(client)) = (b.uri.as_ref(), self.lsp.get()) {
+                    client.did_save(uri, &text);
+                }
+            }
         }
     }
 
@@ -542,6 +577,7 @@ impl AppState {
             let uri = uri.clone();
             doc.clone().add_on_update(move |_| {
                 dirty.set(true);
+                app.last_edit.set(now_ms());
                 let text = doc.text().to_string();
                 *highlights.borrow_mut() = highlight_lines(language, &text);
                 if let Some(head) = &head_text {

@@ -96,6 +96,23 @@ fn app_view() -> impl IntoView {
         state.save_session();
     });
 
+    // Idle auto-save: a ticker drives a UI-thread check every 500ms.
+    {
+        let (auto_tx, auto_rx) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if auto_tx.send(()).is_err() {
+                break;
+            }
+        });
+        let ticks = create_signal_from_channel(auto_rx);
+        create_effect(move |_| {
+            if ticks.get().is_some() {
+                state.maybe_autosave();
+            }
+        });
+    }
+
     let editor_column = stack((
         tab_bar(state),
         breadcrumbs(state),

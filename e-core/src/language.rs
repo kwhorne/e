@@ -23,12 +23,21 @@ pub enum Language {
     C,
     Cpp,
     Go,
+    Php,
+    Blade,
+    Vue,
+    Svelte,
 }
 
 impl Language {
     /// Detect a language from a path's extension (and a few special names).
     pub fn from_path(path: &Path) -> Self {
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            let lower = name.to_ascii_lowercase();
+            // Laravel Blade / Livewire templates: `*.blade.php`.
+            if lower.ends_with(".blade.php") {
+                return Language::Blade;
+            }
             match name {
                 "Cargo.lock" => return Language::Toml,
                 "Makefile" => return Language::Shell,
@@ -48,14 +57,17 @@ impl Language {
             "json" => Language::Json,
             "md" | "markdown" => Language::Markdown,
             "js" | "mjs" | "cjs" | "jsx" => Language::JavaScript,
-            "ts" | "tsx" => Language::TypeScript,
+            "ts" | "tsx" | "mts" | "cts" => Language::TypeScript,
             "py" | "pyi" => Language::Python,
             "html" | "htm" => Language::Html,
-            "css" => Language::Css,
+            "css" | "scss" | "sass" | "less" | "pcss" | "postcss" => Language::Css,
             "sh" | "bash" | "zsh" => Language::Shell,
             "c" | "h" => Language::C,
             "cc" | "cpp" | "cxx" | "hpp" => Language::Cpp,
             "go" => Language::Go,
+            "php" => Language::Php,
+            "vue" => Language::Vue,
+            "svelte" => Language::Svelte,
             _ => Language::PlainText,
         }
     }
@@ -77,6 +89,10 @@ impl Language {
             Language::C => "C",
             Language::Cpp => "C++",
             Language::Go => "Go",
+            Language::Php => "PHP",
+            Language::Blade => "Blade",
+            Language::Vue => "Vue",
+            Language::Svelte => "Svelte",
         }
     }
 }

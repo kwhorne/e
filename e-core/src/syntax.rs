@@ -101,52 +101,95 @@ pub struct LineSpan {
 }
 
 fn build_config(language: Language) -> Option<HighlightConfiguration> {
-    let (lang_fn, highlights, injections, locals) = match language {
-        Language::Rust => (
-            tree_sitter_rust::LANGUAGE,
-            tree_sitter_rust::HIGHLIGHTS_QUERY,
-            tree_sitter_rust::INJECTIONS_QUERY,
-            "",
-        ),
-        Language::Python => (
-            tree_sitter_python::LANGUAGE,
-            tree_sitter_python::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        Language::JavaScript => (
-            tree_sitter_javascript::LANGUAGE,
-            tree_sitter_javascript::HIGHLIGHT_QUERY,
-            tree_sitter_javascript::INJECTIONS_QUERY,
-            tree_sitter_javascript::LOCALS_QUERY,
-        ),
-        Language::Json => (
-            tree_sitter_json::LANGUAGE,
-            tree_sitter_json::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        Language::Go => (
-            tree_sitter_go::LANGUAGE,
-            tree_sitter_go::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        Language::C => (
-            tree_sitter_c::LANGUAGE,
-            tree_sitter_c::HIGHLIGHT_QUERY,
-            "",
-            "",
-        ),
-        _ => return None,
-    };
+    // (grammar, highlights, injections, locals) — queries owned so we can
+    // concatenate (e.g. TypeScript = JavaScript + TypeScript highlights).
+    let (lang_fn, highlights, injections, locals): (
+        tree_sitter::Language,
+        String,
+        String,
+        String,
+    ) = match language {
+            Language::Rust => (
+                tree_sitter_rust::LANGUAGE.into(),
+                tree_sitter_rust::HIGHLIGHTS_QUERY.into(),
+                tree_sitter_rust::INJECTIONS_QUERY.into(),
+                String::new(),
+            ),
+            Language::Python => (
+                tree_sitter_python::LANGUAGE.into(),
+                tree_sitter_python::HIGHLIGHTS_QUERY.into(),
+                String::new(),
+                String::new(),
+            ),
+            Language::JavaScript => (
+                tree_sitter_javascript::LANGUAGE.into(),
+                tree_sitter_javascript::HIGHLIGHT_QUERY.into(),
+                tree_sitter_javascript::INJECTIONS_QUERY.into(),
+                tree_sitter_javascript::LOCALS_QUERY.into(),
+            ),
+            Language::TypeScript => (
+                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+                format!(
+                    "{}\n{}",
+                    tree_sitter_javascript::HIGHLIGHT_QUERY,
+                    tree_sitter_typescript::HIGHLIGHTS_QUERY
+                ),
+                tree_sitter_javascript::INJECTIONS_QUERY.into(),
+                tree_sitter_typescript::LOCALS_QUERY.into(),
+            ),
+            Language::Json => (
+                tree_sitter_json::LANGUAGE.into(),
+                tree_sitter_json::HIGHLIGHTS_QUERY.into(),
+                String::new(),
+                String::new(),
+            ),
+            Language::Go => (
+                tree_sitter_go::LANGUAGE.into(),
+                tree_sitter_go::HIGHLIGHTS_QUERY.into(),
+                String::new(),
+                String::new(),
+            ),
+            Language::C => (
+                tree_sitter_c::LANGUAGE.into(),
+                tree_sitter_c::HIGHLIGHT_QUERY.into(),
+                String::new(),
+                String::new(),
+            ),
+            Language::Php => (
+                tree_sitter_php::LANGUAGE_PHP.into(),
+                tree_sitter_php::HIGHLIGHTS_QUERY.into(),
+                tree_sitter_php::INJECTIONS_QUERY.into(),
+                String::new(),
+            ),
+            Language::Css => (
+                tree_sitter_css::LANGUAGE.into(),
+                tree_sitter_css::HIGHLIGHTS_QUERY.into(),
+                String::new(),
+                String::new(),
+            ),
+            // Blade (Laravel/Livewire) and Vue SFCs are HTML-dominant; use the
+            // HTML grammar so tags, attributes and Tailwind classes highlight.
+            Language::Html | Language::Blade | Language::Vue => (
+                tree_sitter_html::LANGUAGE.into(),
+                tree_sitter_html::HIGHLIGHTS_QUERY.into(),
+                tree_sitter_html::INJECTIONS_QUERY.into(),
+                String::new(),
+            ),
+            Language::Svelte => (
+                tree_sitter_svelte_ng::LANGUAGE.into(),
+                tree_sitter_svelte_ng::HIGHLIGHTS_QUERY.into(),
+                tree_sitter_svelte_ng::INJECTIONS_QUERY.into(),
+                tree_sitter_svelte_ng::LOCALS_QUERY.into(),
+            ),
+            _ => return None,
+        };
 
     let mut config = HighlightConfiguration::new(
-        lang_fn.into(),
+        lang_fn,
         language.name(),
-        highlights,
-        injections,
-        locals,
+        &highlights,
+        &injections,
+        &locals,
     )
     .ok()?;
     config.configure(NAMES);

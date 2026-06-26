@@ -24,6 +24,17 @@ pub type Highlights = Rc<RefCell<Vec<Vec<LineSpan>>>>;
 /// Shared, mutable per-buffer git change markers (one slot per line).
 pub type GitMarks = Rc<RefCell<Vec<Option<LineMark>>>>;
 
+/// A find-match span within a single line (line-local char offsets).
+#[derive(Clone, Copy)]
+pub struct FindSpan {
+    pub start: usize,
+    pub end: usize,
+    pub current: bool,
+}
+
+/// Shared, mutable per-buffer find-match spans (one entry per line).
+pub type FindMarks = Rc<RefCell<Vec<Vec<FindSpan>>>>;
+
 /// A diagnostic span within a single line (line-local char offsets).
 #[derive(Clone, Copy)]
 pub struct DiagSpan {
@@ -39,16 +50,18 @@ pub struct SyntaxStyling {
     highlights: Highlights,
     diagnostics: DiagLines,
     git: GitMarks,
+    find: FindMarks,
     family: Vec<FamilyOwned>,
     font_size: usize,
 }
 
 impl SyntaxStyling {
-    pub fn new(highlights: Highlights, diagnostics: DiagLines, git: GitMarks) -> Self {
+    pub fn new(highlights: Highlights, diagnostics: DiagLines, git: GitMarks, find: FindMarks) -> Self {
         Self {
             highlights,
             diagnostics,
             git,
+            find,
             family: vec![FamilyOwned::Monospace],
             font_size: 14,
         }
@@ -96,9 +109,15 @@ pub fn build_diag_lines(diags: &[Diagnostic], text: &str) -> Vec<Vec<DiagSpan>> 
     lines
 }
 
-/// Port of Lapce's `extra_styles_for_range`: turn a column range into the
-/// pixel rectangles needed to draw a wavy underline.
-fn wave_styles(text_layout: &TextLayout, start: usize, end: usize, color: Color) -> Vec<LineExtraStyle> {
+/// Port of Lapce's `extra_styles_for_range`: turn a column range into pixel
+/// rectangles, styled as a background / underline / wavy underline.
+fn range_styles(
+    text_layout: &TextLayout,
+    start: usize,
+    end: usize,
+    bg_color: Option<Color>,
+    wave_line: Option<Color>,
+) -> Vec<LineExtraStyle> {
     let start_hit = text_layout.hit_position(start);
     let end_hit = text_layout.hit_position(end);
     text_layout
@@ -129,9 +148,9 @@ fn wave_styles(text_layout: &TextLayout, start: usize, end: usize, color: Color)
                 y,
                 width: Some(width),
                 height,
-                bg_color: None,
+                bg_color,
                 under_line: None,
-                wave_line: Some(color),
+                wave_line,
             })
         })
         .collect()
@@ -176,6 +195,17 @@ impl Styling for SyntaxStyling {
         line: usize,
         layout_line: &mut TextLayoutLine,
     ) {
+        // Find-match highlights (drawn first, behind text).
+        for span in self.find.borrow().get(line).into_iter().flatten() {
+            let color = if span.current {
+                Color::from_rgb8(0xc8, 0x8a, 0x3a)
+            } else {
+                Color::from_rgb8(0x5a, 0x53, 0x2a)
+            };
+            let styles = range_styles(&layout_line.text, span.start, span.end, Some(color), None);
+            layout_line.extra_style.extend(styles);
+        }
+
         // Git change bar at the left edge of the line.
         if let Some(mark) = self.git.borrow().get(line).copied().flatten() {
             let color = match mark {
@@ -207,7 +237,7 @@ impl Styling for SyntaxStyling {
             } else {
                 Color::from_rgb8(0xe5, 0xc0, 0x7b)
             };
-            let styles = wave_styles(&layout_line.text, span.start, span.end, color);
+            let styles = range_styles(&layout_line.text, span.start, span.end, None, Some(color));
             layout_line.extra_style.extend(styles);
         }
     }

@@ -32,6 +32,7 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                     b.highlights.clone(),
                     b.diag_lines.clone(),
                     b.git_marks.clone(),
+                    b.find_marks.clone(),
                 ))
                 .editor_style(default_dark_color)
                 .style(|s| s.size_full())

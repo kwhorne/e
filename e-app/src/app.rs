@@ -11,6 +11,7 @@ use floem::IntoView;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
+use crate::find::find_bar;
 use crate::outline::outline_panel;
 use crate::palette::palette;
 use crate::picker::picker_overlay;
@@ -98,6 +99,14 @@ fn app_view() -> impl IntoView {
         state.request_outline();
     });
 
+    // Re-run find-in-file whenever the query changes.
+    create_effect(move |_| {
+        if state.find.open.get() {
+            state.find.query.get();
+            state.run_find();
+        }
+    });
+
     let sidebar = stack((file_tree(state), outline_panel(state))).style(|s| {
         s.flex_col()
             .width(240.0)
@@ -110,6 +119,7 @@ fn app_view() -> impl IntoView {
 
     stack((
         main_row,
+        find_bar(state),
         signature_popup(state),
         completion_popup(state),
         hover_popup(state),
@@ -170,6 +180,12 @@ fn app_view() -> impl IntoView {
             Key::Character("`".into()),
             |m| m.control(),
             move |_| state.toggle_terminal(),
+        )
+        // ⌘F / Ctrl+F opens find-in-file.
+        .on_key_down(
+            Key::Character("f".into()),
+            |m| m.meta() || m.control(),
+            move |_| state.open_find(),
         )
         // Escape dismisses popups.
         .on_key_down(Key::Named(NamedKey::Escape), |m| m.is_empty(), move |_| {

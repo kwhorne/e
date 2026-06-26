@@ -33,7 +33,8 @@ use crate::completion::{Completion, HoverState, SignatureState};
 use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
 use crate::picker::{Picker, PickerItem, PickerMode};
-use crate::styling::{build_diag_lines, DiagLines, GitMarks, Highlights};
+use crate::find::FindState;
+use crate::styling::{build_diag_lines, DiagLines, FindMarks, FindSpan, GitMarks, Highlights};
 
 /// One open file/tab.
 #[derive(Clone)]
@@ -47,6 +48,8 @@ pub struct Buffer {
     pub diag_lines: DiagLines,
     /// Per-line git change markers.
     pub git_marks: GitMarks,
+    /// Per-line find-match spans.
+    pub find_marks: FindMarks,
     /// `file://` URI, when backed by a path (used for LSP).
     pub uri: Option<String>,
     /// The live editor, set once its view is built.
@@ -107,6 +110,8 @@ pub struct AppState {
     pub term_rx: RwSignal<Option<Receiver<()>>>,
     /// Document outline of the active buffer.
     pub outline: RwSignal<Vec<OutlineItem>>,
+    /// Find-in-file state.
+    pub find: FindState,
 }
 
 impl AppState {
@@ -135,7 +140,92 @@ impl AppState {
             term_tx: RwSignal::new(term_tx),
             term_rx: RwSignal::new(Some(term_rx)),
             outline: RwSignal::new(Vec::new()),
+            find: FindState::new(),
         }
+    }
+
+    // ---- Find in file --------------------------------------------------
+
+    pub fn open_find(&self) {
+        self.find.open.set(true);
+    }
+
+    pub fn close_find(&self) {
+        self.find.open.set(false);
+        self.find.matches.set(Vec::new());
+        if let Some(buf) = self.active_buffer() {
+            *buf.find_marks.borrow_mut() = Vec::new();
+            buf.doc.cache_rev().update(|r| *r += 1);
+        }
+    }
+
+    /// Recompute matches for the current query (called as the query changes).
+    pub fn run_find(&self) {
+        let query = self.find.query.get_untracked();
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        if query.is_empty() {
+            self.find.matches.set(Vec::new());
+            *buf.find_marks.borrow_mut() = Vec::new();
+            buf.doc.cache_rev().update(|r| *r += 1);
+            return;
+        }
+        let text = buf.doc.text().to_string();
+        let matches = ascii_find_all(&text, &query);
+        self.find.matches.set(matches);
+        self.find.current.set(0);
+        self.apply_find_marks();
+    }
+
+    /// Rebuild per-line highlight spans and move the caret to the current match.
+    fn apply_find_marks(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let matches = self.find.matches.get_untracked();
+        let cur = self.find.current.get_untracked();
+        let text = buf.doc.text().to_string();
+        let starts = line_starts(&text);
+        let mut lines: Vec<Vec<FindSpan>> = vec![Vec::new(); starts.len()];
+        for (idx, (s, e)) in matches.iter().enumerate() {
+            let line = line_of(&starts, *s);
+            let ls = starts[line];
+            lines[line].push(FindSpan {
+                start: s - ls,
+                end: e - ls,
+                current: idx == cur,
+            });
+        }
+        *buf.find_marks.borrow_mut() = lines;
+        buf.doc.cache_rev().update(|r| *r += 1);
+
+        if let Some(editor) = buf.editor.get_untracked() {
+            if let Some((s, _)) = matches.get(cur) {
+                editor
+                    .cursor
+                    .set(Cursor::new(CursorMode::Insert(Selection::caret(*s)), None, None));
+            }
+        }
+    }
+
+    pub fn find_next(&self) {
+        let n = self.find.matches.with(|m| m.len());
+        if n == 0 {
+            return;
+        }
+        self.find.current.set((self.find.current.get_untracked() + 1) % n);
+        self.apply_find_marks();
+    }
+
+    pub fn find_prev(&self) {
+        let n = self.find.matches.with(|m| m.len());
+        if n == 0 {
+            return;
+        }
+        let cur = self.find.current.get_untracked();
+        self.find.current.set((cur + n - 1) % n);
+        self.apply_find_marks();
     }
 
     /// Load the document outline for the active buffer (LSP documentSymbol).
@@ -386,6 +476,7 @@ impl AppState {
             highlights,
             diag_lines: Rc::new(RefCell::new(Vec::new())),
             git_marks,
+            find_marks: Rc::new(RefCell::new(Vec::new())),
             uri,
             editor: RwSignal::new(None),
             win_origin: RwSignal::new(Point::ZERO),
@@ -885,6 +976,45 @@ impl AppState {
 
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$'
+}
+
+/// All non-overlapping, ASCII-case-insensitive matches of `needle` in `hay`.
+fn ascii_find_all(hay: &str, needle: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let (h, n) = (hay.as_bytes(), needle.as_bytes());
+    if n.is_empty() || n.len() > h.len() {
+        return out;
+    }
+    let mut i = 0;
+    while i + n.len() <= h.len() {
+        if h[i..i + n.len()].eq_ignore_ascii_case(n) {
+            out.push((i, i + n.len()));
+            i += n.len();
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Byte offset where each line starts.
+fn line_starts(text: &str) -> Vec<usize> {
+    let mut starts = vec![0usize];
+    let mut off = 0;
+    for line in text.split_inclusive('\n') {
+        off += line.len();
+        if line.ends_with('\n') {
+            starts.push(off);
+        }
+    }
+    if starts.is_empty() {
+        starts.push(0);
+    }
+    starts
+}
+
+fn line_of(starts: &[usize], byte: usize) -> usize {
+    starts.partition_point(|&s| s <= byte).saturating_sub(1)
 }
 
 /// Display a `file://` URI relative to the workspace root.

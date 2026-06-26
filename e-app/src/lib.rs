@@ -8,6 +8,7 @@ mod app;
 mod completion;
 mod editor_area;
 mod file_tree;
+mod find;
 mod laravel;
 mod outline;
 mod palette;

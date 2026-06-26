@@ -23,6 +23,10 @@ pub fn is_dark() -> bool {
     dark_signal().get()
 }
 
+pub fn set_dark(dark: bool) {
+    dark_signal().set(dark);
+}
+
 pub fn toggle() {
     let s = dark_signal();
     let cur = s.get_untracked();

@@ -9,6 +9,7 @@ use floem::views::{stack, Decorators};
 use floem::IntoView;
 
 use crate::breadcrumbs::breadcrumbs;
+use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
@@ -51,6 +52,12 @@ fn resolve_args() -> (PathBuf, Option<PathBuf>) {
 fn app_view() -> impl IntoView {
     let (root, file) = resolve_args();
     let state = AppState::new(Scope::current(), root);
+
+    // Restore the saved theme, and persist it whenever it changes.
+    theme::set_dark(crate::config::load_dark());
+    create_effect(|_| {
+        crate::config::save_dark(theme::is_dark());
+    });
 
     // Bridge the LSP reader thread's diagnostics into a UI-thread signal.
     if let Some(rx) = state.diag_rx.try_update(|opt| opt.take()).flatten() {
@@ -159,6 +166,7 @@ fn app_view() -> impl IntoView {
         hover_popup(state),
         picker_overlay(state),
         palette(state),
+        command_palette(state),
     ))
         .style(|s| s.size_full().background(theme::bg()).color(theme::fg()))
         .window_title(move || {
@@ -229,6 +237,12 @@ fn app_view() -> impl IntoView {
             |m| (m.meta() || m.control()) && m.shift(),
             move |_| state.open_global_search(),
         )
+        // ⌘⇧P / Ctrl+⇧P opens the command palette.
+        .on_key_down(
+            Key::Character("P".into()),
+            |m| (m.meta() || m.control()) && m.shift(),
+            move |_| state.cmd.open.set(true),
+        )
         // Ctrl+` toggles the integrated terminal.
         .on_key_down(
             Key::Character("`".into()),
@@ -254,5 +268,6 @@ fn app_view() -> impl IntoView {
             state.close_signature();
             state.picker.open.set(false);
             state.md_preview.set(false);
+            state.cmd.open.set(false);
         })
 }

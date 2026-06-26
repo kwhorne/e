@@ -6,6 +6,8 @@
 
 mod app;
 mod breadcrumbs;
+mod cmd_palette;
+mod config;
 mod completion;
 mod editor_area;
 mod file_tree;

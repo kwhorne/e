@@ -34,6 +34,7 @@ use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
 use crate::session::{self, SessionData};
 use crate::picker::{Picker, PickerItem, PickerMode};
+use crate::cmd_palette::CmdPalette;
 use crate::rename::RenameState;
 use crate::find::FindState;
 use crate::styling::{build_diag_lines, DiagLines, FindMarks, FindSpan, GitMarks, Highlights};
@@ -126,6 +127,8 @@ pub struct AppState {
     pub last_edit: RwSignal<u128>,
     /// Markdown reading-mode preview toggle.
     pub md_preview: RwSignal<bool>,
+    /// Command palette (⌘⇧P).
+    pub cmd: CmdPalette,
 }
 
 fn now_ms() -> u128 {
@@ -168,6 +171,7 @@ impl AppState {
             rename: RenameState::new(),
             last_edit: RwSignal::new(0),
             md_preview: RwSignal::new(false),
+            cmd: CmdPalette::new(),
         }
     }
 
@@ -722,7 +726,7 @@ impl AppState {
     }
 
     /// Format the active buffer in place via the language server (PHP only).
-    fn format_active(&self) {
+    pub fn format_active(&self) {
         let Some(buf) = self.active_buffer() else {
             return;
         };

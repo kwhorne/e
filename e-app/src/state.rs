@@ -29,6 +29,7 @@ use e_lsp::{path_to_uri, uri_to_path, LspClient};
 
 use crate::completion::{Completion, HoverState};
 use crate::laravel::{self, LaravelData};
+use crate::picker::{Picker, PickerItem, PickerMode};
 use crate::styling::Highlights;
 
 /// One open file/tab.
@@ -86,6 +87,8 @@ pub struct AppState {
     pub hover: HoverState,
     /// Laravel project data (routes/views/config/env), if applicable.
     pub laravel: RwSignal<Option<Rc<LaravelData>>>,
+    /// References / symbol-search picker.
+    pub picker: Picker,
 }
 
 impl AppState {
@@ -105,6 +108,7 @@ impl AppState {
             completion: Completion::new(),
             hover: HoverState::new(),
             laravel: RwSignal::new(None),
+            picker: Picker::new(),
         }
     }
 
@@ -563,6 +567,94 @@ impl AppState {
         });
     }
 
+    // ---- References & symbol search ------------------------------------
+
+    /// Open the workspace symbol search (⌘T).
+    pub fn open_symbol_search(&self) {
+        let p = self.picker;
+        p.mode.set(PickerMode::Symbols);
+        p.query.set(String::new());
+        p.items.set(Vec::new());
+        p.selected.set(0);
+        p.open.set(true);
+    }
+
+    /// Run a workspace/symbol query (called reactively from the picker).
+    pub fn request_symbols(&self, query: String) {
+        let p = self.picker;
+        let Some(client) = self.lsp.get() else {
+            return;
+        };
+        if query.trim().is_empty() {
+            p.items.set(Vec::new());
+            return;
+        }
+        let gen = p.gen.get_untracked() + 1;
+        p.gen.set(gen);
+        let root = self.root.get();
+        let send = create_ext_action(self.cx, move |(g, items): (u64, Vec<PickerItem>)| {
+            if g == p.gen.get_untracked() {
+                p.items.set(items);
+                p.selected.set(0);
+            }
+        });
+        std::thread::spawn(move || {
+            let syms = client.workspace_symbol(&query).unwrap_or_default();
+            let items = syms
+                .into_iter()
+                .take(200)
+                .map(|(name, uri, line, ch)| PickerItem {
+                    label: name,
+                    detail: rel_uri(&uri, &root),
+                    uri,
+                    line,
+                    char: ch,
+                })
+                .collect();
+            send((gen, items));
+        });
+    }
+
+    /// Find references to the symbol under the cursor (Shift+F12).
+    pub fn request_references(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let (Some(client), Some(uri), Some(editor)) =
+            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+        else {
+            return;
+        };
+        let (line, col) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
+
+        let p = self.picker;
+        p.mode.set(PickerMode::References);
+        p.query.set(String::new());
+        p.items.set(Vec::new());
+        p.selected.set(0);
+        p.open.set(true);
+
+        let root = self.root.get();
+        let send = create_ext_action(self.cx, move |items: Vec<PickerItem>| {
+            p.items.set(items);
+            p.selected.set(0);
+        });
+        std::thread::spawn(move || {
+            let refs = client.references(&uri, line as u32, col as u32).unwrap_or_default();
+            let items = refs
+                .into_iter()
+                .map(|(u, l, c)| PickerItem {
+                    label: rel_uri(&u, &root),
+                    detail: format!(":{}", l + 1),
+                    uri: u,
+                    line: l,
+                    char: c,
+                })
+                .collect();
+            send(items);
+        });
+    }
+
     /// Open `uri` and place the caret at `(line, col)`.
     pub fn jump_to(&self, uri: &str, line: usize, col: usize) {
         self.open_path(uri_to_path(uri));
@@ -583,6 +675,15 @@ impl AppState {
 
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$'
+}
+
+/// Display a `file://` URI relative to the workspace root.
+fn rel_uri(uri: &str, root: &std::path::Path) -> String {
+    let path = uri_to_path(uri);
+    path.strip_prefix(root)
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Byte offset where the identifier ending at `offset` begins.

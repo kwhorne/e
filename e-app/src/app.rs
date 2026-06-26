@@ -12,6 +12,7 @@ use crate::completion::{completion_popup, hover_popup};
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
 use crate::palette::palette;
+use crate::picker::picker_overlay;
 use crate::problems::problems_panel;
 use crate::state::AppState;
 use crate::status::status_bar;
@@ -80,6 +81,7 @@ fn app_view() -> impl IntoView {
         main_row,
         completion_popup(state),
         hover_popup(state),
+        picker_overlay(state),
         palette(state),
     ))
         .style(|s| s.size_full().background(theme::BG).color(theme::FG))
@@ -121,9 +123,20 @@ fn app_view() -> impl IntoView {
         .on_key_down(Key::Named(NamedKey::F12), |m| m.is_empty(), move |_| {
             state.goto_definition();
         })
+        // Shift+F12 finds references to the symbol at the cursor.
+        .on_key_down(Key::Named(NamedKey::F12), |m| m.shift(), move |_| {
+            state.request_references();
+        })
+        // ⌘T / Ctrl+T opens workspace symbol search.
+        .on_key_down(
+            Key::Character("t".into()),
+            |m| m.meta() || m.control(),
+            move |_| state.open_symbol_search(),
+        )
         // Escape dismisses popups.
         .on_key_down(Key::Named(NamedKey::Escape), |m| m.is_empty(), move |_| {
             state.close_completion();
             state.close_hover();
+            state.picker.open.set(false);
         })
 }

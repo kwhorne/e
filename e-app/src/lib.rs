@@ -10,6 +10,7 @@ mod editor_area;
 mod file_tree;
 mod laravel;
 mod palette;
+mod picker;
 mod problems;
 mod state;
 mod status;

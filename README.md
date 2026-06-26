@@ -13,6 +13,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 4** — LSP: PHP via Intelephense (diagnostics, completion, hover)
 - [x] **Milepæl 5** — Laravel-lag: `route()`/`view()`/`config()`/`env()`-completion
 - [x] **Milepæl 6** — Go-to-definition (F12), auto-scroll til mål
+- [x] **Milepæl 7C** — Go-to-references (Shift+F12) + symbol-søk (⌘T)
 - [ ] **Milepæl 7** — Inline diagnostics-squiggles, integrert terminal
 
 ## Workspace layout
@@ -72,6 +73,8 @@ Works in both `.php` and `.blade.php` files.
 | ↑/↓ + Enter/Tab | Navigate / accept completion |
 | F1 | Hover info |
 | F12 | Go to definition |
+| Shift+F12 | Find references |
+| ⌘T | Workspace symbol search |
 | Esc | Dismiss popups |
 
 ## Build & run

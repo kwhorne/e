@@ -221,6 +221,46 @@ impl LspClient {
         Ok(loc.map(|(uri, pos)| (uri, pos.line, pos.character)))
     }
 
+    /// Find all references to the symbol at a position.
+    /// Returns `(uri, line, character)` per reference.
+    pub fn references(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Vec<(String, u32, u32)>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+            "context": { "includeDeclaration": true }
+        });
+        let res = self.request("textDocument/references", params, Duration::from_secs(5))?;
+        Ok(locations_from_value(&res))
+    }
+
+    /// Search workspace symbols by name. Returns `(name, uri, line, character)`.
+    pub fn workspace_symbol(&self, query: &str) -> Result<Vec<(String, String, u32, u32)>> {
+        let params = json!({ "query": query });
+        let res = self.request("workspace/symbol", params, Duration::from_secs(5))?;
+        let mut out = Vec::new();
+        if let Some(arr) = res.as_array() {
+            for s in arr {
+                let Some(name) = s.get("name").and_then(|n| n.as_str()) else {
+                    continue;
+                };
+                let loc = &s["location"];
+                if let (Some(uri), Some(line), Some(ch)) = (
+                    loc["uri"].as_str(),
+                    loc["range"]["start"]["line"].as_u64(),
+                    loc["range"]["start"]["character"].as_u64(),
+                ) {
+                    out.push((name.to_string(), uri.to_string(), line as u32, ch as u32));
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Request hover text at a position. Blocking; call off the UI thread.
     pub fn hover(&self, uri: &str, line: u32, character: u32) -> Result<Option<String>> {
         let params = json!({
@@ -233,6 +273,21 @@ impl LspClient {
         }
         let hover: Hover = serde_json::from_value(res)?;
         Ok(Some(hover_to_string(hover.contents)))
+    }
+}
+
+/// Extract `(uri, line, character)` from a `Location` or `Location[]` value.
+fn locations_from_value(res: &Value) -> Vec<(String, u32, u32)> {
+    fn one(v: &Value) -> Option<(String, u32, u32)> {
+        let uri = v["uri"].as_str()?;
+        let line = v["range"]["start"]["line"].as_u64()? as u32;
+        let ch = v["range"]["start"]["character"].as_u64()? as u32;
+        Some((uri.to_string(), line, ch))
+    }
+    match res {
+        Value::Array(arr) => arr.iter().filter_map(one).collect(),
+        Value::Null => Vec::new(),
+        v => one(v).into_iter().collect(),
     }
 }
 

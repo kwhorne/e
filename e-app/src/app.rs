@@ -2,76 +2,79 @@
 
 use std::path::PathBuf;
 
-use floem::{
-    keyboard::Key,
-    reactive::{RwSignal, SignalGet, SignalUpdate},
-    views::{
-        editor::text::{default_dark_color, SimpleStyling},
-        stack, text_editor, Decorators,
-    },
-    IntoView,
-};
+use floem::keyboard::Key;
+use floem::reactive::{Scope, SignalGet, SignalUpdate};
+use floem::views::{stack, Decorators};
+use floem::IntoView;
 
-use e_core::buffer::{self, FileInfo};
-
+use crate::editor_area::editor_area;
+use crate::file_tree::file_tree;
+use crate::palette::palette;
+use crate::state::AppState;
 use crate::status::status_bar;
+use crate::tabs::tab_bar;
+use crate::theme;
 
 /// Launch the editor.
 pub fn launch() {
     floem::launch(app_view);
 }
 
+/// Resolve the CLI argument into `(workspace_root, file_to_open)`.
+fn resolve_args() -> (PathBuf, Option<PathBuf>) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    match std::env::args().nth(1) {
+        None => (cwd, None),
+        Some(arg) => {
+            let path = PathBuf::from(arg);
+            let path = path.canonicalize().unwrap_or(path);
+            if path.is_dir() {
+                (path, None)
+            } else {
+                let root = path.parent().map(|p| p.to_path_buf()).unwrap_or(cwd);
+                (root, Some(path))
+            }
+        }
+    }
+}
+
 fn app_view() -> impl IntoView {
-    // Milepæl 0: a single optional file argument.
-    let path: Option<PathBuf> = std::env::args().nth(1).map(PathBuf::from);
+    let (root, file) = resolve_args();
+    let state = AppState::new(Scope::current(), root);
+    if let Some(file) = file {
+        state.open_path(file);
+    }
 
-    let file = match &path {
-        Some(p) => FileInfo::for_path(p),
-        None => FileInfo::scratch(),
-    };
-    let initial = match &path {
-        Some(p) => buffer::read_to_string(p).unwrap_or_default(),
-        None => String::new(),
-    };
+    let editor_column = stack((
+        tab_bar(state),
+        editor_area(state).style(|s| s.flex_grow(1.0).width_full()),
+        status_bar(state),
+    ))
+    .style(|s| s.flex_col().flex_grow(1.0).height_full());
 
-    let dirty = RwSignal::new(false);
-    let language = file.language;
-    let name = file.display_name();
+    let main_row = stack((file_tree(state), editor_column))
+        .style(|s| s.flex_row().size_full());
 
-    let editor = text_editor(initial)
-        .styling(SimpleStyling::new())
-        .editor_style(default_dark_color)
-        .style(|s| s.size_full())
-        .update(move |_| dirty.set(true));
-
-    // Grab the document handle so Cmd/Ctrl+S can read the current text.
-    let doc = editor.doc();
-
-    let title_name = name.clone();
-    let save_path = path.clone();
-
-    stack((editor, status_bar(name, language, dirty)))
-        .style(|s| s.flex_col().size_full())
+    stack((main_row, palette(state)))
+        .style(|s| s.size_full().background(theme::BG).color(theme::FG))
         .window_title(move || {
-            let mark = if dirty.get() { "● " } else { "" };
-            format!("{mark}{title_name} — e")
+            let (name, dirty) = state
+                .active_buffer()
+                .map(|b| (b.file.display_name(), b.dirty.get()))
+                .unwrap_or_else(|| ("e".to_string(), false));
+            let mark = if dirty { "● " } else { "" };
+            format!("{mark}{name} — e")
         })
+        // ⌘P / Ctrl+P toggles the command palette.
+        .on_key_down(
+            Key::Character("p".into()),
+            |m| m.meta() || m.control(),
+            move |_| state.palette_open.update(|o| *o = !*o),
+        )
+        // ⌘S / Ctrl+S saves the active buffer.
         .on_key_down(
             Key::Character("s".into()),
             |m| m.meta() || m.control(),
-            move |_| {
-                let Some(p) = &save_path else {
-                    eprintln!("e: no file path — save-as is not implemented yet");
-                    return;
-                };
-                let text = doc.text().to_string();
-                match buffer::write(p, &text) {
-                    Ok(()) => {
-                        dirty.set(false);
-                        eprintln!("e: saved {}", p.display());
-                    }
-                    Err(e) => eprintln!("e: save failed: {e:#}"),
-                }
-            },
+            move |_| state.save_active(),
         )
 }

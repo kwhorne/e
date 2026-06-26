@@ -5,6 +5,12 @@
 //! name, language and dirty state. Everything else grows from here.
 
 mod app;
+mod editor_area;
+mod file_tree;
+mod palette;
+mod state;
 mod status;
+mod tabs;
+mod theme;
 
 pub use app::launch;

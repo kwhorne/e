@@ -24,6 +24,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("split", "Toggle Split View"),
     ("terminal", "Toggle Terminal"),
     ("theme", "Toggle Light/Dark Theme"),
+    ("settings", "Open Settings (config.json)"),
     ("close-tab", "Close Tab"),
 ];
 
@@ -60,6 +61,15 @@ pub fn run_command(state: AppState, id: &str) {
         "split" => state.toggle_split(),
         "terminal" => state.toggle_terminal(),
         "theme" => theme::toggle(),
+        "settings" => {
+            if let Some(home) = std::env::var_os("HOME") {
+                let path = std::path::PathBuf::from(home)
+                    .join(".config")
+                    .join("e")
+                    .join("config.json");
+                state.open_path(path);
+            }
+        }
         "close-tab" => {
             if let Some(id) = state.focused_active_id() {
                 state.close(id);

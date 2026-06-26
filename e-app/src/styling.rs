@@ -57,15 +57,19 @@ pub struct SyntaxStyling {
     brackets: BracketMarks,
     family: Vec<FamilyOwned>,
     font_size: usize,
+    tab_width: usize,
 }
 
 impl SyntaxStyling {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         highlights: Highlights,
         diagnostics: DiagLines,
         git: GitMarks,
         find: FindMarks,
         brackets: BracketMarks,
+        font_size: usize,
+        tab_width: usize,
     ) -> Self {
         Self {
             highlights,
@@ -74,7 +78,8 @@ impl SyntaxStyling {
             find,
             brackets,
             family: vec![FamilyOwned::Monospace],
-            font_size: 14,
+            font_size,
+            tab_width,
         }
     }
 }
@@ -178,6 +183,10 @@ impl Styling for SyntaxStyling {
 
     fn font_family(&self, _edid: EditorId, _line: usize) -> Cow<'_, [FamilyOwned]> {
         Cow::Borrowed(&self.family)
+    }
+
+    fn tab_width(&self, _edid: EditorId, _line: usize) -> usize {
+        self.tab_width
     }
 
     fn apply_attr_styles(

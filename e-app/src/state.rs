@@ -30,6 +30,7 @@ use e_lsp::{path_to_uri, uri_to_path, LspClient, SignatureInfo};
 use e_term::Terminal;
 
 use crate::completion::{Completion, HoverState, SignatureState};
+use crate::config::{self, Settings};
 use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
 use crate::session::{self, SessionData};
@@ -177,6 +178,8 @@ pub struct AppState {
     pub cmd: CmdPalette,
     /// Git diff reading-mode toggle.
     pub diff_open: RwSignal<bool>,
+    /// User settings loaded from config.json.
+    pub settings: Settings,
 }
 
 fn now_ms() -> u128 {
@@ -222,6 +225,7 @@ impl AppState {
             md_preview: RwSignal::new(false),
             cmd: CmdPalette::new(),
             diff_open: RwSignal::new(false),
+            settings: config::load_settings(),
         }
     }
 
@@ -337,6 +341,9 @@ impl AppState {
 
     /// Save all dirty buffers to disk (no formatting) — used by idle auto-save.
     pub fn maybe_autosave(&self) {
+        if !self.settings.autosave {
+            return;
+        }
         let last = self.last_edit.get_untracked();
         if last == 0 || now_ms().saturating_sub(last) < 1500 {
             return;
@@ -903,9 +910,11 @@ impl AppState {
         }
     }
 
-    /// Save the active buffer to disk (formatting PHP first).
+    /// Save the active buffer to disk (formatting first, if enabled).
     pub fn save_active(&self) {
-        self.format_active();
+        if self.settings.format_on_save {
+            self.format_active();
+        }
         let Some(buf) = self.active_buffer() else {
             return;
         };

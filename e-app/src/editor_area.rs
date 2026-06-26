@@ -40,8 +40,12 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                     b.git_marks.clone(),
                     b.find_marks.clone(),
                     b.bracket_marks.clone(),
+                    state.settings.font_size,
+                    state.settings.tab_width,
                 ))
-                .editor_style(theme::editor_style)
+                .editor_style(move |s| {
+                    theme::editor_style(s).indent_guide(state.settings.indent_guides)
+                })
                 .style(|s| s.size_full())
                 .pre_command(move |pre| {
                     if state.completion.open.get_untracked() {

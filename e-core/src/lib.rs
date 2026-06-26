@@ -6,3 +6,4 @@
 
 pub mod buffer;
 pub mod language;
+pub mod syntax;

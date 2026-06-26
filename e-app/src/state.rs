@@ -3,6 +3,7 @@
 //! `AppState` is `Copy` (every field is a Floem signal or `Scope`), so it can
 //! be handed to as many view closures as needed without cloning ceremony.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -11,6 +12,9 @@ use floem::views::editor::text::Document;
 use floem::views::editor::text_document::TextDocument;
 
 use e_core::buffer::{self, FileInfo};
+use e_core::syntax::highlight_lines;
+
+use crate::styling::Highlights;
 
 /// One open file/tab.
 #[derive(Clone)]
@@ -19,6 +23,7 @@ pub struct Buffer {
     pub file: FileInfo,
     pub doc: Rc<TextDocument>,
     pub dirty: RwSignal<bool>,
+    pub highlights: Highlights,
 }
 
 /// Global editor state.
@@ -76,16 +81,32 @@ impl AppState {
         let id = self.next_id.get();
         self.next_id.set(id + 1);
 
+        let file = FileInfo::for_path(canon);
+        let language = file.language;
+
+        let highlights: Highlights = Rc::new(RefCell::new(highlight_lines(language, &content)));
         let doc = Rc::new(TextDocument::new(self.cx, content));
         let dirty = RwSignal::new(false);
-        doc.add_on_update(move |_| dirty.set(true));
 
-        let file = FileInfo::for_path(canon);
+        // On every edit: mark dirty, re-highlight, and invalidate the editor's
+        // layout cache so the new colours are painted.
+        {
+            let doc = doc.clone();
+            let highlights = highlights.clone();
+            doc.clone().add_on_update(move |_| {
+                dirty.set(true);
+                let text = doc.text().to_string();
+                *highlights.borrow_mut() = highlight_lines(language, &text);
+                doc.cache_rev().update(|r| *r += 1);
+            });
+        }
+
         let buf = Buffer {
             id,
             file,
             doc,
             dirty,
+            highlights,
         };
         self.buffers.update(|bs| bs.push(buf));
         self.active.set(Some(id));

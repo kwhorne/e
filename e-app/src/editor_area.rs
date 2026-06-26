@@ -5,11 +5,12 @@
 use std::rc::Rc;
 
 use floem::reactive::{SignalGet, SignalWith};
-use floem::views::editor::text::{default_dark_color, Document, SimpleStyling};
+use floem::views::editor::text::{default_dark_color, Document};
 use floem::views::{container, dyn_stack, label, stack, text_editor, Decorators};
 use floem::IntoView;
 
 use crate::state::AppState;
+use crate::styling::SyntaxStyling;
 use crate::theme;
 
 pub fn editor_area(state: AppState) -> impl IntoView {
@@ -22,7 +23,7 @@ pub fn editor_area(state: AppState) -> impl IntoView {
 
             let editor = text_editor("")
                 .use_doc(b.doc.clone() as Rc<dyn Document>)
-                .styling(SimpleStyling::new())
+                .styling(SyntaxStyling::new(b.highlights.clone()))
                 .editor_style(default_dark_color)
                 .style(|s| s.size_full());
 

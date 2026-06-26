@@ -8,9 +8,8 @@ UI built on [Floem](https://github.com/lapce/floem).
 Early development. Built incrementally:
 
 - [x] **Milepæl 0** — Skjelett: open a file, edit it, save with Cmd/Ctrl+S, status bar
-- [ ] **Milepæl 1** — Editor-kjerne: cursor, selection, undo/redo polish, save-as
-- [ ] **Milepæl 2** — Workspace: file tree, tabs, command palette (Ctrl+P)
-- [ ] **Milepæl 3** — Syntaks: tree-sitter highlighting
+- [x] **Milepæl A** — Workspace: file tree, tabs, command palette (⌘P), multi-buffer
+- [x] **Milepæl 3** — Syntaks: tree-sitter highlighting (Rust, Python, JS, Go, C, JSON)
 - [ ] **Milepæl 4** — LSP: completion, diagnostics
 - [ ] **Milepæl 5** — Terminal / plugins
 
@@ -18,8 +17,18 @@ Early development. Built incrementally:
 
 ```
 e/
-├── e-core/   # text, language detection, syntax (GUI-agnostic)   ~ lapce-core
+├── e-core/   # text IO, language detection, tree-sitter syntax    ~ lapce-core
+│   ├── buffer.rs    # file load/save
+│   ├── language.rs  # extension -> Language
+│   └── syntax.rs    # tree-sitter -> per-line highlight spans
 └── e-app/    # Floem UI + the `e` binary                          ~ lapce-app
+    ├── state.rs       # reactive AppState, buffers, open/close/save
+    ├── file_tree.rs   # left explorer
+    ├── tabs.rs        # tab strip
+    ├── editor_area.rs # multi-buffer editor
+    ├── styling.rs     # syntax-highlight Styling (monospace)
+    ├── palette.rs     # ⌘P fuzzy finder
+    └── status.rs      # status bar
 ```
 
 ## Build & run

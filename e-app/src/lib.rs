@@ -10,6 +10,7 @@ mod file_tree;
 mod palette;
 mod state;
 mod status;
+mod styling;
 mod tabs;
 mod theme;
 

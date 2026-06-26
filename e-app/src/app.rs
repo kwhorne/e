@@ -13,6 +13,7 @@ use crate::completion::{completion_popup, hover_popup, signature_popup};
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
 use crate::find::find_bar;
+use crate::markdown_view::markdown_preview;
 use crate::outline::outline_panel;
 use crate::palette::palette;
 use crate::picker::picker_overlay;
@@ -150,6 +151,7 @@ fn app_view() -> impl IntoView {
 
     stack((
         main_row,
+        markdown_preview(state),
         find_bar(state),
         rename_bar(state),
         signature_popup(state),
@@ -201,6 +203,12 @@ fn app_view() -> impl IntoView {
         .on_key_down(Key::Named(NamedKey::F2), |m| m.is_empty(), move |_| {
             state.open_rename();
         })
+        // ⌘⇧M toggles the Markdown reading-mode preview.
+        .on_key_down(
+            Key::Character("M".into()),
+            |m| (m.meta() || m.control()) && m.shift(),
+            move |_| state.toggle_md_preview(),
+        )
         // F12 jumps to the definition of the symbol at the cursor.
         .on_key_down(Key::Named(NamedKey::F12), |m| m.is_empty(), move |_| {
             state.goto_definition();
@@ -245,5 +253,6 @@ fn app_view() -> impl IntoView {
             state.close_hover();
             state.close_signature();
             state.picker.open.set(false);
+            state.md_preview.set(false);
         })
 }

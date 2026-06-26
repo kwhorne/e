@@ -27,6 +27,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 16** — Tema-system (lys/mørk, F8) — reaktiv palett + editor-tema
 - [x] **Milepæl 17** — Terminal-resize til panelstørrelse (on_resize → PTY/grid)
 - [x] **Milepæl 18** — Lokal rename-i-fil (F2, whole-word, virker uten LSP premium)
+- [x] **Milepæl 19** — Markdown-preview (⌘⇧M reading-mode for .md)
 
 ## Workspace layout
 
@@ -96,6 +97,7 @@ Works in both `.php` and `.blade.php` files.
 | Ctrl+` | Toggle terminal |
 | F8 | Toggle light/dark theme |
 | F2 | Rename in file |
+| ⌘⇧M | Markdown preview (.md) |
 | Esc | Dismiss popups |
 
 ## Build & run

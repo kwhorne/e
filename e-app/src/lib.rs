@@ -11,6 +11,7 @@ mod editor_area;
 mod file_tree;
 mod find;
 mod laravel;
+mod markdown_view;
 mod outline;
 mod palette;
 mod picker;

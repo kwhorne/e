@@ -124,6 +124,8 @@ pub struct AppState {
     pub rename: RenameState,
     /// Timestamp (ms since epoch) of the last edit, for idle auto-save.
     pub last_edit: RwSignal<u128>,
+    /// Markdown reading-mode preview toggle.
+    pub md_preview: RwSignal<bool>,
 }
 
 fn now_ms() -> u128 {
@@ -165,7 +167,13 @@ impl AppState {
             find: FindState::new(),
             rename: RenameState::new(),
             last_edit: RwSignal::new(0),
+            md_preview: RwSignal::new(false),
         }
+    }
+
+    pub fn toggle_md_preview(&self) {
+        let cur = self.md_preview.get_untracked();
+        self.md_preview.set(!cur);
     }
 
     // ---- Local rename --------------------------------------------------

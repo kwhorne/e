@@ -17,7 +17,8 @@ Early development. Built incrementally:
 - [x] **Milepæl 7A** — Inline bølgelinjer (squiggles) under diagnostics i editoren
 - [x] **Milepæl 7B** — Integrert terminal (PTY + VT100, Ctrl+`)
 - [x] **Milepæl 8** — Format-on-save (PHP) + git-gutter (endrede linjer)
-- [ ] **Milepæl 9** — Terminal-farger (SGR), multi-cursor, split-view
+- [x] **Milepæl 9** — Document outline-panel (LSP documentSymbol) i sidebar
+- [ ] **Milepæl 10** — Terminal-farger (SGR), signature help, split-view
 
 ## Workspace layout
 
@@ -82,6 +83,7 @@ Works in both `.php` and `.blade.php` files.
 | Shift+F12 | Find references |
 | ⌘T | Workspace symbol search |
 | Ctrl+` | Toggle terminal |
+| F2 | Rename (krever Intelephense Premium) |
 | Esc | Dismiss popups |
 
 ## Build & run

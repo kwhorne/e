@@ -19,9 +19,16 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Sender};
 use lsp_types::{
-    CompletionItem, CompletionResponse, GotoDefinitionResponse, Hover, HoverContents, MarkedString,
-    PublishDiagnosticsParams, TextEdit,
+    CompletionItem, CompletionResponse, Diagnostic, GotoDefinitionResponse, Hover, HoverContents,
+    MarkedString, PublishDiagnosticsParams, TextEdit,
 };
+
+/// A code action with its concrete text edits, grouped by document URI.
+#[derive(Clone, Debug)]
+pub struct CodeActionItem {
+    pub title: String,
+    pub edits: Vec<(String, Vec<TextEdit>)>,
+}
 use serde_json::{json, Value};
 
 /// Callback invoked (on the reader thread) for each `publishDiagnostics`.
@@ -93,6 +100,15 @@ impl LspClient {
                     },
                     "hover": { "contentFormat": ["markdown", "plaintext"] },
                     "definition": {},
+                    "codeAction": {
+                        "dynamicRegistration": false,
+                        "codeActionLiteralSupport": {
+                            "codeActionKind": {
+                                "valueSet": ["quickfix", "refactor", "source", "source.organizeImports"]
+                            }
+                        }
+                    },
+                    "formatting": {},
                 },
                 "workspace": { "configuration": true, "workspaceFolders": true }
             },
@@ -274,6 +290,71 @@ impl LspClient {
         Ok(serde_json::from_value(res)?)
     }
 
+    /// Request code actions (quick-fixes) for a range. Blocking.
+    pub fn code_actions(
+        &self,
+        uri: &str,
+        start_line: u32,
+        start_char: u32,
+        end_line: u32,
+        end_char: u32,
+        diagnostics: &[Diagnostic],
+    ) -> Result<Vec<CodeActionItem>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": start_line, "character": start_char },
+                "end": { "line": end_line, "character": end_char }
+            },
+            "context": { "diagnostics": serde_json::to_value(diagnostics)? }
+        });
+        let res = self.request("textDocument/codeAction", params, Duration::from_secs(5))?;
+        let mut out = Vec::new();
+        if let Some(arr) = res.as_array() {
+            for it in arr {
+                let Some(title) = it.get("title").and_then(|t| t.as_str()) else {
+                    continue;
+                };
+                let edits = parse_workspace_edit(it.get("edit"));
+                out.push(CodeActionItem {
+                    title: title.to_string(),
+                    edits,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Document symbols for `uri` as a flat list `(name, kind, line, char, depth)`.
+    pub fn document_symbols(&self, uri: &str) -> Result<Vec<(String, i64, u32, u32, usize)>> {
+        let params = json!({ "textDocument": { "uri": uri } });
+        let res = self.request("textDocument/documentSymbol", params, Duration::from_secs(5))?;
+        let mut out = Vec::new();
+        if let Some(arr) = res.as_array() {
+            for s in arr {
+                collect_symbol(s, 0, &mut out);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Rename the symbol at a position. Returns per-URI edits to apply.
+    pub fn rename(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+        new_name: &str,
+    ) -> Result<Vec<(String, Vec<TextEdit>)>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+            "newName": new_name
+        });
+        let res = self.request("textDocument/rename", params, Duration::from_secs(8))?;
+        Ok(parse_workspace_edit(Some(&res)))
+    }
+
     /// Request hover text at a position. Blocking; call off the UI thread.
     pub fn hover(&self, uri: &str, line: u32, character: u32) -> Result<Option<String>> {
         let params = json!({
@@ -287,6 +368,59 @@ impl LspClient {
         let hover: Hover = serde_json::from_value(res)?;
         Ok(Some(hover_to_string(hover.contents)))
     }
+}
+
+/// Recursively flatten a `DocumentSymbol` (or `SymbolInformation`).
+fn collect_symbol(s: &Value, depth: usize, out: &mut Vec<(String, i64, u32, u32, usize)>) {
+    let Some(name) = s.get("name").and_then(|n| n.as_str()) else {
+        return;
+    };
+    let kind = s.get("kind").and_then(|k| k.as_i64()).unwrap_or(0);
+    // DocumentSymbol uses selectionRange/range; SymbolInformation uses location.range.
+    let pos = s
+        .get("selectionRange")
+        .or_else(|| s.get("range"))
+        .or_else(|| s.pointer("/location/range"));
+    let (line, ch) = pos
+        .map(|r| {
+            (
+                r["start"]["line"].as_u64().unwrap_or(0) as u32,
+                r["start"]["character"].as_u64().unwrap_or(0) as u32,
+            )
+        })
+        .unwrap_or((0, 0));
+    out.push((name.to_string(), kind, line, ch, depth));
+    if let Some(children) = s.get("children").and_then(|c| c.as_array()) {
+        for c in children {
+            collect_symbol(c, depth + 1, out);
+        }
+    }
+}
+
+/// Parse a `WorkspaceEdit` (`changes` or `documentChanges`) into per-URI edits.
+fn parse_workspace_edit(edit: Option<&Value>) -> Vec<(String, Vec<TextEdit>)> {
+    let Some(edit) = edit else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if let Some(changes) = edit.get("changes").and_then(|c| c.as_object()) {
+        for (uri, edits) in changes {
+            if let Ok(te) = serde_json::from_value::<Vec<TextEdit>>(edits.clone()) {
+                out.push((uri.clone(), te));
+            }
+        }
+    } else if let Some(dc) = edit.get("documentChanges").and_then(|d| d.as_array()) {
+        for change in dc {
+            if let (Some(uri), Some(edits)) =
+                (change["textDocument"]["uri"].as_str(), change.get("edits"))
+            {
+                if let Ok(te) = serde_json::from_value::<Vec<TextEdit>>(edits.clone()) {
+                    out.push((uri.to_string(), te));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Extract `(uri, line, character)` from a `Location` or `Location[]` value.

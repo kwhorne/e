@@ -11,6 +11,7 @@ use floem::IntoView;
 use crate::completion::{completion_popup, hover_popup};
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
+use crate::outline::outline_panel;
 use crate::palette::palette;
 use crate::picker::picker_overlay;
 use crate::problems::problems_panel;
@@ -91,8 +92,21 @@ fn app_view() -> impl IntoView {
     ))
     .style(|s| s.flex_col().flex_grow(1.0).height_full());
 
-    let main_row = stack((file_tree(state), editor_column))
-        .style(|s| s.flex_row().size_full());
+    // Keep the document outline in sync with the active buffer.
+    create_effect(move |_| {
+        state.active.get();
+        state.request_outline();
+    });
+
+    let sidebar = stack((file_tree(state), outline_panel(state))).style(|s| {
+        s.flex_col()
+            .width(240.0)
+            .height_full()
+            .border_right(1.0)
+            .border_color(theme::BORDER)
+    });
+
+    let main_row = stack((sidebar, editor_column)).style(|s| s.flex_row().size_full());
 
     stack((
         main_row,

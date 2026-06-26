@@ -9,6 +9,7 @@ mod completion;
 mod editor_area;
 mod file_tree;
 mod laravel;
+mod outline;
 mod palette;
 mod picker;
 mod problems;

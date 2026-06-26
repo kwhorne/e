@@ -31,6 +31,7 @@ use e_term::Terminal;
 
 use crate::completion::{Completion, HoverState};
 use crate::laravel::{self, LaravelData};
+use crate::outline::OutlineItem;
 use crate::picker::{Picker, PickerItem, PickerMode};
 use crate::styling::{build_diag_lines, DiagLines, GitMarks, Highlights};
 
@@ -102,6 +103,8 @@ pub struct AppState {
     pub term_tick: RwSignal<u64>,
     term_tx: RwSignal<Sender<()>>,
     pub term_rx: RwSignal<Option<Receiver<()>>>,
+    /// Document outline of the active buffer.
+    pub outline: RwSignal<Vec<OutlineItem>>,
 }
 
 impl AppState {
@@ -128,7 +131,40 @@ impl AppState {
             term_tick: RwSignal::new(0),
             term_tx: RwSignal::new(term_tx),
             term_rx: RwSignal::new(Some(term_rx)),
+            outline: RwSignal::new(Vec::new()),
         }
+    }
+
+    /// Load the document outline for the active buffer (LSP documentSymbol).
+    pub fn request_outline(&self) {
+        let outline = self.outline;
+        let Some(buf) = self.active_buffer() else {
+            outline.set(Vec::new());
+            return;
+        };
+        let (Some(client), Some(uri)) = (self.lsp.get(), buf.uri.clone()) else {
+            outline.set(Vec::new());
+            return;
+        };
+        if lsp_language_id(buf.file.language).is_none() {
+            outline.set(Vec::new());
+            return;
+        }
+        let send = create_ext_action(self.cx, move |items: Vec<OutlineItem>| outline.set(items));
+        std::thread::spawn(move || {
+            let syms = client.document_symbols(&uri).unwrap_or_default();
+            let items = syms
+                .into_iter()
+                .map(|(name, kind, line, ch, depth)| OutlineItem {
+                    name,
+                    kind,
+                    line,
+                    char: ch,
+                    depth,
+                })
+                .collect();
+            send(items);
+        });
     }
 
     // ---- Integrated terminal -------------------------------------------
@@ -438,6 +474,7 @@ impl AppState {
                 if let (Some(uri), Some(client)) = (buf.uri.as_ref(), self.lsp.get()) {
                     client.did_save(uri, &text);
                 }
+                self.request_outline();
             }
             Err(e) => eprintln!("e: save failed: {e:#}"),
         }

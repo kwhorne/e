@@ -25,6 +25,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 14** — Breadcrumbs (sti + symbol ved cursor)
 - [x] **Milepæl 15** — Auto-save (lagrer skitne buffere etter 1,5 s inaktivitet)
 - [x] **Milepæl 16** — Tema-system (lys/mørk, F8) — reaktiv palett + editor-tema
+- [x] **Milepæl 17** — Terminal-resize til panelstørrelse (on_resize → PTY/grid)
 
 ## Workspace layout
 

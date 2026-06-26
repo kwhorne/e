@@ -13,6 +13,16 @@ use floem::IntoView;
 use crate::state::AppState;
 use crate::theme;
 
+/// Pixel size of one monospace cell at the terminal's font size.
+fn char_size() -> (f64, f64) {
+    let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
+    let attrs = Attrs::new().family(&family).font_size(13.0);
+    let mut layout = TextLayout::new();
+    layout.set_text("W", AttrsList::new(attrs), None);
+    let size = layout.size();
+    (size.width.max(1.0), size.height.max(1.0))
+}
+
 /// Translate a key event into the bytes to send to the PTY.
 fn key_to_bytes(ke: &floem::keyboard::KeyEvent) -> Option<Vec<u8>> {
     let mods = ke.modifiers;
@@ -90,6 +100,12 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
             } else {
                 s.hide()
             }
+        })
+        .on_resize(move |rect| {
+            let (cw, lh) = char_size();
+            let cols = (((rect.width() - 16.0) / cw).floor() as i64).max(20) as usize;
+            let rows = (((rect.height() - 16.0) / lh).floor() as i64).max(5) as usize;
+            state.resize_terminal(rows, cols);
         })
         .keyboard_navigable()
         .request_focus(move || {

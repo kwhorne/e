@@ -334,6 +334,12 @@ impl AppState {
         }
     }
 
+    pub fn resize_terminal(&self, rows: usize, cols: usize) {
+        if let Some(t) = self.terminal.get_untracked() {
+            t.borrow().resize(rows, cols);
+        }
+    }
+
     pub fn terminal_runs(&self) -> Vec<Vec<e_term::Run>> {
         self.terminal
             .get_untracked()

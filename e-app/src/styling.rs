@@ -6,10 +6,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use floem::peniko::Color;
-use floem::text::{Attrs, AttrsList, FamilyOwned};
+use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
 use floem::views::editor::id::EditorId;
+use floem::views::editor::layout::{LineExtraStyle, TextLayoutLine};
 use floem::views::editor::text::Styling;
 use floem::views::editor::EditorStyle;
+use lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use e_core::syntax::{HighlightKind, LineSpan};
 
@@ -18,20 +20,115 @@ use crate::theme;
 /// Shared, mutable per-buffer highlight data (one entry per line).
 pub type Highlights = Rc<RefCell<Vec<Vec<LineSpan>>>>;
 
+/// A diagnostic span within a single line (line-local char offsets).
+#[derive(Clone, Copy)]
+pub struct DiagSpan {
+    pub start: usize,
+    pub end: usize,
+    pub error: bool,
+}
+
+/// Shared, mutable per-buffer diagnostic spans (one entry per line).
+pub type DiagLines = Rc<RefCell<Vec<Vec<DiagSpan>>>>;
+
 pub struct SyntaxStyling {
     highlights: Highlights,
+    diagnostics: DiagLines,
     family: Vec<FamilyOwned>,
     font_size: usize,
 }
 
 impl SyntaxStyling {
-    pub fn new(highlights: Highlights) -> Self {
+    pub fn new(highlights: Highlights, diagnostics: DiagLines) -> Self {
         Self {
             highlights,
+            diagnostics,
             family: vec![FamilyOwned::Monospace],
             font_size: 14,
         }
     }
+}
+
+/// Build per-line diagnostic spans from LSP diagnostics + the buffer text.
+pub fn build_diag_lines(diags: &[Diagnostic], text: &str) -> Vec<Vec<DiagSpan>> {
+    let line_lens: Vec<usize> = text
+        .split_inclusive('\n')
+        .map(|l| {
+            let t = l
+                .strip_suffix("\r\n")
+                .or_else(|| l.strip_suffix('\n'))
+                .unwrap_or(l);
+            t.chars().count()
+        })
+        .collect();
+    let n = line_lens.len().max(1);
+    let mut lines: Vec<Vec<DiagSpan>> = vec![Vec::new(); n];
+
+    for d in diags {
+        let error = !matches!(d.severity, Some(DiagnosticSeverity::WARNING));
+        let sline = d.range.start.line as usize;
+        let eline = (d.range.end.line as usize).min(n - 1);
+        for line in sline..=eline {
+            let len = line_lens.get(line).copied().unwrap_or(0);
+            let start = if line == sline {
+                d.range.start.character as usize
+            } else {
+                0
+            }
+            .min(len);
+            let end = if line == eline {
+                d.range.end.character as usize
+            } else {
+                len
+            };
+            let end = end.max(start + 1).min(len.max(start + 1));
+            if line < lines.len() {
+                lines[line].push(DiagSpan { start, end, error });
+            }
+        }
+    }
+    lines
+}
+
+/// Port of Lapce's `extra_styles_for_range`: turn a column range into the
+/// pixel rectangles needed to draw a wavy underline.
+fn wave_styles(text_layout: &TextLayout, start: usize, end: usize, color: Color) -> Vec<LineExtraStyle> {
+    let start_hit = text_layout.hit_position(start);
+    let end_hit = text_layout.hit_position(end);
+    text_layout
+        .layout_runs()
+        .enumerate()
+        .filter_map(|(current_line, run)| {
+            if current_line < start_hit.line || current_line > end_hit.line {
+                return None;
+            }
+            let x = if current_line == start_hit.line {
+                start_hit.point.x
+            } else {
+                run.glyphs.first().map(|g| g.x).unwrap_or(0.0) as f64
+            };
+            let end_x = if current_line == end_hit.line {
+                end_hit.point.x
+            } else {
+                run.glyphs.last().map(|g| g.x + g.w).unwrap_or(0.0) as f64
+            };
+            let width = end_x - x;
+            if width == 0.0 {
+                return None;
+            }
+            let height = (run.max_ascent + run.max_descent) as f64;
+            let y = run.line_y as f64 - run.max_ascent as f64;
+            Some(LineExtraStyle {
+                x,
+                y,
+                width: Some(width),
+                height,
+                bg_color: None,
+                under_line: None,
+                wave_line: Some(color),
+            })
+        })
+        .collect()
 }
 
 impl Styling for SyntaxStyling {
@@ -63,6 +160,28 @@ impl Styling for SyntaxStyling {
             if let Some(color) = color_for(span.kind) {
                 attrs.add_span(span.start..span.end, default.clone().color(color));
             }
+        }
+    }
+
+    fn apply_layout_styles(
+        &self,
+        _edid: EditorId,
+        _style: &EditorStyle,
+        line: usize,
+        layout_line: &mut TextLayoutLine,
+    ) {
+        let diagnostics = self.diagnostics.borrow();
+        let Some(spans) = diagnostics.get(line) else {
+            return;
+        };
+        for span in spans {
+            let color = if span.error {
+                Color::from_rgb8(0xe0, 0x6c, 0x75)
+            } else {
+                Color::from_rgb8(0xe5, 0xc0, 0x7b)
+            };
+            let styles = wave_styles(&layout_line.text, span.start, span.end, color);
+            layout_line.extra_style.extend(styles);
         }
     }
 }

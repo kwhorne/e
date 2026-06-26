@@ -14,6 +14,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 5** — Laravel-lag: `route()`/`view()`/`config()`/`env()`-completion
 - [x] **Milepæl 6** — Go-to-definition (F12), auto-scroll til mål
 - [x] **Milepæl 7C** — Go-to-references (Shift+F12) + symbol-søk (⌘T)
+- [x] **Milepæl 7A** — Inline bølgelinjer (squiggles) under diagnostics i editoren
 - [ ] **Milepæl 7** — Inline diagnostics-squiggles, integrert terminal
 
 ## Workspace layout

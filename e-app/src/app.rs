@@ -52,9 +52,13 @@ fn app_view() -> impl IntoView {
         let diagnostics = state.diagnostics;
         create_effect(move |_| {
             if let Some(params) = notif.get() {
+                let uri = params.uri.to_string();
+                let diags = params.diagnostics;
                 diagnostics.update(|map| {
-                    map.insert(params.uri.to_string(), params.diagnostics);
+                    map.insert(uri.clone(), diags.clone());
                 });
+                // Feed inline squiggles into the matching buffer.
+                state.apply_diagnostics_to_buffer(&uri, &diags);
             }
         });
     }

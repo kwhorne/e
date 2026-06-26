@@ -28,7 +28,7 @@ pub fn editor_area(state: AppState) -> impl IntoView {
             let win_origin = b.win_origin;
             let te = text_editor("")
                 .use_doc(b.doc.clone() as Rc<dyn Document>)
-                .styling(SyntaxStyling::new(b.highlights.clone()))
+                .styling(SyntaxStyling::new(b.highlights.clone(), b.diag_lines.clone()))
                 .editor_style(default_dark_color)
                 .style(|s| s.size_full())
                 // Intercept keys while the completion popup is open.

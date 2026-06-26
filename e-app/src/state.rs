@@ -30,7 +30,7 @@ use e_lsp::{path_to_uri, uri_to_path, LspClient};
 use crate::completion::{Completion, HoverState};
 use crate::laravel::{self, LaravelData};
 use crate::picker::{Picker, PickerItem, PickerMode};
-use crate::styling::Highlights;
+use crate::styling::{build_diag_lines, DiagLines, Highlights};
 
 /// One open file/tab.
 #[derive(Clone)]
@@ -40,6 +40,8 @@ pub struct Buffer {
     pub doc: Rc<TextDocument>,
     pub dirty: RwSignal<bool>,
     pub highlights: Highlights,
+    /// Per-line diagnostic spans (for inline squiggles).
+    pub diag_lines: DiagLines,
     /// `file://` URI, when backed by a path (used for LSP).
     pub uri: Option<String>,
     /// The live editor, set once its view is built.
@@ -275,6 +277,7 @@ impl AppState {
             doc,
             dirty,
             highlights,
+            diag_lines: Rc::new(RefCell::new(Vec::new())),
             uri,
             editor: RwSignal::new(None),
             win_origin: RwSignal::new(Point::ZERO),
@@ -332,6 +335,19 @@ impl AppState {
             }
             Err(e) => eprintln!("e: save failed: {e:#}"),
         }
+    }
+
+    /// Rebuild a buffer's inline diagnostic spans and repaint it.
+    pub fn apply_diagnostics_to_buffer(&self, uri: &str, diags: &[Diagnostic]) {
+        let Some(buf) = self
+            .buffers
+            .with(|bs| bs.iter().find(|b| b.uri.as_deref() == Some(uri)).cloned())
+        else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        *buf.diag_lines.borrow_mut() = build_diag_lines(diags, &text);
+        buf.doc.cache_rev().update(|r| *r += 1);
     }
 
     /// `(errors, warnings)` for the active buffer.

@@ -1,7 +1,7 @@
 //! The tab strip above the editor area.
 
 use floem::event::EventPropagation;
-use floem::reactive::{SignalGet, SignalUpdate};
+use floem::reactive::SignalGet;
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
 use floem::IntoView;
 
@@ -14,7 +14,6 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
         |b| b.id,
         move |b| {
             let id = b.id;
-            let active = state.active;
             let dirty = b.dirty;
             let name = b.file.display_name();
 
@@ -43,7 +42,7 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
                         .border_right(1.0)
                         .border_color(theme::BORDER)
                         .cursor(floem::style::CursorStyle::Pointer);
-                    if active.get() == Some(id) {
+                    if state.focused_active_id() == Some(id) {
                         s.background(theme::BG_ACTIVE)
                     } else {
                         s.background(theme::BG_PANEL)
@@ -51,7 +50,7 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
                     }
                 })
                 .on_click(move |_| {
-                    state.active.set(Some(id));
+                    state.focus_buffer(id);
                     EventPropagation::Stop
                 })
         },

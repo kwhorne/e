@@ -77,8 +77,14 @@ pub struct AppState {
     pub root: RwSignal<PathBuf>,
     /// All open buffers, in tab order.
     pub buffers: RwSignal<Vec<Buffer>>,
-    /// Currently focused buffer id.
+    /// Pane 0's active buffer id.
     pub active: RwSignal<Option<u64>>,
+    /// Pane 1's active buffer id (split view).
+    pub active2: RwSignal<Option<u64>>,
+    /// Is the editor split into two panes?
+    pub split: RwSignal<bool>,
+    /// Which pane has focus (0 or 1).
+    pub focused: RwSignal<u8>,
     /// Monotonic id source.
     next_id: RwSignal<u64>,
     /// Is the command palette open?
@@ -123,6 +129,9 @@ impl AppState {
             root: RwSignal::new(root),
             buffers: RwSignal::new(Vec::new()),
             active: RwSignal::new(None),
+            active2: RwSignal::new(None),
+            split: RwSignal::new(false),
+            focused: RwSignal::new(0),
             next_id: RwSignal::new(1),
             palette_open: RwSignal::new(false),
             lsp: RwSignal::new(None),
@@ -300,6 +309,43 @@ impl AppState {
         self.buffers.with(|bs| bs.iter().find(|b| b.id == id).cloned())
     }
 
+    /// The active-buffer signal of the focused pane.
+    fn focused_active(&self) -> RwSignal<Option<u64>> {
+        if self.focused.get_untracked() == 1 {
+            self.active2
+        } else {
+            self.active
+        }
+    }
+
+    /// Buffer id active in the focused pane, tracked reactively.
+    pub fn focused_active_id(&self) -> Option<u64> {
+        if self.focused.get() == 1 {
+            self.active2.get()
+        } else {
+            self.active.get()
+        }
+    }
+
+    /// Focus a buffer in the currently focused pane (e.g. clicking a tab).
+    pub fn focus_buffer(&self, id: u64) {
+        self.focused_active().set(Some(id));
+    }
+
+    /// Toggle the two-pane split view.
+    pub fn toggle_split(&self) {
+        let on = !self.split.get_untracked();
+        self.split.set(on);
+        if on {
+            if self.active2.get_untracked().is_none() {
+                self.active2.set(self.active.get_untracked());
+            }
+            self.focused.set(1);
+        } else {
+            self.focused.set(0);
+        }
+    }
+
     /// If the workspace is a Laravel project, scrape its data in the background.
     pub fn load_laravel(&self) {
         let root = self.root.get();
@@ -395,7 +441,7 @@ impl AppState {
                 .map(|b| b.id)
         });
         if let Some(id) = existing {
-            self.active.set(Some(id));
+            self.focused_active().set(Some(id));
             return;
         }
 
@@ -483,7 +529,7 @@ impl AppState {
             pending_goto: RwSignal::new(None),
         };
         self.buffers.update(|bs| bs.push(buf));
-        self.active.set(Some(id));
+        self.focused_active().set(Some(id));
     }
 
     /// Close a tab; focus a neighbour if it was active.
@@ -500,8 +546,11 @@ impl AppState {
                 }
             }
         });
-        if self.active.get() == Some(id) {
+        if self.active.get_untracked() == Some(id) {
             self.active.set(focus_next);
+        }
+        if self.active2.get_untracked() == Some(id) {
+            self.active2.set(focus_next);
         }
         if let (Some(uri), Some(client)) = (closed_uri, self.lsp.get()) {
             client.did_close(&uri);
@@ -509,7 +558,7 @@ impl AppState {
     }
 
     pub fn active_buffer(&self) -> Option<Buffer> {
-        let active = self.active.get()?;
+        let active = self.focused_active_id()?;
         self.buffers
             .with(|bs| bs.iter().find(|b| b.id == active).cloned())
     }

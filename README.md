@@ -19,7 +19,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 8** — Format-on-save (PHP) + git-gutter (endrede linjer)
 - [x] **Milepæl 9** — Document outline-panel (LSP documentSymbol) i sidebar
 - [x] **Milepæl 10** — Signature help (popup med aktiv-parameter-highlight)
-- [ ] **Milepæl 11** — Terminal-farger (SGR), split-view
+- [x] **Milepæl 11** — Find-in-file (⌘F), terminal-farger (SGR), split-view (⌘\\)
 
 ## Workspace layout
 
@@ -83,6 +83,8 @@ Works in both `.php` and `.blade.php` files.
 | F12 | Go to definition |
 | Shift+F12 | Find references |
 | ⌘T | Workspace symbol search |
+| ⌘F | Find in file |
+| ⌘\\ | Toggle split view |
 | Ctrl+` | Toggle terminal |
 | Esc | Dismiss popups |
 

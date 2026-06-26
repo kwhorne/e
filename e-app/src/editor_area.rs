@@ -1,31 +1,37 @@
-//! The central editor area: one live editor per open buffer, only the active
-//! one visible. Hidden editors stay alive in the view tree, so each tab keeps
-//! its own cursor and scroll position.
+//! The central editor area: one or two panes, each showing its active buffer.
+//! Hidden editors stay alive so every tab keeps its cursor and scroll.
 
 use std::rc::Rc;
 
-use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::event::{EventListener, EventPropagation};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::{Command, CommandExecuted};
 use floem::views::editor::core::command::{EditCommand, MoveCommand};
 use floem::views::editor::core::cursor::{Cursor, CursorMode};
 use floem::views::editor::core::selection::Selection;
 use floem::views::editor::text::{default_dark_color, Document};
-use floem::views::{container, dyn_stack, label, stack, text_editor, Decorators};
+use floem::views::{container, dyn_container, dyn_stack, label, stack, text_editor, Decorators};
 use floem::IntoView;
 
 use crate::state::AppState;
 use crate::styling::SyntaxStyling;
 use crate::theme;
 
-pub fn editor_area(state: AppState) -> impl IntoView {
-    let editors = dyn_stack(
+/// One pane: a stack of all buffers, only this pane's active one visible.
+fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
+    let active_sig: RwSignal<Option<u64>> = if pane_idx == 1 {
+        state.active2
+    } else {
+        state.active
+    };
+
+    dyn_stack(
         move || state.buffers.get(),
         |b| b.id,
         move |b| {
             let id = b.id;
-            let active = state.active;
-
             let win_origin = b.win_origin;
+
             let te = text_editor("")
                 .use_doc(b.doc.clone() as Rc<dyn Document>)
                 .styling(SyntaxStyling::new(
@@ -36,7 +42,6 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                 ))
                 .editor_style(default_dark_color)
                 .style(|s| s.size_full())
-                // Intercept keys while the completion popup is open.
                 .pre_command(move |pre| {
                     if state.completion.open.get_untracked() {
                         match pre.cmd {
@@ -60,11 +65,9 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                     CommandExecuted::No
                 });
 
-            // Hand the live editor to the buffer for cursor / position queries.
             let editor_handle = te.editor().clone();
             b.editor.set(Some(editor_handle.clone()));
 
-            // Apply a pending go-to-definition jump now that the editor exists.
             if let Some((l, c)) = b.pending_goto.get_untracked() {
                 let offset = editor_handle.offset_of_line_col(l, c);
                 editor_handle.cursor.set(Cursor::new(
@@ -77,8 +80,12 @@ pub fn editor_area(state: AppState) -> impl IntoView {
 
             container(te)
                 .on_move(move |point| win_origin.set(point))
+                .on_event(EventListener::PointerDown, move |_| {
+                    state.focused.set(pane_idx);
+                    EventPropagation::Continue
+                })
                 .style(move |s| {
-                    if active.get() == Some(id) {
+                    if active_sig.get() == Some(id) {
                         s.size_full()
                     } else {
                         s.hide()
@@ -86,26 +93,45 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                 })
         },
     )
-    .style(|s| s.size_full());
+    .style(|s| s.size_full())
+}
 
-    // Empty-state shown when no buffer is open.
-    let placeholder = container(label(|| "No file open — press ⌘P to find a file".to_string()))
-        .style(|s| {
-            s.size_full()
-                .items_center()
-                .justify_center()
-                .color(theme::FG_DIM)
-        });
-
-    stack((
-        placeholder.style(move |s| {
-            if state.buffers.with(|b| b.is_empty()) {
-                s.size_full()
+pub fn editor_area(state: AppState) -> impl IntoView {
+    dyn_container(
+        move || state.split.get(),
+        move |split| {
+            if split {
+                stack((
+                    pane(state, 0).style(|s| {
+                        s.flex_grow(1.0)
+                            .height_full()
+                            .border_right(1.0)
+                            .border_color(theme::BORDER)
+                    }),
+                    pane(state, 1).style(|s| s.flex_grow(1.0).height_full()),
+                ))
+                .style(|s| s.flex_row().size_full().background(theme::BG))
+                .into_any()
             } else {
-                s.hide()
+                let placeholder =
+                    container(label(|| "No file open — press ⌘P to find a file".to_string()))
+                        .style(move |s| {
+                            let s = s
+                                .size_full()
+                                .items_center()
+                                .justify_center()
+                                .color(theme::FG_DIM);
+                            if state.buffers.with(|b| b.is_empty()) {
+                                s
+                            } else {
+                                s.hide()
+                            }
+                        });
+                stack((placeholder, pane(state, 0)))
+                    .style(|s| s.size_full().background(theme::BG))
+                    .into_any()
             }
-        }),
-        editors,
-    ))
-    .style(|s| s.size_full().background(theme::BG))
+        },
+    )
+    .style(|s| s.size_full())
 }

@@ -187,6 +187,12 @@ fn app_view() -> impl IntoView {
             |m| m.meta() || m.control(),
             move |_| state.open_find(),
         )
+        // ⌘\ / Ctrl+\ toggles the split view.
+        .on_key_down(
+            Key::Character("\\".into()),
+            |m| m.meta() || m.control(),
+            move |_| state.toggle_split(),
+        )
         // Escape dismisses popups.
         .on_key_down(Key::Named(NamedKey::Escape), |m| m.is_empty(), move |_| {
             state.close_completion();

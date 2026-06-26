@@ -37,10 +37,10 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
         |(i, _)| *i,
         move |(_, d)| {
             let color = severity_color(d.severity);
-            let line = d.range.start.line + 1;
-            let col = d.range.start.character + 1;
+            let raw_line = d.range.start.line;
+            let raw_col = d.range.start.character;
             let msg = d.message.replace('\n', " ");
-            label(move || format!("{line}:{col}  {msg}"))
+            label(move || format!("{}:{}  {msg}", raw_line + 1, raw_col + 1))
                 .style(move |s| {
                     s.height(22.0)
                         .width_full()
@@ -48,7 +48,15 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
                         .padding_horiz(12.0)
                         .text_ellipsis()
                         .color(color)
+                        .cursor(floem::style::CursorStyle::Pointer)
                         .hover(|s| s.background(theme::BG_HOVER))
+                })
+                .on_click_stop(move |_| {
+                    if let Some(buf) = state.active_buffer() {
+                        if let Some(uri) = buf.uri {
+                            state.jump_to(&uri, raw_line as usize, raw_col as usize);
+                        }
+                    }
                 })
         },
     )

@@ -36,6 +36,7 @@ use crate::session::{self, SessionData};
 use crate::picker::{Picker, PickerItem, PickerMode};
 use crate::cmd_palette::CmdPalette;
 use crate::rename::RenameState;
+use crate::snippets;
 use crate::find::FindState;
 use crate::styling::{
     build_diag_lines, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
@@ -807,10 +808,8 @@ impl AppState {
                         client.did_change_full(uri, v, &text);
                     }
                 }
-                // Laravel helper completion works in both PHP and Blade files.
-                if matches!(language, Language::Php | Language::Blade) {
-                    app.autocomplete_after_edit(id);
-                }
+                // Trigger completion (LSP + snippets + Laravel helpers).
+                app.autocomplete_after_edit(id);
             });
         }
 
@@ -1031,9 +1030,7 @@ impl AppState {
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return;
         };
-        let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
-        else {
+        let Some(editor) = buf.editor.get_untracked() else {
             return;
         };
 
@@ -1043,6 +1040,7 @@ impl AppState {
 
         let text = buf.doc.text().to_string();
         let start = word_start(&text, offset);
+        let word = text[start..offset.min(text.len())].to_string();
 
         // Anchor the popup at the start of the replaced word.
         let (_, below) = editor.points_of_offset(start, cursor.affinity);
@@ -1055,7 +1053,10 @@ impl AppState {
         comp.start_offset.set(start);
         comp.anchor.set(anchor);
 
-        let send = create_ext_action(self.cx, move |items: Vec<lsp_types::CompletionItem>| {
+        // Snippets are computed synchronously and shown first.
+        let snippet_items = snippets::completion_items(buf.file.language, &word);
+
+        let show = move |items: Vec<lsp_types::CompletionItem>| {
             if items.is_empty() {
                 comp.open.set(false);
             } else {
@@ -1063,11 +1064,22 @@ impl AppState {
                 comp.selected.set(0);
                 comp.open.set(true);
             }
-        });
-        std::thread::spawn(move || {
-            let items = client.completion(&uri, line as u32, col as u32).unwrap_or_default();
-            send(items);
-        });
+        };
+
+        match (self.lsp_for_active(), buf.uri.clone()) {
+            (Some(client), Some(uri)) => {
+                let send = create_ext_action(self.cx, move |lsp: Vec<lsp_types::CompletionItem>| {
+                    let mut items = snippet_items.clone();
+                    items.extend(lsp);
+                    show(items);
+                });
+                std::thread::spawn(move || {
+                    let items = client.completion(&uri, line as u32, col as u32).unwrap_or_default();
+                    send(items);
+                });
+            }
+            _ => show(snippet_items),
+        }
     }
 
     pub fn move_completion(&self, delta: i64) {
@@ -1099,10 +1111,12 @@ impl AppState {
         }
         let sel = comp.selected.get_untracked().min(items.len() - 1);
         let item = &items[sel];
+        let is_snippet = item.detail.as_deref() == Some("snippet");
         let insert = item
             .insert_text
             .clone()
             .unwrap_or_else(|| item.label.clone());
+        let label = item.label.clone();
 
         let Some(bid) = comp.buffer_id.get_untracked() else {
             return false;
@@ -1116,9 +1130,25 @@ impl AppState {
 
         let end = editor.cursor.get_untracked().offset();
         let start = comp.start_offset.get_untracked().min(end);
+        comp.open.set(false);
+
+        if is_snippet {
+            if let Some(body) = snippets::body(buf.file.language, &label) {
+                let text = buf.doc.text().to_string();
+                let indent = line_indent(&text, start);
+                let (expanded, caret) = snippets::expand(body, &indent);
+                buf.doc
+                    .edit_single(Selection::region(start, end), &expanded, EditType::InsertChars);
+                let pos = start + caret;
+                editor
+                    .cursor
+                    .set(Cursor::new(CursorMode::Insert(Selection::caret(pos)), None, None));
+                return true;
+            }
+        }
+
         buf.doc
             .edit_single(Selection::region(start, end), &insert, EditType::InsertChars);
-        comp.open.set(false);
         true
     }
 
@@ -1377,6 +1407,16 @@ fn is_word_char(c: char) -> bool {
 
 fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+/// Leading whitespace of the line containing `offset`.
+fn line_indent(text: &str, offset: usize) -> String {
+    let offset = offset.min(text.len());
+    let ls = text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    text[ls..]
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect()
 }
 
 /// Byte range of the identifier surrounding `offset`.

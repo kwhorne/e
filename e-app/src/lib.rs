@@ -21,6 +21,7 @@ mod picker;
 mod problems;
 mod rename;
 mod session;
+mod snippets;
 mod state;
 mod status;
 mod styling;

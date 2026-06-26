@@ -92,6 +92,7 @@ fn kind_icon(kind: Option<CompletionItemKind>) -> (&'static str, Color) {
             ("π", Color::from_rgb8(0xd1, 0x9a, 0x66))
         }
         Some(CompletionItemKind::KEYWORD) => ("k", Color::from_rgb8(0xc6, 0x78, 0xdd)),
+        Some(CompletionItemKind::SNIPPET) => ("▢", Color::from_rgb8(0x98, 0xc3, 0x79)),
         _ => ("•", theme::fg_dim()),
     }
 }

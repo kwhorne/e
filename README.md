@@ -31,6 +31,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 20** — Tema-persistens · command palette (⌘⇧P) · git diff-view · multi-cursor (⌘D)
 - [x] **Milepæl 21** — Multi-språk LSP (PHP/intelephense, C·C++/clangd, Rust, TS, Go, Python)
 - [x] **Milepæl 22** — Bracket-matching (highlight av matchende parentes ved cursor)
+- [x] **Milepæl 23** — Snippets (innebygde kode-maler per språk, $0-cursor, i completion)
 
 ## Workspace layout
 

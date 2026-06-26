@@ -11,6 +11,7 @@ use floem::IntoView;
 use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
+use crate::diff_view::diff_view;
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
 use crate::find::find_bar;
@@ -159,6 +160,7 @@ fn app_view() -> impl IntoView {
     stack((
         main_row,
         markdown_preview(state),
+        diff_view(state),
         find_bar(state),
         rename_bar(state),
         signature_popup(state),
@@ -261,6 +263,12 @@ fn app_view() -> impl IntoView {
             |m| m.meta() || m.control(),
             move |_| state.toggle_split(),
         )
+        // ⌘D / Ctrl+D adds a cursor at the next occurrence (multi-cursor).
+        .on_key_down(
+            Key::Character("d".into()),
+            |m| m.meta() || m.control(),
+            move |_| state.select_next_occurrence(),
+        )
         // Escape dismisses popups.
         .on_key_down(Key::Named(NamedKey::Escape), |m| m.is_empty(), move |_| {
             state.close_completion();
@@ -269,5 +277,6 @@ fn app_view() -> impl IntoView {
             state.picker.open.set(false);
             state.md_preview.set(false);
             state.cmd.open.set(false);
+            state.diff_open.set(false);
         })
 }

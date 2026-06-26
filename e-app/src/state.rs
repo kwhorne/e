@@ -16,7 +16,7 @@ use floem::kurbo::Point;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::core::cursor::{Cursor, CursorMode};
 use floem::views::editor::core::editor::EditType;
-use floem::views::editor::core::selection::Selection;
+use floem::views::editor::core::selection::{SelRegion, Selection};
 use floem::views::editor::text::Document;
 use floem::views::editor::text_document::TextDocument;
 use floem::views::editor::Editor;
@@ -129,6 +129,8 @@ pub struct AppState {
     pub md_preview: RwSignal<bool>,
     /// Command palette (⌘⇧P).
     pub cmd: CmdPalette,
+    /// Git diff reading-mode toggle.
+    pub diff_open: RwSignal<bool>,
 }
 
 fn now_ms() -> u128 {
@@ -172,12 +174,18 @@ impl AppState {
             last_edit: RwSignal::new(0),
             md_preview: RwSignal::new(false),
             cmd: CmdPalette::new(),
+            diff_open: RwSignal::new(false),
         }
     }
 
     pub fn toggle_md_preview(&self) {
         let cur = self.md_preview.get_untracked();
         self.md_preview.set(!cur);
+    }
+
+    pub fn toggle_diff(&self) {
+        let cur = self.diff_open.get_untracked();
+        self.diff_open.set(!cur);
     }
 
     // ---- Local rename --------------------------------------------------
@@ -204,6 +212,52 @@ impl AppState {
 
     pub fn close_rename(&self) {
         self.rename.open.set(false);
+    }
+
+    /// Multi-cursor (⌘D): expand the caret to its word, or add a cursor at the
+    /// next occurrence of the current selection.
+    pub fn select_next_occurrence(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let CursorMode::Insert(sel) = cursor.mode.clone() else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        let regions = sel.regions().to_vec();
+        let all_carets = regions.iter().all(|r| r.start == r.end);
+
+        let new_sel = if all_carets {
+            // Expand each caret to the surrounding word.
+            let mut s = Selection::new();
+            for r in &regions {
+                let (a, b) = word_range(&text, r.max());
+                if b > a {
+                    s.add_region(SelRegion::new(a, b, None));
+                } else {
+                    s.add_region(*r);
+                }
+            }
+            s
+        } else {
+            // Add the next occurrence of the last non-empty region's text.
+            let mut s = sel.clone();
+            if let Some(last) = regions.iter().rev().find(|r| r.max() > r.min()) {
+                let word = text[last.min()..last.max()].to_string();
+                if let Some(pos) = find_next(&text, &word, last.max()) {
+                    s.add_region(SelRegion::new(pos, pos + word.len(), None));
+                }
+            }
+            s
+        };
+
+        editor
+            .cursor
+            .set(Cursor::new(CursorMode::Insert(new_sel), None, None));
     }
 
     /// Replace every whole-word occurrence of the original identifier.
@@ -1234,8 +1288,8 @@ fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
 }
 
-/// The identifier surrounding `offset`, if any.
-fn word_at(text: &str, offset: usize) -> String {
+/// Byte range of the identifier surrounding `offset`.
+fn word_range(text: &str, offset: usize) -> (usize, usize) {
     let offset = offset.min(text.len());
     let mut start = offset;
     for (i, c) in text[..offset].char_indices().rev() {
@@ -1253,7 +1307,25 @@ fn word_at(text: &str, offset: usize) -> String {
             break;
         }
     }
+    (start, end)
+}
+
+/// The identifier surrounding `offset`, if any.
+fn word_at(text: &str, offset: usize) -> String {
+    let (start, end) = word_range(text, offset);
     text[start..end].to_string()
+}
+
+/// Next occurrence of `word` at or after `from`, wrapping to the start.
+fn find_next(text: &str, word: &str, from: usize) -> Option<usize> {
+    if word.is_empty() {
+        return None;
+    }
+    let from = from.min(text.len());
+    if let Some(p) = text[from..].find(word) {
+        return Some(from + p);
+    }
+    text[..from].find(word)
 }
 
 /// Byte ranges of every whole-word (identifier-boundary) occurrence of `word`.

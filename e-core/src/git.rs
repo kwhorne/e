@@ -4,12 +4,43 @@
 use std::path::Path;
 use std::process::Command;
 
-use similar::{DiffOp, TextDiff};
+use similar::{ChangeTag, DiffOp, TextDiff};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineMark {
     Added,
     Modified,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffKind {
+    Context,
+    Added,
+    Removed,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiffLine {
+    pub kind: DiffKind,
+    pub text: String,
+}
+
+/// A unified line-diff between `head` and `current`.
+pub fn diff(head: &str, current: &str) -> Vec<DiffLine> {
+    TextDiff::from_lines(head, current)
+        .iter_all_changes()
+        .map(|c| {
+            let kind = match c.tag() {
+                ChangeTag::Insert => DiffKind::Added,
+                ChangeTag::Delete => DiffKind::Removed,
+                ChangeTag::Equal => DiffKind::Context,
+            };
+            DiffLine {
+                kind,
+                text: c.value().trim_end_matches('\n').to_string(),
+            }
+        })
+        .collect()
 }
 
 /// Fetch the `HEAD` version of `path`, or `None` if it's untracked / not a repo.

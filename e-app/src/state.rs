@@ -1016,19 +1016,31 @@ impl AppState {
         })
     }
 
-    /// Diagnostics for the active buffer, sorted by line.
-    pub fn active_diagnostics(&self) -> Vec<Diagnostic> {
-        let Some(buf) = self.active_buffer() else {
-            return Vec::new();
-        };
-        let Some(uri) = buf.uri.as_ref() else {
-            return Vec::new();
-        };
-        let mut diags = self
-            .diagnostics
-            .with(|map| map.get(uri).cloned().unwrap_or_default());
-        diags.sort_by_key(|d| d.range.start.line);
-        diags
+    /// All non-empty diagnostics across open files, grouped and sorted.
+    pub fn all_diagnostics(&self) -> Vec<(String, Vec<Diagnostic>)> {
+        self.diagnostics.with(|map| {
+            let mut groups: Vec<(String, Vec<Diagnostic>)> = map
+                .iter()
+                .filter(|(_, d)| !d.is_empty())
+                .map(|(uri, d)| {
+                    let mut dd = d.clone();
+                    dd.sort_by_key(|x| x.range.start.line);
+                    (uri.clone(), dd)
+                })
+                .collect();
+            groups.sort_by(|a, b| a.0.cmp(&b.0));
+            groups
+        })
+    }
+
+    /// Total number of diagnostics across all open files.
+    pub fn total_diagnostic_count(&self) -> usize {
+        self.diagnostics.with(|m| m.values().map(|v| v.len()).sum())
+    }
+
+    /// A `file://` URI shown relative to the workspace root.
+    pub fn rel_path(&self, uri: &str) -> String {
+        rel_uri(uri, &self.root.get())
     }
 
     // ---- Completion & hover --------------------------------------------

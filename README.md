@@ -35,6 +35,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 24** — Bruker-settings (config.json: font/tab/format-on-save/autosave/indent-guides)
 - [x] **Milepæl 25** — Statuslinje: cursor-posisjon (Ln/Col) + seleksjonslengde
 - [x] **Milepæl 26** — Trailing-whitespace-trim + final newline ved lagring
+- [x] **Milepæl 27** — Workspace-wide problems-panel (alle filer, gruppert, klikkbart)
 
 ## Workspace layout
 

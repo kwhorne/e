@@ -2,14 +2,16 @@
 
 use std::path::PathBuf;
 
+use floem::ext_event::create_signal_from_channel;
 use floem::keyboard::Key;
-use floem::reactive::{Scope, SignalGet, SignalUpdate};
+use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate};
 use floem::views::{stack, Decorators};
 use floem::IntoView;
 
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
 use crate::palette::palette;
+use crate::problems::problems_panel;
 use crate::state::AppState;
 use crate::status::status_bar;
 use crate::tabs::tab_bar;
@@ -41,6 +43,20 @@ fn resolve_args() -> (PathBuf, Option<PathBuf>) {
 fn app_view() -> impl IntoView {
     let (root, file) = resolve_args();
     let state = AppState::new(Scope::current(), root);
+
+    // Bridge the LSP reader thread's diagnostics into a UI-thread signal.
+    if let Some(rx) = state.diag_rx.try_update(|opt| opt.take()).flatten() {
+        let notif = create_signal_from_channel(rx);
+        let diagnostics = state.diagnostics;
+        create_effect(move |_| {
+            if let Some(params) = notif.get() {
+                diagnostics.update(|map| {
+                    map.insert(params.uri.to_string(), params.diagnostics);
+                });
+            }
+        });
+    }
+
     if let Some(file) = file {
         state.open_path(file);
     }
@@ -48,6 +64,7 @@ fn app_view() -> impl IntoView {
     let editor_column = stack((
         tab_bar(state),
         editor_area(state).style(|s| s.flex_grow(1.0).width_full()),
+        problems_panel(state),
         status_bar(state),
     ))
     .style(|s| s.flex_col().flex_grow(1.0).height_full());

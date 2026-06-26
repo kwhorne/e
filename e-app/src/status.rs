@@ -16,10 +16,21 @@ pub fn status_bar(state: AppState) -> impl IntoView {
         None => String::new(),
     });
 
-    let right = label(move || match state.active_buffer() {
+    let diags = label(move || {
+        let (errors, warnings) = state.active_diagnostic_counts();
+        if errors == 0 && warnings == 0 {
+            String::new()
+        } else {
+            format!("⨯ {errors}   ⚠ {warnings}")
+        }
+    });
+
+    let language = label(move || match state.active_buffer() {
         Some(b) => b.file.language.name().to_string(),
         None => String::new(),
     });
+
+    let right = stack((diags, language)).style(|s| s.items_center().gap(14.0));
 
     stack((left, right)).style(|s| {
         s.height(24.0)

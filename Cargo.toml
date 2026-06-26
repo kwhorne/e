@@ -14,7 +14,7 @@ name = "e"
 path = "e-app/src/bin/e.rs"
 
 [workspace]
-members  = ["e-app", "e-core"]
+members  = ["e-app", "e-core", "e-lsp"]
 resolver = "2"
 
 [workspace.package]
@@ -26,7 +26,12 @@ authors      = ["kh"]
 
 [workspace.dependencies]
 anyhow      = "1.0"
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
+lsp-types   = "0.95.1"
+crossbeam-channel = "0.5"
 e-core      = { path = "./e-core" }
+e-lsp       = { path = "./e-lsp" }
 
 # Same Floem revision Lapce builds against, so we can use it as a reference.
 [workspace.dependencies.floem]

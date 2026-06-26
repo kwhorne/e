@@ -8,6 +8,7 @@ mod app;
 mod editor_area;
 mod file_tree;
 mod palette;
+mod problems;
 mod state;
 mod status;
 mod styling;

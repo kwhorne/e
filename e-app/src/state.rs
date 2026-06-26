@@ -929,6 +929,47 @@ impl AppState {
         p.open.set(true);
     }
 
+    /// Open workspace-wide text search (⌘⇧F).
+    pub fn open_global_search(&self) {
+        let p = self.picker;
+        p.mode.set(PickerMode::Search);
+        p.query.set(String::new());
+        p.items.set(Vec::new());
+        p.selected.set(0);
+        p.open.set(true);
+    }
+
+    /// Dispatch a picker query to the right backend for the current mode.
+    pub fn run_picker_query(&self, query: String) {
+        match self.picker.mode.get_untracked() {
+            PickerMode::Symbols => self.request_symbols(query),
+            PickerMode::Search => self.request_search(query),
+            PickerMode::References => {}
+        }
+    }
+
+    /// Grep the workspace for `query` (called reactively from the picker).
+    pub fn request_search(&self, query: String) {
+        let p = self.picker;
+        if query.trim().len() < 2 {
+            p.items.set(Vec::new());
+            return;
+        }
+        let gen = p.gen.get_untracked() + 1;
+        p.gen.set(gen);
+        let root = self.root.get();
+        let send = create_ext_action(self.cx, move |(g, items): (u64, Vec<PickerItem>)| {
+            if g == p.gen.get_untracked() {
+                p.items.set(items);
+                p.selected.set(0);
+            }
+        });
+        std::thread::spawn(move || {
+            let items = grep_workspace(&root, &query, 300);
+            send((gen, items));
+        });
+    }
+
     /// Run a workspace/symbol query (called reactively from the picker).
     pub fn request_symbols(&self, query: String) {
         let p = self.picker;
@@ -1064,6 +1105,57 @@ fn line_starts(text: &str) -> Vec<usize> {
 
 fn line_of(starts: &[usize], byte: usize) -> usize {
     starts.partition_point(|&s| s <= byte).saturating_sub(1)
+}
+
+/// Walk the workspace and collect lines matching `query` (case-insensitive).
+fn grep_workspace(root: &std::path::Path, query: &str, max: usize) -> Vec<PickerItem> {
+    let needle = query.to_lowercase();
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if out.len() >= max {
+            break;
+        }
+        let Ok(read) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read.filter_map(|e| e.ok()) {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "target" || name == "node_modules" {
+                continue;
+            }
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(t) if t.is_dir() => stack.push(path),
+                Ok(_) => {
+                    // Skip large files; read the rest as UTF-8 (binaries fail).
+                    if entry.metadata().map(|m| m.len() > 2_000_000).unwrap_or(true) {
+                        continue;
+                    }
+                    let Ok(content) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    for (li, line) in content.lines().enumerate() {
+                        if let Some(col) = line.to_lowercase().find(&needle) {
+                            out.push(PickerItem {
+                                label: line.trim_start().chars().take(120).collect(),
+                                detail: format!("{}:{}", rel_uri(&path_to_uri(&path), root), li + 1),
+                                uri: path_to_uri(&path),
+                                line: li as u32,
+                                char: col as u32,
+                            });
+                            if out.len() >= max {
+                                return out;
+                            }
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    out
 }
 
 /// Display a `file://` URI relative to the workspace root.

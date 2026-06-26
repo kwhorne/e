@@ -175,6 +175,12 @@ fn app_view() -> impl IntoView {
             |m| m.meta() || m.control(),
             move |_| state.open_symbol_search(),
         )
+        // ⌘⇧F / Ctrl+⇧F opens workspace-wide text search.
+        .on_key_down(
+            Key::Character("F".into()),
+            |m| (m.meta() || m.control()) && m.shift(),
+            move |_| state.open_global_search(),
+        )
         // Ctrl+` toggles the integrated terminal.
         .on_key_down(
             Key::Character("`".into()),

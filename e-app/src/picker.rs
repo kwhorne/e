@@ -13,6 +13,7 @@ use crate::theme;
 pub enum PickerMode {
     References,
     Symbols,
+    Search,
 }
 
 #[derive(Clone)]
@@ -51,11 +52,11 @@ impl Picker {
 pub fn picker_overlay(state: AppState) -> impl IntoView {
     let p = state.picker;
 
-    // In Symbols mode, every query change fires a workspace/symbol request.
+    // Symbols and Search re-query asynchronously as the query changes.
     create_effect(move |_| {
-        if p.open.get() && p.mode.get() == PickerMode::Symbols {
+        if p.open.get() && matches!(p.mode.get(), PickerMode::Symbols | PickerMode::Search) {
             let q = p.query.get();
-            state.request_symbols(q);
+            state.run_picker_query(q);
         }
     });
 

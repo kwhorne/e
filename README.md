@@ -83,7 +83,6 @@ Works in both `.php` and `.blade.php` files.
 | Shift+F12 | Find references |
 | ⌘T | Workspace symbol search |
 | Ctrl+` | Toggle terminal |
-| F2 | Rename (krever Intelephense Premium) |
 | Esc | Dismiss popups |
 
 ## Build & run

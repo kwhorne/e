@@ -139,6 +139,16 @@ fn app_view() -> impl IntoView {
         state.request_outline();
     });
 
+    // Highlight the matching bracket as the cursor moves.
+    create_effect(move |_| {
+        if let Some(buf) = state.active_buffer() {
+            if let Some(ed) = buf.editor.get() {
+                ed.cursor.get(); // track caret movement
+                state.update_bracket_marks();
+            }
+        }
+    });
+
     // Re-run find-in-file whenever the query changes.
     create_effect(move |_| {
         if state.find.open.get() {

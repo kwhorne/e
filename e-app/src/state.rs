@@ -37,7 +37,9 @@ use crate::picker::{Picker, PickerItem, PickerMode};
 use crate::cmd_palette::CmdPalette;
 use crate::rename::RenameState;
 use crate::find::FindState;
-use crate::styling::{build_diag_lines, DiagLines, FindMarks, FindSpan, GitMarks, Highlights};
+use crate::styling::{
+    build_diag_lines, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
+};
 
 /// One open file/tab.
 #[derive(Clone)]
@@ -53,6 +55,8 @@ pub struct Buffer {
     pub git_marks: GitMarks,
     /// Per-line find-match spans.
     pub find_marks: FindMarks,
+    /// Matching-bracket highlight spans.
+    pub bracket_marks: BracketMarks,
     /// `file://` URI, when backed by a path (used for LSP).
     pub uri: Option<String>,
     /// The live editor, set once its view is built.
@@ -441,6 +445,21 @@ impl AppState {
         self.apply_find_marks();
     }
 
+    /// Recompute the matching-bracket highlight for the active buffer and
+    /// repaint. Called from a cursor-tracking effect.
+    pub fn update_bracket_marks(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let offset = editor.cursor.get_untracked().offset();
+        let text = buf.doc.text().to_string();
+        *buf.bracket_marks.borrow_mut() = compute_bracket_marks(&text, offset);
+        buf.doc.cache_rev().update(|r| *r += 1);
+    }
+
     /// Load the document outline for the active buffer (LSP documentSymbol).
     pub fn request_outline(&self) {
         let outline = self.outline;
@@ -804,6 +823,7 @@ impl AppState {
             diag_lines: Rc::new(RefCell::new(Vec::new())),
             git_marks,
             find_marks: Rc::new(RefCell::new(Vec::new())),
+            bracket_marks: Rc::new(RefCell::new(Vec::new())),
             uri,
             editor: RwSignal::new(None),
             win_origin: RwSignal::new(Point::ZERO),
@@ -1441,6 +1461,74 @@ fn ascii_find_all(hay: &str, needle: &str) -> Vec<(usize, usize)> {
     out
 }
 
+/// Find the matching bracket for a bracket adjacent to `offset`, returning
+/// per-line highlight spans for both brackets.
+fn compute_bracket_marks(text: &str, offset: usize) -> Vec<Vec<(usize, usize)>> {
+    let bytes = text.as_bytes();
+    let opens = b"([{";
+    let closes = b")]}";
+
+    // Prefer the bracket just before the cursor, else the one at the cursor.
+    let candidates = [offset.checked_sub(1), Some(offset)];
+    for pos in candidates.into_iter().flatten() {
+        let Some(&b) = bytes.get(pos) else { continue };
+        let other = if let Some(i) = opens.iter().position(|&o| o == b) {
+            find_match(bytes, pos, closes[i], b, true)
+        } else if let Some(i) = closes.iter().position(|&c| c == b) {
+            find_match(bytes, pos, opens[i], b, false)
+        } else {
+            None
+        };
+        if let Some(m) = other {
+            let starts = line_starts(text);
+            let mut lines: Vec<Vec<(usize, usize)>> = vec![Vec::new(); starts.len()];
+            for p in [pos, m] {
+                let line = line_of(&starts, p);
+                let ls = starts[line];
+                lines[line].push((p - ls, p - ls + 1));
+            }
+            return lines;
+        }
+    }
+    Vec::new()
+}
+
+/// Scan for the matching bracket. `target` is the bracket we look for, `self_ch`
+/// the one we started on, `forward` the scan direction.
+fn find_match(bytes: &[u8], from: usize, target: u8, self_ch: u8, forward: bool) -> Option<usize> {
+    let mut depth = 0i32;
+    if forward {
+        let mut i = from;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if c == self_ch {
+                depth += 1;
+            } else if c == target {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            i += 1;
+        }
+    } else {
+        let mut i = from as isize;
+        while i >= 0 {
+            let c = bytes[i as usize];
+            if c == self_ch {
+                depth += 1;
+            } else if c == target {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i as usize);
+                }
+            }
+            i -= 1;
+        }
+    }
+    None
+}
+
 /// Byte offset where each line starts.
 fn line_starts(text: &str) -> Vec<usize> {
     let mut starts = vec![0usize];
@@ -1533,6 +1621,27 @@ fn word_start(text: &str, offset: usize) -> usize {
         }
     }
     start
+}
+
+#[cfg(test)]
+mod bracket_tests {
+    use super::compute_bracket_marks;
+    #[test]
+    fn matches_outer_paren() {
+        // "foo(bar(baz))" — cursor after first '(' (offset 4)
+        let m = compute_bracket_marks("foo(bar(baz))", 4);
+        let mut spans: Vec<(usize,usize)> = m.into_iter().flatten().collect();
+        spans.sort();
+        assert_eq!(spans, vec![(3,4),(12,13)]);
+    }
+    #[test]
+    fn matches_close_brace() {
+        // cursor right after the closing brace
+        let m = compute_bracket_marks("a{b{c}d}", 8);
+        let mut spans: Vec<(usize,usize)> = m.into_iter().flatten().collect();
+        spans.sort();
+        assert_eq!(spans, vec![(1,2),(7,8)]);
+    }
 }
 
 #[cfg(test)]

@@ -39,6 +39,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                     b.diag_lines.clone(),
                     b.git_marks.clone(),
                     b.find_marks.clone(),
+                    b.bracket_marks.clone(),
                 ))
                 .editor_style(theme::editor_style)
                 .style(|s| s.size_full())

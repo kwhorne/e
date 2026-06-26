@@ -35,6 +35,9 @@ pub struct FindSpan {
 /// Shared, mutable per-buffer find-match spans (one entry per line).
 pub type FindMarks = Rc<RefCell<Vec<Vec<FindSpan>>>>;
 
+/// Matching-bracket spans (line-local char ranges), one entry per line.
+pub type BracketMarks = Rc<RefCell<Vec<Vec<(usize, usize)>>>>;
+
 /// A diagnostic span within a single line (line-local char offsets).
 #[derive(Clone, Copy)]
 pub struct DiagSpan {
@@ -51,17 +54,25 @@ pub struct SyntaxStyling {
     diagnostics: DiagLines,
     git: GitMarks,
     find: FindMarks,
+    brackets: BracketMarks,
     family: Vec<FamilyOwned>,
     font_size: usize,
 }
 
 impl SyntaxStyling {
-    pub fn new(highlights: Highlights, diagnostics: DiagLines, git: GitMarks, find: FindMarks) -> Self {
+    pub fn new(
+        highlights: Highlights,
+        diagnostics: DiagLines,
+        git: GitMarks,
+        find: FindMarks,
+        brackets: BracketMarks,
+    ) -> Self {
         Self {
             highlights,
             diagnostics,
             git,
             find,
+            brackets,
             family: vec![FamilyOwned::Monospace],
             font_size: 14,
         }
@@ -195,6 +206,13 @@ impl Styling for SyntaxStyling {
         line: usize,
         layout_line: &mut TextLayoutLine,
     ) {
+        // Matching-bracket highlight (subtle box behind the bracket chars).
+        for (start, end) in self.brackets.borrow().get(line).into_iter().flatten() {
+            let color = Color::from_rgba8(0x80, 0x90, 0xa0, 0x55);
+            let styles = range_styles(&layout_line.text, *start, *end, Some(color), None);
+            layout_line.extra_style.extend(styles);
+        }
+
         // Find-match highlights (drawn first, behind text).
         for span in self.find.borrow().get(line).into_iter().flatten() {
             let color = if span.current {

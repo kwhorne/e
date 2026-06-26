@@ -30,6 +30,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 19** — Markdown-preview (⌘⇧M reading-mode for .md)
 - [x] **Milepæl 20** — Tema-persistens · command palette (⌘⇧P) · git diff-view · multi-cursor (⌘D)
 - [x] **Milepæl 21** — Multi-språk LSP (PHP/intelephense, C·C++/clangd, Rust, TS, Go, Python)
+- [x] **Milepæl 22** — Bracket-matching (highlight av matchende parentes ved cursor)
 
 ## Workspace layout
 

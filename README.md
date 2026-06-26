@@ -15,7 +15,8 @@ Early development. Built incrementally:
 - [x] **Milepæl 6** — Go-to-definition (F12), auto-scroll til mål
 - [x] **Milepæl 7C** — Go-to-references (Shift+F12) + symbol-søk (⌘T)
 - [x] **Milepæl 7A** — Inline bølgelinjer (squiggles) under diagnostics i editoren
-- [ ] **Milepæl 7** — Inline diagnostics-squiggles, integrert terminal
+- [x] **Milepæl 7B** — Integrert terminal (PTY + VT100, Ctrl+`)
+- [ ] **Milepæl 8** — Format-on-save, git-gutter, multi-cursor
 
 ## Workspace layout
 
@@ -26,7 +27,7 @@ e/
 │   ├── buffer.rs    # file load/save
 │   ├── language.rs  # extension -> Language
 │   └── syntax.rs    # tree-sitter -> per-line highlight spans
-└── e-app/    # Floem UI + the `e` binary                          ~ lapce-app
+ XXXKEEP# Floem UI + the `e` binary                          ~ lapce-app
     ├── state.rs       # reactive AppState, buffers, open/close/save
     ├── file_tree.rs   # left explorer
     ├── tabs.rs        # tab strip
@@ -76,6 +77,7 @@ Works in both `.php` and `.blade.php` files.
 | F12 | Go to definition |
 | Shift+F12 | Find references |
 | ⌘T | Workspace symbol search |
+| Ctrl+` | Toggle terminal |
 | Esc | Dismiss popups |
 
 ## Build & run

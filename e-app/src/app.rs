@@ -17,6 +17,7 @@ use crate::problems::problems_panel;
 use crate::state::AppState;
 use crate::status::status_bar;
 use crate::tabs::tab_bar;
+use crate::terminal_view::terminal_panel;
 use crate::theme;
 
 /// Launch the editor.
@@ -63,6 +64,17 @@ fn app_view() -> impl IntoView {
         });
     }
 
+    // Bridge terminal output ticks into a repaint signal.
+    if let Some(rx) = state.term_rx.try_update(|opt| opt.take()).flatten() {
+        let ticks = create_signal_from_channel(rx);
+        let term_tick = state.term_tick;
+        create_effect(move |_| {
+            if ticks.get().is_some() {
+                term_tick.update(|t| *t += 1);
+            }
+        });
+    }
+
     // Scrape Laravel project data (routes/views/config/env) in the background.
     state.load_laravel();
 
@@ -73,6 +85,7 @@ fn app_view() -> impl IntoView {
     let editor_column = stack((
         tab_bar(state),
         editor_area(state).style(|s| s.flex_grow(1.0).width_full()),
+        terminal_panel(state),
         problems_panel(state),
         status_bar(state),
     ))
@@ -136,6 +149,12 @@ fn app_view() -> impl IntoView {
             Key::Character("t".into()),
             |m| m.meta() || m.control(),
             move |_| state.open_symbol_search(),
+        )
+        // Ctrl+` toggles the integrated terminal.
+        .on_key_down(
+            Key::Character("`".into()),
+            |m| m.control(),
+            move |_| state.toggle_terminal(),
         )
         // Escape dismisses popups.
         .on_key_down(Key::Named(NamedKey::Escape), |m| m.is_empty(), move |_| {

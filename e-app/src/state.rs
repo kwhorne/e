@@ -26,6 +26,7 @@ use e_core::buffer::{self, FileInfo};
 use e_core::language::Language;
 use e_core::syntax::highlight_lines;
 use e_lsp::{path_to_uri, uri_to_path, LspClient};
+use e_term::Terminal;
 
 use crate::completion::{Completion, HoverState};
 use crate::laravel::{self, LaravelData};
@@ -91,11 +92,19 @@ pub struct AppState {
     pub laravel: RwSignal<Option<Rc<LaravelData>>>,
     /// References / symbol-search picker.
     pub picker: Picker,
+    /// Integrated terminal session (lazily spawned).
+    pub terminal: RwSignal<Option<Rc<RefCell<Terminal>>>>,
+    pub terminal_open: RwSignal<bool>,
+    /// Bumped whenever the terminal produces output, to trigger a repaint.
+    pub term_tick: RwSignal<u64>,
+    term_tx: RwSignal<Sender<()>>,
+    pub term_rx: RwSignal<Option<Receiver<()>>>,
 }
 
 impl AppState {
     pub fn new(cx: Scope, root: PathBuf) -> Self {
         let (tx, rx) = channel();
+        let (term_tx, term_rx) = channel();
         Self {
             cx,
             root: RwSignal::new(root),
@@ -111,7 +120,48 @@ impl AppState {
             hover: HoverState::new(),
             laravel: RwSignal::new(None),
             picker: Picker::new(),
+            terminal: RwSignal::new(None),
+            terminal_open: RwSignal::new(false),
+            term_tick: RwSignal::new(0),
+            term_tx: RwSignal::new(term_tx),
+            term_rx: RwSignal::new(Some(term_rx)),
         }
+    }
+
+    // ---- Integrated terminal -------------------------------------------
+
+    /// Toggle the terminal, spawning a shell on first use.
+    pub fn toggle_terminal(&self) {
+        if self.terminal.get_untracked().is_none() {
+            let tx = self.term_tx.get();
+            let on_update = Box::new(move || {
+                let _ = tx.send(());
+            });
+            let root = self.root.get();
+            match Terminal::spawn(&e_term::default_shell(), &root, 30, 110, on_update) {
+                Ok(t) => {
+                    self.terminal.set(Some(Rc::new(RefCell::new(t))));
+                    self.terminal_open.set(true);
+                }
+                Err(e) => eprintln!("e: terminal failed: {e:#}"),
+            }
+        } else {
+            let open = self.terminal_open.get_untracked();
+            self.terminal_open.set(!open);
+        }
+    }
+
+    pub fn terminal_input(&self, bytes: &[u8]) {
+        if let Some(t) = self.terminal.get_untracked() {
+            t.borrow_mut().write(bytes);
+        }
+    }
+
+    pub fn terminal_snapshot(&self) -> Vec<String> {
+        self.terminal
+            .get_untracked()
+            .map(|t| t.borrow().snapshot())
+            .unwrap_or_default()
     }
 
     pub fn buffer_by_id(&self, id: u64) -> Option<Buffer> {

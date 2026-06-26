@@ -16,6 +16,7 @@ path = "src/bin/e.rs"
 [dependencies]
 e-core             = { workspace = true }
 e-lsp              = { workspace = true }
+e-term             = { workspace = true }
 floem              = { workspace = true }
 floem-editor-core  = { workspace = true }
 anyhow             = { workspace = true }

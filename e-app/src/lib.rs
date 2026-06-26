@@ -16,6 +16,7 @@ mod state;
 mod status;
 mod styling;
 mod tabs;
+mod terminal_view;
 mod theme;
 
 pub use app::launch;

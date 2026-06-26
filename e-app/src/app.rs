@@ -58,6 +58,9 @@ fn app_view() -> impl IntoView {
         });
     }
 
+    // Scrape Laravel project data (routes/views/config/env) in the background.
+    state.load_laravel();
+
     if let Some(file) = file {
         state.open_path(file);
     }

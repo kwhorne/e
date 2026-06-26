@@ -877,6 +877,7 @@ dependencies = [
  "floem",
  "floem-editor-core",
  "lsp-types",
+ "serde_json",
 ]
 
 [[package]]

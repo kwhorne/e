@@ -8,6 +8,7 @@ mod app;
 mod completion;
 mod editor_area;
 mod file_tree;
+mod laravel;
 mod palette;
 mod problems;
 mod state;

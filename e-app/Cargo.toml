@@ -21,3 +21,4 @@ floem-editor-core  = { workspace = true }
 anyhow             = { workspace = true }
 lsp-types          = { workspace = true }
 crossbeam-channel  = { workspace = true }
+serde_json         = { workspace = true }

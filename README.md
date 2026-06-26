@@ -11,7 +11,8 @@ Early development. Built incrementally:
 - [x] **Milepæl A** — Workspace: file tree, tabs, command palette (⌘P), multi-buffer
 - [x] **Milepæl 3** — Syntaks: tree-sitter (Rust, Python, JS/TS, Go, C, JSON, PHP, HTML, CSS, Blade, Vue, Svelte)
 - [x] **Milepæl 4** — LSP: PHP via Intelephense (diagnostics, completion, hover)
-- [ ] **Milepæl 5** — Laravel-lag (artisan: routes/views/config-completion), terminal
+- [x] **Milepæl 5** — Laravel-lag: `route()`/`view()`/`config()`/`env()`-completion
+- [ ] **Milepæl 6** — Inline diagnostics-squiggles, integrert terminal
 
 ## Workspace layout
 
@@ -29,6 +30,8 @@ e/
     ├── editor_area.rs # multi-buffer editor
     ├── styling.rs     # syntax-highlight Styling (monospace)
     ├── palette.rs     # ⌘P fuzzy finder
+    ├── completion.rs  # completion + hover popups
+    ├── laravel.rs     # route/view/config/env completion
     ├── problems.rs    # LSP diagnostics panel
     └── status.rs      # status bar (+ error/warning counts)
 ```
@@ -42,6 +45,21 @@ type, or ⌘Space) and **hover** (F1). Install Intelephense once:
 ```sh
 npm install -g intelephense
 ```
+
+### Laravel awareness
+
+If the workspace contains an `artisan` file, `e` scrapes the project in the
+background (inspired by the official Laravel VS Code extension) and offers
+context-aware completion inside helper strings:
+
+| Inside | Completes |
+|--------|-----------|
+| `route('…')` | route names (`php artisan route:list --json`) |
+| `view('…')` | Blade views as dotted names (`resources/views/**`) |
+| `config('…')` | config files + first-level keys (`config/*.php`) |
+| `env('…')` | keys from `.env` |
+
+Works in both `.php` and `.blade.php` files.
 
 ### Keybindings
 

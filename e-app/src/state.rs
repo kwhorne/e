@@ -27,6 +27,7 @@ use e_core::syntax::highlight_lines;
 use e_lsp::{path_to_uri, LspClient};
 
 use crate::completion::{Completion, HoverState};
+use crate::laravel::{self, LaravelData};
 use crate::styling::Highlights;
 
 /// One open file/tab.
@@ -80,6 +81,8 @@ pub struct AppState {
     pub completion: Completion,
     /// Hover popup state.
     pub hover: HoverState,
+    /// Laravel project data (routes/views/config/env), if applicable.
+    pub laravel: RwSignal<Option<Rc<LaravelData>>>,
 }
 
 impl AppState {
@@ -98,11 +101,73 @@ impl AppState {
             diag_rx: RwSignal::new(Some(rx)),
             completion: Completion::new(),
             hover: HoverState::new(),
+            laravel: RwSignal::new(None),
         }
     }
 
     pub fn buffer_by_id(&self, id: u64) -> Option<Buffer> {
         self.buffers.with(|bs| bs.iter().find(|b| b.id == id).cloned())
+    }
+
+    /// If the workspace is a Laravel project, scrape its data in the background.
+    pub fn load_laravel(&self) {
+        let root = self.root.get();
+        if !laravel::is_laravel(&root) {
+            return;
+        }
+        let laravel_sig = self.laravel;
+        let send = create_ext_action(self.cx, move |data: LaravelData| {
+            eprintln!("e: loaded Laravel project data");
+            laravel_sig.set(Some(Rc::new(data)));
+        });
+        std::thread::spawn(move || {
+            let data = laravel::load(&root);
+            send(data);
+        });
+    }
+
+    /// Offer Laravel completions if the cursor is inside a helper string.
+    /// Returns true when the context was handled (so we skip the LSP).
+    fn try_laravel_completion(&self, buffer_id: u64) -> bool {
+        let Some(data) = self.laravel.get() else {
+            return false;
+        };
+        let Some(buf) = self.buffer_by_id(buffer_id) else {
+            return false;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let offset = cursor.offset();
+        let text = buf.doc.text().to_string();
+        let upto = offset.min(text.len());
+        let line_start = text[..upto].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_before = &text[line_start..upto];
+
+        let Some((helper, prefix)) = laravel::detect_context(line_before) else {
+            return false;
+        };
+
+        let items = laravel::completions(&data, helper, &prefix);
+        let start = offset - prefix.len();
+
+        let (_, below) = editor.points_of_offset(start, cursor.affinity);
+        let vp = editor.viewport.get_untracked();
+        let win = buf.win_origin.get_untracked();
+
+        let comp = self.completion;
+        comp.anchor.set(Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0));
+        comp.buffer_id.set(Some(buffer_id));
+        comp.start_offset.set(start);
+        if items.is_empty() {
+            comp.open.set(false);
+        } else {
+            comp.items.set(items);
+            comp.selected.set(0);
+            comp.open.set(true);
+        }
+        true
     }
 
     /// Start (or reuse) the PHP language server for this workspace.
@@ -188,8 +253,11 @@ impl AppState {
                         let v = version.get() + 1;
                         version.set(v);
                         client.did_change_full(uri, v, &text);
-                        app.autocomplete_after_edit(id);
                     }
+                }
+                // Laravel helper completion works in both PHP and Blade files.
+                if matches!(language, Language::Php | Language::Blade) {
+                    app.autocomplete_after_edit(id);
                 }
             });
         }
@@ -302,6 +370,10 @@ impl AppState {
 
     /// After an edit in a PHP buffer, decide whether to (re)trigger completion.
     pub fn autocomplete_after_edit(&self, buffer_id: u64) {
+        // Laravel helper strings take priority over generic PHP completion.
+        if self.try_laravel_completion(buffer_id) {
+            return;
+        }
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return;
         };
@@ -329,6 +401,9 @@ impl AppState {
     }
 
     pub fn request_completion(&self, buffer_id: u64) {
+        if self.try_laravel_completion(buffer_id) {
+            return;
+        }
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return;
         };

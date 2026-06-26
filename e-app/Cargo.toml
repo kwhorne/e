@@ -1,0 +1,20 @@
+[package]
+name         = "e-app"
+version      = { workspace = true }
+edition      = { workspace = true }
+license      = { workspace = true }
+rust-version = { workspace = true }
+
+[lib]
+name = "e_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "e"
+path = "src/bin/e.rs"
+
+[dependencies]
+e-core             = { workspace = true }
+floem              = { workspace = true }
+floem-editor-core  = { workspace = true }
+anyhow             = { workspace = true }

@@ -23,21 +23,24 @@ Early development. Built incrementally:
 ```
 e/
 ├── e-lsp/    # JSON-RPC LSP client over stdio (Intelephense)       ~ lapce-proxy
+├── e-term/   # PTY + VT100 terminal model                          ~ lapce-proxy
 ├── e-core/   # text IO, language detection, tree-sitter syntax    ~ lapce-core
 │   ├── buffer.rs    # file load/save
 │   ├── language.rs  # extension -> Language
 │   └── syntax.rs    # tree-sitter -> per-line highlight spans
- XXXKEEP# Floem UI + the `e` binary                          ~ lapce-app
-    ├── state.rs       # reactive AppState, buffers, open/close/save
-    ├── file_tree.rs   # left explorer
-    ├── tabs.rs        # tab strip
-    ├── editor_area.rs # multi-buffer editor
-    ├── styling.rs     # syntax-highlight Styling (monospace)
-    ├── palette.rs     # ⌘P fuzzy finder
-    ├── completion.rs  # completion + hover popups
-    ├── laravel.rs     # route/view/config/env completion
-    ├── problems.rs    # LSP diagnostics panel
-    └── status.rs      # status bar (+ error/warning counts)
+└── e-app/    # Floem UI + the `e` binary                          ~ lapce-app
+    ├── state.rs        # reactive AppState, buffers, LSP, terminal
+    ├── file_tree.rs    # left explorer
+    ├── tabs.rs         # tab strip
+    ├── editor_area.rs  # multi-buffer editor
+    ├── styling.rs      # syntax highlight + diagnostic squiggles
+    ├── palette.rs      # ⌘P fuzzy finder
+    ├── completion.rs   # completion + hover popups
+    ├── laravel.rs      # route/view/config/env completion
+    ├── picker.rs       # references + symbol search overlay
+    ├── problems.rs     # clickable LSP diagnostics panel
+    ├── terminal_view.rs# integrated terminal panel
+    └── status.rs       # status bar (+ error/warning counts)
 ```
 
 ## PHP / Laravel

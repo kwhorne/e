@@ -26,10 +26,10 @@ use e_core::buffer::{self, FileInfo};
 use e_core::git;
 use e_core::language::Language;
 use e_core::syntax::highlight_lines;
-use e_lsp::{path_to_uri, uri_to_path, LspClient};
+use e_lsp::{path_to_uri, uri_to_path, LspClient, SignatureInfo};
 use e_term::Terminal;
 
-use crate::completion::{Completion, HoverState};
+use crate::completion::{Completion, HoverState, SignatureState};
 use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
 use crate::picker::{Picker, PickerItem, PickerMode};
@@ -92,6 +92,8 @@ pub struct AppState {
     pub completion: Completion,
     /// Hover popup state.
     pub hover: HoverState,
+    /// Signature-help popup state.
+    pub signature: SignatureState,
     /// Laravel project data (routes/views/config/env), if applicable.
     pub laravel: RwSignal<Option<Rc<LaravelData>>>,
     /// References / symbol-search picker.
@@ -124,6 +126,7 @@ impl AppState {
             diag_rx: RwSignal::new(Some(rx)),
             completion: Completion::new(),
             hover: HoverState::new(),
+            signature: SignatureState::new(),
             laravel: RwSignal::new(None),
             picker: Picker::new(),
             terminal: RwSignal::new(None),
@@ -553,6 +556,13 @@ impl AppState {
         let last = before.last().copied();
         let prev = before.get(before.len().wrapping_sub(2)).copied();
 
+        // Signature help on call punctuation.
+        match last {
+            Some('(') | Some(',') => self.request_signature_help(buffer_id),
+            Some(')') => self.close_signature(),
+            _ => {}
+        }
+
         let trigger = match last {
             Some(c) if is_word_char(c) => true,
             Some('>') => prev == Some('-'),
@@ -701,6 +711,47 @@ impl AppState {
     pub fn close_hover(&self) {
         if self.hover.open.get_untracked() {
             self.hover.open.set(false);
+        }
+    }
+
+    pub fn request_signature_help(&self, buffer_id: u64) {
+        let Some(buf) = self.buffer_by_id(buffer_id) else {
+            return;
+        };
+        let (Some(client), Some(uri), Some(editor)) =
+            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+        else {
+            return;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let offset = cursor.offset();
+        let (line, col) = editor.offset_to_line_col(offset);
+
+        // Anchor just above the caret line.
+        let (above, _) = editor.points_of_offset(offset, cursor.affinity);
+        let vp = editor.viewport.get_untracked();
+        let win = buf.win_origin.get_untracked();
+        let anchor = Point::new(win.x + above.x - vp.x0, win.y + above.y - vp.y0 - 26.0);
+
+        let sig = self.signature;
+        sig.anchor.set(anchor);
+        let send = create_ext_action(self.cx, move |info: Option<SignatureInfo>| match info {
+            Some(i) => {
+                sig.label.set(i.label);
+                sig.active.set(i.active.map(|(a, b)| (a as usize, b as usize)));
+                sig.open.set(true);
+            }
+            None => sig.open.set(false),
+        });
+        std::thread::spawn(move || {
+            let info = client.signature_help(&uri, line as u32, col as u32).ok().flatten();
+            send(info);
+        });
+    }
+
+    pub fn close_signature(&self) {
+        if self.signature.open.get_untracked() {
+            self.signature.open.set(false);
         }
     }
 

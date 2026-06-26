@@ -23,6 +23,14 @@ use lsp_types::{
     MarkedString, PublishDiagnosticsParams, TextEdit,
 };
 
+/// Active signature info for the signature-help popup.
+#[derive(Clone, Debug)]
+pub struct SignatureInfo {
+    pub label: String,
+    /// Character range of the active parameter within `label`, if known.
+    pub active: Option<(u32, u32)>,
+}
+
 /// A code action with its concrete text edits, grouped by document URI.
 #[derive(Clone, Debug)]
 pub struct CodeActionItem {
@@ -355,6 +363,40 @@ impl LspClient {
         Ok(parse_workspace_edit(Some(&res)))
     }
 
+    /// Request signature help at a position (function call hints).
+    pub fn signature_help(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Option<SignatureInfo>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character }
+        });
+        let res = self.request("textDocument/signatureHelp", params, Duration::from_secs(5))?;
+        if res.is_null() {
+            return Ok(None);
+        }
+        let sigs = match res["signatures"].as_array() {
+            Some(s) if !s.is_empty() => s,
+            _ => return Ok(None),
+        };
+        let active_sig = res["activeSignature"].as_u64().unwrap_or(0) as usize;
+        let sig = sigs.get(active_sig).or_else(|| sigs.first()).unwrap();
+        let label = sig["label"].as_str().unwrap_or("").to_string();
+
+        let active_param = res["activeParameter"]
+            .as_u64()
+            .or_else(|| sig["activeParameter"].as_u64())
+            .map(|v| v as usize);
+        let active = active_param
+            .and_then(|ap| sig["parameters"].as_array().and_then(|ps| ps.get(ap)))
+            .and_then(|p| param_range(&p["label"], &label));
+
+        Ok(Some(SignatureInfo { label, active }))
+    }
+
     /// Request hover text at a position. Blocking; call off the UI thread.
     pub fn hover(&self, uri: &str, line: u32, character: u32) -> Result<Option<String>> {
         let params = json!({
@@ -395,6 +437,20 @@ fn collect_symbol(s: &Value, depth: usize, out: &mut Vec<(String, i64, u32, u32,
             collect_symbol(c, depth + 1, out);
         }
     }
+}
+
+/// Resolve a parameter label (string or `[start,end]` offsets) to a char range.
+fn param_range(plabel: &Value, sig_label: &str) -> Option<(u32, u32)> {
+    if let Some(arr) = plabel.as_array() {
+        let a = arr.first()?.as_u64()? as u32;
+        let b = arr.get(1)?.as_u64()? as u32;
+        return Some((a, b));
+    }
+    if let Some(s) = plabel.as_str() {
+        let idx = sig_label.find(s)? as u32;
+        return Some((idx, idx + s.chars().count() as u32));
+    }
+    None
 }
 
 /// Parse a `WorkspaceEdit` (`changes` or `documentChanges`) into per-URI edits.

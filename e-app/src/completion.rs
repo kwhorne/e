@@ -37,6 +37,27 @@ impl Completion {
     }
 }
 
+/// Reactive state for the signature-help popup.
+#[derive(Clone, Copy)]
+pub struct SignatureState {
+    pub open: RwSignal<bool>,
+    pub label: RwSignal<String>,
+    /// Char range of the active parameter within `label`.
+    pub active: RwSignal<Option<(usize, usize)>>,
+    pub anchor: RwSignal<Point>,
+}
+
+impl SignatureState {
+    pub fn new() -> Self {
+        Self {
+            open: RwSignal::new(false),
+            label: RwSignal::new(String::new()),
+            active: RwSignal::new(None),
+            anchor: RwSignal::new(Point::ZERO),
+        }
+    }
+}
+
 /// Reactive state for the hover popup.
 #[derive(Clone, Copy)]
 pub struct HoverState {
@@ -129,6 +150,59 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
                 s.hide()
             }
         })
+}
+
+pub fn signature_popup(state: AppState) -> impl IntoView {
+    let sig = state.signature;
+
+    let before = label(move || {
+        let l = sig.label.get();
+        match sig.active.get() {
+            Some((s, _)) => l.chars().take(s).collect(),
+            None => l,
+        }
+    })
+    .style(|s| s.color(theme::FG_DIM));
+
+    let active = label(move || {
+        let l = sig.label.get();
+        match sig.active.get() {
+            Some((s, e)) => l.chars().skip(s).take(e.saturating_sub(s)).collect(),
+            None => String::new(),
+        }
+    })
+    .style(|s| s.color(theme::ACCENT));
+
+    let after = label(move || {
+        let l = sig.label.get();
+        match sig.active.get() {
+            Some((_, e)) => l.chars().skip(e).collect(),
+            None => String::new(),
+        }
+    })
+    .style(|s| s.color(theme::FG_DIM));
+
+    stack((before, active, after)).style(move |s| {
+        let anchor = sig.anchor.get();
+        let s = s
+            .absolute()
+            .inset_left(anchor.x)
+            .inset_top(anchor.y)
+            .items_center()
+            .padding_horiz(8.0)
+            .height(24.0)
+            .font_family("monospace".to_string())
+            .font_size(13.0)
+            .background(theme::BG_PANEL)
+            .border(1.0)
+            .border_color(theme::BORDER)
+            .border_radius(6.0);
+        if sig.open.get() && !sig.label.get().is_empty() {
+            s
+        } else {
+            s.hide()
+        }
+    })
 }
 
 pub fn hover_popup(state: AppState) -> impl IntoView {

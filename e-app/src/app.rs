@@ -8,7 +8,7 @@ use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate};
 use floem::views::{stack, Decorators};
 use floem::IntoView;
 
-use crate::completion::{completion_popup, hover_popup};
+use crate::completion::{completion_popup, hover_popup, signature_popup};
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
 use crate::outline::outline_panel;
@@ -110,6 +110,7 @@ fn app_view() -> impl IntoView {
 
     stack((
         main_row,
+        signature_popup(state),
         completion_popup(state),
         hover_popup(state),
         picker_overlay(state),
@@ -174,6 +175,7 @@ fn app_view() -> impl IntoView {
         .on_key_down(Key::Named(NamedKey::Escape), |m| m.is_empty(), move |_| {
             state.close_completion();
             state.close_hover();
+            state.close_signature();
             state.picker.open.set(false);
         })
 }

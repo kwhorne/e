@@ -8,6 +8,7 @@ use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith}
 use floem::views::{stack, Decorators};
 use floem::IntoView;
 
+use crate::breadcrumbs::breadcrumbs;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
 use crate::editor_area::editor_area;
 use crate::file_tree::file_tree;
@@ -97,6 +98,7 @@ fn app_view() -> impl IntoView {
 
     let editor_column = stack((
         tab_bar(state),
+        breadcrumbs(state),
         editor_area(state).style(|s| s.flex_grow(1.0).width_full()),
         terminal_panel(state),
         problems_panel(state),

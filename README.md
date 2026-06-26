@@ -22,6 +22,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 11** — Find-in-file (⌘F), terminal-farger (SGR), split-view (⌘\\)
 - [x] **Milepæl 12** — Workspace-wide search / grep (⌘⇧F)
 - [x] **Milepæl 13** — Session-persistens (gjenåpner filer/faner/split per workspace)
+- [x] **Milepæl 14** — Breadcrumbs (sti + symbol ved cursor)
 
 ## Workspace layout
 

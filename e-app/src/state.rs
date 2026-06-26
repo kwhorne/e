@@ -23,6 +23,7 @@ use floem::views::editor::Editor;
 use lsp_types::{Diagnostic, PublishDiagnosticsParams};
 
 use e_core::buffer::{self, FileInfo};
+use e_core::git;
 use e_core::language::Language;
 use e_core::syntax::highlight_lines;
 use e_lsp::{path_to_uri, uri_to_path, LspClient};
@@ -31,7 +32,7 @@ use e_term::Terminal;
 use crate::completion::{Completion, HoverState};
 use crate::laravel::{self, LaravelData};
 use crate::picker::{Picker, PickerItem, PickerMode};
-use crate::styling::{build_diag_lines, DiagLines, Highlights};
+use crate::styling::{build_diag_lines, DiagLines, GitMarks, Highlights};
 
 /// One open file/tab.
 #[derive(Clone)]
@@ -43,6 +44,8 @@ pub struct Buffer {
     pub highlights: Highlights,
     /// Per-line diagnostic spans (for inline squiggles).
     pub diag_lines: DiagLines,
+    /// Per-line git change markers.
+    pub git_marks: GitMarks,
     /// `file://` URI, when backed by a path (used for LSP).
     pub uri: Option<String>,
     /// The live editor, set once its view is built.
@@ -283,6 +286,15 @@ impl AppState {
         let uri = file.path.as_ref().map(|p| path_to_uri(p));
 
         let highlights: Highlights = Rc::new(RefCell::new(highlight_lines(language, &content)));
+
+        // Git change markers vs HEAD.
+        let head_text = file.path.as_ref().and_then(|p| git::head_text(p));
+        let line_count = content.split_inclusive('\n').count().max(1);
+        let git_marks: GitMarks = Rc::new(RefCell::new(match &head_text {
+            Some(h) => git::marks(h, &content, line_count),
+            None => Vec::new(),
+        }));
+
         let doc = Rc::new(TextDocument::new(self.cx, content.clone()));
         let dirty = RwSignal::new(false);
         let version = RwSignal::new(1i64);
@@ -299,12 +311,18 @@ impl AppState {
         {
             let doc = doc.clone();
             let highlights = highlights.clone();
+            let git_marks = git_marks.clone();
+            let head_text = head_text.clone();
             let app = *self;
             let uri = uri.clone();
             doc.clone().add_on_update(move |_| {
                 dirty.set(true);
                 let text = doc.text().to_string();
                 *highlights.borrow_mut() = highlight_lines(language, &text);
+                if let Some(head) = &head_text {
+                    let lc = text.split_inclusive('\n').count().max(1);
+                    *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                }
                 doc.cache_rev().update(|r| *r += 1);
 
                 if let (Some(uri), Some(client)) = (uri.as_ref(), app.lsp.get()) {
@@ -328,6 +346,7 @@ impl AppState {
             dirty,
             highlights,
             diag_lines: Rc::new(RefCell::new(Vec::new())),
+            git_marks,
             uri,
             editor: RwSignal::new(None),
             win_origin: RwSignal::new(Point::ZERO),

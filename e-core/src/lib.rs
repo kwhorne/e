@@ -5,5 +5,6 @@
 //! and (later) syntax highlighting.
 
 pub mod buffer;
+pub mod git;
 pub mod language;
 pub mod syntax;

@@ -13,12 +13,16 @@ use floem::views::editor::text::Styling;
 use floem::views::editor::EditorStyle;
 use lsp_types::{Diagnostic, DiagnosticSeverity};
 
+use e_core::git::LineMark;
 use e_core::syntax::{HighlightKind, LineSpan};
 
 use crate::theme;
 
 /// Shared, mutable per-buffer highlight data (one entry per line).
 pub type Highlights = Rc<RefCell<Vec<Vec<LineSpan>>>>;
+
+/// Shared, mutable per-buffer git change markers (one slot per line).
+pub type GitMarks = Rc<RefCell<Vec<Option<LineMark>>>>;
 
 /// A diagnostic span within a single line (line-local char offsets).
 #[derive(Clone, Copy)]
@@ -34,15 +38,17 @@ pub type DiagLines = Rc<RefCell<Vec<Vec<DiagSpan>>>>;
 pub struct SyntaxStyling {
     highlights: Highlights,
     diagnostics: DiagLines,
+    git: GitMarks,
     family: Vec<FamilyOwned>,
     font_size: usize,
 }
 
 impl SyntaxStyling {
-    pub fn new(highlights: Highlights, diagnostics: DiagLines) -> Self {
+    pub fn new(highlights: Highlights, diagnostics: DiagLines, git: GitMarks) -> Self {
         Self {
             highlights,
             diagnostics,
+            git,
             family: vec![FamilyOwned::Monospace],
             font_size: 14,
         }
@@ -170,6 +176,27 @@ impl Styling for SyntaxStyling {
         line: usize,
         layout_line: &mut TextLayoutLine,
     ) {
+        // Git change bar at the left edge of the line.
+        if let Some(mark) = self.git.borrow().get(line).copied().flatten() {
+            let color = match mark {
+                LineMark::Added => Color::from_rgb8(0x6a, 0xb0, 0x4a),
+                LineMark::Modified => Color::from_rgb8(0x4a, 0x7c, 0xc0),
+            };
+            for run in layout_line.text.layout_runs() {
+                let height = (run.max_ascent + run.max_descent) as f64;
+                let y = run.line_y as f64 - run.max_ascent as f64;
+                layout_line.extra_style.push(LineExtraStyle {
+                    x: 0.0,
+                    y,
+                    width: Some(3.0),
+                    height,
+                    bg_color: Some(color),
+                    under_line: None,
+                    wave_line: None,
+                });
+            }
+        }
+
         let diagnostics = self.diagnostics.borrow();
         let Some(spans) = diagnostics.get(line) else {
             return;

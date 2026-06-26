@@ -16,7 +16,8 @@ Early development. Built incrementally:
 - [x] **Milepæl 7C** — Go-to-references (Shift+F12) + symbol-søk (⌘T)
 - [x] **Milepæl 7A** — Inline bølgelinjer (squiggles) under diagnostics i editoren
 - [x] **Milepæl 7B** — Integrert terminal (PTY + VT100, Ctrl+`)
-- [ ] **Milepæl 8** — Format-on-save, git-gutter, multi-cursor
+- [x] **Milepæl 8** — Format-on-save (PHP) + git-gutter (endrede linjer)
+- [ ] **Milepæl 9** — Terminal-farger (SGR), multi-cursor, split-view
 
 ## Workspace layout
 

@@ -11,6 +11,7 @@ pub struct Settings {
     pub font_size: usize,
     pub tab_width: usize,
     pub format_on_save: bool,
+    pub trim_on_save: bool,
     pub autosave: bool,
     pub indent_guides: bool,
 }
@@ -22,6 +23,7 @@ impl Default for Settings {
             font_size: 14,
             tab_width: 4,
             format_on_save: true,
+            trim_on_save: true,
             autosave: true,
             indent_guides: true,
         }
@@ -51,6 +53,7 @@ pub fn load_settings() -> Settings {
         font_size: usize_of("font_size", d.font_size).clamp(8, 40),
         tab_width: usize_of("tab_width", d.tab_width).clamp(1, 16),
         format_on_save: bool_of("format_on_save", d.format_on_save),
+        trim_on_save: bool_of("trim_on_save", d.trim_on_save),
         autosave: bool_of("autosave", d.autosave),
         indent_guides: bool_of("indent_guides", d.indent_guides),
     }

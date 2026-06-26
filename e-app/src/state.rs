@@ -910,10 +910,35 @@ impl AppState {
         }
     }
 
-    /// Save the active buffer to disk (formatting first, if enabled).
+    /// Strip trailing whitespace and ensure a final newline in the active buffer.
+    fn trim_active(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        let (edits, needs_newline) = trailing_trim_edits(&text);
+        if edits.is_empty() && !needs_newline {
+            return;
+        }
+        // Delete trailing whitespace bottom-up so offsets stay valid.
+        for (s, e) in edits.into_iter().rev() {
+            buf.doc
+                .edit_single(Selection::region(s, e), "", EditType::Delete);
+        }
+        if needs_newline {
+            let len = buf.doc.text().len();
+            buf.doc
+                .edit_single(Selection::region(len, len), "\n", EditType::InsertChars);
+        }
+    }
+
+    /// Save the active buffer to disk (formatting / trimming first, if enabled).
     pub fn save_active(&self) {
         if self.settings.format_on_save {
             self.format_active();
+        }
+        if self.settings.trim_on_save {
+            self.trim_active();
         }
         let Some(buf) = self.active_buffer() else {
             return;
@@ -1433,6 +1458,23 @@ fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
 }
 
+/// Byte ranges of trailing whitespace per line, plus whether a final newline
+/// is missing. Used by trim-on-save.
+fn trailing_trim_edits(text: &str) -> (Vec<(usize, usize)>, bool) {
+    let mut edits = Vec::new();
+    let mut off = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let trimmed = content.trim_end_matches([' ', '\t', '\r']);
+        if trimmed.len() < content.len() {
+            edits.push((off + trimmed.len(), off + content.len()));
+        }
+        off += line.len();
+    }
+    let needs_newline = !text.is_empty() && !text.ends_with('\n');
+    (edits, needs_newline)
+}
+
 /// Leading whitespace of the line containing `offset`.
 fn line_indent(text: &str, offset: usize) -> String {
     let offset = offset.min(text.len());
@@ -1725,5 +1767,25 @@ mod rename_tests {
         let t = "$user->name";
         assert_eq!(word_at(t, 2), "$user"); // cursor inside $user
         assert_eq!(word_at(t, 8), "name");  // cursor inside name
+    }
+}
+
+#[cfg(test)]
+mod trim_tests {
+    use super::trailing_trim_edits;
+
+    #[test]
+    fn finds_trailing_and_missing_newline() {
+        // "a  \nb\t\nc" : line0 trailing 2 spaces (1..3), line1 trailing tab (5..6), no final \n
+        let (edits, nl) = trailing_trim_edits("a  \nb\t\nc");
+        assert_eq!(edits, vec![(1, 3), (5, 6)]);
+        assert!(nl);
+    }
+
+    #[test]
+    fn clean_text_no_edits() {
+        let (edits, nl) = trailing_trim_edits("a\nb\n");
+        assert!(edits.is_empty());
+        assert!(!nl);
     }
 }

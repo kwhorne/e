@@ -34,6 +34,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 23** — Snippets (innebygde kode-maler per språk, $0-cursor, i completion)
 - [x] **Milepæl 24** — Bruker-settings (config.json: font/tab/format-on-save/autosave/indent-guides)
 - [x] **Milepæl 25** — Statuslinje: cursor-posisjon (Ln/Col) + seleksjonslengde
+- [x] **Milepæl 26** — Trailing-whitespace-trim + final newline ved lagring
 
 ## Workspace layout
 

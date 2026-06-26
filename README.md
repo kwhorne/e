@@ -33,6 +33,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 22** — Bracket-matching (highlight av matchende parentes ved cursor)
 - [x] **Milepæl 23** — Snippets (innebygde kode-maler per språk, $0-cursor, i completion)
 - [x] **Milepæl 24** — Bruker-settings (config.json: font/tab/format-on-save/autosave/indent-guides)
+- [x] **Milepæl 25** — Statuslinje: cursor-posisjon (Ln/Col) + seleksjonslengde
 
 ## Workspace layout
 

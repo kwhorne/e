@@ -16,6 +16,12 @@ pub fn status_bar(state: AppState) -> impl IntoView {
         None => String::new(),
     });
 
+    let position = label(move || match state.cursor_info() {
+        Some((line, col, sel)) if sel > 0 => format!("Ln {line}, Col {col}  ({sel} sel)"),
+        Some((line, col, _)) => format!("Ln {line}, Col {col}"),
+        None => String::new(),
+    });
+
     let diags = label(move || {
         let (errors, warnings) = state.active_diagnostic_counts();
         if errors == 0 && warnings == 0 {
@@ -30,7 +36,7 @@ pub fn status_bar(state: AppState) -> impl IntoView {
         None => String::new(),
     });
 
-    let right = stack((diags, language)).style(|s| s.items_center().gap(14.0));
+    let right = stack((diags, position, language)).style(|s| s.items_center().gap(14.0));
 
     stack((left, right)).style(|s| {
         s.height(24.0)

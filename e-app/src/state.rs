@@ -951,6 +951,21 @@ impl AppState {
         buf.doc.cache_rev().update(|r| *r += 1);
     }
 
+    /// `(line, col, selection_len)` of the active editor's cursor (1-based).
+    /// Reactive: reads the cursor signal, so call it inside a view closure.
+    pub fn cursor_info(&self) -> Option<(usize, usize, usize)> {
+        let buf = self.active_buffer()?;
+        let editor = buf.editor.get()?;
+        let cursor = editor.cursor.get();
+        let offset = cursor.offset();
+        let (line, col) = editor.offset_to_line_col(offset);
+        let sel_len = match &cursor.mode {
+            CursorMode::Insert(sel) => sel.regions().iter().map(|r| r.max() - r.min()).sum(),
+            _ => 0,
+        };
+        Some((line + 1, col + 1, sel_len))
+    }
+
     /// `(errors, warnings)` for the active buffer.
     pub fn active_diagnostic_counts(&self) -> (usize, usize) {
         let Some(buf) = self.active_buffer() else {

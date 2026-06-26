@@ -11,9 +11,14 @@ use std::sync::Arc;
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 
+use floem::ext_event::create_ext_action;
+use floem::kurbo::Point;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
+use floem::views::editor::core::editor::EditType;
+use floem::views::editor::core::selection::Selection;
 use floem::views::editor::text::Document;
 use floem::views::editor::text_document::TextDocument;
+use floem::views::editor::Editor;
 use lsp_types::{Diagnostic, PublishDiagnosticsParams};
 
 use e_core::buffer::{self, FileInfo};
@@ -21,6 +26,7 @@ use e_core::language::Language;
 use e_core::syntax::highlight_lines;
 use e_lsp::{path_to_uri, LspClient};
 
+use crate::completion::{Completion, HoverState};
 use crate::styling::Highlights;
 
 /// One open file/tab.
@@ -33,6 +39,10 @@ pub struct Buffer {
     pub highlights: Highlights,
     /// `file://` URI, when backed by a path (used for LSP).
     pub uri: Option<String>,
+    /// The live editor, set once its view is built.
+    pub editor: RwSignal<Option<Editor>>,
+    /// The editor's top-left position in the window (for popups).
+    pub win_origin: RwSignal<Point>,
 }
 
 /// LSP language id, or `None` if `e` has no server for this language.
@@ -66,6 +76,10 @@ pub struct AppState {
     diag_tx: RwSignal<Sender<PublishDiagnosticsParams>>,
     /// Receiver, taken once by the UI to build a reactive signal.
     pub diag_rx: RwSignal<Option<Receiver<PublishDiagnosticsParams>>>,
+    /// Completion popup state.
+    pub completion: Completion,
+    /// Hover popup state.
+    pub hover: HoverState,
 }
 
 impl AppState {
@@ -82,7 +96,13 @@ impl AppState {
             diagnostics: RwSignal::new(HashMap::new()),
             diag_tx: RwSignal::new(tx),
             diag_rx: RwSignal::new(Some(rx)),
+            completion: Completion::new(),
+            hover: HoverState::new(),
         }
+    }
+
+    pub fn buffer_by_id(&self, id: u64) -> Option<Buffer> {
+        self.buffers.with(|bs| bs.iter().find(|b| b.id == id).cloned())
     }
 
     /// Start (or reuse) the PHP language server for this workspace.
@@ -168,6 +188,7 @@ impl AppState {
                         let v = version.get() + 1;
                         version.set(v);
                         client.did_change_full(uri, v, &text);
+                        app.autocomplete_after_edit(id);
                     }
                 }
             });
@@ -180,6 +201,8 @@ impl AppState {
             dirty,
             highlights,
             uri,
+            editor: RwSignal::new(None),
+            win_origin: RwSignal::new(Point::ZERO),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.active.set(Some(id));
@@ -274,4 +297,186 @@ impl AppState {
         diags.sort_by_key(|d| d.range.start.line);
         diags
     }
+
+    // ---- Completion & hover --------------------------------------------
+
+    /// After an edit in a PHP buffer, decide whether to (re)trigger completion.
+    pub fn autocomplete_after_edit(&self, buffer_id: u64) {
+        let Some(buf) = self.buffer_by_id(buffer_id) else {
+            return;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let offset = editor.cursor.get_untracked().offset();
+        let text = buf.doc.text().to_string();
+        let before: Vec<char> = text[..offset.min(text.len())].chars().collect();
+        let last = before.last().copied();
+        let prev = before.get(before.len().wrapping_sub(2)).copied();
+
+        let trigger = match last {
+            Some(c) if is_word_char(c) => true,
+            Some('>') => prev == Some('-'),
+            Some(':') => prev == Some(':'),
+            _ => false,
+        };
+
+        if trigger {
+            self.request_completion(buffer_id);
+        } else {
+            self.close_completion();
+        }
+    }
+
+    pub fn request_completion(&self, buffer_id: u64) {
+        let Some(buf) = self.buffer_by_id(buffer_id) else {
+            return;
+        };
+        let (Some(client), Some(uri), Some(editor)) =
+            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+        else {
+            return;
+        };
+
+        let cursor = editor.cursor.get_untracked();
+        let offset = cursor.offset();
+        let (line, col) = editor.offset_to_line_col(offset);
+
+        let text = buf.doc.text().to_string();
+        let start = word_start(&text, offset);
+
+        // Anchor the popup at the start of the replaced word.
+        let (_, below) = editor.points_of_offset(start, cursor.affinity);
+        let vp = editor.viewport.get_untracked();
+        let win = buf.win_origin.get_untracked();
+        let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+
+        let comp = self.completion;
+        comp.buffer_id.set(Some(buffer_id));
+        comp.start_offset.set(start);
+        comp.anchor.set(anchor);
+
+        let send = create_ext_action(self.cx, move |items: Vec<lsp_types::CompletionItem>| {
+            if items.is_empty() {
+                comp.open.set(false);
+            } else {
+                comp.items.set(items);
+                comp.selected.set(0);
+                comp.open.set(true);
+            }
+        });
+        std::thread::spawn(move || {
+            let items = client.completion(&uri, line as u32, col as u32).unwrap_or_default();
+            send(items);
+        });
+    }
+
+    pub fn move_completion(&self, delta: i64) {
+        let comp = self.completion;
+        let len = comp.items.with(|i| i.len());
+        if len == 0 {
+            return;
+        }
+        let cur = comp.selected.get_untracked() as i64;
+        let next = (cur + delta).clamp(0, len as i64 - 1) as usize;
+        comp.selected.set(next);
+    }
+
+    pub fn close_completion(&self) {
+        if self.completion.open.get_untracked() {
+            self.completion.open.set(false);
+        }
+    }
+
+    /// Insert the selected completion. Returns true if something was inserted.
+    pub fn accept_completion(&self) -> bool {
+        let comp = self.completion;
+        if !comp.open.get_untracked() {
+            return false;
+        }
+        let items = comp.items.get_untracked();
+        if items.is_empty() {
+            return false;
+        }
+        let sel = comp.selected.get_untracked().min(items.len() - 1);
+        let item = &items[sel];
+        let insert = item
+            .insert_text
+            .clone()
+            .unwrap_or_else(|| item.label.clone());
+
+        let Some(bid) = comp.buffer_id.get_untracked() else {
+            return false;
+        };
+        let Some(buf) = self.buffer_by_id(bid) else {
+            return false;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+
+        let end = editor.cursor.get_untracked().offset();
+        let start = comp.start_offset.get_untracked().min(end);
+        buf.doc
+            .edit_single(Selection::region(start, end), &insert, EditType::InsertChars);
+        comp.open.set(false);
+        true
+    }
+
+    pub fn request_hover(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let (Some(client), Some(uri), Some(editor)) =
+            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+        else {
+            return;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let offset = cursor.offset();
+        let (line, col) = editor.offset_to_line_col(offset);
+
+        let (_, below) = editor.points_of_offset(offset, cursor.affinity);
+        let vp = editor.viewport.get_untracked();
+        let win = buf.win_origin.get_untracked();
+        let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+
+        let hover = self.hover;
+        hover.anchor.set(anchor);
+        let send = create_ext_action(self.cx, move |text: Option<String>| match text {
+            Some(text) if !text.trim().is_empty() => {
+                hover.text.set(text);
+                hover.open.set(true);
+            }
+            _ => hover.open.set(false),
+        });
+        std::thread::spawn(move || {
+            let text = client.hover(&uri, line as u32, col as u32).ok().flatten();
+            send(text);
+        });
+    }
+
+    pub fn close_hover(&self) {
+        if self.hover.open.get_untracked() {
+            self.hover.open.set(false);
+        }
+    }
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '$'
+}
+
+/// Byte offset where the identifier ending at `offset` begins.
+fn word_start(text: &str, offset: usize) -> usize {
+    let offset = offset.min(text.len());
+    let mut start = offset;
+    for (i, c) in text[..offset].char_indices().rev() {
+        if is_word_char(c) {
+            start = i;
+        } else {
+            break;
+        }
+    }
+    start
 }

@@ -10,7 +10,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 0** — Skjelett: open a file, edit it, save with Cmd/Ctrl+S, status bar
 - [x] **Milepæl A** — Workspace: file tree, tabs, command palette (⌘P), multi-buffer
 - [x] **Milepæl 3** — Syntaks: tree-sitter (Rust, Python, JS/TS, Go, C, JSON, PHP, HTML, CSS, Blade, Vue, Svelte)
-- [~] **Milepæl 4** — LSP: PHP via Intelephense (diagnostics ✓, completion/hover neste)
+- [x] **Milepæl 4** — LSP: PHP via Intelephense (diagnostics, completion, hover)
 - [ ] **Milepæl 5** — Laravel-lag (artisan: routes/views/config-completion), terminal
 
 ## Workspace layout
@@ -36,11 +36,23 @@ e/
 ## PHP / Laravel
 
 Opening a `.php` file auto-starts [Intelephense](https://intelephense.com)
-(`intelephense --stdio`) for diagnostics. Install it once:
+(`intelephense --stdio`). You get **diagnostics**, **completion** (auto as you
+type, or ⌘Space) and **hover** (F1). Install Intelephense once:
 
 ```sh
 npm install -g intelephense
 ```
+
+### Keybindings
+
+| Key | Action |
+|-----|--------|
+| ⌘P / Ctrl+P | Find file |
+| ⌘S / Ctrl+S | Save |
+| ⌘Space | Trigger completion |
+| ↑/↓ + Enter/Tab | Navigate / accept completion |
+| F1 | Hover info |
+| Esc | Dismiss popups |
 
 ## Build & run
 

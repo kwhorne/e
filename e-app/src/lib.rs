@@ -5,6 +5,7 @@
 //! name, language and dirty state. Everything else grows from here.
 
 mod app;
+mod completion;
 mod editor_area;
 mod file_tree;
 mod palette;

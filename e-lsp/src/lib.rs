@@ -18,7 +18,9 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Sender};
-use lsp_types::PublishDiagnosticsParams;
+use lsp_types::{
+    CompletionItem, CompletionResponse, Hover, HoverContents, MarkedString, PublishDiagnosticsParams,
+};
 use serde_json::{json, Value};
 
 /// Callback invoked (on the reader thread) for each `publishDiagnostics`.
@@ -85,7 +87,7 @@ impl LspClient {
                     "synchronization": { "didSave": true, "dynamicRegistration": false },
                     "publishDiagnostics": { "relatedInformation": true },
                     "completion": {
-                        "completionItem": { "snippetSupport": true },
+                        "completionItem": { "snippetSupport": false },
                         "contextSupport": true
                     },
                     "hover": { "contentFormat": ["markdown", "plaintext"] },
@@ -168,6 +170,52 @@ impl LspClient {
             "textDocument/didClose",
             json!({ "textDocument": { "uri": uri } }),
         );
+    }
+
+    /// Request completions at a position. Blocking; call off the UI thread.
+    pub fn completion(&self, uri: &str, line: u32, character: u32) -> Result<Vec<CompletionItem>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+            "context": { "triggerKind": 1 }
+        });
+        let res = self.request("textDocument/completion", params, Duration::from_secs(5))?;
+        if res.is_null() {
+            return Ok(Vec::new());
+        }
+        let parsed: CompletionResponse = serde_json::from_value(res)?;
+        Ok(match parsed {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        })
+    }
+
+    /// Request hover text at a position. Blocking; call off the UI thread.
+    pub fn hover(&self, uri: &str, line: u32, character: u32) -> Result<Option<String>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character }
+        });
+        let res = self.request("textDocument/hover", params, Duration::from_secs(5))?;
+        if res.is_null() {
+            return Ok(None);
+        }
+        let hover: Hover = serde_json::from_value(res)?;
+        Ok(Some(hover_to_string(hover.contents)))
+    }
+}
+
+fn hover_to_string(contents: HoverContents) -> String {
+    fn marked(m: MarkedString) -> String {
+        match m {
+            MarkedString::String(s) => s,
+            MarkedString::LanguageString(ls) => ls.value,
+        }
+    }
+    match contents {
+        HoverContents::Scalar(m) => marked(m),
+        HoverContents::Array(arr) => arr.into_iter().map(marked).collect::<Vec<_>>().join("\n\n"),
+        HoverContents::Markup(mk) => mk.value,
     }
 }
 

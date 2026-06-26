@@ -26,6 +26,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 15** — Auto-save (lagrer skitne buffere etter 1,5 s inaktivitet)
 - [x] **Milepæl 16** — Tema-system (lys/mørk, F8) — reaktiv palett + editor-tema
 - [x] **Milepæl 17** — Terminal-resize til panelstørrelse (on_resize → PTY/grid)
+- [x] **Milepæl 18** — Lokal rename-i-fil (F2, whole-word, virker uten LSP premium)
 
 ## Workspace layout
 
@@ -94,6 +95,7 @@ Works in both `.php` and `.blade.php` files.
 | ⌘\\ | Toggle split view |
 | Ctrl+` | Toggle terminal |
 | F8 | Toggle light/dark theme |
+| F2 | Rename in file |
 | Esc | Dismiss popups |
 
 ## Build & run

@@ -34,6 +34,7 @@ use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
 use crate::session::{self, SessionData};
 use crate::picker::{Picker, PickerItem, PickerMode};
+use crate::rename::RenameState;
 use crate::find::FindState;
 use crate::styling::{build_diag_lines, DiagLines, FindMarks, FindSpan, GitMarks, Highlights};
 
@@ -119,6 +120,8 @@ pub struct AppState {
     pub outline: RwSignal<Vec<OutlineItem>>,
     /// Find-in-file state.
     pub find: FindState,
+    /// Local rename state.
+    pub rename: RenameState,
     /// Timestamp (ms since epoch) of the last edit, for idle auto-save.
     pub last_edit: RwSignal<u128>,
 }
@@ -160,8 +163,63 @@ impl AppState {
             term_rx: RwSignal::new(Some(term_rx)),
             outline: RwSignal::new(Vec::new()),
             find: FindState::new(),
+            rename: RenameState::new(),
             last_edit: RwSignal::new(0),
         }
+    }
+
+    // ---- Local rename --------------------------------------------------
+
+    /// Open the rename bar for the identifier under the cursor.
+    pub fn open_rename(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let offset = editor.cursor.get_untracked().offset();
+        let text = buf.doc.text().to_string();
+        let word = word_at(&text, offset);
+        if word.is_empty() {
+            return;
+        }
+        let r = self.rename;
+        r.word.set(word.clone());
+        r.new_name.set(word);
+        r.open.set(true);
+    }
+
+    pub fn close_rename(&self) {
+        self.rename.open.set(false);
+    }
+
+    /// Replace every whole-word occurrence of the original identifier.
+    pub fn apply_rename(&self) {
+        let r = self.rename;
+        if !r.open.get_untracked() {
+            return;
+        }
+        let word = r.word.get_untracked();
+        let new_name = r.new_name.get_untracked();
+        r.open.set(false);
+        if new_name.is_empty() || new_name == word {
+            return;
+        }
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        let occ = whole_word_occurrences(&text, &word);
+        if occ.is_empty() {
+            return;
+        }
+        let edits: Vec<(Selection, String)> = occ
+            .iter()
+            .map(|(s, e)| (Selection::region(*s, *e), new_name.clone()))
+            .collect();
+        let mut it = edits.iter().map(|(s, t)| (s.clone(), t.as_str()));
+        buf.doc.edit(&mut it, EditType::InsertChars);
     }
 
     /// Save all dirty buffers to disk (no formatting) — used by idle auto-save.
@@ -1160,6 +1218,55 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$'
 }
 
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+/// The identifier surrounding `offset`, if any.
+fn word_at(text: &str, offset: usize) -> String {
+    let offset = offset.min(text.len());
+    let mut start = offset;
+    for (i, c) in text[..offset].char_indices().rev() {
+        if is_word_char(c) {
+            start = i;
+        } else {
+            break;
+        }
+    }
+    let mut end = offset;
+    for (i, c) in text[offset..].char_indices() {
+        if is_word_char(c) {
+            end = offset + i + c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    text[start..end].to_string()
+}
+
+/// Byte ranges of every whole-word (identifier-boundary) occurrence of `word`.
+fn whole_word_occurrences(text: &str, word: &str) -> Vec<(usize, usize)> {
+    let (hay, w) = (text.as_bytes(), word.as_bytes());
+    let mut out = Vec::new();
+    if w.is_empty() || w.len() > hay.len() {
+        return out;
+    }
+    let mut i = 0;
+    while i + w.len() <= hay.len() {
+        if &hay[i..i + w.len()] == w {
+            let before = i == 0 || !is_word_byte(hay[i - 1]);
+            let after = i + w.len() >= hay.len() || !is_word_byte(hay[i + w.len()]);
+            if before && after {
+                out.push((i, i + w.len()));
+                i += w.len();
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 /// All non-overlapping, ASCII-case-insensitive matches of `needle` in `hay`.
 fn ascii_find_all(hay: &str, needle: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
@@ -1271,4 +1378,24 @@ fn word_start(text: &str, offset: usize) -> usize {
         }
     }
     start
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::{whole_word_occurrences, word_at};
+
+    #[test]
+    fn word_boundaries() {
+        let t = "let foo = foo_bar + foo;";
+        // whole-word 'foo' should match positions 4 and 20, NOT inside 'foo_bar'
+        let occ = whole_word_occurrences(t, "foo");
+        assert_eq!(occ, vec![(4, 7), (20, 23)]);
+    }
+
+    #[test]
+    fn word_under_cursor() {
+        let t = "$user->name";
+        assert_eq!(word_at(t, 2), "$user"); // cursor inside $user
+        assert_eq!(word_at(t, 8), "name");  // cursor inside name
+    }
 }

@@ -16,6 +16,7 @@ use crate::find::find_bar;
 use crate::outline::outline_panel;
 use crate::palette::palette;
 use crate::picker::picker_overlay;
+use crate::rename::rename_bar;
 use crate::problems::problems_panel;
 use crate::state::AppState;
 use crate::status::status_bar;
@@ -150,6 +151,7 @@ fn app_view() -> impl IntoView {
     stack((
         main_row,
         find_bar(state),
+        rename_bar(state),
         signature_popup(state),
         completion_popup(state),
         hover_popup(state),
@@ -194,6 +196,10 @@ fn app_view() -> impl IntoView {
         // F8 toggles the light/dark theme.
         .on_key_down(Key::Named(NamedKey::F8), |m| m.is_empty(), move |_| {
             theme::toggle();
+        })
+        // F2 renames the identifier under the cursor (within the file).
+        .on_key_down(Key::Named(NamedKey::F2), |m| m.is_empty(), move |_| {
+            state.open_rename();
         })
         // F12 jumps to the definition of the symbol at the cursor.
         .on_key_down(Key::Named(NamedKey::F12), |m| m.is_empty(), move |_| {

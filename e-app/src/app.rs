@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use floem::ext_event::create_signal_from_channel;
 use floem::keyboard::{Key, NamedKey};
-use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate};
+use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{stack, Decorators};
 use floem::IntoView;
 
@@ -80,9 +80,20 @@ fn app_view() -> impl IntoView {
     // Scrape Laravel project data (routes/views/config/env) in the background.
     state.load_laravel();
 
+    // Restore the previous session, then open any file passed on the CLI.
+    state.restore_session();
     if let Some(file) = file {
         state.open_path(file);
     }
+
+    // Persist the session whenever the open files / panes change.
+    create_effect(move |_| {
+        state.buffers.with(|_| ());
+        state.active.get();
+        state.active2.get();
+        state.split.get();
+        state.save_session();
+    });
 
     let editor_column = stack((
         tab_bar(state),

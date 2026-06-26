@@ -14,6 +14,7 @@ mod outline;
 mod palette;
 mod picker;
 mod problems;
+mod session;
 mod state;
 mod status;
 mod styling;

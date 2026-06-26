@@ -32,6 +32,7 @@ use e_term::Terminal;
 use crate::completion::{Completion, HoverState, SignatureState};
 use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
+use crate::session::{self, SessionData};
 use crate::picker::{Picker, PickerItem, PickerMode};
 use crate::find::FindState;
 use crate::styling::{build_diag_lines, DiagLines, FindMarks, FindSpan, GitMarks, Highlights};
@@ -330,6 +331,55 @@ impl AppState {
     /// Focus a buffer in the currently focused pane (e.g. clicking a tab).
     pub fn focus_buffer(&self, id: u64) {
         self.focused_active().set(Some(id));
+    }
+
+    fn buffer_id_by_path(&self, path: &str) -> Option<u64> {
+        let canon = std::path::Path::new(path).canonicalize().ok();
+        self.buffers.with(|bs| {
+            bs.iter()
+                .find(|b| b.file.path.as_deref() == canon.as_deref())
+                .map(|b| b.id)
+        })
+    }
+
+    /// Restore the previous session for this workspace (open files, tabs, split).
+    pub fn restore_session(&self) {
+        let Some(data) = session::load(&self.root.get_untracked()) else {
+            return;
+        };
+        for p in &data.open {
+            self.open_path(PathBuf::from(p));
+        }
+        if let Some(a) = data.active.as_deref().and_then(|a| self.buffer_id_by_path(a)) {
+            self.active.set(Some(a));
+        }
+        if data.split {
+            self.split.set(true);
+            if let Some(a2) = data.active2.as_deref().and_then(|a| self.buffer_id_by_path(a)) {
+                self.active2.set(Some(a2));
+            }
+        }
+    }
+
+    /// Persist the current session.
+    pub fn save_session(&self) {
+        let buffers = self.buffers.get_untracked();
+        let path_of = |id: Option<u64>| -> Option<String> {
+            id.and_then(|i| buffers.iter().find(|b| b.id == i))
+                .and_then(|b| b.file.path.as_ref())
+                .map(|p| p.display().to_string())
+        };
+        let open: Vec<String> = buffers
+            .iter()
+            .filter_map(|b| b.file.path.as_ref().map(|p| p.display().to_string()))
+            .collect();
+        let data = SessionData {
+            open,
+            active: path_of(self.active.get_untracked()),
+            active2: path_of(self.active2.get_untracked()),
+            split: self.split.get_untracked(),
+        };
+        session::save(&self.root.get_untracked(), &data);
     }
 
     /// Toggle the two-pane split view.

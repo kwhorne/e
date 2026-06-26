@@ -258,7 +258,7 @@ fn color_for(kind: HighlightKind) -> Option<Color> {
         Namespace => Color::from_rgb8(0xe5, 0xc0, 0x7b),
         Attribute => Color::from_rgb8(0x61, 0xaf, 0xef),
         Label | Tag => Color::from_rgb8(0xe0, 0x6c, 0x75),
-        Punctuation => theme::FG_DIM,
+        Punctuation => theme::fg_dim(),
         Variable => return None,
     };
     Some(c)

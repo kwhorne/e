@@ -75,7 +75,7 @@ pub fn file_tree(state: AppState) -> impl IntoView {
             .width_full()
             .items_center()
             .padding_horiz(12.0)
-            .color(theme::FG_DIM)
+            .color(theme::fg_dim())
             .font_size(11.0)
     });
 
@@ -98,8 +98,8 @@ pub fn file_tree(state: AppState) -> impl IntoView {
             };
 
             stack((
-                label(move || icon.to_string()).style(|s| s.width(14.0).color(theme::FG_DIM)),
-                label(move || r.name.clone()).style(|s| s.text_ellipsis().color(theme::FG)),
+                label(move || icon.to_string()).style(|s| s.width(14.0).color(theme::fg_dim())),
+                label(move || r.name.clone()).style(|s| s.text_ellipsis().color(theme::fg())),
             ))
             .style(move |s| {
                 s.items_center()
@@ -109,7 +109,7 @@ pub fn file_tree(state: AppState) -> impl IntoView {
                     .padding_left(indent)
                     .padding_right(8.0)
                     .cursor(floem::style::CursorStyle::Pointer)
-                    .hover(|s| s.background(theme::BG_HOVER))
+                    .hover(|s| s.background(theme::bg_hover()))
             })
             .on_click_stop(move |_| {
                 if is_dir {
@@ -131,6 +131,6 @@ pub fn file_tree(state: AppState) -> impl IntoView {
             .width_full()
             .flex_grow(1.0)
             .min_height(0.0)
-            .background(theme::BG_PANEL)
+            .background(theme::bg_panel())
     })
 }

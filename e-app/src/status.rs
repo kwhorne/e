@@ -38,9 +38,9 @@ pub fn status_bar(state: AppState) -> impl IntoView {
             .items_center()
             .justify_between()
             .padding_horiz(10.0)
-            .background(theme::BG_PANEL)
+            .background(theme::bg_panel())
             .border_top(1.0)
-            .border_color(theme::BORDER)
-            .color(theme::FG_DIM)
+            .border_color(theme::border())
+            .color(theme::fg_dim())
     })
 }

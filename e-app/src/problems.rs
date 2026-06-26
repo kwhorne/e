@@ -27,9 +27,9 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
             .items_center()
             .padding_horiz(10.0)
             .font_size(11.0)
-            .color(theme::FG_DIM)
+            .color(theme::fg_dim())
             .border_bottom(1.0)
-            .border_color(theme::BORDER)
+            .border_color(theme::border())
     });
 
     let rows = dyn_stack(
@@ -49,7 +49,7 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
                         .text_ellipsis()
                         .color(color)
                         .cursor(floem::style::CursorStyle::Pointer)
-                        .hover(|s| s.background(theme::BG_HOVER))
+                        .hover(|s| s.background(theme::bg_hover()))
                 })
                 .on_click_stop(move |_| {
                     if let Some(buf) = state.active_buffer() {
@@ -68,9 +68,9 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
                 .flex_col()
                 .width_full()
                 .height(150.0)
-                .background(theme::BG_PANEL)
+                .background(theme::bg_panel())
                 .border_top(1.0)
-                .border_color(theme::BORDER);
+                .border_color(theme::border());
             // Only show the panel when there are diagnostics.
             if state.active_diagnostics().is_empty() {
                 s.hide()

@@ -142,7 +142,7 @@ fn app_view() -> impl IntoView {
             .width(240.0)
             .height_full()
             .border_right(1.0)
-            .border_color(theme::BORDER)
+            .border_color(theme::border())
     });
 
     let main_row = stack((sidebar, editor_column)).style(|s| s.flex_row().size_full());
@@ -156,7 +156,7 @@ fn app_view() -> impl IntoView {
         picker_overlay(state),
         palette(state),
     ))
-        .style(|s| s.size_full().background(theme::BG).color(theme::FG))
+        .style(|s| s.size_full().background(theme::bg()).color(theme::fg()))
         .window_title(move || {
             let (name, dirty) = state
                 .active_buffer()
@@ -190,6 +190,10 @@ fn app_view() -> impl IntoView {
         // F1 shows hover info for the symbol at the cursor.
         .on_key_down(Key::Named(NamedKey::F1), |m| m.is_empty(), move |_| {
             state.request_hover();
+        })
+        // F8 toggles the light/dark theme.
+        .on_key_down(Key::Named(NamedKey::F8), |m| m.is_empty(), move |_| {
+            theme::toggle();
         })
         // F12 jumps to the definition of the symbol at the cursor.
         .on_key_down(Key::Named(NamedKey::F12), |m| m.is_empty(), move |_| {

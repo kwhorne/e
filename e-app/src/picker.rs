@@ -95,10 +95,10 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
             s.width_full()
                 .height(36.0)
                 .padding_horiz(10.0)
-                .background(theme::BG)
-                .color(theme::FG)
+                .background(theme::bg())
+                .color(theme::fg())
                 .border_bottom(1.0)
-                .border_color(theme::BORDER)
+                .border_color(theme::border())
         })
         .request_focus(move || {
             p.open.get();
@@ -122,8 +122,8 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
             let detail = it.detail.clone();
             stack((
                 label(move || it.label.clone())
-                    .style(|s| s.color(theme::FG).flex_grow(1.0).text_ellipsis()),
-                label(move || detail.clone()).style(|s| s.color(theme::FG_DIM).text_ellipsis()),
+                    .style(|s| s.color(theme::fg()).flex_grow(1.0).text_ellipsis()),
+                label(move || detail.clone()).style(|s| s.color(theme::fg_dim()).text_ellipsis()),
             ))
             .style(move |s| {
                 let s = s
@@ -134,9 +134,9 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
                     .padding_horiz(10.0)
                     .cursor(floem::style::CursorStyle::Pointer);
                 if p.selected.get() == i {
-                    s.background(theme::BG_ACTIVE)
+                    s.background(theme::bg_active())
                 } else {
-                    s.hover(|s| s.background(theme::BG_HOVER))
+                    s.hover(|s| s.background(theme::bg_hover()))
                 }
             })
             .on_click_stop(move |_| {
@@ -152,9 +152,9 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
         .style(|s| {
             s.flex_col()
                 .width(620.0)
-                .background(theme::BG_PANEL)
+                .background(theme::bg_panel())
                 .border(1.0)
-                .border_color(theme::BORDER)
+                .border_color(theme::border())
                 .border_radius(8.0)
         })
         .on_click_stop(|_| {});

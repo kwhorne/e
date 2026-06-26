@@ -9,7 +9,7 @@ use floem::views::editor::command::{Command, CommandExecuted};
 use floem::views::editor::core::command::{EditCommand, MoveCommand};
 use floem::views::editor::core::cursor::{Cursor, CursorMode};
 use floem::views::editor::core::selection::Selection;
-use floem::views::editor::text::{default_dark_color, Document};
+use floem::views::editor::text::Document;
 use floem::views::{container, dyn_container, dyn_stack, label, stack, text_editor, Decorators};
 use floem::IntoView;
 
@@ -40,7 +40,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                     b.git_marks.clone(),
                     b.find_marks.clone(),
                 ))
-                .editor_style(default_dark_color)
+                .editor_style(theme::editor_style)
                 .style(|s| s.size_full())
                 .pre_command(move |pre| {
                     if state.completion.open.get_untracked() {
@@ -106,11 +106,11 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                         s.flex_grow(1.0)
                             .height_full()
                             .border_right(1.0)
-                            .border_color(theme::BORDER)
+                            .border_color(theme::border())
                     }),
                     pane(state, 1).style(|s| s.flex_grow(1.0).height_full()),
                 ))
-                .style(|s| s.flex_row().size_full().background(theme::BG))
+                .style(|s| s.flex_row().size_full().background(theme::bg()))
                 .into_any()
             } else {
                 let placeholder =
@@ -120,7 +120,7 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                                 .size_full()
                                 .items_center()
                                 .justify_center()
-                                .color(theme::FG_DIM);
+                                .color(theme::fg_dim());
                             if state.buffers.with(|b| b.is_empty()) {
                                 s
                             } else {
@@ -128,7 +128,7 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                             }
                         });
                 stack((placeholder, pane(state, 0)))
-                    .style(|s| s.size_full().background(theme::BG))
+                    .style(|s| s.size_full().background(theme::bg()))
                     .into_any()
             }
         },

@@ -28,8 +28,8 @@ fn kind_icon(kind: i64) -> (&'static str, Color) {
         // Constant, EnumMember
         14 | 22 => ("π", Color::from_rgb8(0xd1, 0x9a, 0x66)),
         // Namespace, Module, Package
-        2 | 3 | 4 => ("{}", theme::FG_DIM),
-        _ => ("•", theme::FG_DIM),
+        2 | 3 | 4 => ("{}", theme::fg_dim()),
+        _ => ("•", theme::fg_dim()),
     }
 }
 
@@ -42,9 +42,9 @@ pub fn outline_panel(state: AppState) -> impl IntoView {
             .items_center()
             .padding_horiz(12.0)
             .font_size(11.0)
-            .color(theme::FG_DIM)
+            .color(theme::fg_dim())
             .border_bottom(1.0)
-            .border_color(theme::BORDER)
+            .border_color(theme::border())
     });
 
     let rows = dyn_stack(
@@ -57,7 +57,7 @@ pub fn outline_panel(state: AppState) -> impl IntoView {
             stack((
                 label(move || icon.to_string()).style(move |s| s.width(16.0).color(color)),
                 label(move || it.name.clone())
-                    .style(|s| s.color(theme::FG).text_ellipsis().flex_grow(1.0)),
+                    .style(|s| s.color(theme::fg()).text_ellipsis().flex_grow(1.0)),
             ))
             .style(move |s| {
                 s.items_center()
@@ -67,7 +67,7 @@ pub fn outline_panel(state: AppState) -> impl IntoView {
                     .padding_left(indent)
                     .padding_right(8.0)
                     .cursor(floem::style::CursorStyle::Pointer)
-                    .hover(|s| s.background(theme::BG_HOVER))
+                    .hover(|s| s.background(theme::bg_hover()))
             })
             .on_click_stop(move |_| {
                 if let Some(buf) = state.active_buffer() {
@@ -85,9 +85,9 @@ pub fn outline_panel(state: AppState) -> impl IntoView {
             .flex_col()
             .width_full()
             .height(260.0)
-            .background(theme::BG_PANEL)
+            .background(theme::bg_panel())
             .border_top(1.0)
-            .border_color(theme::BORDER);
+            .border_color(theme::border());
         if items.get().is_empty() {
             s.hide()
         } else {

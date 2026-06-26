@@ -43,9 +43,9 @@ pub fn breadcrumbs(state: AppState) -> impl IntoView {
             .items_center()
             .padding_horiz(12.0)
             .font_size(12.0)
-            .color(theme::FG_DIM)
-            .background(theme::BG)
+            .color(theme::fg_dim())
+            .background(theme::bg())
             .border_bottom(1.0)
-            .border_color(theme::BORDER)
+            .border_color(theme::border())
     })
 }

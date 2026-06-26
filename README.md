@@ -24,6 +24,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 13** — Session-persistens (gjenåpner filer/faner/split per workspace)
 - [x] **Milepæl 14** — Breadcrumbs (sti + symbol ved cursor)
 - [x] **Milepæl 15** — Auto-save (lagrer skitne buffere etter 1,5 s inaktivitet)
+- [x] **Milepæl 16** — Tema-system (lys/mørk, F8) — reaktiv palett + editor-tema
 
 ## Workspace layout
 
@@ -91,6 +92,7 @@ Works in both `.php` and `.blade.php` files.
 | ⌘F | Find in file |
 | ⌘\\ | Toggle split view |
 | Ctrl+` | Toggle terminal |
+| F8 | Toggle light/dark theme |
 | Esc | Dismiss popups |
 
 ## Build & run

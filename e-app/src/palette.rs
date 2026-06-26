@@ -91,10 +91,10 @@ pub fn palette(state: AppState) -> impl IntoView {
             s.width_full()
                 .height(36.0)
                 .padding_horiz(10.0)
-                .background(theme::BG)
-                .color(theme::FG)
+                .background(theme::bg())
+                .color(theme::fg())
                 .border_bottom(1.0)
-                .border_color(theme::BORDER)
+                .border_color(theme::border())
         })
         .request_focus(move || {
             // Re-focus the input each time the palette is toggled open.
@@ -129,11 +129,11 @@ pub fn palette(state: AppState) -> impl IntoView {
                         .padding_horiz(10.0)
                         .text_ellipsis()
                         .cursor(floem::style::CursorStyle::Pointer)
-                        .color(theme::FG);
+                        .color(theme::fg());
                     if selected.get() == i {
-                        s.background(theme::BG_ACTIVE).color(theme::ACCENT)
+                        s.background(theme::bg_active()).color(theme::accent())
                     } else {
-                        s.hover(|s| s.background(theme::BG_HOVER))
+                        s.hover(|s| s.background(theme::bg_hover()))
                     }
                 })
                 .on_click_stop(move |_| {
@@ -149,9 +149,9 @@ pub fn palette(state: AppState) -> impl IntoView {
         .style(|s| {
             s.flex_col()
                 .width(560.0)
-                .background(theme::BG_PANEL)
+                .background(theme::bg_panel())
                 .border(1.0)
-                .border_color(theme::BORDER)
+                .border_color(theme::border())
                 .border_radius(8.0)
         })
         .on_click_stop(|_| {});

@@ -38,10 +38,10 @@ pub fn find_bar(state: AppState) -> impl IntoView {
             s.width(220.0)
                 .height(28.0)
                 .padding_horiz(8.0)
-                .background(theme::BG)
-                .color(theme::FG)
+                .background(theme::bg())
+                .color(theme::fg())
                 .border(1.0)
-                .border_color(theme::BORDER)
+                .border_color(theme::border())
                 .border_radius(4.0)
         })
         .request_focus(move || {
@@ -69,15 +69,15 @@ pub fn find_bar(state: AppState) -> impl IntoView {
             format!("{}/{}", find.current.get() + 1, n)
         }
     })
-    .style(|s| s.color(theme::FG_DIM).font_size(12.0).min_width(60.0));
+    .style(|s| s.color(theme::fg_dim()).font_size(12.0).min_width(60.0));
 
     let close = label(|| "×".to_string())
         .style(|s| {
             s.padding_horiz(6.0)
-                .color(theme::FG_DIM)
+                .color(theme::fg_dim())
                 .border_radius(4.0)
                 .cursor(floem::style::CursorStyle::Pointer)
-                .hover(|s| s.background(theme::BG_HOVER).color(theme::FG))
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
         })
         .on_click_stop(move |_| state.close_find());
 
@@ -89,9 +89,9 @@ pub fn find_bar(state: AppState) -> impl IntoView {
             .items_center()
             .gap(8.0)
             .padding(8.0)
-            .background(theme::BG_PANEL)
+            .background(theme::bg_panel())
             .border(1.0)
-            .border_color(theme::BORDER)
+            .border_color(theme::border())
             .border_radius(6.0);
         if find.open.get() {
             s

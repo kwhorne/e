@@ -92,7 +92,7 @@ fn kind_icon(kind: Option<CompletionItemKind>) -> (&'static str, Color) {
             ("π", Color::from_rgb8(0xd1, 0x9a, 0x66))
         }
         Some(CompletionItemKind::KEYWORD) => ("k", Color::from_rgb8(0xc6, 0x78, 0xdd)),
-        _ => ("•", theme::FG_DIM),
+        _ => ("•", theme::fg_dim()),
     }
 }
 
@@ -115,16 +115,16 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
             let detail = item.detail.clone().unwrap_or_default();
             stack((
                 label(move || icon.to_string()).style(move |s| s.width(16.0).color(color)),
-                label(move || lbl.clone()).style(|s| s.color(theme::FG).flex_grow(1.0).text_ellipsis()),
+                label(move || lbl.clone()).style(|s| s.color(theme::fg()).flex_grow(1.0).text_ellipsis()),
                 label(move || detail.clone())
-                    .style(|s| s.color(theme::FG_DIM).text_ellipsis().max_width(140.0)),
+                    .style(|s| s.color(theme::fg_dim()).text_ellipsis().max_width(140.0)),
             ))
             .style(move |s| {
                 let s = s.items_center().gap(8.0).height(22.0).width_full().padding_horiz(8.0);
                 if comp.selected.get() == i {
-                    s.background(theme::BG_ACTIVE)
+                    s.background(theme::bg_active())
                 } else {
-                    s.hover(|s| s.background(theme::BG_HOVER))
+                    s.hover(|s| s.background(theme::bg_hover()))
                 }
             })
         },
@@ -140,9 +140,9 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
                 .inset_top(anchor.y + 4.0)
                 .width(420.0)
                 .max_height(240.0)
-                .background(theme::BG_PANEL)
+                .background(theme::bg_panel())
                 .border(1.0)
-                .border_color(theme::BORDER)
+                .border_color(theme::border())
                 .border_radius(6.0);
             if comp.open.get() && !comp.items.get().is_empty() {
                 s
@@ -162,7 +162,7 @@ pub fn signature_popup(state: AppState) -> impl IntoView {
             None => l,
         }
     })
-    .style(|s| s.color(theme::FG_DIM));
+    .style(|s| s.color(theme::fg_dim()));
 
     let active = label(move || {
         let l = sig.label.get();
@@ -171,7 +171,7 @@ pub fn signature_popup(state: AppState) -> impl IntoView {
             None => String::new(),
         }
     })
-    .style(|s| s.color(theme::ACCENT));
+    .style(|s| s.color(theme::accent()));
 
     let after = label(move || {
         let l = sig.label.get();
@@ -180,7 +180,7 @@ pub fn signature_popup(state: AppState) -> impl IntoView {
             None => String::new(),
         }
     })
-    .style(|s| s.color(theme::FG_DIM));
+    .style(|s| s.color(theme::fg_dim()));
 
     stack((before, active, after)).style(move |s| {
         let anchor = sig.anchor.get();
@@ -193,9 +193,9 @@ pub fn signature_popup(state: AppState) -> impl IntoView {
             .height(24.0)
             .font_family("monospace".to_string())
             .font_size(13.0)
-            .background(theme::BG_PANEL)
+            .background(theme::bg_panel())
             .border(1.0)
-            .border_color(theme::BORDER)
+            .border_color(theme::border())
             .border_radius(6.0);
         if sig.open.get() && !sig.label.get().is_empty() {
             s
@@ -217,10 +217,10 @@ pub fn hover_popup(state: AppState) -> impl IntoView {
                 .inset_top(anchor.y + 4.0)
                 .max_width(520.0)
                 .padding(8.0)
-                .background(theme::BG_PANEL)
-                .color(theme::FG)
+                .background(theme::bg_panel())
+                .color(theme::fg())
                 .border(1.0)
-                .border_color(theme::BORDER)
+                .border_color(theme::border())
                 .border_radius(6.0);
             if hover.open.get() && !hover.text.get().is_empty() {
                 s

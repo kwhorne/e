@@ -50,7 +50,7 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
         let default = Attrs::new()
             .family(&family)
             .font_size(13.0)
-            .color(theme::FG);
+            .color(theme::fg());
         let mut attrs_list = AttrsList::new(default);
 
         let mut text = String::new();
@@ -84,7 +84,7 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
                 .height(300.0)
                 .background(Color::from_rgb8(0x14, 0x16, 0x1b))
                 .border_top(1.0)
-                .border_color(theme::BORDER);
+                .border_color(theme::border());
             if state.terminal_open.get() {
                 s
             } else {

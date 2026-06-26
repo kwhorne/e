@@ -21,14 +21,14 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
                 let mark = if dirty.get() { " ●" } else { "" };
                 format!("{name}{mark}")
             })
-            .style(|s| s.color(theme::FG));
+            .style(|s| s.color(theme::fg()));
 
             let close = label(|| "×".to_string())
                 .style(|s| {
                     s.padding_horiz(4.0)
                         .border_radius(4.0)
-                        .color(theme::FG_DIM)
-                        .hover(|s| s.background(theme::BG_HOVER).color(theme::FG))
+                        .color(theme::fg_dim())
+                        .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
                 })
                 .on_click_stop(move |_| state.close(id));
 
@@ -40,13 +40,13 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
                         .padding_horiz(12.0)
                         .height(34.0)
                         .border_right(1.0)
-                        .border_color(theme::BORDER)
+                        .border_color(theme::border())
                         .cursor(floem::style::CursorStyle::Pointer);
                     if state.focused_active_id() == Some(id) {
-                        s.background(theme::BG_ACTIVE)
+                        s.background(theme::bg_active())
                     } else {
-                        s.background(theme::BG_PANEL)
-                            .hover(|s| s.background(theme::BG_HOVER))
+                        s.background(theme::bg_panel())
+                            .hover(|s| s.background(theme::bg_hover()))
                     }
                 })
                 .on_click(move |_| {
@@ -60,8 +60,8 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
     scroll(tabs).style(|s| {
         s.width_full()
             .height(34.0)
-            .background(theme::BG_PANEL)
+            .background(theme::bg_panel())
             .border_bottom(1.0)
-            .border_color(theme::BORDER)
+            .border_color(theme::border())
     })
 }

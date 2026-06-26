@@ -29,6 +29,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 18** — Lokal rename-i-fil (F2, whole-word, virker uten LSP premium)
 - [x] **Milepæl 19** — Markdown-preview (⌘⇧M reading-mode for .md)
 - [x] **Milepæl 20** — Tema-persistens · command palette (⌘⇧P) · git diff-view · multi-cursor (⌘D)
+- [x] **Milepæl 21** — Multi-språk LSP (PHP/intelephense, C·C++/clangd, Rust, TS, Go, Python)
 
 ## Workspace layout
 
@@ -64,6 +65,12 @@ type, or ⌘Space) and **hover** (F1). Install Intelephense once:
 ```sh
 npm install -g intelephense
 ```
+
+## Other language servers
+
+`e` auto-detects and launches the right server per language (if installed):
+clangd (C/C++), rust-analyzer (Rust), typescript-language-server, gopls,
+pyright. Servers that fail to start are skipped silently.
 
 ### Laravel awareness
 

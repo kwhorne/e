@@ -123,7 +123,7 @@ impl LspClient {
             "workspaceFolders": [ { "uri": root_uri, "name": "root" } ],
         });
 
-        self.request("initialize", params, Duration::from_secs(15))?;
+        self.request("initialize", params, Duration::from_secs(30))?;
         self.notify("initialized", json!({}));
         Ok(())
     }
@@ -524,8 +524,15 @@ fn read_loop(
     loop {
         let msg = match read_message(&mut reader) {
             Ok(Some(msg)) => msg,
-            Ok(None) => break, // EOF: server exited
-            Err(_) => break,
+            // EOF or error: the server exited. Fail any pending requests fast
+            // instead of letting them wait for their timeouts.
+            Ok(None) | Err(_) => {
+                let mut map = pending.lock().unwrap();
+                for (_, tx) in map.drain() {
+                    let _ = tx.send(Err(Value::String("server exited".into())));
+                }
+                break;
+            }
         };
 
         let has_id = msg.get("id").map(|v| !v.is_null()).unwrap_or(false);

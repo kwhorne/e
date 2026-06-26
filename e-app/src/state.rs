@@ -4,7 +4,7 @@
 //! be handed to as many view closures as needed without cloning ceremony.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -63,12 +63,50 @@ pub struct Buffer {
     pub pending_goto: RwSignal<Option<(usize, usize)>>,
 }
 
-/// LSP language id, or `None` if `e` has no server for this language.
-fn lsp_language_id(language: Language) -> Option<&'static str> {
+/// A language server we know how to launch.
+struct ServerSpec {
+    id: &'static str,
+    program: &'static str,
+    args: &'static [&'static str],
+    language_id: &'static str,
+}
+
+/// The language server for a given language, if `e` knows one.
+fn server_spec(language: Language) -> Option<ServerSpec> {
+    let spec = |id, program, args, language_id| {
+        Some(ServerSpec {
+            id,
+            program,
+            args,
+            language_id,
+        })
+    };
     match language {
-        Language::Php => Some("php"),
+        Language::Php => spec("intelephense", "intelephense", &["--stdio"], "php"),
+        Language::Rust => spec("rust-analyzer", "rust-analyzer", &[], "rust"),
+        Language::C => spec("clangd", "clangd", &[], "c"),
+        Language::Cpp => spec("clangd", "clangd", &[], "cpp"),
+        Language::TypeScript => spec(
+            "tsserver",
+            "typescript-language-server",
+            &["--stdio"],
+            "typescript",
+        ),
+        Language::JavaScript => spec(
+            "tsserver",
+            "typescript-language-server",
+            &["--stdio"],
+            "javascript",
+        ),
+        Language::Go => spec("gopls", "gopls", &[], "go"),
+        Language::Python => spec("pyright", "pyright-langserver", &["--stdio"], "python"),
         _ => None,
     }
+}
+
+/// LSP `languageId` for a language, or `None` if unsupported.
+fn lsp_language_id(language: Language) -> Option<&'static str> {
+    server_spec(language).map(|s| s.language_id)
 }
 
 /// Global editor state.
@@ -93,7 +131,10 @@ pub struct AppState {
     /// Is the command palette open?
     pub palette_open: RwSignal<bool>,
     /// The PHP language server, started lazily on first PHP file.
-    pub lsp: RwSignal<Option<Arc<LspClient>>>,
+    /// Running language servers, keyed by server id.
+    pub lsp_clients: RwSignal<HashMap<String, Arc<LspClient>>>,
+    /// Server ids that failed to start (don't retry).
+    lsp_failed: RwSignal<HashSet<String>>,
     /// Diagnostics keyed by `file://` URI.
     pub diagnostics: RwSignal<HashMap<String, Vec<Diagnostic>>>,
     /// Channel the LSP reader thread pushes diagnostics into.
@@ -154,7 +195,8 @@ impl AppState {
             focused: RwSignal::new(0),
             next_id: RwSignal::new(1),
             palette_open: RwSignal::new(false),
-            lsp: RwSignal::new(None),
+            lsp_clients: RwSignal::new(HashMap::new()),
+            lsp_failed: RwSignal::new(HashSet::new()),
             diagnostics: RwSignal::new(HashMap::new()),
             diag_tx: RwSignal::new(tx),
             diag_rx: RwSignal::new(Some(rx)),
@@ -306,7 +348,9 @@ impl AppState {
             let text = b.doc.text().to_string();
             if buffer::write(path, &text).is_ok() {
                 b.dirty.set(false);
-                if let (Some(uri), Some(client)) = (b.uri.as_ref(), self.lsp.get()) {
+                if let (Some(uri), Some(client)) =
+                    (b.uri.as_ref(), self.lsp_for_language(b.file.language))
+                {
                     client.did_save(uri, &text);
                 }
             }
@@ -404,7 +448,7 @@ impl AppState {
             outline.set(Vec::new());
             return;
         };
-        let (Some(client), Some(uri)) = (self.lsp.get(), buf.uri.clone()) else {
+        let (Some(client), Some(uri)) = (self.lsp_for_active(), buf.uri.clone()) else {
             outline.set(Vec::new());
             return;
         };
@@ -622,24 +666,45 @@ impl AppState {
         true
     }
 
-    /// Start (or reuse) the PHP language server for this workspace.
-    fn ensure_php_lsp(&self) -> Option<Arc<LspClient>> {
-        if let Some(client) = self.lsp.get() {
+    /// Look up a running language server for `language` (does not start one).
+    pub fn lsp_for_language(&self, language: Language) -> Option<Arc<LspClient>> {
+        let spec = server_spec(language)?;
+        self.lsp_clients.with(|m| m.get(spec.id).cloned())
+    }
+
+    /// The language server for the active buffer, if running.
+    pub fn lsp_for_active(&self) -> Option<Arc<LspClient>> {
+        self.lsp_for_language(self.active_buffer()?.file.language)
+    }
+
+    /// Start (or reuse) the language server for `language`.
+    fn ensure_lsp(&self, language: Language) -> Option<Arc<LspClient>> {
+        let spec = server_spec(language)?;
+        if let Some(client) = self.lsp_clients.with(|m| m.get(spec.id).cloned()) {
             return Some(client);
+        }
+        if self.lsp_failed.with(|f| f.contains(spec.id)) {
+            return None;
         }
         let tx = self.diag_tx.get();
         let handler: e_lsp::DiagnosticsHandler = Box::new(move |p| {
             let _ = tx.send(p);
         });
         let root = self.root.get();
-        match LspClient::start("intelephense", &["--stdio"], &root, handler) {
+        match LspClient::start(spec.program, spec.args, &root, handler) {
             Ok(client) => {
-                eprintln!("e: started intelephense for {}", root.display());
-                self.lsp.set(Some(client.clone()));
+                eprintln!("e: started {} for {}", spec.id, root.display());
+                self.lsp_clients
+                    .update(|m| {
+                        m.insert(spec.id.to_string(), client.clone());
+                    });
                 Some(client)
             }
             Err(e) => {
-                eprintln!("e: could not start intelephense ({e:#}). Install with `npm i -g intelephense`.");
+                eprintln!("e: could not start {} ({e:#})", spec.program);
+                self.lsp_failed.update(|f| {
+                    f.insert(spec.id.to_string());
+                });
                 None
             }
         }
@@ -691,7 +756,7 @@ impl AppState {
 
         // Hand the document to the language server, if we have one.
         if let (Some(lang_id), Some(uri)) = (lsp_language_id(language), uri.as_ref()) {
-            if let Some(client) = self.ensure_php_lsp() {
+            if let Some(client) = self.ensure_lsp(language) {
                 client.did_open(uri, lang_id, 1, &content);
             }
         }
@@ -716,7 +781,7 @@ impl AppState {
                 }
                 doc.cache_rev().update(|r| *r += 1);
 
-                if let (Some(uri), Some(client)) = (uri.as_ref(), app.lsp.get()) {
+                if let (Some(uri), Some(client)) = (uri.as_ref(), app.lsp_for_language(language)) {
                     if lsp_language_id(language).is_some() {
                         let v = version.get() + 1;
                         version.set(v);
@@ -752,9 +817,11 @@ impl AppState {
     pub fn close(&self, id: u64) {
         let mut focus_next = None;
         let mut closed_uri = None;
+        let mut closed_lang = None;
         self.buffers.update(|bs| {
             if let Some(pos) = bs.iter().position(|b| b.id == id) {
                 closed_uri = bs[pos].uri.clone();
+                closed_lang = Some(bs[pos].file.language);
                 bs.remove(pos);
                 if !bs.is_empty() {
                     let n = pos.min(bs.len() - 1);
@@ -768,8 +835,10 @@ impl AppState {
         if self.active2.get_untracked() == Some(id) {
             self.active2.set(focus_next);
         }
-        if let (Some(uri), Some(client)) = (closed_uri, self.lsp.get()) {
-            client.did_close(&uri);
+        if let (Some(uri), Some(lang)) = (closed_uri, closed_lang) {
+            if let Some(client) = self.lsp_for_language(lang) {
+                client.did_close(&uri);
+            }
         }
     }
 
@@ -788,7 +857,7 @@ impl AppState {
             return;
         }
         let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
         else {
             return;
         };
@@ -830,7 +899,9 @@ impl AppState {
             Ok(()) => {
                 buf.dirty.set(false);
                 eprintln!("e: saved {}", path.display());
-                if let (Some(uri), Some(client)) = (buf.uri.as_ref(), self.lsp.get()) {
+                if let (Some(uri), Some(client)) =
+                    (buf.uri.as_ref(), self.lsp_for_language(buf.file.language))
+                {
                     client.did_save(uri, &text);
                 }
                 self.request_outline();
@@ -941,7 +1012,7 @@ impl AppState {
             return;
         };
         let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
         else {
             return;
         };
@@ -1036,7 +1107,7 @@ impl AppState {
             return;
         };
         let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
         else {
             return;
         };
@@ -1075,7 +1146,7 @@ impl AppState {
             return;
         };
         let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
         else {
             return;
         };
@@ -1117,7 +1188,7 @@ impl AppState {
             return;
         };
         let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
         else {
             return;
         };
@@ -1189,7 +1260,7 @@ impl AppState {
     /// Run a workspace/symbol query (called reactively from the picker).
     pub fn request_symbols(&self, query: String) {
         let p = self.picker;
-        let Some(client) = self.lsp.get() else {
+        let Some(client) = self.lsp_for_active() else {
             return;
         };
         if query.trim().is_empty() {
@@ -1228,7 +1299,7 @@ impl AppState {
             return;
         };
         let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
         else {
             return;
         };

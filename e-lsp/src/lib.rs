@@ -20,7 +20,7 @@ use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Sender};
 use lsp_types::{
     CompletionItem, CompletionResponse, GotoDefinitionResponse, Hover, HoverContents, MarkedString,
-    PublishDiagnosticsParams,
+    PublishDiagnosticsParams, TextEdit,
 };
 use serde_json::{json, Value};
 
@@ -259,6 +259,19 @@ impl LspClient {
             }
         }
         Ok(out)
+    }
+
+    /// Request whole-document formatting. Returns the edits to apply.
+    pub fn formatting(&self, uri: &str, tab_size: u32, insert_spaces: bool) -> Result<Vec<TextEdit>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": tab_size, "insertSpaces": insert_spaces }
+        });
+        let res = self.request("textDocument/formatting", params, Duration::from_secs(8))?;
+        if res.is_null() {
+            return Ok(Vec::new());
+        }
+        Ok(serde_json::from_value(res)?)
     }
 
     /// Request hover text at a position. Blocking; call off the UI thread.

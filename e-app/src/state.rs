@@ -365,8 +365,45 @@ impl AppState {
             .with(|bs| bs.iter().find(|b| b.id == active).cloned())
     }
 
-    /// Save the active buffer to disk.
+    /// Format the active buffer in place via the language server (PHP only).
+    fn format_active(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        if lsp_language_id(buf.file.language).is_none() {
+            return;
+        }
+        let (Some(client), Some(uri), Some(editor)) =
+            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+        else {
+            return;
+        };
+        let edits = match client.formatting(&uri, 4, true) {
+            Ok(e) if !e.is_empty() => e,
+            _ => return,
+        };
+        // Resolve to offsets against the current text, then apply bottom-up so
+        // earlier offsets stay valid.
+        let mut offs: Vec<(usize, usize, String)> = edits
+            .into_iter()
+            .map(|e| {
+                let s = editor
+                    .offset_of_line_col(e.range.start.line as usize, e.range.start.character as usize);
+                let en = editor
+                    .offset_of_line_col(e.range.end.line as usize, e.range.end.character as usize);
+                (s, en, e.new_text)
+            })
+            .collect();
+        offs.sort_by(|a, b| b.0.cmp(&a.0));
+        for (s, en, text) in offs {
+            buf.doc
+                .edit_single(Selection::region(s, en), &text, EditType::InsertChars);
+        }
+    }
+
+    /// Save the active buffer to disk (formatting PHP first).
     pub fn save_active(&self) {
+        self.format_active();
         let Some(buf) = self.active_buffer() else {
             return;
         };

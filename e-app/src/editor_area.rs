@@ -7,6 +7,8 @@ use std::rc::Rc;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::{Command, CommandExecuted};
 use floem::views::editor::core::command::{EditCommand, MoveCommand};
+use floem::views::editor::core::cursor::{Cursor, CursorMode};
+use floem::views::editor::core::selection::Selection;
 use floem::views::editor::text::{default_dark_color, Document};
 use floem::views::{container, dyn_stack, label, stack, text_editor, Decorators};
 use floem::IntoView;
@@ -54,7 +56,19 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                 });
 
             // Hand the live editor to the buffer for cursor / position queries.
-            b.editor.set(Some(te.editor().clone()));
+            let editor_handle = te.editor().clone();
+            b.editor.set(Some(editor_handle.clone()));
+
+            // Apply a pending go-to-definition jump now that the editor exists.
+            if let Some((l, c)) = b.pending_goto.get_untracked() {
+                let offset = editor_handle.offset_of_line_col(l, c);
+                editor_handle.cursor.set(Cursor::new(
+                    CursorMode::Insert(Selection::caret(offset)),
+                    None,
+                    None,
+                ));
+                b.pending_goto.set(None);
+            }
 
             container(te)
                 .on_move(move |point| win_origin.set(point))

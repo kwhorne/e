@@ -19,7 +19,8 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Sender};
 use lsp_types::{
-    CompletionItem, CompletionResponse, Hover, HoverContents, MarkedString, PublishDiagnosticsParams,
+    CompletionItem, CompletionResponse, GotoDefinitionResponse, Hover, HoverContents, MarkedString,
+    PublishDiagnosticsParams,
 };
 use serde_json::{json, Value};
 
@@ -190,6 +191,36 @@ impl LspClient {
         })
     }
 
+    /// Request the definition location of the symbol at a position.
+    /// Returns `(uri, line, character)`. Blocking; call off the UI thread.
+    pub fn definition(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Result<Option<(String, u32, u32)>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character }
+        });
+        let res = self.request("textDocument/definition", params, Duration::from_secs(5))?;
+        if res.is_null() {
+            return Ok(None);
+        }
+        let resp: GotoDefinitionResponse = serde_json::from_value(res)?;
+        let loc = match resp {
+            GotoDefinitionResponse::Scalar(l) => Some((l.uri.to_string(), l.range.start)),
+            GotoDefinitionResponse::Array(v) => {
+                v.into_iter().next().map(|l| (l.uri.to_string(), l.range.start))
+            }
+            GotoDefinitionResponse::Link(v) => v
+                .into_iter()
+                .next()
+                .map(|l| (l.target_uri.to_string(), l.target_range.start)),
+        };
+        Ok(loc.map(|(uri, pos)| (uri, pos.line, pos.character)))
+    }
+
     /// Request hover text at a position. Blocking; call off the UI thread.
     pub fn hover(&self, uri: &str, line: u32, character: u32) -> Result<Option<String>> {
         let params = json!({
@@ -316,6 +347,12 @@ fn read_message(reader: &mut impl BufRead) -> Result<Option<Value>> {
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;
     Ok(Some(serde_json::from_slice(&buf)?))
+}
+
+/// Convert a `file://` URI back to a filesystem path.
+pub fn uri_to_path(uri: &str) -> std::path::PathBuf {
+    let s = uri.strip_prefix("file://").unwrap_or(uri);
+    std::path::PathBuf::from(s.replace("%20", " "))
 }
 
 /// Convert a filesystem path to a `file://` URI.

@@ -14,6 +14,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use floem::ext_event::create_ext_action;
 use floem::kurbo::Point;
 use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
+use floem::views::editor::core::cursor::{Cursor, CursorMode};
 use floem::views::editor::core::editor::EditType;
 use floem::views::editor::core::selection::Selection;
 use floem::views::editor::text::Document;
@@ -24,7 +25,7 @@ use lsp_types::{Diagnostic, PublishDiagnosticsParams};
 use e_core::buffer::{self, FileInfo};
 use e_core::language::Language;
 use e_core::syntax::highlight_lines;
-use e_lsp::{path_to_uri, LspClient};
+use e_lsp::{path_to_uri, uri_to_path, LspClient};
 
 use crate::completion::{Completion, HoverState};
 use crate::laravel::{self, LaravelData};
@@ -44,6 +45,8 @@ pub struct Buffer {
     pub editor: RwSignal<Option<Editor>>,
     /// The editor's top-left position in the window (for popups).
     pub win_origin: RwSignal<Point>,
+    /// A `(line, col)` to move the caret to once the editor exists.
+    pub pending_goto: RwSignal<Option<(usize, usize)>>,
 }
 
 /// LSP language id, or `None` if `e` has no server for this language.
@@ -271,6 +274,7 @@ impl AppState {
             uri,
             editor: RwSignal::new(None),
             win_origin: RwSignal::new(Point::ZERO),
+            pending_goto: RwSignal::new(None),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.active.set(Some(id));
@@ -534,6 +538,45 @@ impl AppState {
     pub fn close_hover(&self) {
         if self.hover.open.get_untracked() {
             self.hover.open.set(false);
+        }
+    }
+
+    /// Jump to the definition of the symbol under the cursor (LSP).
+    pub fn goto_definition(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let (Some(client), Some(uri), Some(editor)) =
+            (self.lsp.get(), buf.uri.clone(), buf.editor.get_untracked())
+        else {
+            return;
+        };
+        let (line, col) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
+        let app = *self;
+        let send = create_ext_action(self.cx, move |loc: Option<(String, u32, u32)>| match loc {
+            Some((u, l, c)) => app.jump_to(&u, l as usize, c as usize),
+            None => eprintln!("e: no definition found"),
+        });
+        std::thread::spawn(move || {
+            let loc = client.definition(&uri, line as u32, col as u32).ok().flatten();
+            send(loc);
+        });
+    }
+
+    /// Open `uri` and place the caret at `(line, col)`.
+    pub fn jump_to(&self, uri: &str, line: usize, col: usize) {
+        self.open_path(uri_to_path(uri));
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        if let Some(editor) = buf.editor.get_untracked() {
+            let offset = editor.offset_of_line_col(line, col);
+            editor
+                .cursor
+                .set(Cursor::new(CursorMode::Insert(Selection::caret(offset)), None, None));
+        } else {
+            // The editor view isn't built yet; apply once it is.
+            buf.pending_goto.set(Some((line, col)));
         }
     }
 }

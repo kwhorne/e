@@ -117,6 +117,10 @@ fn app_view() -> impl IntoView {
         .on_key_down(Key::Named(NamedKey::F1), |m| m.is_empty(), move |_| {
             state.request_hover();
         })
+        // F12 jumps to the definition of the symbol at the cursor.
+        .on_key_down(Key::Named(NamedKey::F12), |m| m.is_empty(), move |_| {
+            state.goto_definition();
+        })
         // Escape dismisses popups.
         .on_key_down(Key::Named(NamedKey::Escape), |m| m.is_empty(), move |_| {
             state.close_completion();

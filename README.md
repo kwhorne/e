@@ -12,7 +12,8 @@ Early development. Built incrementally:
 - [x] **Milepæl 3** — Syntaks: tree-sitter (Rust, Python, JS/TS, Go, C, JSON, PHP, HTML, CSS, Blade, Vue, Svelte)
 - [x] **Milepæl 4** — LSP: PHP via Intelephense (diagnostics, completion, hover)
 - [x] **Milepæl 5** — Laravel-lag: `route()`/`view()`/`config()`/`env()`-completion
-- [ ] **Milepæl 6** — Inline diagnostics-squiggles, integrert terminal
+- [x] **Milepæl 6** — Go-to-definition (F12), auto-scroll til mål
+- [ ] **Milepæl 7** — Inline diagnostics-squiggles, integrert terminal
 
 ## Workspace layout
 
@@ -70,6 +71,7 @@ Works in both `.php` and `.blade.php` files.
 | ⌘Space | Trigger completion |
 | ↑/↓ + Enter/Tab | Navigate / accept completion |
 | F1 | Hover info |
+| F12 | Go to definition |
 | Esc | Dismiss popups |
 
 ## Build & run

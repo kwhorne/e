@@ -39,3 +39,28 @@ jobs:
           files: |
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz.sha256
+
+  dmg:
+    name: Universal DMG installer
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build DMG
+        run: ./scripts/bundle-dmg.sh --universal
+
+      - name: Checksum
+        run: |
+          cd dist
+          shasum -a 256 e-*-universal.dmg > "$(ls e-*-universal.dmg).sha256"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/e-*-universal.dmg
+            dist/e-*-universal.dmg.sha256

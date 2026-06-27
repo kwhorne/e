@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+#
+# Build a macOS .dmg installer for `e`.
+#
+#   ./scripts/bundle-dmg.sh             # host architecture
+#   ./scripts/bundle-dmg.sh --universal # universal (arm64 + x86_64)
+#
+# Produces dist/e-<version>[-arch].dmg containing e.app and an Applications
+# symlink, so users just drag the app into Applications.
+#
+# Code signing / notarization (optional, for distribution without Gatekeeper
+# warnings) is described in docs/installation.md. By default the app is ad-hoc
+# signed; set CODESIGN_IDENTITY to a "Developer ID Application: …" identity to
+# sign properly.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+VERSION="$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' Cargo.toml | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')"
+UNIVERSAL=0
+[[ "${1:-}" == "--universal" ]] && UNIVERSAL=1
+
+APP="dist/e.app"
+
+# --- 1. build the binary ---------------------------------------------------
+if [[ "$UNIVERSAL" == "1" ]]; then
+  echo "==> building universal binary (arm64 + x86_64)"
+  rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null 2>&1 || true
+  cargo build --release --bin e --target aarch64-apple-darwin
+  cargo build --release --bin e --target x86_64-apple-darwin
+  mkdir -p target/release
+  lipo -create -output target/release/e \
+    target/aarch64-apple-darwin/release/e \
+    target/x86_64-apple-darwin/release/e
+  ARCH_SUFFIX="-universal"
+else
+  cargo build --release --bin e
+  ARCH_SUFFIX=""
+fi
+
+# --- 2. assemble the .app bundle ------------------------------------------
+echo "==> assembling $APP"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp target/release/e "$APP/Contents/MacOS/e"
+cp icons/e.icns "$APP/Contents/Resources/e.icns"
+
+cat > "$APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>            <string>e</string>
+  <key>CFBundleDisplayName</key>     <string>e</string>
+  <key>CFBundleIdentifier</key>      <string>dev.e.editor</string>
+  <key>CFBundleVersion</key>         <string>$VERSION</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundlePackageType</key>     <string>APPL</string>
+  <key>CFBundleExecutable</key>      <string>e</string>
+  <key>CFBundleIconFile</key>        <string>e.icns</string>
+  <key>NSHighResolutionCapable</key> <true/>
+  <key>LSMinimumSystemVersion</key>  <string>11.0</string>
+</dict>
+</plist>
+PLIST
+
+# --- 3. sign ---------------------------------------------------------------
+IDENTITY="${CODESIGN_IDENTITY:--}"
+echo "==> signing with identity: $IDENTITY"
+codesign --force --deep --options runtime --sign "$IDENTITY" "$APP" 2>/dev/null \
+  || codesign --force --deep --sign - "$APP" 2>/dev/null || true
+
+# --- 4. build the DMG ------------------------------------------------------
+DMG="dist/e-${VERSION}${ARCH_SUFFIX}.dmg"
+echo "==> building $DMG"
+rm -f "$DMG"
+
+if command -v create-dmg >/dev/null 2>&1; then
+  # Prettier layout if create-dmg is installed (brew install create-dmg).
+  create-dmg \
+    --volname "e $VERSION" \
+    --window-size 540 380 \
+    --icon-size 110 \
+    --icon "e.app" 140 180 \
+    --app-drop-link 400 180 \
+    "$DMG" "$APP" >/dev/null
+else
+  # Fallback: a plain DMG with an Applications symlink, using built-in hdiutil.
+  STAGING="$(mktemp -d)"
+  cp -R "$APP" "$STAGING/"
+  ln -s /Applications "$STAGING/Applications"
+  hdiutil create -volname "e $VERSION" -srcfolder "$STAGING" \
+    -ov -format UDZO "$DMG" >/dev/null
+  rm -rf "$STAGING"
+fi
+
+echo
+echo "✓ Built $DMG"
+echo "  Open it and drag e.app into Applications."
+[[ "$IDENTITY" == "-" ]] && echo "  (ad-hoc signed — see docs/installation.md for Developer ID + notarization)"

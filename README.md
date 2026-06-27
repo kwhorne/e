@@ -160,11 +160,16 @@ bring the window to the front:
 ./scripts/run.sh path/to/project
 ```
 
-To produce a distributable macOS app bundle:
+To produce a distributable macOS app bundle or a DMG installer:
 
 ```sh
-./scripts/bundle-macos.sh
+./scripts/bundle-macos.sh              # e.app bundle
+./scripts/bundle-dmg.sh --universal    # e-<version>-universal.dmg
 ```
+
+The DMG contains `e.app` and an `Applications` symlink — open it and drag the
+app into Applications. See [docs/installation.md](docs/installation.md) for
+code-signing and notarization.
 
 ## Updating
 

@@ -4,7 +4,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-echo "==> building release binary"
+VERSION="$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' Cargo.toml | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')"
+
+echo "==> building release binary (e $VERSION)"
 cargo build --release
 
 APP="dist/e.app"
@@ -23,8 +25,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key>            <string>e</string>
   <key>CFBundleDisplayName</key>     <string>e</string>
   <key>CFBundleIdentifier</key>      <string>dev.e.editor</string>
-  <key>CFBundleVersion</key>         <string>0.1.0</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key>         <string>__VERSION__</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
   <key>CFBundlePackageType</key>     <string>APPL</string>
   <key>CFBundleExecutable</key>      <string>e</string>
   <key>CFBundleIconFile</key>        <string>e.icns</string>
@@ -34,4 +36,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-echo "==> built $APP"
+# Substitute the version read from Cargo.toml.
+sed -i '' "s/__VERSION__/$VERSION/g" "$APP/Contents/Info.plist"
+
+# Ad-hoc sign so macOS treats it as a stable, consistent app (no Developer ID).
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --deep --sign - "$APP" 2>/dev/null || true
+fi
+
+echo "==> built $APP (e $VERSION)"

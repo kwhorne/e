@@ -166,22 +166,28 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 CommandExecuted::No
             });
 
-            let te_id = floem::View::id(&te);
             let editor_handle = te.editor().clone();
             b.editor.set(Some(editor_handle.clone()));
 
             // Give this editor keyboard focus whenever its buffer becomes the
             // active one (e.g. ⌘N, opening a file, switching tabs), so you can
-            // type immediately without clicking into it first.
-            floem::reactive::create_effect(move |_| {
-                if active_sig.get() == Some(id) {
-                    // Defer to the next frame so the view is mounted before we
-                    // grab focus (otherwise the request is dropped).
-                    floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
-                        te_id.request_focus();
-                    });
-                }
-            });
+            // type immediately without clicking into it first. We focus the
+            // inner, keyboard-navigable editor view (`editor_view_id`), which is
+            // set once that view is built.
+            {
+                let editor_handle = editor_handle.clone();
+                floem::reactive::create_effect(move |_| {
+                    let vid = editor_handle.editor_view_id.get();
+                    if active_sig.get() == Some(id) {
+                        if let Some(vid) = vid {
+                            floem::action::exec_after(
+                                std::time::Duration::from_millis(0),
+                                move |_| vid.request_focus(),
+                            );
+                        }
+                    }
+                });
+            }
 
             if let Some((l, c)) = b.pending_goto.get_untracked() {
                 let offset = editor_handle.offset_of_line_col(l, c);

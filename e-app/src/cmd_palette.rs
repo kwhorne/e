@@ -23,6 +23,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("diff", "Show Git Diff vs HEAD"),
     ("split", "Toggle Split View"),
     ("terminal", "Toggle Terminal"),
+    ("new-terminal", "New Terminal"),
     ("theme", "Toggle Light/Dark Theme"),
     ("settings", "Open Settings (config.json)"),
     ("close-tab", "Close Tab"),
@@ -60,6 +61,7 @@ pub fn run_command(state: AppState, id: &str) {
         "diff" => state.toggle_diff(),
         "split" => state.toggle_split(),
         "terminal" => state.toggle_terminal(),
+        "new-terminal" => state.new_terminal(),
         "theme" => theme::toggle(),
         "settings" => {
             if let Some(home) = std::env::var_os("HOME") {

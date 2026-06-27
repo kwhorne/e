@@ -70,6 +70,13 @@ pub struct Buffer {
     pub pending_goto: RwSignal<Option<(usize, usize)>>,
 }
 
+/// One terminal session (a running shell).
+#[derive(Clone)]
+pub struct TermSession {
+    pub id: u64,
+    pub term: Rc<RefCell<Terminal>>,
+}
+
 /// A language server we know how to launch.
 struct ServerSpec {
     id: &'static str,
@@ -159,7 +166,11 @@ pub struct AppState {
     /// References / symbol-search picker.
     pub picker: Picker,
     /// Integrated terminal session (lazily spawned).
-    pub terminal: RwSignal<Option<Rc<RefCell<Terminal>>>>,
+    /// All open terminal sessions, in tab order.
+    pub terminals: RwSignal<Vec<TermSession>>,
+    /// The focused terminal session id.
+    pub active_terminal: RwSignal<Option<u64>>,
+    next_term_id: RwSignal<u64>,
     pub terminal_open: RwSignal<bool>,
     /// Whether the terminal panel currently has keyboard focus.
     pub terminal_focused: RwSignal<bool>,
@@ -222,7 +233,9 @@ impl AppState {
             signature: SignatureState::new(),
             laravel: RwSignal::new(None),
             picker: Picker::new(),
-            terminal: RwSignal::new(None),
+            terminals: RwSignal::new(Vec::new()),
+            active_terminal: RwSignal::new(None),
+            next_term_id: RwSignal::new(1),
             terminal_open: RwSignal::new(false),
             terminal_focused: RwSignal::new(false),
             term_tick: RwSignal::new(0),
@@ -619,49 +632,92 @@ impl AppState {
 
     // ---- Integrated terminal -------------------------------------------
 
-    /// Toggle the terminal, spawning a shell on first use.
-    pub fn toggle_terminal(&self) {
-        if self.terminal.get_untracked().is_none() {
-            let tx = self.term_tx.get();
-            let on_update = Box::new(move || {
-                let _ = tx.send(());
-            });
-            let root = self.root.get();
-            match Terminal::spawn(&e_term::default_shell(), &root, 30, 110, on_update) {
-                Ok(t) => {
-                    self.terminal.set(Some(Rc::new(RefCell::new(t))));
-                    self.terminal_open.set(true);
-                }
-                Err(e) => eprintln!("e: terminal failed: {e:#}"),
+    fn active_term(&self) -> Option<Rc<RefCell<Terminal>>> {
+        let id = self.active_terminal.get_untracked()?;
+        self.terminals
+            .with_untracked(|ts| ts.iter().find(|t| t.id == id).map(|t| t.term.clone()))
+    }
+
+    /// Spawn a new terminal session, focus it and show the panel.
+    pub fn new_terminal(&self) {
+        let tx = self.term_tx.get();
+        let on_update = Box::new(move || {
+            let _ = tx.send(());
+        });
+        let root = self.root.get();
+        match Terminal::spawn(&e_term::default_shell(), &root, 24, 100, on_update) {
+            Ok(t) => {
+                let id = self.next_term_id.get_untracked();
+                self.next_term_id.set(id + 1);
+                self.terminals.update(|ts| {
+                    ts.push(TermSession {
+                        id,
+                        term: Rc::new(RefCell::new(t)),
+                    })
+                });
+                self.active_terminal.set(Some(id));
+                self.terminal_open.set(true);
             }
+            Err(e) => eprintln!("e: terminal failed: {e:#}"),
+        }
+    }
+
+    /// Toggle the terminal panel, spawning the first shell on first use.
+    pub fn toggle_terminal(&self) {
+        if self.terminals.with_untracked(|t| t.is_empty()) {
+            self.new_terminal();
         } else {
             let open = self.terminal_open.get_untracked();
             self.terminal_open.set(!open);
         }
     }
 
+    pub fn focus_terminal(&self, id: u64) {
+        self.active_terminal.set(Some(id));
+    }
+
+    /// Close a terminal session (kills its shell).
+    pub fn close_terminal(&self, id: u64) {
+        let mut next = None;
+        self.terminals.update(|ts| {
+            if let Some(pos) = ts.iter().position(|t| t.id == id) {
+                ts.remove(pos);
+                if !ts.is_empty() {
+                    next = Some(ts[pos.min(ts.len() - 1)].id);
+                }
+            }
+        });
+        if self.active_terminal.get_untracked() == Some(id) {
+            self.active_terminal.set(next);
+        }
+        if self.terminals.with_untracked(|t| t.is_empty()) {
+            self.terminal_open.set(false);
+        }
+    }
+
     pub fn terminal_input(&self, bytes: &[u8]) {
-        if let Some(t) = self.terminal.get_untracked() {
+        if let Some(t) = self.active_term() {
             t.borrow_mut().write(bytes);
         }
     }
 
+    /// Resize every terminal to the panel size.
     pub fn resize_terminal(&self, rows: usize, cols: usize) {
-        if let Some(t) = self.terminal.get_untracked() {
-            t.borrow().resize(rows, cols);
-        }
+        self.terminals.with_untracked(|ts| {
+            for t in ts {
+                t.term.borrow().resize(rows, cols);
+            }
+        });
     }
 
     pub fn terminal_runs(&self) -> Vec<Vec<e_term::Run>> {
-        self.terminal
-            .get_untracked()
+        self.active_term()
             .map(|t| t.borrow().snapshot_runs())
             .unwrap_or_default()
     }
 
     pub fn terminal_cursor(&self) -> (usize, usize) {
-        self.terminal
-            .get_untracked()
+        self.active_term()
             .map(|t| t.borrow().cursor())
             .unwrap_or((0, 0))
     }

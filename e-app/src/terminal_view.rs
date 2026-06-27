@@ -7,12 +7,76 @@ use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate};
 use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
-use floem::views::{empty, rich_text, scroll, stack, Decorators};
+use floem::views::{dyn_stack, empty, label, rich_text, scroll, stack, Decorators};
 use floem::IntoView;
 
 use crate::app::handle_shortcut;
 use crate::state::AppState;
 use crate::theme;
+
+/// The tab strip at the top of the terminal panel: one tab per session,
+/// plus a "+" to add a new terminal.
+fn terminal_tabs(state: AppState) -> impl IntoView {
+    let tabs = dyn_stack(
+        move || state.terminals.get().into_iter().enumerate().collect::<Vec<_>>(),
+        |(_, t)| t.id,
+        move |(i, t)| {
+            let id = t.id;
+            let active = state.active_terminal;
+            stack((
+                label(move || format!("zsh {}", i + 1)).style(|s| s.color(theme::fg())),
+                label(|| "×".to_string())
+                    .style(|s| {
+                        s.padding_horiz(4.0)
+                            .border_radius(4.0)
+                            .color(theme::fg_dim())
+                            .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
+                    })
+                    .on_click_stop(move |_| state.close_terminal(id)),
+            ))
+            .style(move |s| {
+                let s = s
+                    .items_center()
+                    .gap(6.0)
+                    .padding_horiz(10.0)
+                    .height(28.0)
+                    .font_size(12.0)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .border_right(1.0)
+                    .border_color(theme::border());
+                if active.get() == Some(id) {
+                    s.background(theme::bg_active())
+                } else {
+                    s.hover(|s| s.background(theme::bg_hover()))
+                }
+            })
+            .on_click_stop(move |_| state.focus_terminal(id))
+        },
+    )
+    .style(|s| s.items_center());
+
+    let add = label(|| "+".to_string())
+        .style(|s| {
+            s.width(28.0)
+                .height(28.0)
+                .items_center()
+                .justify_center()
+                .font_size(16.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.new_terminal());
+
+    stack((tabs, add)).style(|s| {
+        s.items_center()
+            .width_full()
+            .height(28.0)
+            .background(theme::bg_panel())
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    })
+}
 
 /// Pixel size of one monospace cell at the terminal's font size.
 fn char_size() -> (f64, f64) {
@@ -103,19 +167,11 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
 
     let body = stack((content, cursor_block)).style(|s| s.size_full());
 
-    scroll(body)
-        .style(move |s| {
-            let s = s
-                .width_full()
-                .height(300.0)
+    let term_area = scroll(body)
+        .style(|s| {
+            s.width_full()
+                .flex_grow(1.0)
                 .background(Color::from_rgb8(0x14, 0x16, 0x1b))
-                .border_top(1.0)
-                .border_color(theme::border());
-            if state.terminal_open.get() {
-                s
-            } else {
-                s.hide()
-            }
         })
         .on_resize(move |rect| {
             let (cw, lh) = char_size();
@@ -146,5 +202,19 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
                 }
             }
             EventPropagation::Continue
-        })
+        });
+
+    stack((terminal_tabs(state), term_area)).style(move |s| {
+        let s = s
+            .flex_col()
+            .width_full()
+            .height(320.0)
+            .border_top(1.0)
+            .border_color(theme::border());
+        if state.terminal_open.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
 }

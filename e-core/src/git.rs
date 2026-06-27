@@ -168,6 +168,34 @@ fn run_git(root: &Path, args: &[&str]) -> Result<(), String> {
     }
 }
 
+/// Local branch names, current branch first.
+pub fn branches(root: &Path) -> Vec<String> {
+    let out = match Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["branch", "--format=%(refname:short)"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+/// Switch to an existing branch.
+pub fn checkout(root: &Path, branch: &str) -> Result<(), String> {
+    run_git(root, &["checkout", branch])
+}
+
+/// Create and switch to a new branch.
+pub fn checkout_new(root: &Path, branch: &str) -> Result<(), String> {
+    run_git(root, &["checkout", "-b", branch])
+}
+
 pub fn stage(root: &Path, path: &str) -> Result<(), String> {
     run_git(root, &["add", "--", path])
 }

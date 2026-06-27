@@ -64,6 +64,11 @@ impl AppState {
         self.with_repo(|repo| git::discard(repo, &path));
         self.fs_rev.update(|r| *r += 1);
     }
+    pub fn git_checkout(&self, branch: String) {
+        self.with_repo(|repo| git::checkout(repo, &branch));
+        self.fs_rev.update(|r| *r += 1);
+    }
+
     pub fn git_push(&self) {
         self.with_repo(git::push);
     }
@@ -201,15 +206,37 @@ fn group(state: AppState, title: &'static str, staged: bool) -> impl IntoView {
 }
 
 pub fn git_panel(state: AppState) -> impl IntoView {
-    // Header: branch + refresh / pull / push.
+    // Header: branch (click to switch) + refresh / pull / push.
     let branch = label(move || {
         state
             .git_branch
             .get()
-            .map(|b| format!("⎇ {b}"))
+            .map(|b| format!("⎇ {b}  ▾"))
             .unwrap_or_else(|| "Not a git repository".to_string())
     })
-    .style(|s| s.flex_grow(1.0).color(theme::fg()).font_size(12.0).text_ellipsis().min_width(0.0));
+    .style(|s| {
+        s.flex_grow(1.0)
+            .color(theme::fg())
+            .font_size(12.0)
+            .text_ellipsis()
+            .min_width(0.0)
+            .cursor(floem::style::CursorStyle::Pointer)
+    })
+    .popout_menu(move || {
+        let current = state.git_branch.get_untracked().unwrap_or_default();
+        let mut menu = floem::menu::Menu::new("Switch branch");
+        let repo = state.git_root.get_untracked();
+        let branches = repo.map(|r| git::branches(&r)).unwrap_or_default();
+        for b in branches {
+            let mark = if b == current { "● " } else { "   " };
+            let target = b.clone();
+            menu = menu.entry(
+                floem::menu::MenuItem::new(format!("{mark}{b}"))
+                    .action(move || state.git_checkout(target.clone())),
+            );
+        }
+        menu
+    });
 
     let header = stack((
         branch,

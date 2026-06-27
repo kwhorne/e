@@ -157,8 +157,12 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.open_settings();
                     true
                 }
-                "d" => {
+                "d" if shift => {
                     state.select_next_occurrence();
+                    true
+                }
+                "d" => {
+                    state.duplicate_line();
                     true
                 }
                 "e" => {

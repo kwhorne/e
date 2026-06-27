@@ -22,7 +22,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("comment", "Toggle Line Comment"),
     ("move-line-up", "Move Line Up"),
     ("move-line-down", "Move Line Down"),
-    ("duplicate-line", "Duplicate Line"),
+    ("duplicate-line", "Duplicate Line (⌘D)"),
     ("delete-line", "Delete Line"),
     ("save", "Save File"),
     ("format", "Format Document"),

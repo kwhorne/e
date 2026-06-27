@@ -36,6 +36,7 @@ Early development. Built incrementally:
 - [x] **Milepæl 25** — Statuslinje: cursor-posisjon (Ln/Col) + seleksjonslengde
 - [x] **Milepæl 26** — Trailing-whitespace-trim + final newline ved lagring
 - [x] **Milepæl 27** — Workspace-wide problems-panel (alle filer, gruppert, klikkbart)
+- [x] **App-ikon** — orange "e" + terminal-cursor på mørk bakgrunn (SVG → .icns) + macOS-bundle-script
 
 ## Workspace layout
 

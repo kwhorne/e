@@ -7,6 +7,7 @@
 mod editing;
 mod dialogs;
 mod recent;
+mod git_view;
 mod about;
 mod update_view;
 mod updater;

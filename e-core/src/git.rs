@@ -43,6 +43,169 @@ pub fn diff(head: &str, current: &str) -> Vec<DiffLine> {
         .collect()
 }
 
+/// One entry from `git status --porcelain`.
+#[derive(Debug, Clone)]
+pub struct StatusEntry {
+    /// Path relative to the repository root.
+    pub path: String,
+    /// Index (staged) status code, e.g. `M`, `A`, `D`, `R`, or ` `.
+    pub index: char,
+    /// Work-tree (unstaged) status code, e.g. `M`, `D`, `?`, or ` `.
+    pub worktree: char,
+}
+
+impl StatusEntry {
+    pub fn is_staged(&self) -> bool {
+        self.index != ' ' && self.index != '?'
+    }
+    pub fn is_unstaged(&self) -> bool {
+        self.worktree != ' '
+    }
+    pub fn is_untracked(&self) -> bool {
+        self.index == '?' && self.worktree == '?'
+    }
+    /// A single-letter badge for the UI.
+    pub fn badge(&self) -> char {
+        if self.is_untracked() {
+            'U'
+        } else if self.is_staged() {
+            self.index
+        } else {
+            self.worktree
+        }
+    }
+}
+
+fn git_root(path: &Path) -> Option<std::path::PathBuf> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(out.stdout).ok()?;
+    Some(std::path::PathBuf::from(s.trim()))
+}
+
+/// The current branch name (or a short commit hash when detached).
+pub fn current_branch(root: &Path) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let name = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    if name == "HEAD" {
+        // Detached: show the short hash instead.
+        let h = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .ok()?;
+        Some(format!("({})", String::from_utf8(h.stdout).ok()?.trim()))
+    } else if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// Parse `git status --porcelain` into per-file entries.
+pub fn status(root: &Path) -> Vec<StatusEntry> {
+    let out = match Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["status", "--porcelain"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut entries = Vec::new();
+    for line in text.lines() {
+        if line.len() < 3 {
+            continue;
+        }
+        let bytes: Vec<char> = line.chars().collect();
+        let index = bytes[0];
+        let worktree = bytes[1];
+        let mut path = line[3..].to_string();
+        // Renames are shown as "old -> new"; keep the new path.
+        if let Some(pos) = path.find(" -> ") {
+            path = path[pos + 4..].to_string();
+        }
+        let path = path.trim_matches('"').to_string();
+        entries.push(StatusEntry {
+            index,
+            worktree,
+            path,
+        });
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries
+}
+
+fn run_git(root: &Path, args: &[&str]) -> Result<(), String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+pub fn stage(root: &Path, path: &str) -> Result<(), String> {
+    run_git(root, &["add", "--", path])
+}
+
+pub fn unstage(root: &Path, path: &str) -> Result<(), String> {
+    run_git(root, &["reset", "-q", "HEAD", "--", path])
+}
+
+pub fn stage_all(root: &Path) -> Result<(), String> {
+    run_git(root, &["add", "-A"])
+}
+
+pub fn unstage_all(root: &Path) -> Result<(), String> {
+    run_git(root, &["reset", "-q", "HEAD"])
+}
+
+pub fn commit(root: &Path, message: &str) -> Result<(), String> {
+    run_git(root, &["commit", "-m", message])
+}
+
+pub fn push(root: &Path) -> Result<(), String> {
+    run_git(root, &["push"])
+}
+
+pub fn pull(root: &Path) -> Result<(), String> {
+    run_git(root, &["pull", "--ff-only"])
+}
+
+/// Discard work-tree changes for a single file (`git checkout -- <path>`).
+pub fn discard(root: &Path, path: &str) -> Result<(), String> {
+    run_git(root, &["checkout", "--", path])
+}
+
+/// The repository root for a workspace path, if any.
+pub fn repo_root(path: &Path) -> Option<std::path::PathBuf> {
+    git_root(path)
+}
+
 /// Fetch the `HEAD` version of `path`, or `None` if it's untracked / not a repo.
 pub fn head_text(path: &Path) -> Option<String> {
     let dir = path.parent()?;

@@ -7,7 +7,7 @@ use floem::ext_event::create_signal_from_channel;
 use floem::keyboard::{Key, Modifiers, NamedKey};
 use floem::kurbo::Size;
 use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{stack, Decorators};
+use floem::views::{dyn_container, stack, Decorators};
 use floem::window::WindowConfig;
 use floem::{Application, IntoView};
 
@@ -115,6 +115,10 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 }
                 "1" => {
                     state.sidebar_open.update(|o| *o = !*o);
+                    true
+                }
+                "2" => {
+                    state.toggle_git_panel();
                     true
                 }
                 "l" => {
@@ -440,7 +444,21 @@ fn app_view() -> impl IntoView {
         }
     });
 
-    let sidebar = stack((file_tree(state), outline_panel(state))).style(move |s| {
+    let sidebar_content = dyn_container(
+        move || state.git_panel_open.get(),
+        move |git| {
+            if git {
+                crate::git_view::git_panel(state).into_any()
+            } else {
+                stack((file_tree(state), outline_panel(state)))
+                    .style(|s| s.flex_col().size_full())
+                    .into_any()
+            }
+        },
+    )
+    .style(|s| s.size_full());
+
+    let sidebar = sidebar_content.style(move |s| {
         let s = s
             .flex_col()
             .width(state.sidebar_width.get())
@@ -451,6 +469,14 @@ fn app_view() -> impl IntoView {
             s
         } else {
             s.hide()
+        }
+    });
+
+    // Keep the Source Control panel in sync with filesystem changes.
+    create_effect(move |_| {
+        state.fs_rev.get();
+        if state.git_panel_open.get_untracked() {
+            state.refresh_git_status();
         }
     });
 

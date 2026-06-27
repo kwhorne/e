@@ -251,6 +251,18 @@ pub struct AppState {
     /// Most-recently-used files (newest first) and the ⌘E switcher state.
     pub recent_files: RwSignal<Vec<PathBuf>>,
     pub recent: crate::recent::RecentState,
+
+    // ---- Source control (git) ------------------------------------------
+    /// Whether the left sidebar shows the Source Control panel (⌘2).
+    pub git_panel_open: RwSignal<bool>,
+    /// The repository root, if the workspace is inside a git repo.
+    pub git_root: RwSignal<Option<PathBuf>>,
+    /// Current branch name.
+    pub git_branch: RwSignal<Option<String>>,
+    /// Working-tree status entries.
+    pub git_status: RwSignal<Vec<git::StatusEntry>>,
+    /// The commit-message input.
+    pub git_commit_msg: RwSignal<String>,
 }
 
 fn now_ms() -> u128 {
@@ -324,6 +336,11 @@ impl AppState {
             close_confirm: RwSignal::new(None),
             recent_files: RwSignal::new(Vec::new()),
             recent: crate::recent::RecentState::new(),
+            git_panel_open: RwSignal::new(false),
+            git_root: RwSignal::new(None),
+            git_branch: RwSignal::new(None),
+            git_status: RwSignal::new(Vec::new()),
+            git_commit_msg: RwSignal::new(String::new()),
         }
     }
 
@@ -1658,6 +1675,7 @@ impl AppState {
                 buf.dirty.set(false);
                 buf.disk_changed.set(false);
                 Self::refresh_disk_mtime(&buf);
+                self.fs_rev.update(|r| *r += 1);
                 eprintln!("e: saved {}", path.display());
                 if let (Some(uri), Some(client)) =
                     (buf.uri.as_ref(), self.lsp_for_language(buf.file.language))

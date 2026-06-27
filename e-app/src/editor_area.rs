@@ -178,11 +178,17 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 let editor_handle = editor_handle.clone();
                 floem::reactive::create_effect(move |_| {
                     let vid = editor_handle.editor_view_id.get();
-                    if active_sig.get() == Some(id) {
+                    if active_sig.get() == Some(id) && !state.any_overlay_open() {
                         if let Some(vid) = vid {
                             floem::action::exec_after(
                                 std::time::Duration::from_millis(0),
-                                move |_| vid.request_focus(),
+                                move |_| {
+                                    // Re-check at fire time: a palette may have
+                                    // opened since, and must keep focus.
+                                    if !state.any_overlay_open() {
+                                        vid.request_focus();
+                                    }
+                                },
                             );
                         }
                     }

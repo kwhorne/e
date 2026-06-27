@@ -415,6 +415,21 @@ impl AppState {
         self.repaint_all_buffers();
     }
 
+    /// Whether any focus-grabbing overlay (palette, find, prompt, dialog) is
+    /// open. The editor must not steal keyboard focus while one of these is up.
+    pub fn any_overlay_open(&self) -> bool {
+        self.palette_open.get()
+            || self.cmd.open.get()
+            || self.picker.open.get()
+            || self.find.open.get()
+            || self.rename.open.get()
+            || self.goto.open.get()
+            || self.recent.open.get()
+            || self.about_open.get()
+            || self.close_confirm.get().is_some()
+            || self.term_rename_id.get().is_some()
+    }
+
     /// Force a re-layout of every open buffer (e.g. after a font-size change).
     fn repaint_all_buffers(&self) {
         self.buffers.with_untracked(|bs| {

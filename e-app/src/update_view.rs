@@ -9,6 +9,33 @@ use crate::state::AppState;
 use crate::theme;
 use crate::updater::{current_version, UpdateStatus};
 
+/// Strip the markdown noise from release notes for a clean in-app display.
+fn clean_notes(notes: &str) -> String {
+    let mut out = Vec::new();
+    for line in notes.lines() {
+        let t = line.trim();
+        // Drop the title, the full-changelog footer and italic blurbs.
+        if t.is_empty()
+            || t.starts_with("**e ")
+            || t.starts_with("**Full changelog")
+            || t.starts_with('_')
+        {
+            if out.last().map(|l: &String| l.is_empty()).unwrap_or(true) {
+                continue;
+            }
+            out.push(String::new());
+            continue;
+        }
+        let line = t
+            .trim_start_matches("### ")
+            .trim_start_matches("## ")
+            .replace("**", "")
+            .replace('`', "");
+        out.push(line);
+    }
+    out.join("\n").trim().to_string()
+}
+
 fn btn(text: &'static str, primary: bool) -> impl IntoView {
     label(move || text.to_string()).style(move |s| {
         let s = s
@@ -85,7 +112,7 @@ fn notice_body(state: AppState) -> impl IntoView {
                     return label(|| String::new()).into_any();
                 };
                 let version = info.version.clone();
-                let notes = info.notes.clone();
+                let notes = clean_notes(&info.notes);
 
                 let header = label(move || format!("Update available — e {version}"))
                     .style(|s| s.color(theme::fg()).font_size(15.0));
@@ -106,10 +133,13 @@ fn notice_body(state: AppState) -> impl IntoView {
                             let notes = notes.clone();
                             scroll(
                                 label(move || notes.clone()).style(|s| {
-                                    s.color(theme::fg_dim()).font_size(12.0).line_height(1.4)
+                                    s.color(theme::fg_dim())
+                                        .font_size(12.0)
+                                        .line_height(1.4)
+                                        .width(300.0)
                                 }),
                             )
-                            .style(|s| s.max_height(220.0).width_full().margin_top(8.0))
+                            .style(|s| s.max_height(220.0).width(308.0).margin_top(8.0))
                             .into_any()
                         } else {
                             label(|| String::new()).into_any()

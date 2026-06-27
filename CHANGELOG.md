@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Clicking a command/file in the `⌘P`, `⌘⇧P`, `⌘T` and `⌘E` palettes now runs the
+  selection instead of just closing the palette (the close-on-blur fired before
+  the click registered).
+- The update notice's "What's new" changelog now wraps properly and strips
+  markdown noise, instead of overflowing horizontally.
+
 ## [0.2.4] - 2026-06-27
 
 ### Added

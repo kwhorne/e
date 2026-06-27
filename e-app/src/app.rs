@@ -121,6 +121,18 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.toggle_git_panel();
                     true
                 }
+                "=" | "+" => {
+                    state.zoom(1);
+                    true
+                }
+                "-" => {
+                    state.zoom(-1);
+                    true
+                }
+                "0" => {
+                    state.zoom_reset();
+                    true
+                }
                 "l" => {
                     state.toggle_agent();
                     true
@@ -366,6 +378,8 @@ fn app_view() -> impl IntoView {
 
     // Quietly check GitHub for a newer release on startup.
     state.check_for_updates(false);
+    // Populate the branch/status once so the status bar shows it.
+    state.refresh_git_status();
 
     // Track recently-used files (newest first) for the ⌘E switcher.
     create_effect(move |_| {

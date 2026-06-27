@@ -1,6 +1,7 @@
 //! The bottom status bar — reflects the active buffer.
 
 use floem::reactive::SignalGet;
+use floem::views::editor::text::Document;
 use floem::views::{label, stack, Decorators};
 use floem::IntoView;
 
@@ -36,7 +37,29 @@ pub fn status_bar(state: AppState) -> impl IntoView {
         None => String::new(),
     });
 
-    let right = stack((diags, position, language)).style(|s| s.items_center().gap(14.0));
+    let branch = label(move || {
+        state
+            .git_branch
+            .get()
+            .map(|b| format!("⎇ {b}"))
+            .unwrap_or_default()
+    });
+
+    let indent = label(move || format!("Spaces: {}", state.settings.tab_width));
+
+    let line_ending = label(move || match state.active_buffer() {
+        Some(b) if b.doc.text().to_string().contains("\r\n") => "CRLF".to_string(),
+        Some(_) => "LF".to_string(),
+        None => String::new(),
+    });
+
+    let encoding = label(move || match state.active_buffer() {
+        Some(_) => "UTF-8".to_string(),
+        None => String::new(),
+    });
+
+    let right = stack((diags, branch, position, indent, line_ending, encoding, language))
+        .style(|s| s.items_center().gap(14.0));
 
     stack((left, right)).style(|s| {
         s.height(24.0)

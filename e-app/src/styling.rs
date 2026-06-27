@@ -56,7 +56,7 @@ pub struct SyntaxStyling {
     find: FindMarks,
     brackets: BracketMarks,
     family: Vec<FamilyOwned>,
-    font_size: usize,
+    font_size: floem::reactive::RwSignal<usize>,
     tab_width: usize,
 }
 
@@ -68,7 +68,7 @@ impl SyntaxStyling {
         git: GitMarks,
         find: FindMarks,
         brackets: BracketMarks,
-        font_size: usize,
+        font_size: floem::reactive::RwSignal<usize>,
         tab_width: usize,
     ) -> Self {
         Self {
@@ -178,7 +178,7 @@ impl Styling for SyntaxStyling {
     }
 
     fn font_size(&self, _edid: EditorId, _line: usize) -> usize {
-        self.font_size
+        floem::reactive::SignalGet::get_untracked(&self.font_size)
     }
 
     fn font_family(&self, _edid: EditorId, _line: usize) -> Cow<'_, [FamilyOwned]> {

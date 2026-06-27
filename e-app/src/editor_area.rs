@@ -122,7 +122,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 b.git_marks.clone(),
                 b.find_marks.clone(),
                 b.bracket_marks.clone(),
-                state.settings.font_size,
+                state.font_size,
                 state.settings.tab_width,
             ))
             .editor_style(move |s| {

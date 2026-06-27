@@ -263,6 +263,9 @@ pub struct AppState {
     pub git_status: RwSignal<Vec<git::StatusEntry>>,
     /// The commit-message input.
     pub git_commit_msg: RwSignal<String>,
+
+    /// Editor font size (reactive, for zoom).
+    pub font_size: RwSignal<usize>,
 }
 
 fn now_ms() -> u128 {
@@ -341,7 +344,30 @@ impl AppState {
             git_branch: RwSignal::new(None),
             git_status: RwSignal::new(Vec::new()),
             git_commit_msg: RwSignal::new(String::new()),
+            font_size: RwSignal::new(config::load_settings().font_size),
         }
+    }
+
+    /// Increase / decrease / reset the editor font size (zoom).
+    pub fn zoom(&self, delta: i64) {
+        let cur = self.font_size.get_untracked() as i64;
+        let next = (cur + delta).clamp(8, 32) as usize;
+        self.font_size.set(next);
+        self.repaint_all_buffers();
+    }
+
+    pub fn zoom_reset(&self) {
+        self.font_size.set(self.settings.font_size);
+        self.repaint_all_buffers();
+    }
+
+    /// Force a re-layout of every open buffer (e.g. after a font-size change).
+    fn repaint_all_buffers(&self) {
+        self.buffers.with_untracked(|bs| {
+            for b in bs {
+                b.doc.cache_rev().update(|r| *r += 1);
+            }
+        });
     }
 
     // ---- File explorer operations --------------------------------------

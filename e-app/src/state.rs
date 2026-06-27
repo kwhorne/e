@@ -40,6 +40,7 @@ use crate::picker::{Picker, PickerItem, PickerMode};
 use crate::rename::RenameState;
 use crate::session::{self, SessionData};
 use crate::builtin_completion;
+use crate::framework_completion;
 use crate::snippets;
 use crate::styling::{
     build_diag_lines, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
@@ -2079,6 +2080,30 @@ impl AppState {
         let (line, col) = editor.offset_to_line_col(offset);
 
         let text = buf.doc.text().to_string();
+
+        // Framework-aware completion (Flux UI, Livewire, Tailwind, Vue, Svelte)
+        // takes priority and replaces the whole multi-segment token.
+        let upto = offset.min(text.len());
+        let line_start = text[..upto].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_before = &text[line_start..upto];
+        if let Some((rep, items)) =
+            framework_completion::completions(buf.file.language, line_before)
+        {
+            let comp = self.completion;
+            let fstart = offset.saturating_sub(rep);
+            let (_, below) = editor.points_of_offset(fstart, cursor.affinity);
+            let vp = editor.viewport.get_untracked();
+            let win = buf.win_origin.get_untracked();
+            let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+            comp.buffer_id.set(Some(buffer_id));
+            comp.start_offset.set(fstart);
+            comp.anchor.set(anchor);
+            comp.items.set(items);
+            comp.selected.set(0);
+            comp.open.set(true);
+            return;
+        }
+
         let start = word_start(&text, offset);
         let word = text[start..offset.min(text.len())].to_string();
 

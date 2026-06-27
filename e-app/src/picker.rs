@@ -52,6 +52,13 @@ impl Picker {
 pub fn picker_overlay(state: AppState) -> impl IntoView {
     let p = state.picker;
 
+    let focus_pulse: RwSignal<u64> = RwSignal::new(0);
+    create_effect(move |_| {
+        if p.open.get() {
+            focus_pulse.update(|x| *x += 1);
+        }
+    });
+
     // Symbols and Search re-query asynchronously as the query changes.
     create_effect(move |_| {
         if p.open.get() && matches!(p.mode.get(), PickerMode::Symbols | PickerMode::Search) {
@@ -101,7 +108,12 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
                 .border_bottom(1.0)
         })
         .request_focus(move || {
-            p.open.get();
+            focus_pulse.get();
+        })
+        .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
+            if p.open.get_untracked() {
+                p.open.set(false);
+            }
         })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| p.open.set(false))
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {

@@ -54,12 +54,17 @@ pub fn palette(state: AppState) -> impl IntoView {
     let files: RwSignal<Vec<PathBuf>> = RwSignal::new(Vec::new());
     let selected: RwSignal<usize> = RwSignal::new(0);
 
+    // Pulsed on open so the input grabs focus without the request_focus
+    // tracking `open` (which would re-grab on close and steal/loop focus).
+    let focus_pulse: RwSignal<u64> = RwSignal::new(0);
+
     // (Re)load the file list whenever the palette opens.
     create_effect(move |_| {
         if state.palette_open.get() {
             files.set(collect_files(&state.root.get()));
             query.set(String::new());
             selected.set(0);
+            focus_pulse.update(|x| *x += 1);
         }
     });
 
@@ -97,8 +102,12 @@ pub fn palette(state: AppState) -> impl IntoView {
                 .border_bottom(1.0)
         })
         .request_focus(move || {
-            // Re-focus the input each time the palette is toggled open.
-            state.palette_open.get();
+            focus_pulse.get();
+        })
+        .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
+            if state.palette_open.get_untracked() {
+                state.palette_open.set(false);
+            }
         })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
             state.palette_open.set(false)

@@ -1,7 +1,7 @@
 //! Command palette (⌘⇧P): run editor commands by name.
 
 use floem::keyboard::{Key, NamedKey};
-use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
+use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate};
 use floem::views::{container, dyn_stack, label, scroll, stack, text_input, Decorators};
 use floem::IntoView;
 
@@ -88,6 +88,13 @@ pub fn run_command(state: AppState, id: &str) {
 pub fn command_palette(state: AppState) -> impl IntoView {
     let cmd = state.cmd;
 
+    let focus_pulse: RwSignal<u64> = RwSignal::new(0);
+    create_effect(move |_| {
+        if cmd.open.get() {
+            focus_pulse.update(|x| *x += 1);
+        }
+    });
+
     let filtered = move || -> Vec<(&'static str, &'static str)> {
         let q = cmd.query.get().to_lowercase();
         COMMANDS
@@ -119,7 +126,12 @@ pub fn command_palette(state: AppState) -> impl IntoView {
                 .border_bottom(1.0)
         })
         .request_focus(move || {
-            cmd.open.get();
+            focus_pulse.get();
+        })
+        .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
+            if cmd.open.get_untracked() {
+                cmd.open.set(false);
+            }
         })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| cmd.open.set(false))
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {

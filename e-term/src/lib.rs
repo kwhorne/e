@@ -256,6 +256,34 @@ impl Terminal {
         cols: usize,
         on_update: Box<dyn Fn() + Send>,
     ) -> Result<Self> {
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.cwd(cwd);
+        Self::spawn_builder(cmd, rows, cols, on_update)
+    }
+
+    /// Run a command line through the user's login shell (`$SHELL -lc "..."`),
+    /// so PATH and the usual environment (nvm, etc.) are available. Used to
+    /// launch CLI agents (Elyra, Claude Code, Codex …).
+    pub fn spawn_command(
+        cmdline: &str,
+        cwd: &Path,
+        rows: usize,
+        cols: usize,
+        on_update: Box<dyn Fn() + Send>,
+    ) -> Result<Self> {
+        let mut cmd = CommandBuilder::new(default_shell());
+        cmd.arg("-lc");
+        cmd.arg(cmdline);
+        cmd.cwd(cwd);
+        Self::spawn_builder(cmd, rows, cols, on_update)
+    }
+
+    fn spawn_builder(
+        mut cmd: CommandBuilder,
+        rows: usize,
+        cols: usize,
+        on_update: Box<dyn Fn() + Send>,
+    ) -> Result<Self> {
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize {
@@ -266,10 +294,8 @@ impl Terminal {
             })
             .context("openpty")?;
 
-        let mut cmd = CommandBuilder::new(shell);
-        cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
-        let child = pair.slave.spawn_command(cmd).context("spawn shell")?;
+        let child = pair.slave.spawn_command(cmd).context("spawn command")?;
 
         let mut reader = pair.master.try_clone_reader().context("clone reader")?;
         let writer = pair.master.take_writer().context("take writer")?;

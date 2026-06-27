@@ -12,6 +12,7 @@ use floem::window::WindowConfig;
 use floem::{Application, IntoView};
 
 use crate::about::about_dialog;
+use crate::agent_view::agent_panel;
 use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
@@ -104,6 +105,14 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 }
                 "1" => {
                     state.sidebar_open.update(|o| *o = !*o);
+                    true
+                }
+                "l" => {
+                    state.toggle_agent();
+                    true
+                }
+                "," => {
+                    state.open_settings();
                     true
                 }
                 "d" => {
@@ -313,7 +322,8 @@ fn app_view() -> impl IntoView {
         }
     });
 
-    let main_row = stack((sidebar, editor_column)).style(|s| s.flex_row().size_full());
+    let main_row = stack((sidebar, editor_column, agent_panel(state)))
+        .style(|s| s.flex_row().size_full());
 
     stack((
         main_row,

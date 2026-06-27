@@ -25,6 +25,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("terminal", "Toggle Terminal"),
     ("new-terminal", "New Terminal"),
     ("split-terminal", "Split Terminal"),
+    ("agent", "Toggle Agent Panel"),
+    ("restart-agent", "Restart Agent"),
     ("theme", "Toggle Light/Dark Theme"),
     ("settings", "Open Settings (config.json)"),
     ("about", "About e"),
@@ -65,17 +67,11 @@ pub fn run_command(state: AppState, id: &str) {
         "terminal" => state.toggle_terminal(),
         "new-terminal" => state.new_terminal(),
         "split-terminal" => state.split_terminal(),
+        "agent" => state.toggle_agent(),
+        "restart-agent" => state.restart_agent(),
         "theme" => theme::toggle(),
         "about" => state.about_open.set(true),
-        "settings" => {
-            if let Some(home) = std::env::var_os("HOME") {
-                let path = std::path::PathBuf::from(home)
-                    .join(".config")
-                    .join("e")
-                    .join("config.json");
-                state.open_path(path);
-            }
-        }
+        "settings" => state.open_settings(),
         "close-tab" => {
             if let Some(id) = state.focused_active_id() {
                 state.close(id);

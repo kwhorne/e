@@ -104,7 +104,7 @@ fn terminal_tabs(state: AppState) -> impl IntoView {
 }
 
 /// Pixel size of one monospace cell at the terminal's font size.
-fn char_size() -> (f64, f64) {
+pub(crate) fn char_size() -> (f64, f64) {
     let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
     let attrs = Attrs::new().family(&family).font_size(13.0);
     let mut layout = TextLayout::new();
@@ -114,7 +114,7 @@ fn char_size() -> (f64, f64) {
 }
 
 /// Translate a key event into the bytes to send to the PTY.
-fn key_to_bytes(ke: &floem::keyboard::KeyEvent) -> Option<Vec<u8>> {
+pub(crate) fn key_to_bytes(ke: &floem::keyboard::KeyEvent) -> Option<Vec<u8>> {
     let mods = ke.modifiers;
     match &ke.key.logical_key {
         Key::Character(s) => {

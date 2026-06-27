@@ -46,6 +46,7 @@ fn welcome() -> impl IntoView {
         cheat("⇧⌘O", "Go to symbol"),
         cheat("⌘F", "Find in file"),
         cheat("⌘T", "Toggle terminal"),
+        cheat("⌘L", "Toggle agent panel"),
         cheat("⌘1", "Toggle sidebar"),
         cheat("⌘\\", "Split editor"),
         cheat("F12", "Go to definition"),

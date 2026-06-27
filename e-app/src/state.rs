@@ -30,7 +30,7 @@ use e_lsp::{path_to_uri, uri_to_path, LspClient, SignatureInfo};
 use e_term::Terminal;
 
 use crate::completion::{Completion, HoverState, SignatureState};
-use crate::config::{self, Settings};
+use crate::config::{self, AgentConfig, Settings};
 use crate::file_ops::{copy_recursive, duplicate_name, FileOp, FileOpKind};
 use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
@@ -213,6 +213,20 @@ pub struct AppState {
     pub fs_rev: RwSignal<u64>,
     /// Whether the About dialog is open.
     pub about_open: RwSignal<bool>,
+
+    // ---- Agent panel (right side) --------------------------------------
+    /// Whether the agent panel is visible (toggled with ⌘L).
+    pub agent_open: RwSignal<bool>,
+    /// The configured agents (from config.json or built-in defaults).
+    pub agents: RwSignal<Vec<AgentConfig>>,
+    /// The currently selected agent id.
+    pub agent_current: RwSignal<String>,
+    /// The running agent PTY, if started.
+    pub agent_term: RwSignal<Option<Rc<RefCell<Terminal>>>>,
+    /// Whether the agent panel currently has keyboard focus.
+    pub agent_focused: RwSignal<bool>,
+    /// Pulsed on open so the panel grabs focus without re-grabbing on close.
+    pub agent_focus_pulse: RwSignal<u64>,
 }
 
 fn now_ms() -> u128 {
@@ -271,6 +285,12 @@ impl AppState {
             file_op: FileOp::new(),
             fs_rev: RwSignal::new(0),
             about_open: RwSignal::new(false),
+            agent_open: RwSignal::new(false),
+            agents: RwSignal::new(config::load_agents()),
+            agent_current: RwSignal::new(config::load_default_agent()),
+            agent_term: RwSignal::new(None),
+            agent_focused: RwSignal::new(false),
+            agent_focus_pulse: RwSignal::new(0),
         }
     }
 
@@ -810,6 +830,105 @@ impl AppState {
         id.and_then(|i| self.term_by_id(i))
             .map(|t| t.borrow().cursor())
             .unwrap_or((0, 0))
+    }
+
+    // ---- Agent panel ----------------------------------------------------
+
+    /// The currently selected agent's config.
+    pub fn current_agent(&self) -> Option<AgentConfig> {
+        let id = self.agent_current.get_untracked();
+        self.agents
+            .with_untracked(|list| list.iter().find(|a| a.id == id).cloned())
+            .or_else(|| self.agents.with_untracked(|l| l.first().cloned()))
+    }
+
+    /// Toggle the agent panel, launching the agent on first open.
+    pub fn toggle_agent(&self) {
+        let open = self.agent_open.get_untracked();
+        if open {
+            self.agent_open.set(false);
+        } else {
+            self.agent_open.set(true);
+            if self.agent_term.get_untracked().is_none() {
+                self.start_agent();
+            }
+            self.agent_focus_pulse.update(|x| *x += 1);
+        }
+    }
+
+    /// (Re)start the selected agent in a fresh PTY.
+    pub fn start_agent(&self) {
+        let Some(agent) = self.current_agent() else {
+            eprintln!("e: no agent configured");
+            return;
+        };
+        let cwd = if agent.cwd.trim().is_empty() {
+            self.root.get_untracked()
+        } else {
+            PathBuf::from(&agent.cwd)
+        };
+        let tx = self.term_tx.get_untracked();
+        let on_update = Box::new(move || {
+            let _ = tx.send(());
+        });
+        match Terminal::spawn_command(&agent.command, &cwd, 30, 100, on_update) {
+            Ok(t) => self.agent_term.set(Some(Rc::new(RefCell::new(t)))),
+            Err(e) => eprintln!("e: agent '{}' failed: {e:#}", agent.name),
+        }
+    }
+
+    /// Switch to a different agent and restart the panel with it.
+    pub fn select_agent(&self, id: &str) {
+        self.agent_current.set(id.to_string());
+        config::save_default_agent(id);
+        self.agent_term.set(None);
+        self.start_agent();
+        self.agent_focus_pulse.update(|x| *x += 1);
+    }
+
+    pub fn restart_agent(&self) {
+        self.agent_term.set(None);
+        self.start_agent();
+        self.agent_focus_pulse.update(|x| *x += 1);
+    }
+
+    pub fn agent_input(&self, bytes: &[u8]) {
+        if let Some(t) = self.agent_term.get_untracked() {
+            t.borrow_mut().write(bytes);
+        }
+    }
+
+    pub fn agent_runs(&self) -> Vec<Vec<e_term::Run>> {
+        self.agent_term
+            .get_untracked()
+            .map(|t| t.borrow().snapshot_runs())
+            .unwrap_or_default()
+    }
+
+    pub fn agent_cursor(&self) -> (usize, usize) {
+        self.agent_term
+            .get_untracked()
+            .map(|t| t.borrow().cursor())
+            .unwrap_or((0, 0))
+    }
+
+    pub fn resize_agent(&self, rows: usize, cols: usize) {
+        if let Some(t) = self.agent_term.get_untracked() {
+            t.borrow().resize(rows, cols);
+        }
+    }
+
+    /// Open the global settings file in the editor.
+    pub fn open_settings(&self) {
+        if let Some(path) = config::settings_path() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if !path.exists() {
+                let _ = std::fs::write(&path, "{\n}\n");
+            }
+            self.open_path(path);
+        }
     }
 
     pub fn buffer_by_id(&self, id: u64) -> Option<Buffer> {

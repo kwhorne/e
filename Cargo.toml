@@ -22,7 +22,13 @@ version      = "0.1.0"
 edition      = "2021"
 rust-version = "1.87.0"
 license      = "MIT"
-authors      = ["kh"]
+authors      = ["Knut W. Horne <kh@gets.no>"]
+description  = "The editor for the rest of us — a fast, native code editor written in Rust."
+repository   = "https://github.com/kwhorne/e"
+homepage     = "https://kwhorne.com"
+readme       = "README.md"
+keywords     = ["editor", "ide", "rust", "lsp", "php"]
+categories   = ["development-tools", "text-editors"]
 
 [workspace.dependencies]
 anyhow      = "1.0"

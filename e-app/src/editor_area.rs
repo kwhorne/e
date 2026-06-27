@@ -166,8 +166,18 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 CommandExecuted::No
             });
 
+            let te_id = floem::View::id(&te);
             let editor_handle = te.editor().clone();
             b.editor.set(Some(editor_handle.clone()));
+
+            // Give this editor keyboard focus whenever its buffer becomes the
+            // active one (e.g. ⌘N, opening a file, switching tabs), so you can
+            // type immediately without clicking into it first.
+            floem::reactive::create_effect(move |_| {
+                if active_sig.get() == Some(id) {
+                    te_id.request_focus();
+                }
+            });
 
             if let Some((l, c)) = b.pending_goto.get_untracked() {
                 let offset = editor_handle.offset_of_line_col(l, c);

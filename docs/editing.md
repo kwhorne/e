@@ -2,6 +2,13 @@
 
 `e` provides the editing primitives you expect from a modern code editor.
 
+## Creating & saving files
+
+- **`⌘N`** creates a new, empty **untitled** buffer — start typing right away.
+- **`⌘S`** saves; for an untitled buffer it opens a **Save As** dialog, then
+  reopens the file with the right language, LSP, and git support.
+- **`⌘⇧S`** is Save As… for any buffer.
+
 ## Line operations
 
 | Action | Shortcut |

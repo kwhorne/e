@@ -43,13 +43,17 @@ search, and Source Control. You can also:
 
 | Action | Shortcut |
 | ------ | -------- |
+| New file | `⌘N` |
 | Open a file by name | `⌘P` |
 | Run any command | `⌘⇧P` |
-| Save | `⌘S` |
+| Save (Save As… for new files) | `⌘S` |
 | Find in file | `⌘F` |
 | Search the whole project | `⌘⇧F` |
 | Toggle the terminal | `⌘T` |
 | Open settings | `⌘,` |
+
+> The editor takes keyboard focus automatically when you create or open a file
+> or switch tabs — just start typing, no click needed.
 
 ## Panels can be resized
 

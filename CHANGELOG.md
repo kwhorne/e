@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Built-in completion (works with or without a language server): language
-  keywords, buffer identifiers, Laravel facades, and Blade directives.
-- New file (⌘N) creates an untitled buffer; Save As… (⌘⇧S) writes it to disk.
+- Built-in completion that works with or without a language server: language
+  keywords, identifiers already in the file, and — for PHP/Blade — Laravel
+  facades and Blade directives. Merged with LSP and snippet suggestions.
+- New file (`⌘N`) creates an untitled buffer; Save As… (`⌘⇧S`) writes it to disk
+  and reopens it with full language, LSP, and git support.
 - Complete user documentation in `docs/` (installation, editing, navigation,
-  languages, source control, terminal, agents, configuration, and more).
+  languages, Laravel, source control, terminal, agents, configuration, updating,
+  and troubleshooting).
+
+### Changed
+
+- The editor now takes keyboard focus automatically when a buffer becomes active
+  (new file, opening a file, switching tabs), so you can type immediately
+  without clicking into it first.
 
 ## [0.2.0] - 2026-06-27
 

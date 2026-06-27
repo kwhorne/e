@@ -5088,8 +5088,3 @@ dependencies = [
  "syn",
  "winnow",
 ]
-
-[[patch.unused]]
-name = "regalloc2"
-version = "0.9.3"
-source = "git+https://github.com/bytecodealliance/regalloc2?rev=5d79e12d0a93b10fc181f4da409b4671dd365228#5d79e12d0a93b10fc181f4da409b4671dd365228"

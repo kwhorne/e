@@ -1,104 +1,72 @@
 //! The About dialog.
 
 use floem::reactive::{SignalGet, SignalUpdate};
-use floem::views::{container, label, stack, svg, Decorators};
+use floem::views::{container, label, stack, Decorators};
 use floem::IntoView;
 
 use crate::state::AppState;
 use crate::theme;
 
-const ICON: &str = include_str!("../../icons/e.svg");
-
-fn open_url(url: &str) {
-    let _ = std::process::Command::new("open").arg(url).spawn();
+fn line(text: &'static str, accent: bool, url: Option<&'static str>) -> impl IntoView {
+    label(move || text.to_string())
+        .style(move |s| {
+            let s = s.font_size(14.0);
+            let s = if accent {
+                s.color(theme::accent()).font_family("monospace".to_string())
+            } else {
+                s.color(theme::fg_dim())
+            };
+            if url.is_some() {
+                s.cursor(floem::style::CursorStyle::Pointer)
+            } else {
+                s
+            }
+        })
+        .on_click_stop(move |_| {
+            if let Some(u) = url {
+                let _ = std::process::Command::new("open").arg(u).spawn();
+            }
+        })
 }
 
-/// One info card: an uppercase label over a (clickable) value.
-fn card(heading: &'static str, value: &'static str, url: Option<&'static str>) -> impl IntoView {
-    let val = label(move || value.to_string()).style(move |s| {
-        let s = s.font_family("monospace".to_string()).font_size(14.0).color(theme::accent());
-        if url.is_some() {
-            s.cursor(floem::style::CursorStyle::Pointer)
-        } else {
-            s
-        }
-    });
-
-    stack((
-        label(move || heading.to_string())
-            .style(|s| s.font_size(11.0).color(theme::fg_dim()).margin_bottom(4.0)),
-        val.on_click_stop(move |_| {
-            if let Some(u) = url {
-                open_url(u);
-            }
-        }),
+pub fn about_dialog(state: AppState) -> impl IntoView {
+    let content = stack((
+        label(|| "e".to_string()).style(|s| s.font_size(40.0).color(theme::fg()).margin_bottom(2.0)),
+        label(|| format!("Version {}", env!("CARGO_PKG_VERSION")))
+            .style(|s| s.font_family("monospace".to_string()).font_size(13.0).color(theme::fg_dim()).margin_bottom(16.0)),
+        line("A fast, native code editor in Rust.", false, None),
+        line("kwhorne.com", true, Some("https://kwhorne.com")),
+        line("github.com/kwhorne/e", true, Some("https://github.com/kwhorne/e")),
+        line("Knut W. Horne", false, None),
+        label(|| "Close".to_string())
+            .style(|s| {
+                s.margin_top(18.0)
+                    .padding_horiz(24.0)
+                    .padding_vert(8.0)
+                    .background(theme::bg())
+                    .color(theme::fg())
+                    .border(1.0)
+                    .border_color(theme::border())
+                    .border_radius(8.0)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.background(theme::bg_hover()))
+            })
+            .on_click_stop(move |_| state.about_open.set(false)),
     ))
     .style(|s| {
         s.flex_col()
             .items_center()
-            .gap(2.0)
-            .width(348.0)
-            .padding_vert(12.0)
-            .background(theme::bg())
+            .gap(10.0)
+            .width(420.0)
+            .padding(32.0)
+            .background(theme::bg_panel())
             .border(1.0)
             .border_color(theme::border())
-            .border_radius(8.0)
+            .border_radius(14.0)
     })
-}
+    .on_click_stop(|_| {});
 
-pub fn about_dialog(state: AppState) -> impl IntoView {
-    let icon = container(svg(|| ICON.to_string()).style(|s| s.size_full()))
-        .style(|s| s.width(68.0).height(68.0).margin_bottom(12.0));
-
-    let head = stack((
-        icon,
-        label(|| "e".to_string()).style(|s| s.font_size(30.0).color(theme::fg())),
-        label(|| format!("Version {}", env!("CARGO_PKG_VERSION"))).style(|s| {
-            s.font_family("monospace".to_string())
-                .font_size(12.0)
-                .color(theme::fg_dim())
-                .margin_bottom(12.0)
-        }),
-        label(|| "A fast, native code editor in Rust.".to_string())
-            .style(|s| s.color(theme::fg_dim()).font_size(13.0)),
-    ))
-    .style(|s| s.flex_col().items_center());
-
-    let cards = stack((
-        card("WEBSITE", "kwhorne.com", Some("https://kwhorne.com")),
-        card("GITHUB", "github.com/kwhorne/e", Some("https://github.com/kwhorne/e")),
-        card("DEVELOPED BY", "Knut W. Horne", None),
-    ))
-    .style(|s| s.flex_col().items_center().gap(8.0).margin_vert(18.0));
-
-    let close = label(|| "Close".to_string())
-        .style(|s| {
-            s.padding_horiz(24.0)
-                .padding_vert(7.0)
-                .background(theme::bg())
-                .color(theme::fg())
-                .border(1.0)
-                .border_color(theme::border())
-                .border_radius(8.0)
-                .cursor(floem::style::CursorStyle::Pointer)
-                .hover(|s| s.background(theme::bg_hover()))
-        })
-        .on_click_stop(move |_| state.about_open.set(false));
-
-    let box_ = stack((head, cards, close))
-        .style(|s| {
-            s.flex_col()
-                .items_center()
-                .width(400.0)
-                .padding(26.0)
-                .background(theme::bg_panel())
-                .border(1.0)
-                .border_color(theme::border())
-                .border_radius(14.0)
-        })
-        .on_click_stop(|_| {});
-
-    container(box_)
+    container(content)
         .style(move |s| {
             let s = s
                 .absolute()

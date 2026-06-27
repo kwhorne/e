@@ -268,6 +268,9 @@ pub struct AppState {
     pub font_size: RwSignal<usize>,
     /// Whether soft word-wrap is enabled.
     pub word_wrap: RwSignal<bool>,
+    /// Navigation history (locations jumped from / to).
+    pub nav_back_stack: RwSignal<Vec<(PathBuf, usize, usize)>>,
+    pub nav_fwd_stack: RwSignal<Vec<(PathBuf, usize, usize)>>,
 }
 
 fn now_ms() -> u128 {
@@ -348,6 +351,8 @@ impl AppState {
             git_commit_msg: RwSignal::new(String::new()),
             font_size: RwSignal::new(config::load_settings().font_size),
             word_wrap: RwSignal::new(false),
+            nav_back_stack: RwSignal::new(Vec::new()),
+            nav_fwd_stack: RwSignal::new(Vec::new()),
         }
     }
 
@@ -2230,9 +2235,17 @@ impl AppState {
         });
     }
 
-    /// Open `uri` and place the caret at `(line, col)`.
+    /// Open `uri` and place the caret at `(line, col)`, recording the spot we
+    /// jumped from in the navigation history.
     pub fn jump_to(&self, uri: &str, line: usize, col: usize) {
-        self.open_path(uri_to_path(uri));
+        self.record_nav();
+        self.goto_location(uri_to_path(uri), line, col);
+    }
+
+    /// Open a file and place the caret at `(line, col)` without touching the
+    /// navigation history (used by back/forward themselves).
+    fn goto_location(&self, path: PathBuf, line: usize, col: usize) {
+        self.open_path(path);
         let Some(buf) = self.active_buffer() else {
             return;
         };
@@ -2244,9 +2257,56 @@ impl AppState {
                 None,
             ));
         } else {
-            // The editor view isn't built yet; apply once it is.
             buf.pending_goto.set(Some((line, col)));
         }
+    }
+
+    fn current_location(&self) -> Option<(PathBuf, usize, usize)> {
+        let buf = self.active_buffer()?;
+        let path = buf.file.path.clone()?;
+        let editor = buf.editor.get_untracked()?;
+        let (line, col) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
+        Some((path, line, col))
+    }
+
+    /// Record the current location as a back-navigation target.
+    fn record_nav(&self) {
+        if let Some(loc) = self.current_location() {
+            let dup = self
+                .nav_back_stack
+                .with_untracked(|v| v.last().map(|l| l.0 == loc.0 && l.1 == loc.1).unwrap_or(false));
+            if !dup {
+                self.nav_back_stack.update(|v| {
+                    v.push(loc);
+                    if v.len() > 100 {
+                        v.remove(0);
+                    }
+                });
+                self.nav_fwd_stack.update(|v| v.clear());
+            }
+        }
+    }
+
+    /// Navigate to the previous location in the history.
+    pub fn nav_back(&self) {
+        let Some(target) = self.nav_back_stack.try_update(|v| v.pop()).flatten() else {
+            return;
+        };
+        if let Some(cur) = self.current_location() {
+            self.nav_fwd_stack.update(|v| v.push(cur));
+        }
+        self.goto_location(target.0, target.1, target.2);
+    }
+
+    /// Navigate to the next location in the history.
+    pub fn nav_forward(&self) {
+        let Some(target) = self.nav_fwd_stack.try_update(|v| v.pop()).flatten() else {
+            return;
+        };
+        if let Some(cur) = self.current_location() {
+            self.nav_back_stack.update(|v| v.push(cur));
+        }
+        self.goto_location(target.0, target.1, target.2);
     }
 }
 

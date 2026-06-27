@@ -129,6 +129,14 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.zoom(1);
                     true
                 }
+                "-" if mods.control() && !mods.meta() && shift => {
+                    state.nav_forward();
+                    true
+                }
+                "-" if mods.control() && !mods.meta() => {
+                    state.nav_back();
+                    true
+                }
                 "-" => {
                     state.zoom(-1);
                     true

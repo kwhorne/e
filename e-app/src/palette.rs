@@ -190,6 +190,7 @@ pub fn palette(state: AppState) -> impl IntoView {
                 .width_full()
                 .height_full()
                 .justify_center()
+                .items_start()
                 .padding_top(90.0);
             if state.palette_open.get() {
                 s

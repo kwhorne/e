@@ -244,6 +244,7 @@ pub fn command_palette(state: AppState) -> impl IntoView {
                 .inset(0.0)
                 .size_full()
                 .justify_center()
+                .items_start()
                 .padding_top(90.0);
             if cmd.open.get() {
                 s

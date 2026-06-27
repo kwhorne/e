@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Source Control panel (⌘2): branch display, staged / unstaged / untracked file
   groups with stage, unstage, discard and stage-all; commit, push and pull.
+- Editor zoom (`⌘=` / `⌘-` / `⌘0`) and a soft word-wrap toggle (`⌥Z`).
+- Navigation history: go back (`⌃-`) and forward (`⌃⇧-`) across jumps.
+- Richer status bar: git branch, line ending (LF/CRLF), indentation and encoding.
 - Recent-files quick switcher (⌘E): a most-recently-used list of files opened
   this session, newest first, with arrow-key navigation.
 - Built-in auto-updater: checks GitHub for newer releases on startup, shows the

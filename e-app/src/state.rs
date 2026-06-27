@@ -1536,6 +1536,24 @@ impl AppState {
         self.focused_active().set(Some(id));
     }
 
+    /// Move tab `src` to the position of `target` (drag-to-reorder).
+    pub fn reorder_tab(&self, src: u64, target: u64) {
+        if src == target {
+            return;
+        }
+        self.buffers.update(|bs| {
+            let Some(from) = bs.iter().position(|b| b.id == src) else {
+                return;
+            };
+            let b = bs.remove(from);
+            let to = bs
+                .iter()
+                .position(|x| x.id == target)
+                .unwrap_or(bs.len());
+            bs.insert(to, b);
+        });
+    }
+
     fn buffer_id_by_path(&self, path: &str) -> Option<u64> {
         let canon = std::path::Path::new(path).canonicalize().ok();
         self.buffers.with(|bs| {

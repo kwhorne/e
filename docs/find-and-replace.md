@@ -33,7 +33,7 @@ The replacement text is inserted literally.
 ## Search in files (`⌘⇧F`)
 
 Searches the entire workspace. Results are shown in a picker with the file path
-and matching line; selecting a result opens the file at that location.
+and matching line; selecting a result opens the file at that location. Use the Replace row + **Replace All** to replace across the whole workspace.
 
 ## Tips
 

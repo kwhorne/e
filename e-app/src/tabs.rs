@@ -1,7 +1,7 @@
 //! The tab strip above the editor area.
 
-use floem::event::EventPropagation;
-use floem::reactive::SignalGet;
+use floem::event::{EventListener, EventPropagation};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
 use floem::IntoView;
 
@@ -9,6 +9,9 @@ use crate::state::AppState;
 use crate::theme;
 
 pub fn tab_bar(state: AppState) -> impl IntoView {
+    // The tab id currently being dragged (for reordering).
+    let drag_tab: RwSignal<Option<u64>> = RwSignal::new(None);
+
     let tabs = dyn_stack(
         move || state.buffers.get(),
         |b| b.id,
@@ -52,6 +55,20 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
                 .on_click(move |_| {
                     state.focus_buffer(id);
                     EventPropagation::Stop
+                })
+                .draggable()
+                .dragging_style(|s| {
+                    s.border(1.0)
+                        .border_color(theme::accent())
+                        .background(theme::bg_hover())
+                })
+                .on_event_stop(EventListener::DragStart, move |_| drag_tab.set(Some(id)))
+                .on_event_stop(EventListener::DragEnd, move |_| drag_tab.set(None))
+                .on_event_stop(EventListener::Drop, move |_| {
+                    if let Some(src) = drag_tab.get_untracked() {
+                        state.reorder_tab(src, id);
+                    }
+                    drag_tab.set(None);
                 })
         },
     )

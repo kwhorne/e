@@ -9,7 +9,7 @@ exactly like your terminal.
 Press **`⌘2`** to switch the sidebar to the Source Control panel (it opens the
 sidebar if hidden). The panel shows:
 
-- **Branch** — the current branch (`⎇ main`), with actions:
+- **Branch** — click the branch name to switch branches; the row also has:
   - **⟳** refresh status
   - **↓** pull (`git pull --ff-only`)
   - **↑** push (`git push`)

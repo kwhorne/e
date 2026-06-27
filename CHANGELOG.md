@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Workspace replace: the search panel (⌘⇧F) now has a Replace row and "Replace All".
+- Branch switcher: click the branch name in the Source Control panel to switch branches.
+- Reorder editor tabs by dragging.
+
 ## [0.2.6] - 2026-06-27
 
 ### Fixed

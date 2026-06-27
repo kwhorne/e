@@ -173,7 +173,12 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                 .into_any()
             } else {
                 let placeholder = container(welcome()).style(move |s| {
-                    let s = s.size_full().items_center().justify_center();
+                    let s = s
+                        .absolute()
+                        .inset(0.0)
+                        .size_full()
+                        .items_center()
+                        .justify_center();
                     if state.buffers.with(|b| b.is_empty()) {
                         s
                     } else {

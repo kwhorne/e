@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explorer/Git sidebar and agent panel to the left or right (default: sidebar
   left, agent right).
 
+### Fixed
+
+- The quick-open palettes (`⌘P`, `⌘⇧P`, `⌘T`, `⌘E`) no longer stretch to the full
+  window height — they size to their contents.
+- Typing in a palette now reliably reaches its input: the editor no longer steals
+  keyboard focus while a palette or dialog is open (it re-focuses on close).
+
 ## [0.2.1] - 2026-06-27
 
 ### Added

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Recent-files quick switcher (⌘E): a most-recently-used list of files opened
+  this session, newest first, with arrow-key navigation.
 - Built-in auto-updater: checks GitHub for newer releases on startup, shows the
   changelog in a notice, and installs the update in place on confirmation.
   Manual check available via the command palette ("Check for Updates").

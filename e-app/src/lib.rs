@@ -6,6 +6,7 @@
 
 mod editing;
 mod dialogs;
+mod recent;
 mod about;
 mod update_view;
 mod updater;

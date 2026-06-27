@@ -248,6 +248,9 @@ pub struct AppState {
     pub goto: crate::editing::GotoState,
     /// Buffer id awaiting a close confirmation (unsaved changes).
     pub close_confirm: RwSignal<Option<u64>>,
+    /// Most-recently-used files (newest first) and the ⌘E switcher state.
+    pub recent_files: RwSignal<Vec<PathBuf>>,
+    pub recent: crate::recent::RecentState,
 }
 
 fn now_ms() -> u128 {
@@ -319,6 +322,8 @@ impl AppState {
             update_notes_open: RwSignal::new(false),
             goto: crate::editing::GotoState::new(),
             close_confirm: RwSignal::new(None),
+            recent_files: RwSignal::new(Vec::new()),
+            recent: crate::recent::RecentState::new(),
         }
     }
 

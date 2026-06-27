@@ -43,6 +43,7 @@ fn welcome() -> impl IntoView {
     // The shortcut rows form a left-aligned block...
     let cheats = stack((
         cheat("⌘P", "Find file"),
+        cheat("⌘E", "Recent files"),
         cheat("⇧⌘P", "Command palette"),
         cheat("⇧⌘F", "Search in files"),
         cheat("⇧⌘O", "Go to symbol"),

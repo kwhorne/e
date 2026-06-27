@@ -12,6 +12,7 @@ use floem::window::WindowConfig;
 use floem::{Application, IntoView};
 
 use crate::about::about_dialog;
+use crate::recent::recent_palette;
 use crate::dialogs::{close_confirm_dialog, disk_conflict_bar};
 use crate::editing::goto_bar;
 use crate::agent_view::agent_panel;
@@ -128,6 +129,10 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.select_next_occurrence();
                     true
                 }
+                "e" => {
+                    state.open_recent();
+                    true
+                }
                 "/" => {
                     state.toggle_comment();
                     true
@@ -219,6 +224,7 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 state.close_goto_line();
 
                 state.cancel_close();
+                state.close_recent();
                 true
             }
             _ => false,
@@ -357,6 +363,18 @@ fn app_view() -> impl IntoView {
     // Quietly check GitHub for a newer release on startup.
     state.check_for_updates(false);
 
+    // Track recently-used files (newest first) for the ⌘E switcher.
+    create_effect(move |_| {
+        if let Some(id) = state.focused_active_id() {
+            if let Some(path) = state
+                .buffers
+                .with(|bs| bs.iter().find(|b| b.id == id).and_then(|b| b.file.path.clone()))
+            {
+                state.push_recent(path);
+            }
+        }
+    });
+
     // Persist the session whenever the open files / panes change.
     create_effect(move |_| {
         state.buffers.with(|_| ());
@@ -475,9 +493,9 @@ fn app_view() -> impl IntoView {
         palette(state),
         command_palette(state),
         update_notice(state),
-        stack((goto_bar(state), close_confirm_dialog(state))).style(move |s| {
+        stack((goto_bar(state), close_confirm_dialog(state), recent_palette(state))).style(move |s| {
             let s = s.absolute().inset(0.0).size_full();
-            if state.goto.open.get() || state.close_confirm.get().is_some() {
+            if state.goto.open.get() || state.close_confirm.get().is_some() || state.recent.open.get() {
                 s
             } else {
                 s.hide()

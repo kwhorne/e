@@ -54,6 +54,9 @@ grouped by file. Click an entry to jump straight to the issue.
 
 ## Completion, snippets & signatures
 
+- Even without a language server, built-in completion offers language keywords,
+  identifiers from the open file, and (for PHP/Blade) Laravel facades and Blade
+  directives.
 - Completion combines LSP suggestions with built-in **snippets** (per-language
   templates) and, for Laravel projects, [helper completions](laravel.md).
 - Accepting a snippet places the caret at the first placeholder.

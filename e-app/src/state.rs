@@ -39,6 +39,7 @@ use crate::outline::OutlineItem;
 use crate::picker::{Picker, PickerItem, PickerMode};
 use crate::rename::RenameState;
 use crate::session::{self, SessionData};
+use crate::builtin_completion;
 use crate::snippets;
 use crate::styling::{
     build_diag_lines, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
@@ -2077,10 +2078,13 @@ impl AppState {
         comp.start_offset.set(start);
         comp.anchor.set(anchor);
 
-        // Snippets are computed synchronously and shown first.
+        // Snippets and built-ins (keywords / buffer words / Laravel) are
+        // computed synchronously; LSP results are merged in when available.
         let snippet_items = snippets::completion_items(buf.file.language, &word);
+        let builtin_items = builtin_completion::items(buf.file.language, &word, &text);
 
         let show = move |items: Vec<lsp_types::CompletionItem>| {
+            let items = dedup_by_label(items);
             if items.is_empty() {
                 comp.open.set(false);
             } else {
@@ -2096,6 +2100,7 @@ impl AppState {
                     create_ext_action(self.cx, move |lsp: Vec<lsp_types::CompletionItem>| {
                         let mut items = snippet_items.clone();
                         items.extend(lsp);
+                        items.extend(builtin_items.clone());
                         show(items);
                     });
                 std::thread::spawn(move || {
@@ -2105,7 +2110,11 @@ impl AppState {
                     send(items);
                 });
             }
-            _ => show(snippet_items),
+            _ => {
+                let mut items = snippet_items;
+                items.extend(builtin_items);
+                show(items);
+            }
         }
     }
 
@@ -2557,6 +2566,15 @@ fn find_conflict(text: &str, cursor: usize) -> Option<(usize, usize, String, Str
         search = end;
     }
     None
+}
+
+/// Remove duplicate completion items, keeping the first of each label.
+fn dedup_by_label(items: Vec<lsp_types::CompletionItem>) -> Vec<lsp_types::CompletionItem> {
+    let mut seen = HashSet::new();
+    items
+        .into_iter()
+        .filter(|i| seen.insert(i.label.clone()))
+        .collect()
 }
 
 /// A short "x minutes ago" string for a unix timestamp.

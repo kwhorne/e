@@ -9,12 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Framework-aware completion: Flux UI components (<flux:…>), Livewire wire:
-  directives, Tailwind utility classes (inside class="…"), and Vue/Svelte directives.
+- Framework-aware completion: Flux UI components (`<flux:…>`), Livewire `wire:`
+  directives, Tailwind utility classes (inside `class="…"`), and Vue/Svelte
+  directives.
+- File-type icons in the explorer, per language/extension, with open/closed
+  folder icons.
 
-### Added
+### Fixed
 
-- File-type icons in the explorer (per language/extension; open/closed folders).
+- Accepting a completion now places the caret at the end of the inserted text
+  instead of in the middle (affected framework and LSP completions alike).
 
 ## [0.2.2] - 2026-06-27
 

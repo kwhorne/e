@@ -33,7 +33,7 @@ search, and Source Control. You can also:
 ```
 
 - **Sidebar** (`⌘1`) — file explorer and document outline, or the Source Control
-  panel (`⌘2`).
+  panel (`⌘2`). Files show type-specific icons.
 - **Editor** — tabs, breadcrumbs, and the code area. Split with `⌘\`.
 - **Terminal** (`⌘T`) — an integrated terminal with tabs and split panes.
 - **Agent panel** (`⌘L`) — run an AI coding agent beside your code.

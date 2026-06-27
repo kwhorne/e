@@ -183,7 +183,13 @@ pub fn recent_palette(state: AppState) -> impl IntoView {
 
     container(box_)
         .style(move |s| {
-            let s = s.absolute().inset(0.0).size_full().justify_center().padding_top(90.0);
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .justify_center()
+                .items_start()
+                .padding_top(90.0);
             if recent.open.get() {
                 s
             } else {

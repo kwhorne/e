@@ -5,8 +5,10 @@ use std::path::PathBuf;
 use floem::ext_event::create_signal_from_channel;
 use floem::keyboard::{Key, NamedKey};
 use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith};
+use floem::kurbo::Size;
 use floem::views::{stack, Decorators};
-use floem::IntoView;
+use floem::window::WindowConfig;
+use floem::{Application, IntoView};
 
 use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
@@ -29,7 +31,16 @@ use crate::theme;
 
 /// Launch the editor.
 pub fn launch() {
-    floem::launch(app_view);
+    Application::new()
+        .window(
+            move |_| app_view(),
+            Some(
+                WindowConfig::default()
+                    .size(Size::new(1280.0, 820.0))
+                    .title("e"),
+            ),
+        )
+        .run();
 }
 
 /// Resolve the CLI argument into `(workspace_root, file_to_open)`.

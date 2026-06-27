@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-27
+
 ### Added
 
 - Git blame for the current line shown in the status bar.
@@ -58,5 +60,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kwhorne/e/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kwhorne/e/releases/tag/v0.1.0

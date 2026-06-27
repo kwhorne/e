@@ -32,6 +32,8 @@ pub struct Picker {
     pub query: RwSignal<String>,
     pub items: RwSignal<Vec<PickerItem>>,
     pub selected: RwSignal<usize>,
+    /// Replacement text for workspace replace (Search mode).
+    pub replace: RwSignal<String>,
     /// Generation counter to drop stale async symbol results.
     pub gen: RwSignal<u64>,
 }
@@ -44,6 +46,7 @@ impl Picker {
             query: RwSignal::new(String::new()),
             items: RwSignal::new(Vec::new()),
             selected: RwSignal::new(0),
+            replace: RwSignal::new(String::new()),
             gen: RwSignal::new(0),
         }
     }
@@ -180,7 +183,49 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
         })
         .style(|s| s.max_height(360.0).width_full());
 
-    let box_ = stack((input, rows_scroll))
+    // Replace row — only for workspace search.
+    let replace_input = text_input(p.replace)
+        .placeholder("Replace…")
+        .on_enter(move || state.replace_in_workspace())
+        .style(|s| {
+            theme::input_colors(s)
+                .flex_grow(1.0)
+                .height(28.0)
+                .padding_horiz(8.0)
+                .border(1.0)
+                .border_radius(4.0)
+        });
+    let replace_btn = label(|| "Replace All".to_string())
+        .style(|s| {
+            s.padding_horiz(12.0)
+                .height(28.0)
+                .items_center()
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(4.0)
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.replace_in_workspace());
+    let replace_row = stack((replace_input, replace_btn)).style(move |s| {
+        let s = s
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .padding_horiz(10.0)
+            .padding_vert(6.0)
+            .border_bottom(1.0)
+            .border_color(theme::border());
+        if p.mode.get() == PickerMode::Search {
+            s
+        } else {
+            s.hide()
+        }
+    });
+
+    let box_ = stack((input, replace_row, rows_scroll))
         .style(|s| {
             s.flex_col()
                 .width(620.0)

@@ -2428,9 +2428,26 @@ impl AppState {
         let p = self.picker;
         p.mode.set(PickerMode::Search);
         p.query.set(String::new());
+        p.replace.set(String::new());
         p.items.set(Vec::new());
         p.selected.set(0);
         p.open.set(true);
+    }
+
+    /// Replace every occurrence of the search query across the workspace.
+    pub fn replace_in_workspace(&self) {
+        let query = self.picker.query.get_untracked();
+        let replace = self.picker.replace.get_untracked();
+        if query.is_empty() {
+            return;
+        }
+        let root = self.root.get_untracked();
+        let files = replace_in_dir(&root, &query, &replace);
+        eprintln!("e: replaced in {files} file(s)");
+        self.fs_rev.update(|r| *r += 1);
+        // Reload affected open buffers and refresh the result list.
+        self.check_external_changes();
+        self.request_search(query);
     }
 
     /// Dispatch a picker query to the right backend for the current mode.
@@ -2666,6 +2683,47 @@ fn find_conflict(text: &str, cursor: usize) -> Option<(usize, usize, String, Str
         search = end;
     }
     None
+}
+
+/// Replace every occurrence of `query` with `replace` in text files under
+/// `root` (skipping dot-dirs, `target`, `node_modules`, and large/binary files).
+/// Returns the number of files changed.
+fn replace_in_dir(root: &std::path::Path, query: &str, replace: &str) -> usize {
+    let mut changed = 0;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(read) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read.filter_map(|e| e.ok()) {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "target" || name == "node_modules" {
+                continue;
+            }
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(t) if t.is_dir() => stack.push(path),
+                Ok(_) => {
+                    if entry.metadata().map(|m| m.len() > 2_000_000).unwrap_or(true) {
+                        continue;
+                    }
+                    let Ok(content) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    if content.contains(query) {
+                        let new = content.replace(query, replace);
+                        if new != content {
+                            let _ = std::fs::write(&path, new);
+                            changed += 1;
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    changed
 }
 
 /// Remove duplicate completion items, keeping the first of each label.

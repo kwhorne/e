@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- macOS DMG installer (`scripts/bundle-dmg.sh`, also built per release) — drag
+  `e.app` into Applications. Supports universal (arm64 + x86_64) builds and
+  optional Developer ID signing/notarization.
 - "Install 'e' Command in PATH" command (⌘⇧P) — symlinks `e` into
   `/usr/local/bin` so you can launch the editor from any directory with `e .`.
 

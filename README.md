@@ -167,7 +167,7 @@ Global settings live in `~/.config/e/config.json` (open it with `⌘,`):
 | `e-core`  | GUI-agnostic core: rope buffers, language detection, tree-sitter syntax, git diff, markdown |
 | `e-lsp`   | Multi-server Language Server Protocol client                         |
 | `e-term`  | PTY-backed terminal with a minimal VT100 screen model                |
-| `e-app`   | The Floem UI — editor, panels, palettes, theming, state              |
+| `e-app`   | The UI — editor, panels, palettes, theming, state                    |
 | `e`       | The binary entry point                                               |
 
 Run the test suite with:

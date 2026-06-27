@@ -50,6 +50,11 @@ bar appears above the editor with one-click resolution:
 - **Accept Incoming** — keep the other side.
 - **Accept Both** — keep both, removing the markers.
 
+## Commit history & stash
+
+The panel lists recent commits (hash, summary, author, time), and the Stash /
+ Pop buttons stash and restore your working changes.
+
 ## Status bar
 
 The status bar also shows the current branch, so you always know where you are —

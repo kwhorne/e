@@ -64,6 +64,8 @@ grouped by file. Click an entry to jump straight to the issue.
 - Completion combines LSP suggestions with built-in **snippets** (per-language
   templates) and, for Laravel projects, [helper completions](laravel.md).
 - Accepting a snippet places the caret at the first placeholder.
+- Define your own snippets in `config.json` under `snippets` (per language):
+  `"snippets": { "php": [ { "prefix": "dd", "body": "dd($0);" } ] }`.
 - Signature help shows the active parameter as you type arguments.
 
 ## Bracket matching

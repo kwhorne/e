@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- User-defined snippets in the `snippets` section of `config.json`.
+- Source Control: recent-commit history and stash (Stash / Pop).
+- Tab pinning (right-click a tab) with Close Others; tab overflow scrolls.
 - Inlay hints: inline type and parameter-name hints from the language server,
   shown as dimmed phantom text. Configurable via `inlay_hints`.
 

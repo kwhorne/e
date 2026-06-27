@@ -5,6 +5,8 @@
 //! name, language and dirty state. Everything else grows from here.
 
 mod about;
+mod update_view;
+mod updater;
 mod agent_view;
 mod app;
 mod breadcrumbs;

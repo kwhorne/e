@@ -41,6 +41,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Light / dark themes** (`F8`), **auto-save**, **format & trim on save**
 - **Session persistence** — reopens your files, tabs and split layout per workspace
 - **Workspace problems panel** — every diagnostic across the project, grouped and clickable
+- **Built-in auto-updater** — detects new GitHub releases, shows the changelog, and installs in place
 
 ## Supported languages
 
@@ -140,6 +141,16 @@ To produce a distributable macOS app bundle:
 ```sh
 ./scripts/bundle-macos.sh
 ```
+
+## Updating
+
+`e` checks GitHub for a newer release on startup. When one is available, a
+notice appears in the bottom-right corner with the changelog and an **Update
+now** button — clicking it downloads the latest build for your platform and
+replaces the running binary in place; restart `e` to finish.
+
+You can also trigger a check manually from the command palette (`⌘⇧P` →
+**Check for Updates**).
 
 ## Configuration
 

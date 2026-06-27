@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Built-in auto-updater: checks GitHub for newer releases on startup, shows the
+  changelog in a notice, and installs the update in place on confirmation.
+  Manual check available via the command palette ("Check for Updates").
+- Release workflow that publishes per-platform binary assets for each tag.
+
 ## [0.1.0] - 2026-06-27
 
 ### Added

@@ -13,6 +13,7 @@ use floem::{Application, IntoView};
 
 use crate::about::about_dialog;
 use crate::agent_view::agent_panel;
+use crate::update_view::update_notice;
 use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
@@ -312,6 +313,9 @@ fn app_view() -> impl IntoView {
         state.open_path(file);
     }
 
+    // Quietly check GitHub for a newer release on startup.
+    state.check_for_updates(false);
+
     // Persist the session whenever the open files / panes change.
     create_effect(move |_| {
         state.buffers.with(|_| ());
@@ -424,6 +428,7 @@ fn app_view() -> impl IntoView {
         picker_overlay(state),
         palette(state),
         command_palette(state),
+        update_notice(state),
     ))
     .style(|s| s.size_full().background(theme::bg()).color(theme::fg()))
     .window_title(move || {

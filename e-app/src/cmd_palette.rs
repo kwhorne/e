@@ -28,6 +28,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("agent", "Toggle Agent Panel"),
     ("restart-agent", "Restart Agent"),
     ("theme", "Toggle Light/Dark Theme"),
+    ("check-updates", "Check for Updates"),
     ("settings", "Open Settings (config.json)"),
     ("about", "About e"),
     ("close-tab", "Close Tab"),
@@ -70,6 +71,7 @@ pub fn run_command(state: AppState, id: &str) {
         "agent" => state.toggle_agent(),
         "restart-agent" => state.restart_agent(),
         "theme" => theme::toggle(),
+        "check-updates" => state.check_for_updates(true),
         "about" => state.about_open.set(true),
         "settings" => state.open_settings(),
         "close-tab" => {

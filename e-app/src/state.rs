@@ -231,6 +231,14 @@ pub struct AppState {
     /// Draggable panel widths (pixels).
     pub sidebar_width: RwSignal<f64>,
     pub agent_width: RwSignal<f64>,
+
+    // ---- Auto-update ----------------------------------------------------
+    /// The available update, if GitHub reports a newer release.
+    pub update_info: RwSignal<Option<crate::updater::UpdateInfo>>,
+    /// Progress of the current check/install.
+    pub update_status: RwSignal<crate::updater::UpdateStatus>,
+    /// Whether the changelog is expanded in the update notice.
+    pub update_notes_open: RwSignal<bool>,
 }
 
 fn now_ms() -> u128 {
@@ -297,6 +305,9 @@ impl AppState {
             agent_focus_pulse: RwSignal::new(0),
             sidebar_width: RwSignal::new(240.0),
             agent_width: RwSignal::new(460.0),
+            update_info: RwSignal::new(None),
+            update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
+            update_notes_open: RwSignal::new(false),
         }
     }
 
@@ -950,6 +961,89 @@ impl AppState {
             }
             self.open_path(path);
         }
+    }
+
+    // ---- Auto-update ----------------------------------------------------
+
+    /// Check GitHub for a newer release (non-blocking). `announce_up_to_date`
+    /// controls whether an "already current" result is surfaced in the status.
+    pub fn check_for_updates(&self, announce_up_to_date: bool) {
+        use crate::updater::{self, UpdateStatus};
+        if self.update_status.get_untracked() == UpdateStatus::Downloading {
+            return;
+        }
+        self.update_status.set(UpdateStatus::Checking);
+        let info_sig = self.update_info;
+        let status_sig = self.update_status;
+        let send = create_ext_action(self.cx, move |result: Option<updater::UpdateInfo>| {
+            match result {
+                Some(info) => {
+                    info_sig.set(Some(info));
+                    status_sig.set(UpdateStatus::Idle);
+                }
+                None => {
+                    status_sig.set(if announce_up_to_date {
+                        UpdateStatus::UpToDate
+                    } else {
+                        UpdateStatus::Idle
+                    });
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            let result = updater::check().unwrap_or(None);
+            send(result);
+        });
+    }
+
+    /// Download and install the available update in place (non-blocking).
+    pub fn install_update(&self) {
+        use crate::updater::{self, UpdateStatus};
+        if self.update_status.get_untracked() == UpdateStatus::Downloading {
+            return;
+        }
+        self.update_status.set(UpdateStatus::Downloading);
+        let status_sig = self.update_status;
+        let send = create_ext_action(self.cx, move |result: Result<(), String>| match result {
+            Ok(()) => status_sig.set(UpdateStatus::Installed),
+            Err(e) => status_sig.set(UpdateStatus::Failed(e)),
+        });
+        std::thread::spawn(move || {
+            let result = updater::install().map_err(|e| format!("{e:#}"));
+            send(result);
+        });
+    }
+
+    /// Dismiss the update notice (until the next check).
+    pub fn dismiss_update(&self) {
+        self.update_info.set(None);
+        self.update_notes_open.set(false);
+        self.update_status.set(crate::updater::UpdateStatus::Idle);
+    }
+
+    /// Relaunch the application (used after an update is installed).
+    pub fn restart_app(&self) {
+        let exe = std::env::current_exe().ok();
+        // If we're running inside a macOS .app bundle, relaunch the bundle so
+        // the window comes to the front; otherwise relaunch the bare binary.
+        if let Some(exe) = exe.as_ref() {
+            let bundle = exe
+                .ancestors()
+                .find(|p| p.extension().map(|e| e == "app").unwrap_or(false));
+            if let Some(bundle) = bundle {
+                let _ = std::process::Command::new("open")
+                    .arg("-n")
+                    .arg(bundle)
+                    .spawn();
+                std::process::exit(0);
+            }
+        }
+        if let Some(exe) = exe {
+            let _ = std::process::Command::new(exe)
+                .arg(self.root.get_untracked())
+                .spawn();
+        }
+        std::process::exit(0);
     }
 
     pub fn buffer_by_id(&self, id: u64) -> Option<Buffer> {

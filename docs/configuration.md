@@ -20,6 +20,8 @@ Open it any time with **`⌘,`** (it is created on first use).
   "autosave": true,        // save dirty buffers after a short idle period
   "indent_guides": true,   // show indentation guide lines
   "auto_close": true,      // auto-close brackets and quotes
+  "sidebar_side": "left",  // explorer/Git panel side: "left" or "right"
+  "agent_side": "right",   // agent panel side: "right" or "left"
   "agents": { /* see below */ }
 }
 ```
@@ -34,7 +36,13 @@ Open it any time with **`⌘,`** (it is created on first use).
 | `autosave` | bool | `true` | Idle auto-save |
 | `indent_guides` | bool | `true` | Indentation guides |
 | `auto_close` | bool | `true` | Auto-close brackets/quotes |
+| `sidebar_side` | string | `"left"` | Side of the explorer/Git sidebar (`"left"` or `"right"`) |
+| `agent_side` | string | `"right"` | Side of the agent panel (`"right"` or `"left"`) |
 | `agents` | object | built-ins | AI agent configuration |
+
+> **Panel layout** (`sidebar_side`, `agent_side`) is read at startup — restart
+> `e` after changing it. By default the explorer/Git sidebar is on the left and
+> the agent panel on the right; set them to swap sides.
 
 ## Themes
 

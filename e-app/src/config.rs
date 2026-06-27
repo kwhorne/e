@@ -15,6 +15,10 @@ pub struct Settings {
     pub autosave: bool,
     pub indent_guides: bool,
     pub auto_close: bool,
+    /// Explorer/Git sidebar on the right instead of the left.
+    pub sidebar_right: bool,
+    /// Agent panel on the left instead of the right.
+    pub agent_left: bool,
 }
 
 impl Default for Settings {
@@ -28,6 +32,8 @@ impl Default for Settings {
             autosave: true,
             indent_guides: true,
             auto_close: true,
+            sidebar_right: false,
+            agent_left: false,
         }
     }
 }
@@ -68,6 +74,8 @@ pub fn load_settings() -> Settings {
         autosave: bool_of("autosave", d.autosave),
         indent_guides: bool_of("indent_guides", d.indent_guides),
         auto_close: bool_of("auto_close", d.auto_close),
+        sidebar_right: v.get("sidebar_side").and_then(|x| x.as_str()) == Some("right"),
+        agent_left: v.get("agent_side").and_then(|x| x.as_str()) == Some("left"),
     }
 }
 

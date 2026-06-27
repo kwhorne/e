@@ -523,28 +523,44 @@ fn app_view() -> impl IntoView {
         }
     });
 
-    let main_row = stack((
-        sidebar,
-        editor_column,
-        agent_panel(state),
-        resize_handle(
-            state,
-            ResizeSide::Left,
-            state.sidebar_width,
-            state.sidebar_open,
-            150.0,
-            600.0,
-        ),
-        resize_handle(
-            state,
-            ResizeSide::Right,
-            state.agent_width,
-            state.agent_open,
-            300.0,
-            900.0,
-        ),
-    ))
-    .style(|s| s.flex_row().size_full());
+    // Panel sides are configurable (config keys `sidebar_side` / `agent_side`):
+    // the explorer/Git sidebar and the agent panel can each sit left or right.
+    let sidebar_right = state.settings.sidebar_right;
+    let agent_left = state.settings.agent_left;
+    let sidebar_handle_side = if sidebar_right { ResizeSide::Right } else { ResizeSide::Left };
+    let agent_handle_side = if agent_left { ResizeSide::Left } else { ResizeSide::Right };
+
+    let sidebar = sidebar.into_any();
+    let agent = agent_panel(state).into_any();
+    let editor = editor_column.into_any();
+
+    let mut left: Vec<floem::AnyView> = Vec::new();
+    let mut right: Vec<floem::AnyView> = Vec::new();
+    if sidebar_right {
+        right.push(sidebar);
+    } else {
+        left.push(sidebar);
+    }
+    if agent_left {
+        left.push(agent);
+    } else {
+        right.push(agent);
+    }
+
+    let mut cols: Vec<floem::AnyView> = Vec::new();
+    cols.extend(left);
+    cols.push(editor);
+    cols.extend(right);
+    cols.push(
+        resize_handle(state, sidebar_handle_side, state.sidebar_width, state.sidebar_open, 150.0, 600.0)
+            .into_any(),
+    );
+    cols.push(
+        resize_handle(state, agent_handle_side, state.agent_width, state.agent_open, 300.0, 900.0)
+            .into_any(),
+    );
+
+    let main_row = floem::views::stack_from_iter(cols).style(|s| s.flex_row().size_full());
 
     stack((
         main_row,

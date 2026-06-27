@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Configurable panel layout: `sidebar_side` and `agent_side` in settings move the
+  explorer/Git sidebar and agent panel to the left or right (default: sidebar
+  left, agent right).
+
 ## [0.2.1] - 2026-06-27
 
 ### Added

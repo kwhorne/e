@@ -2,8 +2,9 @@
 
 use std::path::PathBuf;
 
+use floem::event::{Event, EventListener, EventPropagation};
 use floem::ext_event::create_signal_from_channel;
-use floem::keyboard::{Key, NamedKey};
+use floem::keyboard::{Key, Modifiers, NamedKey};
 use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::kurbo::Size;
 use floem::views::{stack, Decorators};
@@ -41,6 +42,121 @@ pub fn launch() {
             ),
         )
         .run();
+}
+
+/// Central keyboard shortcut dispatch. Returns true if the key was handled.
+///
+/// This is invoked both from the editor's key handler (so shortcuts work while
+/// the editor is focused — it otherwise consumes every key) and from a global
+/// fallback listener (for when nothing focusable is active).
+pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bool {
+    let cmd = mods.meta() || mods.control();
+    let shift = mods.shift();
+
+    match key {
+        Key::Character(s) => {
+            let c = s.to_lowercase();
+            match c.as_str() {
+                _ if !cmd => false,
+                "p" if shift => {
+                    state.cmd.open.set(true);
+                    true
+                }
+                "p" => {
+                    state.palette_open.update(|o| *o = !*o);
+                    true
+                }
+                "s" => {
+                    state.save_active();
+                    true
+                }
+                "w" => {
+                    if let Some(id) = state.focused_active_id() {
+                        state.close(id);
+                    }
+                    true
+                }
+                "t" => {
+                    state.open_symbol_search();
+                    true
+                }
+                "f" if shift => {
+                    state.open_global_search();
+                    true
+                }
+                "f" => {
+                    state.open_find();
+                    true
+                }
+                "\\" => {
+                    state.toggle_split();
+                    true
+                }
+                "d" => {
+                    state.select_next_occurrence();
+                    true
+                }
+                "m" if shift => {
+                    state.toggle_md_preview();
+                    true
+                }
+                "`" if mods.control() => {
+                    state.toggle_terminal();
+                    true
+                }
+                " " => {
+                    if let Some(id) = state.focused_active_id() {
+                        state.request_completion(id);
+                    }
+                    true
+                }
+                _ => false,
+            }
+        }
+        Key::Named(named) => match named {
+            NamedKey::F1 if mods.is_empty() => {
+                state.request_hover();
+                true
+            }
+            NamedKey::F2 if mods.is_empty() => {
+                state.open_rename();
+                true
+            }
+            NamedKey::F8 if mods.is_empty() => {
+                theme::toggle();
+                true
+            }
+            NamedKey::F12 if shift => {
+                state.request_references();
+                true
+            }
+            NamedKey::F12 if mods.is_empty() => {
+                state.goto_definition();
+                true
+            }
+            NamedKey::Space if cmd => {
+                if let Some(id) = state.focused_active_id() {
+                    state.request_completion(id);
+                }
+                true
+            }
+            NamedKey::Escape => {
+                state.close_completion();
+                state.close_hover();
+                state.close_signature();
+                state.picker.open.set(false);
+                state.palette_open.set(false);
+                state.cmd.open.set(false);
+                state.md_preview.set(false);
+                state.diff_open.set(false);
+                state.close_find();
+                state.close_rename();
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 /// Resolve the CLI argument into `(workspace_root, file_to_open)`.
@@ -200,116 +316,12 @@ fn app_view() -> impl IntoView {
             let mark = if dirty { "● " } else { "" };
             format!("{mark}{name} — e")
         })
-        // ⌘P / Ctrl+P toggles the command palette.
-        .on_key_down(
-            Key::Character("p".into()),
-            |m| m.meta() || m.control(),
-            move |_| state.palette_open.update(|o| *o = !*o),
-        )
-        // ⌘S / Ctrl+S saves the active buffer.
-        .on_key_down(
-            Key::Character("s".into()),
-            |m| m.meta() || m.control(),
-            move |_| state.save_active(),
-        )
-        // ⌘Space / Ctrl+Space requests completion at the cursor.
-        .on_key_down(
-            Key::Character(" ".into()),
-            |m| m.meta() || m.control(),
-            move |_| {
-                if let Some(id) = state.active.get() {
-                    state.request_completion(id);
+        .on_event(EventListener::KeyDown, move |e| {
+            if let Event::KeyDown(ke) = e {
+                if handle_shortcut(state, &ke.key.logical_key, ke.modifiers) {
+                    return EventPropagation::Stop;
                 }
-            },
-        )
-        // F1 shows hover info for the symbol at the cursor.
-        .on_key_down(Key::Named(NamedKey::F1), |m| m.is_empty(), move |_| {
-            state.request_hover();
+            }
+            EventPropagation::Continue
         })
-        // F8 toggles the light/dark theme.
-        .on_key_down(Key::Named(NamedKey::F8), |m| m.is_empty(), move |_| {
-            theme::toggle();
-        })
-        // F2 renames the identifier under the cursor (within the file).
-        .on_key_down(Key::Named(NamedKey::F2), |m| m.is_empty(), move |_| {
-            state.open_rename();
-        })
-        // ⌘⇧M toggles the Markdown reading-mode preview.
-        .on_key_down(
-            Key::Character("M".into()),
-            |m| (m.meta() || m.control()) && m.shift(),
-            move |_| state.toggle_md_preview(),
-        )
-        // F12 jumps to the definition of the symbol at the cursor.
-        .on_key_down(Key::Named(NamedKey::F12), |m| m.is_empty(), move |_| {
-            state.goto_definition();
-        })
-        // Shift+F12 finds references to the symbol at the cursor.
-        .on_key_down(Key::Named(NamedKey::F12), |m| m.shift(), move |_| {
-            state.request_references();
-        })
-        // ⌘T / Ctrl+T opens workspace symbol search.
-        .on_key_down(
-            Key::Character("t".into()),
-            |m| m.meta() || m.control(),
-            move |_| state.open_symbol_search(),
-        )
-        // ⌘⇧F / Ctrl+⇧F opens workspace-wide text search.
-        .on_key_down(
-            Key::Character("F".into()),
-            |m| (m.meta() || m.control()) && m.shift(),
-            move |_| state.open_global_search(),
-        )
-        // ⌘⇧P / Ctrl+⇧P opens the command palette.
-        .on_key_down(
-            Key::Character("P".into()),
-            |m| (m.meta() || m.control()) && m.shift(),
-            move |_| state.cmd.open.set(true),
-        )
-        // Ctrl+` toggles the integrated terminal.
-        .on_key_down(
-            Key::Character("`".into()),
-            |m| m.control(),
-            move |_| state.toggle_terminal(),
-        )
-        // ⌘F / Ctrl+F opens find-in-file.
-        .on_key_down(
-            Key::Character("f".into()),
-            |m| m.meta() || m.control(),
-            move |_| state.open_find(),
-        )
-        // ⌘\ / Ctrl+\ toggles the split view.
-        .on_key_down(
-            Key::Character("\\".into()),
-            |m| m.meta() || m.control(),
-            move |_| state.toggle_split(),
-        )
-        // ⌘D / Ctrl+D adds a cursor at the next occurrence (multi-cursor).
-        .on_key_down(
-            Key::Character("d".into()),
-            |m| m.meta() || m.control(),
-            move |_| state.select_next_occurrence(),
-        )
-        // Escape dismisses popups.
-        .on_key_down(Key::Named(NamedKey::Escape), |m| m.is_empty(), move |_| {
-            state.close_completion();
-            state.close_hover();
-            state.close_signature();
-            state.picker.open.set(false);
-            state.palette_open.set(false);
-            state.md_preview.set(false);
-            state.cmd.open.set(false);
-            state.diff_open.set(false);
-            state.close_rename();
-        })
-        // ⌘W / Ctrl+W closes the focused tab.
-        .on_key_down(
-            Key::Character("w".into()),
-            |m| m.meta() || m.control(),
-            move |_| {
-                if let Some(id) = state.focused_active_id() {
-                    state.close(id);
-                }
-            },
-        )
 }

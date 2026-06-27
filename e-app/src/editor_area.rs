@@ -9,9 +9,13 @@ use floem::views::editor::command::{Command, CommandExecuted};
 use floem::views::editor::core::command::{EditCommand, MoveCommand};
 use floem::views::editor::core::cursor::{Cursor, CursorMode};
 use floem::views::editor::core::selection::Selection;
+use floem::views::editor::keypress::default_key_handler;
+use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::text::Document;
-use floem::views::{container, dyn_container, dyn_stack, label, stack, text_editor, Decorators};
+use floem::views::{container, dyn_container, dyn_stack, label, stack, text_editor_keys, Decorators};
 use floem::IntoView;
+
+use crate::app::handle_shortcut;
 
 use crate::state::AppState;
 use crate::styling::SyntaxStyling;
@@ -32,8 +36,16 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
             let id = b.id;
             let win_origin = b.win_origin;
 
-            let te = text_editor("")
-                .use_doc(b.doc.clone() as Rc<dyn Document>)
+            let te = text_editor_keys("", move |editor_sig, kp, mods| {
+                // App shortcuts first (the editor otherwise swallows every key).
+                if let KeyInput::Keyboard(key, _) = &kp.key {
+                    if handle_shortcut(state, key, mods) {
+                        return CommandExecuted::Yes;
+                    }
+                }
+                default_key_handler(editor_sig)(kp, mods)
+            })
+            .use_doc(b.doc.clone() as Rc<dyn Document>)
                 .styling(SyntaxStyling::new(
                     b.highlights.clone(),
                     b.diag_lines.clone(),

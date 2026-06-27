@@ -31,6 +31,7 @@ use e_term::Terminal;
 
 use crate::completion::{Completion, HoverState, SignatureState};
 use crate::config::{self, Settings};
+use crate::file_ops::{copy_recursive, duplicate_name, FileOp, FileOpKind};
 use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
 use crate::session::{self, SessionData};
@@ -184,6 +185,10 @@ pub struct AppState {
     pub settings: Settings,
     /// Whether the left sidebar (file explorer) is visible.
     pub sidebar_open: RwSignal<bool>,
+    /// File-operation name prompt (new/rename/duplicate).
+    pub file_op: FileOp,
+    /// Bumped after any filesystem change to refresh the file tree.
+    pub fs_rev: RwSignal<u64>,
 }
 
 fn now_ms() -> u128 {
@@ -232,7 +237,113 @@ impl AppState {
             diff_open: RwSignal::new(false),
             settings: config::load_settings(),
             sidebar_open: RwSignal::new(true),
+            file_op: FileOp::new(),
+            fs_rev: RwSignal::new(0),
         }
+    }
+
+    // ---- File explorer operations --------------------------------------
+
+    /// Open the name prompt for a file operation rooted at `path`.
+    pub fn start_file_op(&self, kind: FileOpKind, path: PathBuf) {
+        let op = self.file_op;
+        op.kind.set(kind);
+        match kind {
+            FileOpKind::NewFile | FileOpKind::NewFolder => {
+                let base = if path.is_dir() {
+                    path
+                } else {
+                    path.parent().map(|p| p.to_path_buf()).unwrap_or(path)
+                };
+                op.base.set(base);
+                op.input.set(String::new());
+            }
+            FileOpKind::Rename => {
+                op.input.set(
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                );
+                op.base.set(path);
+            }
+            FileOpKind::Duplicate => {
+                op.input.set(duplicate_name(&path));
+                op.base.set(path);
+            }
+        }
+        op.open.set(true);
+    }
+
+    /// Apply the pending file operation.
+    pub fn confirm_file_op(&self) {
+        let op = self.file_op;
+        let kind = op.kind.get_untracked();
+        let base = op.base.get_untracked();
+        let name = op.input.get_untracked().trim().to_string();
+        op.open.set(false);
+        if name.is_empty() {
+            return;
+        }
+
+        let mut open_after: Option<PathBuf> = None;
+        let res: std::io::Result<()> = match kind {
+            FileOpKind::NewFile => {
+                let p = base.join(&name);
+                let r = if p.exists() {
+                    Ok(())
+                } else {
+                    std::fs::write(&p, "")
+                };
+                if r.is_ok() {
+                    open_after = Some(p);
+                }
+                r
+            }
+            FileOpKind::NewFolder => std::fs::create_dir_all(base.join(&name)),
+            FileOpKind::Rename => {
+                let dst = base.parent().map(|p| p.join(&name)).unwrap_or_else(|| PathBuf::from(&name));
+                std::fs::rename(&base, &dst)
+            }
+            FileOpKind::Duplicate => {
+                let dst = base.parent().map(|p| p.join(&name)).unwrap_or_else(|| PathBuf::from(&name));
+                copy_recursive(&base, &dst)
+            }
+        };
+        if let Err(e) = res {
+            eprintln!("e: file operation failed: {e}");
+        }
+        self.fs_rev.update(|r| *r += 1);
+        if let Some(p) = open_after {
+            self.open_path(p);
+        }
+    }
+
+    /// Move a path to the Trash (recoverable) and close any open buffer for it.
+    pub fn delete_path(&self, path: PathBuf) {
+        let script = format!(
+            "tell application \"Finder\" to delete POSIX file \"{}\"",
+            path.display()
+        );
+        let _ = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .output();
+        if let Some(id) = self.buffers.with(|bs| {
+            bs.iter()
+                .find(|b| b.file.path.as_deref() == Some(path.as_path()))
+                .map(|b| b.id)
+        }) {
+            self.close(id);
+        }
+        self.fs_rev.update(|r| *r += 1);
+    }
+
+    pub fn copy_path_to_clipboard(&self, path: &std::path::Path) {
+        let _ = floem::Clipboard::set_contents(path.display().to_string());
+    }
+
+    pub fn reveal_in_finder(&self, path: &std::path::Path) {
+        let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
     }
 
     pub fn toggle_md_preview(&self) {

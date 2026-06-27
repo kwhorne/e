@@ -11,6 +11,7 @@ mod config;
 mod completion;
 mod diff_view;
 mod editor_area;
+mod file_ops;
 mod file_tree;
 mod find;
 mod laravel;

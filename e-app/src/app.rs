@@ -16,6 +16,7 @@ use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
 use crate::diff_view::diff_view;
 use crate::editor_area::editor_area;
+use crate::file_ops::file_op_prompt;
 use crate::file_tree::file_tree;
 use crate::find::find_bar;
 use crate::markdown_view::markdown_preview;
@@ -316,6 +317,7 @@ fn app_view() -> impl IntoView {
         diff_view(state),
         find_bar(state),
         rename_bar(state),
+        file_op_prompt(state),
         signature_popup(state),
         completion_popup(state),
         hover_popup(state),

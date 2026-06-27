@@ -3,12 +3,50 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use floem::menu::{Menu, MenuItem};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
 use floem::IntoView;
 
+use crate::file_ops::FileOpKind;
 use crate::state::AppState;
 use crate::theme;
+
+/// Context menu for a tree item.
+fn item_menu(state: AppState, path: PathBuf) -> Menu {
+    let p = || path.clone();
+    Menu::new("")
+        .entry(MenuItem::new("New File").action({
+            let p = p();
+            move || state.start_file_op(FileOpKind::NewFile, p.clone())
+        }))
+        .entry(MenuItem::new("New Folder").action({
+            let p = p();
+            move || state.start_file_op(FileOpKind::NewFolder, p.clone())
+        }))
+        .separator()
+        .entry(MenuItem::new("Rename").action({
+            let p = p();
+            move || state.start_file_op(FileOpKind::Rename, p.clone())
+        }))
+        .entry(MenuItem::new("Duplicate").action({
+            let p = p();
+            move || state.start_file_op(FileOpKind::Duplicate, p.clone())
+        }))
+        .entry(MenuItem::new("Delete").action({
+            let p = p();
+            move || state.delete_path(p.clone())
+        }))
+        .separator()
+        .entry(MenuItem::new("Copy Path").action({
+            let p = p();
+            move || state.copy_path_to_clipboard(&p)
+        }))
+        .entry(MenuItem::new("Reveal in Finder").action({
+            let p = p();
+            move || state.reveal_in_finder(&p)
+        }))
+}
 
 #[derive(Clone)]
 struct Row {
@@ -80,10 +118,14 @@ pub fn file_tree(state: AppState) -> impl IntoView {
     });
 
     let rows = dyn_stack(
-        move || flatten(&state.root.get(), &expanded.get()),
+        move || {
+            state.fs_rev.get(); // refresh after filesystem operations
+            flatten(&state.root.get(), &expanded.get())
+        },
         |r| r.path.clone(),
         move |r| {
             let path = r.path.clone();
+            let menu_path = r.path.clone();
             let is_dir = r.is_dir;
             let indent = 8.0 + r.depth as f64 * 14.0;
 
@@ -122,15 +164,29 @@ pub fn file_tree(state: AppState) -> impl IntoView {
                     state.open_path(path.clone());
                 }
             })
+            .context_menu(move || item_menu(state, menu_path.clone()))
         },
     )
     .style(|s| s.flex_col().width_full());
 
-    stack((header, scroll(rows).style(|s| s.flex_grow(1.0).width_full()))).style(|s| {
-        s.flex_col()
-            .width_full()
-            .flex_grow(1.0)
-            .min_height(0.0)
-            .background(theme::bg_panel())
-    })
+    stack((header, scroll(rows).style(|s| s.flex_grow(1.0).width_full())))
+        .style(|s| {
+            s.flex_col()
+                .width_full()
+                .flex_grow(1.0)
+                .min_height(0.0)
+                .background(theme::bg_panel())
+        })
+        // Right-click on empty space: create items at the workspace root.
+        .context_menu(move || {
+            let root = state.root.get_untracked();
+            Menu::new("")
+                .entry(MenuItem::new("New File").action({
+                    let root = root.clone();
+                    move || state.start_file_op(FileOpKind::NewFile, root.clone())
+                }))
+                .entry(MenuItem::new("New Folder").action(move || {
+                    state.start_file_op(FileOpKind::NewFolder, root.clone())
+                }))
+        })
 }

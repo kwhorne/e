@@ -50,7 +50,8 @@ e/
 │   └── syntax.rs    # tree-sitter -> per-line highlight spans
 └── e-app/    # Floem UI + the `e` binary                          ~ lapce-app
     ├── state.rs        # reactive AppState, buffers, LSP, terminal
-    ├── file_tree.rs    # left explorer
+    ├── file_tree.rs    # left explorer (+ right-click menu)
+    ├── file_ops.rs     # new/rename/duplicate/delete/copy-path/reveal
     ├── tabs.rs         # tab strip
     ├── editor_area.rs  # multi-buffer editor
     ├── styling.rs      # syntax highlight + diagnostic squiggles

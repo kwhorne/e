@@ -1,8 +1,9 @@
 //! Left-hand file explorer: an expandable, flattened directory tree.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use e_core::language::Language;
 use floem::menu::{Menu, MenuItem};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
@@ -11,6 +12,62 @@ use floem::IntoView;
 use crate::file_ops::FileOpKind;
 use crate::state::AppState;
 use crate::theme;
+
+/// A small glyph representing a file/folder type in the explorer.
+fn file_glyph(name: &str, is_dir: bool, expanded: bool) -> &'static str {
+    if is_dir {
+        return if expanded { "📂" } else { "📁" };
+    }
+    let lower = name.to_ascii_lowercase();
+
+    // Well-known file names.
+    match lower.as_str() {
+        "cargo.toml" | "cargo.lock" | "package.json" | "package-lock.json" | "composer.json"
+        | "composer.lock" | "yarn.lock" | "pnpm-lock.yaml" => return "📦",
+        "dockerfile" | ".dockerignore" => return "🐳",
+        ".env" | ".env.example" | ".env.local" => return "🔑",
+        ".gitignore" | ".gitattributes" => return "🔧",
+        "license" | "license.md" => return "📜",
+        "readme.md" | "readme" => return "📖",
+        "makefile" => return "🛠",
+        _ => {}
+    }
+
+    let ext = Path::new(&lower)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "svg" => return "🖼",
+        "lock" => return "🔒",
+        "pdf" => return "📕",
+        "zip" | "tar" | "gz" | "tgz" | "rar" | "7z" => return "🗜",
+        "sql" | "db" | "sqlite" => return "🗄",
+        "sh" | "bash" | "zsh" | "fish" => return "🐚",
+        "yml" | "yaml" => return "⚙️",
+        _ => {}
+    }
+
+    match Language::from_path(Path::new(name)) {
+        Language::Rust => "🦀",
+        Language::Php => "🐘",
+        Language::Blade => "🍃",
+        Language::JavaScript => "🟨",
+        Language::TypeScript => "🟦",
+        Language::Vue => "💚",
+        Language::Svelte => "🧡",
+        Language::Python => "🐍",
+        Language::Go => "🐹",
+        Language::C | Language::Cpp => "🔧",
+        Language::Json => "🗂",
+        Language::Css => "🎨",
+        Language::Html => "🌐",
+        Language::Markdown => "📝",
+        Language::Toml => "⚙️",
+        Language::Shell => "🐚",
+        _ => "📄",
+    }
+}
 
 /// Context menu for a tree item.
 fn item_menu(state: AppState, path: PathBuf) -> Menu {
@@ -132,18 +189,11 @@ pub fn file_tree(state: AppState) -> impl IntoView {
             let is_dir = r.is_dir;
             let indent = 8.0 + r.depth as f64 * 14.0;
 
-            let icon = if is_dir {
-                if r.expanded {
-                    "▾"
-                } else {
-                    "▸"
-                }
-            } else {
-                "·"
-            };
+            let glyph = file_glyph(&r.name, is_dir, r.expanded);
 
             stack((
-                label(move || icon.to_string()).style(|s| s.width(14.0).color(theme::fg_dim())),
+                label(move || glyph.to_string())
+                    .style(|s| s.width(20.0).font_size(13.0).justify_center()),
                 label(move || r.name.clone()).style(|s| s.text_ellipsis().color(theme::fg())),
             ))
             .style(move |s| {

@@ -88,17 +88,19 @@ pub fn palette(state: AppState) -> impl IntoView {
     let input = text_input(query)
         .placeholder("Go to file…")
         .style(|s| {
-            s.width_full()
+            theme::input_colors(s)
+                .width_full()
                 .height(36.0)
                 .padding_horiz(10.0)
-                .background(theme::bg())
-                .color(theme::fg())
+                .border(0.0)
                 .border_bottom(1.0)
-                .border_color(theme::border())
         })
         .request_focus(move || {
             // Re-focus the input each time the palette is toggled open.
             state.palette_open.get();
+        })
+        .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
+            state.palette_open.set(false)
         })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
             state.palette_open.set(false)

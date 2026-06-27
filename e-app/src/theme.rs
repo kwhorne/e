@@ -8,6 +8,7 @@ use std::cell::RefCell;
 
 use floem::peniko::Color;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
+use floem::style::Style;
 use floem::views::editor::text::{default_dark_color, default_light_theme};
 use floem::views::EditorCustomStyle;
 
@@ -65,6 +66,16 @@ pub fn fg_dim() -> Color {
 }
 pub fn accent() -> Color {
     pick(Color::from_rgb8(0x5c, 0x9c, 0xf5), Color::from_rgb8(0x2f, 0x6e, 0xf5))
+}
+
+/// Themed colours for a `text_input`, overriding Floem's default white
+/// focus/hover backgrounds. Apply this, then add layout (size/padding/border).
+pub fn input_colors(s: Style) -> Style {
+    s.background(bg())
+        .color(fg())
+        .border_color(border())
+        .hover(|s| s.background(bg()))
+        .focus(|s| s.background(bg()).border_color(accent()).hover(|s| s.background(bg())))
 }
 
 /// Editor (text area) colours, switched with the theme. Reactive.

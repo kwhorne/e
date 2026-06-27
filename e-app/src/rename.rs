@@ -34,18 +34,17 @@ pub fn rename_bar(state: AppState) -> impl IntoView {
 
     let input = text_input(rename.new_name)
         .style(|s| {
-            s.width(220.0)
+            theme::input_colors(s)
+                .width(220.0)
                 .height(28.0)
                 .padding_horiz(8.0)
-                .background(theme::bg())
-                .color(theme::fg())
                 .border(1.0)
-                .border_color(theme::border())
                 .border_radius(4.0)
         })
         .request_focus(move || {
             rename.open.get();
         })
+        .on_event_stop(floem::event::EventListener::FocusLost, move |_| state.close_rename())
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
             state.close_rename();
         })

@@ -92,17 +92,17 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
     let input = text_input(p.query)
         .placeholder("Search…")
         .style(|s| {
-            s.width_full()
+            theme::input_colors(s)
+                .width_full()
                 .height(36.0)
                 .padding_horiz(10.0)
-                .background(theme::bg())
-                .color(theme::fg())
+                .border(0.0)
                 .border_bottom(1.0)
-                .border_color(theme::border())
         })
         .request_focus(move || {
             p.open.get();
         })
+        .on_event_stop(floem::event::EventListener::FocusLost, move |_| p.open.set(false))
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| p.open.set(false))
         .on_key_down(Key::Named(NamedKey::Enter), |_| true, move |_| accept())
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {

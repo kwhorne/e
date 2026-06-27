@@ -138,3 +138,20 @@ pub fn heading_size(level: u8) -> f32 {
         _ => 13.0,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{parse, Block};
+
+    #[test]
+    fn parses_heading_and_inline() {
+        let blocks = parse("# Title\n\nHi **b** and `c`.\n");
+        assert!(matches!(blocks[0], Block::Heading(1, _)));
+        if let Block::Paragraph(spans) = &blocks[1] {
+            assert!(spans.iter().any(|s| s.bold && s.text == "b"));
+            assert!(spans.iter().any(|s| s.code && s.text == "c"));
+        } else {
+            panic!("expected paragraph");
+        }
+    }
+}

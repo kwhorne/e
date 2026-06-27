@@ -99,3 +99,25 @@ pub fn marks(head: &str, current: &str, line_count: usize) -> Vec<Option<LineMar
     }
     marks
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{diff, marks, DiffKind, LineMark};
+
+    #[test]
+    fn diff_marks_changes() {
+        let head = "a\nb\nc\n";
+        let cur = "a\nB\nc\nd\n";
+        let m = marks(head, cur, 4);
+        assert_eq!(m[0], None);
+        assert_eq!(m[1], Some(LineMark::Modified));
+        assert_eq!(m[3], Some(LineMark::Added));
+    }
+
+    #[test]
+    fn diff_lines_have_signs() {
+        let d = diff("x\ny\n", "x\nY\n");
+        assert!(d.iter().any(|l| l.kind == DiffKind::Removed && l.text == "y"));
+        assert!(d.iter().any(|l| l.kind == DiffKind::Added && l.text == "Y"));
+    }
+}

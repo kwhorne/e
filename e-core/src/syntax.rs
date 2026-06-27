@@ -302,3 +302,17 @@ fn push_span(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{highlight_lines, HighlightKind};
+    use crate::language::Language;
+
+    #[test]
+    fn rust_keyword_highlighted() {
+        let lines = highlight_lines(Language::Rust, "fn main() {}\n");
+        let kinds: Vec<_> = lines[0].iter().map(|s| s.kind).collect();
+        assert!(kinds.contains(&HighlightKind::Keyword));
+        assert!(kinds.contains(&HighlightKind::Function));
+    }
+}

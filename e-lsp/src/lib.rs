@@ -634,3 +634,31 @@ pub fn path_to_uri(path: &Path) -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{locations_from_value, path_to_uri, uri_to_path};
+    use serde_json::json;
+    use std::path::Path;
+
+    #[test]
+    fn uri_roundtrip() {
+        let p = Path::new("/tmp/my project/main.rs");
+        let uri = path_to_uri(p);
+        assert_eq!(uri, "file:///tmp/my%20project/main.rs");
+        assert_eq!(uri_to_path(&uri), p.to_path_buf());
+    }
+
+    #[test]
+    fn parse_location_array() {
+        let v = json!([
+            { "uri": "file:///a.rs", "range": { "start": { "line": 3, "character": 5 }, "end": {"line":3,"character":9} } }
+        ]);
+        assert_eq!(locations_from_value(&v), vec![("file:///a.rs".to_string(), 3, 5)]);
+    }
+
+    #[test]
+    fn parse_location_null() {
+        assert!(locations_from_value(&serde_json::Value::Null).is_empty());
+    }
+}

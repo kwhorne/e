@@ -1,6 +1,7 @@
 //! The tab strip above the editor area.
 
 use floem::event::{EventListener, EventPropagation};
+use floem::menu::{Menu, MenuItem};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
 use floem::IntoView;
@@ -21,8 +22,9 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
             let name = b.file.display_name();
 
             let title = label(move || {
+                let pin = if state.is_pinned(id) { "📌 " } else { "" };
                 let mark = if dirty.get() { " ●" } else { "" };
-                format!("{name}{mark}")
+                format!("{pin}{name}{mark}")
             })
             .style(|s| s.color(theme::fg()));
 
@@ -69,6 +71,14 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
                         state.reorder_tab(src, id);
                     }
                     drag_tab.set(None);
+                })
+                .context_menu(move || {
+                    let pin_label = if state.is_pinned(id) { "Unpin Tab" } else { "Pin Tab" };
+                    Menu::new("")
+                        .entry(MenuItem::new(pin_label).action(move || state.toggle_pin(id)))
+                        .separator()
+                        .entry(MenuItem::new("Close").action(move || state.close(id)))
+                        .entry(MenuItem::new("Close Others").action(move || state.close_others(id)))
                 })
         },
     )

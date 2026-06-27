@@ -258,6 +258,9 @@ pub struct AppState {
     pub recent_files: RwSignal<Vec<PathBuf>>,
     pub recent: crate::recent::RecentState,
 
+    // Pinned tab ids.
+    pub pinned_tabs: RwSignal<HashSet<u64>>,
+
     // ---- Source control (git) ------------------------------------------
     /// Whether the left sidebar shows the Source Control panel (⌘2).
     pub git_panel_open: RwSignal<bool>,
@@ -356,6 +359,7 @@ impl AppState {
             close_confirm: RwSignal::new(None),
             recent_files: RwSignal::new(Vec::new()),
             recent: crate::recent::RecentState::new(),
+            pinned_tabs: RwSignal::new(HashSet::new()),
             git_panel_open: RwSignal::new(false),
             git_root: RwSignal::new(None),
             git_branch: RwSignal::new(None),
@@ -1582,6 +1586,31 @@ impl AppState {
     /// Focus a buffer in the currently focused pane (e.g. clicking a tab).
     pub fn focus_buffer(&self, id: u64) {
         self.focused_active().set(Some(id));
+    }
+
+    pub fn is_pinned(&self, id: u64) -> bool {
+        self.pinned_tabs.with(|set| set.contains(&id))
+    }
+
+    pub fn toggle_pin(&self, id: u64) {
+        self.pinned_tabs.update(|set| {
+            if !set.remove(&id) {
+                set.insert(id);
+            }
+        });
+    }
+
+    /// Close every tab except `keep` (skipping pinned tabs).
+    pub fn close_others(&self, keep: u64) {
+        let ids: Vec<u64> = self.buffers.with_untracked(|bs| {
+            bs.iter()
+                .map(|b| b.id)
+                .filter(|id| *id != keep && !self.is_pinned(*id))
+                .collect()
+        });
+        for id in ids {
+            self.close(id);
+        }
     }
 
     /// Move tab `src` to the position of `target` (drag-to-reorder).

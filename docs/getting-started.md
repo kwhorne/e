@@ -16,6 +16,16 @@ search, and Source Control. You can also:
 - Press **⌘O** to open another project in a new window.
 - Run **Open File…** from the command palette to open any file in the current window.
 
+## The `e` command
+
+To launch `e` from any directory, run **Install 'e' Command in PATH** from the
+command palette (`⌘⇧P`). After that you can open any project from the shell:
+
+```sh
+e .            # open the current directory
+e path/to/file # open a file
+```
+
 ## The interface
 
 ```

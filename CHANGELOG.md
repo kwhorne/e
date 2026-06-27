@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- "Install 'e' Command in PATH" command (⌘⇧P) — symlinks `e` into
+  `/usr/local/bin` so you can launch the editor from any directory with `e .`.
+
 ## [0.2.3] - 2026-06-27
 
 ### Added

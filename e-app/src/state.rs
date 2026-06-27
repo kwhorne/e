@@ -1351,6 +1351,51 @@ impl AppState {
         });
     }
 
+    /// Install the `e` command-line launcher into `/usr/local/bin` so the
+    /// editor can be opened from any directory with `e .`.
+    pub fn install_cli(&self) {
+        let Ok(exe) = std::env::current_exe() else {
+            Self::notify("Could not locate the e executable.");
+            return;
+        };
+        let target = "/usr/local/bin/e";
+
+        // Try a direct symlink first (works if /usr/local/bin is writable).
+        let _ = std::fs::create_dir_all("/usr/local/bin");
+        let _ = std::fs::remove_file(target);
+        if std::os::unix::fs::symlink(&exe, target).is_ok() {
+            Self::notify("Installed: run `e .` from any directory.");
+            return;
+        }
+
+        // Otherwise ask for administrator privileges via osascript.
+        let script = format!(
+            "do shell script \"mkdir -p /usr/local/bin && ln -sf '{}' '{}'\" with administrator privileges",
+            exe.display(),
+            target
+        );
+        match std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .status()
+        {
+            Ok(s) if s.success() => Self::notify("Installed: run `e .` from any directory."),
+            _ => Self::notify("Could not install the `e` command (permission denied)."),
+        }
+    }
+
+    /// Show a native macOS notification banner.
+    fn notify(message: &str) {
+        let script = format!(
+            "display notification \"{}\" with title \"e\"",
+            message.replace('"', "'")
+        );
+        let _ = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .spawn();
+    }
+
     /// Launch a new editor instance on `path` (a project folder or a file).
     pub fn open_project(&self, path: PathBuf) {
         let exe = std::env::current_exe().ok();

@@ -49,6 +49,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("word-wrap", "Toggle Word Wrap"),
     ("check-updates", "Check for Updates"),
     ("settings", "Open Settings (config.json)"),
+    ("install-cli", "Install 'e' Command in PATH"),
     ("about", "About e"),
     ("close-tab", "Close Tab"),
 ];
@@ -112,6 +113,7 @@ pub fn run_command(state: AppState, id: &str) {
         "check-updates" => state.check_for_updates(true),
         "about" => state.about_open.set(true),
         "settings" => state.open_settings(),
+        "install-cli" => state.install_cli(),
         "close-tab" => {
             if let Some(id) = state.focused_active_id() {
                 state.close(id);

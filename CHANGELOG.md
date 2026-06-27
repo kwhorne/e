@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sticky scroll: the enclosing scope lines stay pinned at the top of the editor as
+  you scroll (indentation-based). Configurable via `sticky_scroll`.
 - User-defined snippets in the `snippets` section of `config.json`.
 - Source Control: recent-commit history and stash (Stash / Pop).
 - Tab pinning (right-click a tab) with Close Others; tab overflow scrolls.

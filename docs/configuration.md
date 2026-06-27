@@ -21,6 +21,7 @@ Open it any time with **`⌘,`** (it is created on first use).
   "indent_guides": true,   // show indentation guide lines
   "auto_close": true,      // auto-close brackets and quotes
   "inlay_hints": true,     // show LSP inlay hints (types, parameter names)
+  "sticky_scroll": true,   // pin enclosing scope lines at the top while scrolling
   "sidebar_side": "left",  // explorer/Git panel side: "left" or "right"
   "agent_side": "right",   // agent panel side: "right" or "left"
   "agents": { /* see below */ }
@@ -38,6 +39,7 @@ Open it any time with **`⌘,`** (it is created on first use).
 | `indent_guides` | bool | `true` | Indentation guides |
 | `auto_close` | bool | `true` | Auto-close brackets/quotes |
 | `inlay_hints` | bool | `true` | Show LSP inlay hints |
+| `sticky_scroll` | bool | `true` | Pin enclosing scope at the top |
 | `sidebar_side` | string | `"left"` | Side of the explorer/Git sidebar (`"left"` or `"right"`) |
 | `agent_side` | string | `"right"` | Side of the agent panel (`"right"` or `"left"`) |
 | `agents` | object | built-ins | AI agent configuration |

@@ -16,6 +16,7 @@ pub struct Settings {
     pub indent_guides: bool,
     pub auto_close: bool,
     pub inlay_hints: bool,
+    pub sticky_scroll: bool,
     /// Explorer/Git sidebar on the right instead of the left.
     pub sidebar_right: bool,
     /// Agent panel on the left instead of the right.
@@ -34,6 +35,7 @@ impl Default for Settings {
             indent_guides: true,
             auto_close: true,
             inlay_hints: true,
+            sticky_scroll: true,
             sidebar_right: false,
             agent_left: false,
         }
@@ -77,6 +79,7 @@ pub fn load_settings() -> Settings {
         indent_guides: bool_of("indent_guides", d.indent_guides),
         auto_close: bool_of("auto_close", d.auto_close),
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
+        sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         sidebar_right: v.get("sidebar_side").and_then(|x| x.as_str()) == Some("right"),
         agent_left: v.get("agent_side").and_then(|x| x.as_str()) == Some("left"),
     }

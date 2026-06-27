@@ -80,6 +80,110 @@ fn welcome() -> impl IntoView {
 }
 
 /// One pane: a stack of all buffers, only this pane's active one visible.
+/// The enclosing scope lines for `top_line`, using indentation: each ancestor
+/// line has strictly smaller indentation. Outermost first.
+fn scope_headers(text: &str, top_line: usize) -> Vec<(usize, String)> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    if top_line == 0 || top_line >= lines.len() {
+        return Vec::new();
+    }
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    let mut min_indent = if lines[top_line].trim().is_empty() {
+        usize::MAX
+    } else {
+        indent(lines[top_line])
+    };
+    let mut headers = Vec::new();
+    for i in (0..top_line).rev() {
+        let l = lines[i];
+        let trimmed = l.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let ind = indent(l);
+        if ind < min_indent && (l.trim_end().ends_with('{') || trimmed.ends_with(':')) {
+            headers.push((i, l.trim_end().to_string()));
+            min_indent = ind;
+            if ind == 0 {
+                break;
+            }
+        } else if ind < min_indent {
+            min_indent = ind;
+        }
+    }
+    headers.reverse();
+    headers.truncate(4);
+    headers
+}
+
+/// Sticky-scroll header: shows the enclosing scope lines pinned at the top of
+/// the editor as you scroll. Click a line to jump to it.
+fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
+    let active_sig = if pane_idx == 1 { state.active2 } else { state.active };
+
+    let headers = move || -> Vec<(usize, String)> {
+        if !state.settings.sticky_scroll {
+            return Vec::new();
+        }
+        let Some(id) = active_sig.get() else {
+            return Vec::new();
+        };
+        let Some(buf) = state.buffer_by_id(id) else {
+            return Vec::new();
+        };
+        let Some(editor) = buf.editor.get() else {
+            return Vec::new();
+        };
+        let lh = editor.line_height(0) as f64;
+        if lh <= 0.0 {
+            return Vec::new();
+        }
+        let vp = editor.viewport.get();
+        let top_line = (vp.y0 / lh).floor() as usize;
+        buf.doc.cache_rev().get();
+        let text = buf.doc.text().to_string();
+        scope_headers(&text, top_line)
+    };
+
+    dyn_stack(
+        move || headers().into_iter().enumerate().collect::<Vec<_>>(),
+        |(i, h)| (*i, h.0),
+        move |(_, (line_idx, text))| {
+            label(move || text.clone())
+                .style(move |s| {
+                    s.width_full()
+                        .padding_left(58.0)
+                        .padding_right(10.0)
+                        .padding_vert(2.0)
+                        .font_family("monospace".to_string())
+                        .font_size(state.font_size.get() as f32)
+                        .color(theme::fg())
+                        .text_ellipsis()
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.background(theme::bg_hover()))
+                })
+                .on_click_stop(move |_| state.goto_line(line_idx + 1, 1))
+        },
+    )
+    .style(move |s| {
+        let s = s
+            .absolute()
+            .inset_top(0.0)
+            .inset_left(0.0)
+            .width_full()
+            .flex_col()
+            .background(theme::bg_panel())
+            .border_bottom(1.0)
+            .border_color(theme::border())
+            .z_index(5);
+        if headers().is_empty() {
+            s.hide()
+        } else {
+            s
+        }
+    })
+}
+
 fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
     let active_sig: RwSignal<Option<u64>> = if pane_idx == 1 {
         state.active2
@@ -87,7 +191,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
         state.active
     };
 
-    dyn_stack(
+    let editors = dyn_stack(
         move || state.buffers.get(),
         |b| b.id,
         move |b| {
@@ -221,7 +325,9 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 })
         },
     )
-    .style(|s| s.size_full())
+    .style(|s| s.size_full());
+
+    stack((editors, sticky_header(state, pane_idx))).style(|s| s.size_full())
 }
 
 pub fn editor_area(state: AppState) -> impl IntoView {

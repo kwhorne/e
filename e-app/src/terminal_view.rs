@@ -5,11 +5,12 @@ use std::ops::Range;
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
-use floem::reactive::SignalGet;
+use floem::reactive::{SignalGet, SignalUpdate};
 use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
-use floem::views::{rich_text, scroll, Decorators};
+use floem::views::{empty, rich_text, scroll, stack, Decorators};
 use floem::IntoView;
 
+use crate::app::handle_shortcut;
 use crate::state::AppState;
 use crate::theme;
 
@@ -87,7 +88,22 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
     })
     .style(|s| s.padding(8.0));
 
-    scroll(content)
+    // A block cursor at the terminal's cursor cell.
+    let cursor_block = empty().style(move |s| {
+        state.term_tick.get();
+        let (row, col) = state.terminal_cursor();
+        let (cw, lh) = char_size();
+        s.absolute()
+            .inset_left(8.0 + col as f64 * cw)
+            .inset_top(8.0 + row as f64 * lh)
+            .width(cw)
+            .height(lh)
+            .background(Color::from_rgba8(0xe8, 0xee, 0xfc, 0x88))
+    });
+
+    let body = stack((content, cursor_block)).style(|s| s.size_full());
+
+    scroll(body)
         .style(move |s| {
             let s = s
                 .width_full()
@@ -109,11 +125,21 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
         })
         .keyboard_navigable()
         .request_focus(move || {
-            state.term_tick.get();
             state.terminal_open.get();
+        })
+        .on_event_cont(EventListener::FocusGained, move |_| {
+            state.terminal_focused.set(true)
+        })
+        .on_event_cont(EventListener::FocusLost, move |_| {
+            state.terminal_focused.set(false)
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
+                // ⌘-shortcuts (toggle terminal, close, palettes…) take priority
+                // over sending the key to the shell. Ctrl stays in the shell.
+                if ke.modifiers.meta() && handle_shortcut(state, &ke.key.logical_key, ke.modifiers) {
+                    return EventPropagation::Stop;
+                }
                 if let Some(bytes) = key_to_bytes(ke) {
                     state.terminal_input(&bytes);
                     return EventPropagation::Stop;

@@ -90,6 +90,11 @@ impl Screen {
             .collect()
     }
 
+    /// Current cursor position as `(row, col)`.
+    pub fn cursor(&self) -> (usize, usize) {
+        (self.cy, self.cx)
+    }
+
     fn newline(&mut self) {
         if self.cy + 1 >= self.rows {
             self.grid.remove(0);
@@ -306,6 +311,11 @@ impl Terminal {
     /// Current screen as per-line coloured runs.
     pub fn snapshot_runs(&self) -> Vec<Vec<Run>> {
         self.screen.lock().map(|s| s.runs()).unwrap_or_default()
+    }
+
+    /// Current cursor position `(row, col)`.
+    pub fn cursor(&self) -> (usize, usize) {
+        self.screen.lock().map(|s| s.cursor()).unwrap_or((0, 0))
     }
 
     pub fn resize(&self, rows: usize, cols: usize) {

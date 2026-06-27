@@ -160,6 +160,8 @@ pub struct AppState {
     /// Integrated terminal session (lazily spawned).
     pub terminal: RwSignal<Option<Rc<RefCell<Terminal>>>>,
     pub terminal_open: RwSignal<bool>,
+    /// Whether the terminal panel currently has keyboard focus.
+    pub terminal_focused: RwSignal<bool>,
     /// Bumped whenever the terminal produces output, to trigger a repaint.
     pub term_tick: RwSignal<u64>,
     term_tx: RwSignal<Sender<()>>,
@@ -215,6 +217,7 @@ impl AppState {
             picker: Picker::new(),
             terminal: RwSignal::new(None),
             terminal_open: RwSignal::new(false),
+            terminal_focused: RwSignal::new(false),
             term_tick: RwSignal::new(0),
             term_tx: RwSignal::new(term_tx),
             term_rx: RwSignal::new(Some(term_rx)),
@@ -540,6 +543,13 @@ impl AppState {
             .get_untracked()
             .map(|t| t.borrow().snapshot_runs())
             .unwrap_or_default()
+    }
+
+    pub fn terminal_cursor(&self) -> (usize, usize) {
+        self.terminal
+            .get_untracked()
+            .map(|t| t.borrow().cursor())
+            .unwrap_or((0, 0))
     }
 
     pub fn buffer_by_id(&self, id: u64) -> Option<Buffer> {

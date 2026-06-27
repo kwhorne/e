@@ -8,6 +8,7 @@ Every shortcut below is also available by name from the command palette (`⌘⇧
 
 | Shortcut | Action |
 | -------- | ------ |
+| `⌘N`     | New file |
 | `⌘P`     | Find file (fuzzy) |
 | `⌘E`     | Recent files (most recently used) |
 | `⌘O`     | Open folder / project (new window) |
@@ -25,6 +26,7 @@ Every shortcut below is also available by name from the command palette (`⌘⇧
 | Shortcut | Action |
 | -------- | ------ |
 | `⌘S`     | Save file |
+| `⌘⇧S`    | Save as… |
 | `⌘W`     | Close tab / terminal / agent |
 | `⌘D`     | Duplicate line |
 | `⌘⇧D`    | Add cursor at next occurrence |

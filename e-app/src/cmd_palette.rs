@@ -12,7 +12,9 @@ use crate::theme;
 const COMMANDS: &[(&str, &str)] = &[
     ("goto-file", "Go to File…"),
     ("open-folder", "Open Folder…"),
+    ("new-file", "New File"),
     ("open-file", "Open File…"),
+    ("save-as", "Save As…"),
     ("recent", "Recent Files"),
     ("symbols", "Go to Symbol…"),
     ("search", "Search in Files…"),
@@ -72,7 +74,9 @@ pub fn run_command(state: AppState, id: &str) {
     match id {
         "goto-file" => state.palette_open.set(true),
         "open-folder" => state.open_project_dialog(),
+        "new-file" => state.new_untitled(),
         "open-file" => state.open_file_dialog(),
+        "save-as" => state.save_active_as(),
         "recent" => state.open_recent(),
         "symbols" => state.open_symbol_search(),
         "search" => state.open_global_search(),

@@ -77,6 +77,14 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.palette_open.update(|o| *o = !*o);
                     true
                 }
+                "n" => {
+                    state.new_untitled();
+                    true
+                }
+                "s" if shift => {
+                    state.save_active_as();
+                    true
+                }
                 "s" => {
                     state.save_active();
                     true

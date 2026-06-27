@@ -1235,6 +1235,76 @@ impl AppState {
         }
     }
 
+    // ---- New file / save as --------------------------------------------
+
+    /// Create a new, empty, untitled buffer and focus it.
+    pub fn new_untitled(&self) {
+        let id = self.next_id.get_untracked();
+        self.next_id.set(id + 1);
+
+        let highlights: Highlights = Rc::new(RefCell::new(Vec::new()));
+        let doc = Rc::new(TextDocument::new(self.cx, String::new()));
+        doc.auto_indent.set(true);
+        let dirty = RwSignal::new(false);
+
+        {
+            let app = *self;
+            let dirty = dirty;
+            let doc2 = doc.clone();
+            let highlights = highlights.clone();
+            doc.clone().add_on_update(move |_| {
+                dirty.set(true);
+                app.last_edit.set(now_ms());
+                let text = doc2.text().to_string();
+                *highlights.borrow_mut() = highlight_lines(Language::PlainText, &text);
+                doc2.cache_rev().update(|r| *r += 1);
+            });
+        }
+
+        let buf = Buffer {
+            id,
+            file: FileInfo::scratch(),
+            doc,
+            dirty,
+            highlights,
+            diag_lines: Rc::new(RefCell::new(Vec::new())),
+            git_marks: Rc::new(RefCell::new(Vec::new())),
+            find_marks: Rc::new(RefCell::new(Vec::new())),
+            bracket_marks: Rc::new(RefCell::new(Vec::new())),
+            uri: None,
+            editor: RwSignal::new(None),
+            win_origin: RwSignal::new(Point::ZERO),
+            pending_goto: RwSignal::new(None),
+            disk_mtime: RwSignal::new(None),
+            disk_changed: RwSignal::new(false),
+            blame: Rc::new(RefCell::new(Vec::new())),
+        };
+        self.buffers.update(|bs| bs.push(buf));
+        self.focused_active().set(Some(id));
+    }
+
+    /// Prompt for a path and save the active buffer there, then reopen it so it
+    /// gets the right language, LSP, and git integration.
+    pub fn save_active_as(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let content = buf.doc.text().to_string();
+        let id = buf.id;
+        let state = *self;
+        let opts = floem::file::FileDialogOptions::new()
+            .title("Save As")
+            .force_starting_directory(self.root.get_untracked());
+        floem::action::save_as(opts, move |info| {
+            if let Some(path) = info.and_then(|i| i.path.into_iter().next()) {
+                if buffer::write(&path, &content).is_ok() {
+                    state.force_close(id);
+                    state.open_path(path);
+                }
+            }
+        });
+    }
+
     // ---- Open file / project (native dialogs) --------------------------
 
     /// Native dialog to open an arbitrary file in the current window.
@@ -1833,7 +1903,7 @@ impl AppState {
             return;
         };
         let Some(path) = buf.file.path.as_ref() else {
-            eprintln!("e: save-as is not implemented yet");
+            self.save_active_as();
             return;
         };
         let text = buf.doc.text().to_string();

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New file (⌘N) creates an untitled buffer; Save As… (⌘⇧S) writes it to disk.
 - Complete user documentation in `docs/` (installation, editing, navigation,
   languages, source control, terminal, agents, configuration, and more).
 

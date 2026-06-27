@@ -200,6 +200,31 @@ pub fn settings_path() -> Option<PathBuf> {
     config_path()
 }
 
+/// User-defined snippets, keyed by language id, from the `snippets` section:
+/// `"snippets": { "php": [ { "prefix": "dd", "body": "dd($0);" } ] }`.
+pub fn load_user_snippets() -> std::collections::HashMap<String, Vec<(String, String)>> {
+    let mut out = std::collections::HashMap::new();
+    let v = read();
+    let Some(obj) = v.get("snippets").and_then(|s| s.as_object()) else {
+        return out;
+    };
+    for (lang, arr) in obj {
+        let Some(arr) = arr.as_array() else { continue };
+        let mut list = Vec::new();
+        for item in arr {
+            let prefix = item.get("prefix").and_then(|p| p.as_str());
+            let body = item.get("body").and_then(|b| b.as_str());
+            if let (Some(p), Some(b)) = (prefix, body) {
+                list.push((p.to_string(), b.to_string()));
+            }
+        }
+        if !list.is_empty() {
+            out.insert(lang.clone(), list);
+        }
+    }
+    out
+}
+
 /// Whether dark mode is enabled (defaults to true).
 pub fn load_dark() -> bool {
     read().get("dark").and_then(|v| v.as_bool()).unwrap_or(true)

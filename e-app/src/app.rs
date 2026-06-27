@@ -360,6 +360,7 @@ fn resize_handle(
 fn app_view() -> impl IntoView {
     let (root, file) = resolve_args();
     let state = AppState::new(Scope::current(), root);
+    crate::snippets::set_user(crate::config::load_user_snippets());
 
     // Restore the saved theme, and persist it whenever it changes.
     theme::set_dark(crate::config::load_dark());

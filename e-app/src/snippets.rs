@@ -1,9 +1,52 @@
 //! Built-in code snippets. Surfaced in the completion popup; on accept the
 //! body is expanded with the caret placed at the `$0` marker.
 
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+
 use lsp_types::{CompletionItem, CompletionItemKind};
 
 use e_core::language::Language;
+
+/// User-defined snippets keyed by language id (see [`lang_id`]).
+static USER: OnceLock<HashMap<String, Vec<(String, String)>>> = OnceLock::new();
+
+/// Install user snippets loaded from `config.json` (call once at startup).
+pub fn set_user(map: HashMap<String, Vec<(String, String)>>) {
+    let _ = USER.set(map);
+}
+
+/// Stable config key for a language (used in the `snippets` config section).
+fn lang_id(language: Language) -> &'static str {
+    use Language::*;
+    match language {
+        Rust => "rust",
+        Php => "php",
+        Blade => "blade",
+        JavaScript => "javascript",
+        TypeScript => "typescript",
+        Vue => "vue",
+        Svelte => "svelte",
+        Python => "python",
+        Go => "go",
+        C => "c",
+        Cpp => "cpp",
+        Html => "html",
+        Css => "css",
+        Json => "json",
+        Toml => "toml",
+        Markdown => "markdown",
+        Shell => "shell",
+        _ => "plaintext",
+    }
+}
+
+fn user_snippets(language: Language) -> Vec<(String, String)> {
+    USER.get()
+        .and_then(|m| m.get(lang_id(language)))
+        .cloned()
+        .unwrap_or_default()
+}
 
 /// `(prefix, body)`. `$0` marks the final caret position; indentation uses
 /// four spaces and continuation lines are re-indented to the current line.
@@ -56,27 +99,42 @@ fn snippets(language: Language) -> &'static [(&'static str, &'static str)] {
     }
 }
 
-/// The body for a snippet prefix, if any.
-pub fn body(language: Language, prefix: &str) -> Option<&'static str> {
-    snippets(language)
-        .iter()
-        .find(|(p, _)| *p == prefix)
-        .map(|(_, b)| *b)
+/// The body for a snippet prefix, if any (user snippets take precedence).
+pub fn body(language: Language, prefix: &str) -> Option<String> {
+    user_snippets(language)
+        .into_iter()
+        .find(|(p, _)| p == prefix)
+        .map(|(_, b)| b)
+        .or_else(|| {
+            snippets(language)
+                .iter()
+                .find(|(p, _)| *p == prefix)
+                .map(|(_, b)| b.to_string())
+        })
 }
 
-/// Completion items for snippets whose prefix starts with `word`.
+/// Completion items for snippets whose prefix starts with `word`
+/// (user snippets first, then built-ins; deduplicated by prefix).
 pub fn completion_items(language: Language, word: &str) -> Vec<CompletionItem> {
-    snippets(language)
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    let user = user_snippets(language);
+    let prefixes = user
         .iter()
-        .filter(|(p, _)| word.is_empty() || p.starts_with(word))
-        .map(|(p, _)| CompletionItem {
-            label: p.to_string(),
-            insert_text: Some(p.to_string()),
-            kind: Some(CompletionItemKind::SNIPPET),
-            detail: Some("snippet".to_string()),
-            ..Default::default()
-        })
-        .collect()
+        .map(|(p, _)| p.clone())
+        .chain(snippets(language).iter().map(|(p, _)| p.to_string()));
+    for p in prefixes {
+        if (word.is_empty() || p.starts_with(word)) && seen.insert(p.clone()) {
+            out.push(CompletionItem {
+                label: p.clone(),
+                insert_text: Some(p),
+                kind: Some(CompletionItemKind::SNIPPET),
+                detail: Some("snippet".to_string()),
+                ..Default::default()
+            });
+        }
+    }
+    out
 }
 
 /// Expand a snippet body: re-indent continuation lines and locate `$0`.

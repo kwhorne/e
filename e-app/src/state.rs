@@ -2327,7 +2327,7 @@ impl AppState {
             if let Some(body) = snippets::body(buf.file.language, &label) {
                 let text = buf.doc.text().to_string();
                 let indent = line_indent(&text, start);
-                let (expanded, caret) = snippets::expand(body, &indent);
+                let (expanded, caret) = snippets::expand(&body, &indent);
                 buf.doc.edit_single(
                     Selection::region(start, end),
                     &expanded,

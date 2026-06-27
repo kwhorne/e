@@ -21,7 +21,7 @@ resolver = "2"
 version      = "0.1.0"
 edition      = "2021"
 rust-version = "1.87.0"
-license      = "Apache-2.0"
+license      = "MIT"
 authors      = ["kh"]
 
 [workspace.dependencies]

@@ -183,4 +183,14 @@ Rust ecosystem that make `e` possible.
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE).
+Licensed under the [MIT License](LICENSE).
+
+---
+
+<div align="center">
+
+**e** — The editor for the rest of us
+
+Made with ♥ by [Knut W. Horne](https://kwhorne.com) · [kwhorne.com](https://kwhorne.com)
+
+</div>

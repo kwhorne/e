@@ -9,6 +9,8 @@ cd "$(dirname "$0")/.."
 TARGET="${1:-$(pwd)}"
 TARGET="$(cd "$TARGET" 2>/dev/null && pwd || echo "$TARGET")"
 
+VERSION="$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' Cargo.toml | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')"
+
 echo "==> building (debug)"
 cargo build
 
@@ -24,13 +26,15 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>e</string>
   <key>CFBundleIdentifier</key><string>dev.e.editor</string>
-  <key>CFBundleVersion</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>__VERSION__</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
   <key>CFBundleExecutable</key><string>e</string>
   <key>CFBundleIconFile</key><string>e.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+sed -i '' "s/__VERSION__/$VERSION/g" "$APP/Contents/Info.plist"
 
 # Kill any running instance so `open` launches the freshly built binary
 # (macOS `open` just focuses an existing instance instead of relaunching).

@@ -57,6 +57,47 @@ pub fn check() -> Result<Option<UpdateInfo>> {
     }
 }
 
+/// After an in-place update, rewrite the bundle's `Info.plist` version so the
+/// macOS "About" panel (which reads the plist, not the binary) shows the new
+/// version. `self_update` only swaps the executable, leaving the plist stale.
+pub fn patch_bundle_version(version: &str) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(bundle) = exe
+        .ancestors()
+        .find(|p| p.extension().map(|e| e == "app").unwrap_or(false))
+    else {
+        return;
+    };
+    let plist = bundle.join("Contents/Info.plist");
+    let Ok(content) = std::fs::read_to_string(&plist) else {
+        return;
+    };
+    let content = replace_plist_string(&content, "CFBundleShortVersionString", version);
+    let content = replace_plist_string(&content, "CFBundleVersion", version);
+    let _ = std::fs::write(&plist, content);
+    // Nudge LaunchServices to pick up the change on next launch.
+    let _ = std::process::Command::new("/usr/bin/touch").arg(bundle).status();
+}
+
+/// Replace the `<string>` value that follows `<key>{key}</key>` in a plist.
+fn replace_plist_string(content: &str, key: &str, value: &str) -> String {
+    let needle = format!("<key>{key}</key>");
+    let Some(kpos) = content.find(&needle) else {
+        return content.to_string();
+    };
+    let Some(srel) = content[kpos..].find("<string>") else {
+        return content.to_string();
+    };
+    let sstart = kpos + srel + "<string>".len();
+    let Some(erel) = content[sstart..].find("</string>") else {
+        return content.to_string();
+    };
+    let eabs = sstart + erel;
+    format!("{}{}{}", &content[..sstart], value, &content[eabs..])
+}
+
 /// Download the latest release asset for this platform and replace the running
 /// binary in place. Blocking — run on a background thread. After this succeeds
 /// the app must be restarted to load the new binary.

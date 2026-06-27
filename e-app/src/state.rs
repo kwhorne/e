@@ -1459,8 +1459,15 @@ impl AppState {
         }
         self.update_status.set(UpdateStatus::Downloading);
         let status_sig = self.update_status;
+        let info_sig = self.update_info;
         let send = create_ext_action(self.cx, move |result: Result<(), String>| match result {
-            Ok(()) => status_sig.set(UpdateStatus::Installed),
+            Ok(()) => {
+                // Keep the bundle's Info.plist version in sync with the binary.
+                if let Some(info) = info_sig.get_untracked() {
+                    updater::patch_bundle_version(&info.version);
+                }
+                status_sig.set(UpdateStatus::Installed);
+            }
             Err(e) => status_sig.set(UpdateStatus::Failed(e)),
         });
         std::thread::spawn(move || {

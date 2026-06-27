@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- After an in-place auto-update, the bundle Info.plist version is rewritten so the
+  macOS About panel shows the correct version (previously stale).
+- Dev/bundle scripts now stamp the real version from Cargo.toml into Info.plist.
+
 ## [0.2.5] - 2026-06-27
 
 ### Fixed

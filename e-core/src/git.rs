@@ -206,6 +206,45 @@ pub fn repo_root(path: &Path) -> Option<std::path::PathBuf> {
     git_root(path)
 }
 
+/// Per-line blame: `(author, unix_time, summary)` for each line of `path`.
+/// Uncommitted lines yield `("You", 0, "Uncommitted changes")`.
+pub fn blame(path: &Path) -> Vec<(String, i64, String)> {
+    let Some(dir) = path.parent() else {
+        return Vec::new();
+    };
+    let out = match Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["blame", "--line-porcelain", "--"])
+        .arg(path)
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut result = Vec::new();
+    let (mut author, mut time, mut summary) = (String::new(), 0i64, String::new());
+    for line in text.lines() {
+        if let Some(a) = line.strip_prefix("author ") {
+            author = a.to_string();
+        } else if let Some(t) = line.strip_prefix("author-time ") {
+            time = t.trim().parse().unwrap_or(0);
+        } else if let Some(s) = line.strip_prefix("summary ") {
+            summary = s.to_string();
+        } else if line.starts_with('\t') {
+            // The actual source line terminates a blame group.
+            let (a, s) = if author == "Not Committed Yet" {
+                ("You".to_string(), "Uncommitted changes".to_string())
+            } else {
+                (author.clone(), summary.clone())
+            };
+            result.push((a, time, s));
+        }
+    }
+    result
+}
+
 /// Fetch the `HEAD` version of `path`, or `None` if it's untracked / not a repo.
 pub fn head_text(path: &Path) -> Option<String> {
     let dir = path.parent()?;

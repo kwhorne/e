@@ -81,6 +81,54 @@ pub fn close_confirm_dialog(state: AppState) -> impl IntoView {
         .on_click_stop(move |_| state.cancel_close())
 }
 
+/// A bar shown when the caret is inside a git merge-conflict block, offering
+/// to accept the current, incoming, or both sides.
+pub fn merge_conflict_bar(state: AppState) -> impl IntoView {
+    let in_conflict = move || {
+        // Re-evaluate as the caret moves / the document changes.
+        state.cursor_info();
+        state.active_has_conflicts()
+    };
+
+    let small_btn = |text: &'static str| {
+        label(move || text.to_string()).style(|s| {
+            s.padding_horiz(10.0)
+                .padding_vert(3.0)
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+    };
+
+    stack((
+        label(|| "Merge conflict".to_string())
+            .style(|s| s.color(theme::fg()).font_size(12.0).flex_grow(1.0)),
+        small_btn("Accept Current").on_click_stop(move |_| state.resolve_conflict(0)),
+        small_btn("Accept Incoming").on_click_stop(move |_| state.resolve_conflict(1)),
+        small_btn("Accept Both").on_click_stop(move |_| state.resolve_conflict(2)),
+    ))
+    .style(move |s| {
+        let s = s
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .padding_horiz(12.0)
+            .padding_vert(6.0)
+            .background(floem::peniko::Color::from_rgb8(0x3a, 0x2a, 0x40))
+            .border_bottom(1.0)
+            .border_color(theme::border());
+        if in_conflict() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 /// A thin bar shown atop the editor when the active file changed on disk while
 /// it had unsaved edits.
 pub fn disk_conflict_bar(state: AppState) -> impl IntoView {

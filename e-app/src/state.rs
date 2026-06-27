@@ -72,6 +72,8 @@ pub struct Buffer {
     pub disk_mtime: RwSignal<Option<std::time::SystemTime>>,
     /// Set when the file changed on disk while the buffer had unsaved edits.
     pub disk_changed: RwSignal<bool>,
+    /// Per-line git blame: `(author, unix_time, summary)`.
+    pub blame: Rc<RefCell<Vec<(String, i64, String)>>>,
 }
 
 /// One terminal session (a running shell).
@@ -271,6 +273,8 @@ pub struct AppState {
     /// Navigation history (locations jumped from / to).
     pub nav_back_stack: RwSignal<Vec<(PathBuf, usize, usize)>>,
     pub nav_fwd_stack: RwSignal<Vec<(PathBuf, usize, usize)>>,
+    /// Bumped when blame data finishes loading, to refresh the status bar.
+    pub blame_rev: RwSignal<u64>,
 }
 
 fn now_ms() -> u128 {
@@ -353,6 +357,43 @@ impl AppState {
             word_wrap: RwSignal::new(false),
             nav_back_stack: RwSignal::new(Vec::new()),
             nav_fwd_stack: RwSignal::new(Vec::new()),
+            blame_rev: RwSignal::new(0),
+        }
+    }
+
+    /// Load git blame for a buffer in the background.
+    pub fn load_blame(&self, id: u64) {
+        let Some(buf) = self.buffer_by_id(id) else {
+            return;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return;
+        };
+        let blame_cell = buf.blame.clone();
+        let rev = self.blame_rev;
+        let send = create_ext_action(self.cx, move |lines: Vec<(String, i64, String)>| {
+            *blame_cell.borrow_mut() = lines;
+            rev.update(|r| *r += 1);
+        });
+        std::thread::spawn(move || {
+            send(git::blame(&path));
+        });
+    }
+
+    /// Blame string for the active cursor line, if available.
+    pub fn active_line_blame(&self) -> Option<String> {
+        let buf = self.active_buffer()?;
+        let editor = buf.editor.get_untracked()?;
+        let (line, _) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
+        let b = buf.blame.borrow();
+        let (author, time, summary) = b.get(line)?.clone();
+        if summary.is_empty() {
+            return None;
+        }
+        if time == 0 {
+            Some(format!("{author} • {summary}"))
+        } else {
+            Some(format!("{author}, {} • {summary}", rel_time(time)))
         }
     }
 
@@ -634,6 +675,41 @@ impl AppState {
                 }
             }
         }
+    }
+
+    // ---- Merge conflicts ------------------------------------------------
+
+    /// Whether the active buffer contains conflict markers.
+    pub fn active_has_conflicts(&self) -> bool {
+        self.active_buffer()
+            .map(|b| b.doc.text().to_string().contains("<<<<<<<"))
+            .unwrap_or(false)
+    }
+
+    /// The conflict block containing the caret: `(start, end, current, incoming)`.
+    fn active_conflict_block(&self) -> Option<(usize, usize, String, String)> {
+        let buf = self.active_buffer()?;
+        let editor = buf.editor.get_untracked()?;
+        let offset = editor.cursor.get_untracked().offset();
+        let text = buf.doc.text().to_string();
+        find_conflict(&text, offset)
+    }
+
+    /// Resolve the conflict at the caret: 0 = current, 1 = incoming, 2 = both.
+    pub fn resolve_conflict(&self, choice: u8) {
+        let Some((start, end, current, incoming)) = self.active_conflict_block() else {
+            return;
+        };
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let replacement = match choice {
+            0 => current,
+            1 => incoming,
+            _ => format!("{current}{incoming}"),
+        };
+        let mut it = std::iter::once((Selection::region(start, end), replacement.as_str()));
+        buf.doc.edit(&mut it, EditType::InsertChars);
     }
 
     // ---- External file changes -----------------------------------------
@@ -1604,9 +1680,11 @@ impl AppState {
             pending_goto: RwSignal::new(None),
             disk_mtime: RwSignal::new(disk_mtime),
             disk_changed: RwSignal::new(false),
+            blame: Rc::new(RefCell::new(Vec::new())),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
+        self.load_blame(id);
     }
 
     /// Close a tab; focus a neighbour if it was active.
@@ -1765,6 +1843,7 @@ impl AppState {
                 buf.disk_changed.set(false);
                 Self::refresh_disk_mtime(&buf);
                 self.fs_rev.update(|r| *r += 1);
+                self.load_blame(buf.id);
                 eprintln!("e: saved {}", path.display());
                 if let (Some(uri), Some(client)) =
                     (buf.uri.as_ref(), self.lsp_for_language(buf.file.language))
@@ -2363,6 +2442,74 @@ impl AppState {
 
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$'
+}
+
+/// Find the git conflict block containing `cursor`, returning
+/// `(start, end, current_text, incoming_text)` in byte offsets.
+fn find_conflict(text: &str, cursor: usize) -> Option<(usize, usize, String, String)> {
+    let mut search = 0;
+    while let Some(rel) = text[search..].find("<<<<<<<") {
+        let start = search + rel;
+        // Must be at the start of a line.
+        if start != 0 && text.as_bytes()[start - 1] != b'\n' {
+            search = start + 7;
+            continue;
+        }
+        let after_marker = text[start..].find('\n').map(|i| start + i + 1)?;
+        let sep = text[after_marker..]
+            .find("\n=======")
+            .map(|i| after_marker + i + 1)
+            .or_else(|| {
+                if text[after_marker..].starts_with("=======") {
+                    Some(after_marker)
+                } else {
+                    None
+                }
+            })?;
+        let after_sep = text[sep..].find('\n').map(|i| sep + i + 1)?;
+        let gt = text[after_sep..]
+            .find("\n>>>>>>>")
+            .map(|i| after_sep + i + 1)
+            .or_else(|| {
+                if text[after_sep..].starts_with(">>>>>>>") {
+                    Some(after_sep)
+                } else {
+                    None
+                }
+            })?;
+        let end = text[gt..].find('\n').map(|i| gt + i + 1).unwrap_or(text.len());
+
+        if (start..end).contains(&cursor) {
+            let current = text[after_marker..sep].to_string();
+            let incoming = text[after_sep..gt].to_string();
+            return Some((start, end, current, incoming));
+        }
+        search = end;
+    }
+    None
+}
+
+/// A short "x minutes ago" string for a unix timestamp.
+fn rel_time(unix: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let diff = (now - unix).max(0);
+    let (n, unit) = if diff < 60 {
+        return "just now".to_string();
+    } else if diff < 3600 {
+        (diff / 60, "minute")
+    } else if diff < 86_400 {
+        (diff / 3600, "hour")
+    } else if diff < 2_592_000 {
+        (diff / 86_400, "day")
+    } else if diff < 31_536_000 {
+        (diff / 2_592_000, "month")
+    } else {
+        (diff / 31_536_000, "year")
+    };
+    format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
 }
 
 pub(crate) fn is_word_byte(b: u8) -> bool {

@@ -13,7 +13,7 @@ use floem::{Application, IntoView};
 
 use crate::about::about_dialog;
 use crate::recent::recent_palette;
-use crate::dialogs::{close_confirm_dialog, disk_conflict_bar};
+use crate::dialogs::{close_confirm_dialog, disk_conflict_bar, merge_conflict_bar};
 use crate::editing::goto_bar;
 use crate::agent_view::agent_panel;
 use crate::update_view::update_notice;
@@ -444,6 +444,7 @@ fn app_view() -> impl IntoView {
         tab_bar(state),
         breadcrumbs(state),
         disk_conflict_bar(state),
+        merge_conflict_bar(state),
         editor_area(state).style(|s| s.flex_grow(1.0).width_full()),
         terminal_panel(state),
         problems_panel(state),

@@ -58,8 +58,17 @@ pub fn status_bar(state: AppState) -> impl IntoView {
         None => String::new(),
     });
 
+    let blame = label(move || {
+        state.blame_rev.get();
+        state.cursor_info(); // re-render on caret movement
+        state.active_line_blame().unwrap_or_default()
+    })
+    .style(|s| s.color(theme::fg_dim()).text_ellipsis().max_width(360.0));
+
     let right = stack((diags, branch, position, indent, line_ending, encoding, language))
         .style(|s| s.items_center().gap(14.0));
+
+    let left = stack((left, blame)).style(|s| s.items_center().gap(14.0).min_width(0.0));
 
     stack((left, right)).style(|s| {
         s.height(24.0)

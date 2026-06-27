@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Git blame for the current line shown in the status bar.
+- Merge-conflict resolution bar: accept current, incoming, or both sides when the
+  caret is inside a conflict block.
 - Open dialogs: ⌘O opens a native folder picker to open another project in a
   new window; an "Open File…" command opens any file in the current window.
 - Source Control panel (⌘2): branch display, staged / unstaged / untracked file

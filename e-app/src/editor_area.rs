@@ -56,7 +56,7 @@ fn welcome() -> impl IntoView {
     // ...which is centred as a whole, with the title centred above it.
     stack((
         label(|| "e".to_string()).style(|s| s.font_size(44.0).color(theme::fg()).margin_bottom(4.0)),
-        label(|| "A lightning-fast editor in Rust".to_string())
+        label(|| "The editor for the rest of us".to_string())
             .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(22.0)),
         cheats,
     ))

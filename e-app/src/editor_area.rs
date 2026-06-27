@@ -175,7 +175,11 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
             // type immediately without clicking into it first.
             floem::reactive::create_effect(move |_| {
                 if active_sig.get() == Some(id) {
-                    te_id.request_focus();
+                    // Defer to the next frame so the view is mounted before we
+                    // grab focus (otherwise the request is dropped).
+                    floem::action::exec_after(std::time::Duration::from_millis(0), move |_| {
+                        te_id.request_focus();
+                    });
                 }
             });
 

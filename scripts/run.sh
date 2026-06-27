@@ -32,5 +32,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 
+# Kill any running instance so `open` launches the freshly built binary
+# (macOS `open` just focuses an existing instance instead of relaunching).
+pkill -f "e.app/Contents/MacOS/e" 2>/dev/null || true
+sleep 0.3
+
 echo "==> opening e on: $TARGET"
-open "$APP" --args "$TARGET"
+open -n "$APP" --args "$TARGET"

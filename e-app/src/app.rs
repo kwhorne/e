@@ -74,7 +74,9 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     true
                 }
                 "w" => {
-                    if state.terminal_focused.get() {
+                    if state.agent_focused.get() {
+                        state.agent_open.set(false);
+                    } else if state.terminal_focused.get() {
                         if let Some(id) = state.focused_term_id() {
                             state.close_terminal(id);
                         }

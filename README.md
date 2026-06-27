@@ -109,6 +109,16 @@ header, and configure them in your global settings (`⌘,`):
 | `F12`      | Go to definition             |
 | `⇧F12`     | Find references              |
 
+## Documentation
+
+Full user documentation lives in [`docs/`](docs/README.md):
+
+- [Installation](docs/installation.md) · [Getting started](docs/getting-started.md) · [Keyboard shortcuts](docs/keyboard-shortcuts.md)
+- [Editing](docs/editing.md) · [Find & Replace](docs/find-and-replace.md) · [Navigation](docs/navigation.md)
+- [Languages & LSP](docs/languages-and-lsp.md) · [Laravel](docs/laravel.md)
+- [Source Control](docs/source-control.md) · [Terminal](docs/terminal.md) · [AI Agents](docs/agents.md)
+- [Configuration](docs/configuration.md) · [Updating](docs/updating.md) · [Troubleshooting](docs/troubleshooting.md)
+
 ## Getting started
 
 ### Requirements

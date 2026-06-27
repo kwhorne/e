@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Complete user documentation in `docs/` (installation, editing, navigation,
+  languages, source control, terminal, agents, configuration, and more).
+
 ## [0.2.0] - 2026-06-27
 
 ### Added

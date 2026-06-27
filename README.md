@@ -191,6 +191,6 @@ Licensed under the [MIT License](LICENSE).
 
 **e** — The editor for the rest of us
 
-Made with ♥ by [Knut W. Horne](https://kwhorne.com) · [kwhorne.com](https://kwhorne.com)
+Made with ♥ by [Knut W. Horne](https://kwhorne.com)
 
 </div>

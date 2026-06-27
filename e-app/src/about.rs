@@ -1,7 +1,7 @@
 //! The About dialog.
 
 use floem::reactive::{SignalGet, SignalUpdate};
-use floem::views::{container, label, scroll, stack, svg, Decorators};
+use floem::views::{container, label, stack, svg, Decorators};
 use floem::IntoView;
 
 use crate::state::AppState;
@@ -37,7 +37,7 @@ fn card(heading: &'static str, value: &'static str, url: Option<&'static str>) -
         s.flex_col()
             .items_center()
             .gap(2.0)
-            .width_full()
+            .width(348.0)
             .padding_vert(12.0)
             .background(theme::bg())
             .border(1.0)
@@ -47,63 +47,65 @@ fn card(heading: &'static str, value: &'static str, url: Option<&'static str>) -
 }
 
 pub fn about_dialog(state: AppState) -> impl IntoView {
-    let box_ = stack((
-        svg(|| ICON.to_string()).style(|s| s.width(68.0).height(68.0).margin_bottom(12.0)),
+    let icon = container(svg(|| ICON.to_string()).style(|s| s.size_full()))
+        .style(|s| s.width(68.0).height(68.0).margin_bottom(12.0));
+
+    let head = stack((
+        icon,
         label(|| "e".to_string()).style(|s| s.font_size(30.0).color(theme::fg())),
         label(|| format!("Version {}", env!("CARGO_PKG_VERSION"))).style(|s| {
             s.font_family("monospace".to_string())
                 .font_size(12.0)
                 .color(theme::fg_dim())
-                .margin_bottom(14.0)
+                .margin_bottom(12.0)
         }),
         label(|| "A fast, native code editor in Rust.".to_string())
-            .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(18.0)),
+            .style(|s| s.color(theme::fg_dim()).font_size(13.0)),
+    ))
+    .style(|s| s.flex_col().items_center());
+
+    let cards = stack((
         card("WEBSITE", "kwhorne.com", Some("https://kwhorne.com")),
         card("GITHUB", "github.com/kwhorne/e", Some("https://github.com/kwhorne/e")),
         card("DEVELOPED BY", "Knut W. Horne", None),
-        label(|| "Close".to_string())
-            .style(|s| {
-                s.margin_top(18.0)
-                    .padding_horiz(24.0)
-                    .padding_vert(7.0)
-                    .background(theme::bg())
-                    .color(theme::fg())
-                    .border(1.0)
-                    .border_color(theme::border())
-                    .border_radius(8.0)
-                    .cursor(floem::style::CursorStyle::Pointer)
-                    .hover(|s| s.background(theme::bg_hover()))
-            })
-            .on_click_stop(move |_| state.about_open.set(false)),
     ))
-    .style(|s| {
-        s.flex_col()
-            .items_center()
-            .width(400.0)
-            .padding(26.0)
-            .gap(6.0)
-            .background(theme::bg_panel())
-            .border(1.0)
-            .border_color(theme::border())
-            .border_radius(14.0)
-    })
-    .on_click_stop(|_| {});
+    .style(|s| s.flex_col().items_center().gap(8.0).margin_vert(18.0));
 
-    // Scrollable + centred, so it works even in small windows.
-    let centred = container(box_).style(|s| {
-        s.min_height_full()
-            .width_full()
-            .items_center()
-            .justify_center()
-            .padding_vert(24.0)
-    });
+    let close = label(|| "Close".to_string())
+        .style(|s| {
+            s.padding_horiz(24.0)
+                .padding_vert(7.0)
+                .background(theme::bg())
+                .color(theme::fg())
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(8.0)
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.about_open.set(false));
 
-    scroll(centred)
+    let box_ = stack((head, cards, close))
+        .style(|s| {
+            s.flex_col()
+                .items_center()
+                .width(400.0)
+                .padding(26.0)
+                .background(theme::bg_panel())
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(14.0)
+        })
+        .on_click_stop(|_| {});
+
+    container(box_)
         .style(move |s| {
             let s = s
                 .absolute()
                 .inset(0.0)
                 .size_full()
+                .items_center()
+                .justify_center()
                 .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
             if state.about_open.get() {
                 s

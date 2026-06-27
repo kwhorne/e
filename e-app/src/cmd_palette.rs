@@ -114,7 +114,6 @@ pub fn command_palette(state: AppState) -> impl IntoView {
         .request_focus(move || {
             cmd.open.get();
         })
-        .on_event_stop(floem::event::EventListener::FocusLost, move |_| cmd.open.set(false))
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| cmd.open.set(false))
         .on_key_down(Key::Named(NamedKey::Enter), |_| true, move |_| run_selected())
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {

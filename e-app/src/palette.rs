@@ -99,9 +99,6 @@ pub fn palette(state: AppState) -> impl IntoView {
             // Re-focus the input each time the palette is toggled open.
             state.palette_open.get();
         })
-        .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
-            state.palette_open.set(false)
-        })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
             state.palette_open.set(false)
         })

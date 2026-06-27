@@ -102,7 +102,6 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
         .request_focus(move || {
             p.open.get();
         })
-        .on_event_stop(floem::event::EventListener::FocusLost, move |_| p.open.set(false))
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| p.open.set(false))
         .on_key_down(Key::Named(NamedKey::Enter), |_| true, move |_| accept())
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {

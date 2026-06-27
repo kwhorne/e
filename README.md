@@ -23,24 +23,42 @@ GPU-accelerated and reactive, with a focus on staying fast and out of your way.
 The editor targets the modern web stack out of the box — **PHP, Laravel, Blade,
 Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 
+## Screenshots
+
+<div align="center">
+
+![A Blade view with Flux UI components and Tailwind classes](docs/images/editor.png)
+
+*Editing a Laravel Blade view — Flux UI components, Tailwind classes, tabs, breadcrumbs.*
+
+![The welcome screen with the file explorer and shortcut cheat sheet](docs/images/welcome.png)
+
+*The welcome screen: file explorer with type icons, and the keyboard shortcut cheat sheet.*
+
+</div>
+
 ## Features
 
-- **Tree-sitter syntax highlighting** for 12+ languages
+- **Tree-sitter syntax highlighting** for 12+ languages, with file-type icons in the explorer
 - **Language Server Protocol** — diagnostics, completion, hover, go-to-definition,
   find references, document & workspace symbols, formatting, rename, code actions
   and signature help, with per-language servers auto-selected
-- **Laravel-aware completion** — `route()`, `view()`, `config()` and `env()` keys
-- **Fuzzy file finder** (`⌘P`) and **command palette** (`⌘⇧P`)
-- **Workspace search** across files (`⌘⇧F`) and **find-in-file** (`⌘F`)
-- **Integrated terminal** — PTY-backed with ANSI colour, multiple tabs, rename and split
-- **AI agent panel** — run Elyra, Claude Code, Codex or any CLI agent in a side panel (`⌘L`)
-- **Split editor** (`⌘\`), **resizable panels** (drag the edges), **multi-cursor** (`⌘D`)
-- **Git integration** — change gutter and inline diff vs `HEAD`
-- **Inline diagnostics**, **bracket matching**, **snippets**, **breadcrumbs**
-- **Markdown preview** (`⌘⇧M`)
-- **Light / dark themes** (`F8`), **auto-save**, **format & trim on save**
-- **Session persistence** — reopens your files, tabs and split layout per workspace
-- **Workspace problems panel** — every diagnostic across the project, grouped and clickable
+- **Framework-aware completion** — Flux UI (`<flux:…>`), Livewire (`wire:`),
+  Tailwind classes, Vue/Svelte directives, and Laravel helpers (`route()`,
+  `view()`, `config()`, `env()`)
+- **Built-in completion** — keywords and buffer words, with or without a language server
+- **Fuzzy file finder** (`⌘P`), **command palette** (`⌘⇧P`), **recent files** (`⌘E`)
+- **Open another project** (`⌘O`), **new file** (`⌘N`), **go to line** (`⌃G`)
+- **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search** (`⌘⇧F`)
+- **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch, inline blame, merge-conflict resolution
+- **Integrated terminal** (`⌘T`) — PTY-backed with ANSI colour, multiple tabs, rename and split
+- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent beside your code
+- **Editing essentials** — comment toggle (`⌘/`), line move/duplicate/delete, indent, multi-cursor (`⌘⇧D`), auto-closing brackets
+- **Split editor** (`⌘\`), **resizable & swappable panels**, **zoom** (`⌘±`), **word wrap** (`⌥Z`)
+- **Navigation history** (`⌃-` / `⌃⇧-`), **breadcrumbs**, **outline**, **inline diagnostics**, **bracket matching**
+- **Markdown preview** (`⌘⇧M`), **light / dark themes** (`F8`)
+- **Auto-save**, **format & trim on save**, **unsaved-change & external-edit handling**
+- **Session persistence**, **workspace problems panel**
 - **Built-in auto-updater** — detects new GitHub releases, shows the changelog, and installs in place
 
 ## Supported languages
@@ -86,28 +104,24 @@ header, and configure them in your global settings (`⌘,`):
 
 > On macOS the modifier is `⌘`; on Linux/Windows use `Ctrl`.
 
-| Shortcut   | Action                       |
-| ---------- | ---------------------------- |
-| `⌘P`       | Find file                    |
-| `⌘⇧P`      | Command palette              |
-| `⌘⇧F`      | Search in files              |
-| `⌘⇧O`      | Go to symbol                 |
-| `⌘F`       | Find in file                 |
-| `⌘S`       | Save file                    |
-| `⌘W`       | Close tab / terminal / agent |
-| `⌘\`       | Split editor                 |
-| `⌘D`       | Add cursor at next match     |
-| `⌘T`       | Toggle terminal              |
-| `⌘L`       | Toggle agent panel           |
-| `⌘1`       | Toggle sidebar               |
-| `⌘⇧M`      | Toggle markdown preview      |
-| `⌘,`       | Open settings                |
-| `⌘Space`   | Trigger completion           |
-| `F1`       | Hover info                   |
-| `F2`       | Rename                       |
-| `F8`       | Toggle light / dark theme    |
-| `F12`      | Go to definition             |
-| `⇧F12`     | Find references              |
+A selection — see [the full list](docs/keyboard-shortcuts.md).
+
+| Shortcut   | Action                       | Shortcut | Action |
+| ---------- | ---------------------------- | -------- | ------ |
+| `⌘P`       | Find file                    | `⌘N`     | New file |
+| `⌘E`       | Recent files                 | `⌘O`     | Open folder / project |
+| `⌘⇧P`      | Command palette              | `⌘,`     | Open settings |
+| `⌘F` / `⌥⌘F` | Find / Replace in file     | `⌘⇧F`    | Search in files |
+| `⌘⇧O`      | Go to symbol                 | `⌃G`     | Go to line |
+| `⌘S`       | Save (Save As for new files) | `⌘W`     | Close tab / terminal / agent |
+| `⌘/`       | Toggle comment               | `⌘D`     | Duplicate line |
+| `⌘⇧D`      | Add cursor at next match     | `⌘\`     | Split editor |
+| `⌘1`       | Toggle sidebar               | `⌘2`     | Source Control |
+| `⌘T`       | Toggle terminal              | `⌘L`     | Toggle agent panel |
+| `⌘=` / `⌘-`| Zoom in / out                | `⌥Z`     | Toggle word wrap |
+| `⌃-` / `⌃⇧-` | Go back / forward          | `⌘⇧M`    | Markdown preview |
+| `F12`      | Go to definition             | `⇧F12`   | Find references |
+| `F2`       | Rename                       | `F8`     | Light / dark theme |
 
 ## Documentation
 

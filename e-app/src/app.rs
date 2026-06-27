@@ -98,6 +98,10 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.toggle_split();
                     true
                 }
+                "1" => {
+                    state.sidebar_open.update(|o| *o = !*o);
+                    true
+                }
                 "d" => {
                     state.select_next_occurrence();
                     true
@@ -290,12 +294,18 @@ fn app_view() -> impl IntoView {
         }
     });
 
-    let sidebar = stack((file_tree(state), outline_panel(state))).style(|s| {
-        s.flex_col()
+    let sidebar = stack((file_tree(state), outline_panel(state))).style(move |s| {
+        let s = s
+            .flex_col()
             .width(240.0)
             .height_full()
             .border_right(1.0)
-            .border_color(theme::border())
+            .border_color(theme::border());
+        if state.sidebar_open.get() {
+            s
+        } else {
+            s.hide()
+        }
     });
 
     let main_row = stack((sidebar, editor_column)).style(|s| s.flex_row().size_full());

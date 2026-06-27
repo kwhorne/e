@@ -182,6 +182,8 @@ pub struct AppState {
     pub diff_open: RwSignal<bool>,
     /// User settings loaded from config.json.
     pub settings: Settings,
+    /// Whether the left sidebar (file explorer) is visible.
+    pub sidebar_open: RwSignal<bool>,
 }
 
 fn now_ms() -> u128 {
@@ -229,6 +231,7 @@ impl AppState {
             cmd: CmdPalette::new(),
             diff_open: RwSignal::new(false),
             settings: config::load_settings(),
+            sidebar_open: RwSignal::new(true),
         }
     }
 

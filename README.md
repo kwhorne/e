@@ -106,6 +106,7 @@ Works in both `.php` and `.blade.php` files.
 | F12 | Go to definition |
 | Shift+F12 | Find references |
 | ⌘T | Toggle terminal |
+| ⌘1 | Toggle sidebar |
 | ⌘⇧O | Workspace symbol search |
 | ⌘⇧F | Search across files |
 | ⌘F | Find in file |

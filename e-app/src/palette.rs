@@ -145,7 +145,14 @@ pub fn palette(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    let box_ = stack((input, scroll(results).style(|s| s.max_height(320.0).width_full())))
+    let results_scroll = scroll(results)
+        .scroll_to_percent(move || {
+            let n = filtered().len().max(1) as f32;
+            selected.get() as f32 / n
+        })
+        .style(|s| s.max_height(320.0).width_full());
+
+    let box_ = stack((input, results_scroll))
         .style(|s| {
             s.flex_col()
                 .width(560.0)

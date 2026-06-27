@@ -154,7 +154,14 @@ pub fn command_palette(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    let box_ = stack((input, scroll(rows).style(|s| s.max_height(360.0).width_full())))
+    let rows_scroll = scroll(rows)
+        .scroll_to_percent(move || {
+            let n = filtered().len().max(1) as f32;
+            cmd.selected.get() as f32 / n
+        })
+        .style(|s| s.max_height(360.0).width_full());
+
+    let box_ = stack((input, rows_scroll))
         .style(|s| {
             s.flex_col()
                 .width(520.0)

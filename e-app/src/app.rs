@@ -285,8 +285,20 @@ fn app_view() -> impl IntoView {
             state.close_hover();
             state.close_signature();
             state.picker.open.set(false);
+            state.palette_open.set(false);
             state.md_preview.set(false);
             state.cmd.open.set(false);
             state.diff_open.set(false);
+            state.close_rename();
         })
+        // ⌘W / Ctrl+W closes the focused tab.
+        .on_key_down(
+            Key::Character("w".into()),
+            |m| m.meta() || m.control(),
+            move |_| {
+                if let Some(id) = state.focused_active_id() {
+                    state.close(id);
+                }
+            },
+        )
 }

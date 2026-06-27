@@ -12,6 +12,7 @@ use floem::window::WindowConfig;
 use floem::{Application, IntoView};
 
 use crate::about::about_dialog;
+use crate::dialogs::{close_confirm_dialog, disk_conflict_bar};
 use crate::editing::goto_bar;
 use crate::agent_view::agent_panel;
 use crate::update_view::update_notice;
@@ -216,6 +217,8 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 state.close_find();
                 state.close_rename();
                 state.close_goto_line();
+
+                state.cancel_close();
                 true
             }
             _ => false,
@@ -376,6 +379,7 @@ fn app_view() -> impl IntoView {
         create_effect(move |_| {
             if ticks.get().is_some() {
                 state.maybe_autosave();
+                state.check_external_changes();
             }
         });
     }
@@ -383,6 +387,7 @@ fn app_view() -> impl IntoView {
     let editor_column = stack((
         tab_bar(state),
         breadcrumbs(state),
+        disk_conflict_bar(state),
         editor_area(state).style(|s| s.flex_grow(1.0).width_full()),
         terminal_panel(state),
         problems_panel(state),
@@ -470,7 +475,14 @@ fn app_view() -> impl IntoView {
         palette(state),
         command_palette(state),
         update_notice(state),
-        goto_bar(state),
+        stack((goto_bar(state), close_confirm_dialog(state))).style(move |s| {
+            let s = s.absolute().inset(0.0).size_full();
+            if state.goto.open.get() || state.close_confirm.get().is_some() {
+                s
+            } else {
+                s.hide()
+            }
+        }),
     ))
     .style(|s| s.size_full().background(theme::bg()).color(theme::fg()))
     .window_title(move || {

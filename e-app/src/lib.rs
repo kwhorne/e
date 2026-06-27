@@ -5,6 +5,7 @@
 //! name, language and dirty state. Everything else grows from here.
 
 mod editing;
+mod dialogs;
 mod about;
 mod update_view;
 mod updater;

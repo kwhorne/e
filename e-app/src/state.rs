@@ -68,6 +68,10 @@ pub struct Buffer {
     pub win_origin: RwSignal<Point>,
     /// A `(line, col)` to move the caret to once the editor exists.
     pub pending_goto: RwSignal<Option<(usize, usize)>>,
+    /// Last-seen modification time of the file on disk (for change detection).
+    pub disk_mtime: RwSignal<Option<std::time::SystemTime>>,
+    /// Set when the file changed on disk while the buffer had unsaved edits.
+    pub disk_changed: RwSignal<bool>,
 }
 
 /// One terminal session (a running shell).
@@ -242,6 +246,8 @@ pub struct AppState {
 
     /// Go-to-line prompt state.
     pub goto: crate::editing::GotoState,
+    /// Buffer id awaiting a close confirmation (unsaved changes).
+    pub close_confirm: RwSignal<Option<u64>>,
 }
 
 fn now_ms() -> u128 {
@@ -312,6 +318,7 @@ impl AppState {
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
             goto: crate::editing::GotoState::new(),
+            close_confirm: RwSignal::new(None),
         }
     }
 
@@ -559,12 +566,87 @@ impl AppState {
             let text = b.doc.text().to_string();
             if buffer::write(path, &text).is_ok() {
                 b.dirty.set(false);
+                Self::refresh_disk_mtime(b);
                 if let (Some(uri), Some(client)) =
                     (b.uri.as_ref(), self.lsp_for_language(b.file.language))
                 {
                     client.did_save(uri, &text);
                 }
             }
+        }
+    }
+
+    // ---- External file changes -----------------------------------------
+
+    /// Read and store the on-disk mtime for a buffer (after we write it, to
+    /// avoid mistaking our own save for an external change).
+    fn refresh_disk_mtime(buf: &Buffer) {
+        let mtime = buf
+            .file
+            .path
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        buf.disk_mtime.set(mtime);
+    }
+
+    /// Poll open files for on-disk changes (called on the idle tick). Clean
+    /// buffers are reloaded silently; dirty ones are flagged for the user.
+    pub fn check_external_changes(&self) {
+        let buffers = self.buffers.get_untracked();
+        for b in &buffers {
+            let Some(path) = b.file.path.as_ref() else {
+                continue;
+            };
+            let Some(mtime) = std::fs::metadata(path).ok().and_then(|m| m.modified().ok()) else {
+                continue;
+            };
+            match b.disk_mtime.get_untracked() {
+                None => b.disk_mtime.set(Some(mtime)),
+                Some(prev) if prev != mtime => {
+                    b.disk_mtime.set(Some(mtime));
+                    if b.dirty.get_untracked() {
+                        b.disk_changed.set(true);
+                    } else {
+                        self.reload_buffer(b);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Reload a buffer's contents from disk, discarding any unsaved edits.
+    fn reload_buffer(&self, buf: &Buffer) {
+        let Some(path) = buf.file.path.as_ref() else {
+            return;
+        };
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return;
+        };
+        if content == buf.doc.text().to_string() {
+            buf.disk_changed.set(false);
+            return;
+        }
+        let old_len = buf.doc.text().len();
+        let mut it = std::iter::once((Selection::region(0, old_len), content.as_str()));
+        buf.doc.edit(&mut it, EditType::InsertChars);
+        buf.dirty.set(false);
+        buf.disk_changed.set(false);
+        Self::refresh_disk_mtime(buf);
+    }
+
+    /// Reload the active buffer from disk (used by the conflict banner).
+    pub fn reload_active_from_disk(&self) {
+        if let Some(buf) = self.active_buffer() {
+            self.reload_buffer(&buf);
+        }
+    }
+
+    /// Dismiss the disk-change conflict, keeping the in-memory version.
+    pub fn keep_active_version(&self) {
+        if let Some(buf) = self.active_buffer() {
+            buf.disk_changed.set(false);
         }
     }
 
@@ -1389,6 +1471,12 @@ impl AppState {
             });
         }
 
+        let disk_mtime = file
+            .path
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+
         let buf = Buffer {
             id,
             file,
@@ -1403,13 +1491,52 @@ impl AppState {
             editor: RwSignal::new(None),
             win_origin: RwSignal::new(Point::ZERO),
             pending_goto: RwSignal::new(None),
+            disk_mtime: RwSignal::new(disk_mtime),
+            disk_changed: RwSignal::new(false),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
     }
 
     /// Close a tab; focus a neighbour if it was active.
+    /// Close a tab, prompting first if it has unsaved changes.
     pub fn close(&self, id: u64) {
+        let dirty = self
+            .buffers
+            .with_untracked(|bs| bs.iter().find(|b| b.id == id).map(|b| b.dirty.get_untracked()))
+            .unwrap_or(false);
+        if dirty {
+            self.close_confirm.set(Some(id));
+        } else {
+            self.force_close(id);
+        }
+    }
+
+    /// Save the pending buffer, then close it.
+    pub fn confirm_close_save(&self) {
+        if let Some(id) = self.close_confirm.get_untracked() {
+            self.close_confirm.set(None);
+            let prev = self.focused_active().get_untracked();
+            self.focused_active().set(Some(id));
+            self.save_active();
+            self.focused_active().set(prev);
+            self.force_close(id);
+        }
+    }
+
+    /// Discard changes and close the pending buffer.
+    pub fn confirm_close_discard(&self) {
+        if let Some(id) = self.close_confirm.get_untracked() {
+            self.close_confirm.set(None);
+            self.force_close(id);
+        }
+    }
+
+    pub fn cancel_close(&self) {
+        self.close_confirm.set(None);
+    }
+
+    pub fn force_close(&self, id: u64) {
         let mut focus_next = None;
         let mut closed_uri = None;
         let mut closed_lang = None;
@@ -1524,6 +1651,8 @@ impl AppState {
         match buffer::write(path, &text) {
             Ok(()) => {
                 buf.dirty.set(false);
+                buf.disk_changed.set(false);
+                Self::refresh_disk_mtime(&buf);
                 eprintln!("e: saved {}", path.display());
                 if let (Some(uri), Some(client)) =
                     (buf.uri.as_ref(), self.lsp_for_language(buf.file.language))

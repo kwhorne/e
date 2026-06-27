@@ -77,6 +77,10 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     true
                 }
                 "t" => {
+                    state.toggle_terminal();
+                    true
+                }
+                "o" if shift => {
                     state.open_symbol_search();
                     true
                 }

@@ -5,7 +5,7 @@ UI built on [Floem](https://github.com/lapce/floem).
 
 ## Status
 
-Early development. Built incrementally:
+Early development. Built incrementally:   jhdjshj
 
 - [x] **Milepæl 0** — Skjelett: open a file, edit it, save with Cmd/Ctrl+S, status bar
 - [x] **Milepæl A** — Workspace: file tree, tabs, command palette (⌘P), multi-buffer
@@ -105,11 +105,12 @@ Works in both `.php` and `.blade.php` files.
 | F1 | Hover info |
 | F12 | Go to definition |
 | Shift+F12 | Find references |
-| ⌘T | Workspace symbol search |
+| ⌘T | Toggle terminal |
+| ⌘⇧O | Workspace symbol search |
 | ⌘⇧F | Search across files |
 | ⌘F | Find in file |
 | ⌘\\ | Toggle split view |
-| Ctrl+` | Toggle terminal |
+| Ctrl+` | Toggle terminal (alt.) |
 | F8 | Toggle light/dark theme |
 | F2 | Rename in file |
 | ⌘⇧M | Markdown preview (.md) |

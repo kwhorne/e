@@ -1345,6 +1345,8 @@ impl AppState {
         }));
 
         let doc = Rc::new(TextDocument::new(self.cx, content.clone()));
+        // Keep/auto-indent on newline (matches editor expectations).
+        doc.auto_indent.set(true);
         let dirty = RwSignal::new(false);
         let version = RwSignal::new(1i64);
 
@@ -2067,7 +2069,7 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$'
 }
 
-fn is_word_byte(b: u8) -> bool {
+pub(crate) fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
 }
 

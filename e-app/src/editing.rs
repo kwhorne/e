@@ -151,6 +151,138 @@ impl AppState {
         buf.doc.edit(&mut it, EditType::ToggleComment);
     }
 
+    /// Auto-pairing for a typed bracket/quote. Returns `true` if it handled the
+    /// input (the caller should then consume the key); `false` to type normally.
+    pub fn handle_autopair(&self, ch: char) -> bool {
+        if !self.settings.auto_close {
+            return false;
+        }
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let CursorMode::Insert(sel) = cursor.mode.clone() else {
+            return false;
+        };
+        let regions = sel.regions();
+        if regions.len() != 1 {
+            return false; // leave multi-cursor typing to the editor
+        }
+        let (s, e) = (regions[0].min(), regions[0].max());
+        let text = buf.doc.text().to_string();
+        let bytes = text.as_bytes();
+
+        let pairs = [('(', ')'), ('[', ']'), ('{', '}')];
+        let quotes = ['"', '\'', '`'];
+
+        let set_caret = |off: usize| {
+            editor
+                .cursor
+                .set(Cursor::new(CursorMode::Insert(Selection::caret(off)), None, None));
+        };
+        let set_region = |a: usize, b: usize| {
+            editor
+                .cursor
+                .set(Cursor::new(CursorMode::Insert(Selection::region(a, b)), None, None));
+        };
+        let edit = |sel: Selection, t: &str| {
+            let mut it = std::iter::once((sel, t));
+            buf.doc.edit(&mut it, EditType::InsertChars);
+        };
+
+        // Opening bracket: wrap selection or insert a pair.
+        if let Some(&(open, close)) = pairs.iter().find(|(o, _)| *o == ch) {
+            if s < e {
+                edit(Selection::region(s, e), &format!("{open}{}{close}", &text[s..e]));
+                set_region(s + 1, e + 1);
+            } else {
+                edit(Selection::caret(s), &format!("{open}{close}"));
+                set_caret(s + 1);
+            }
+            return true;
+        }
+
+        // Closing bracket: type-over if the next char already matches.
+        if pairs.iter().any(|(_, c)| *c == ch) {
+            if s == e && bytes.get(s) == Some(&(ch as u8)) {
+                set_caret(s + 1);
+                return true;
+            }
+            return false;
+        }
+
+        // Quotes: wrap, type-over, or auto-close (with apostrophe heuristics).
+        if quotes.contains(&ch) {
+            let cb = ch as u8;
+            if s < e {
+                edit(Selection::region(s, e), &format!("{ch}{}{ch}", &text[s..e]));
+                set_region(s + 1, e + 1);
+                return true;
+            }
+            if bytes.get(s) == Some(&cb) {
+                set_caret(s + 1);
+                return true;
+            }
+            let prev_word = s > 0 && crate::state::is_word_byte(bytes[s - 1]);
+            let next_word = bytes.get(s).map(|b| crate::state::is_word_byte(*b)).unwrap_or(false);
+            if (ch == '\'' && prev_word) || next_word {
+                return false;
+            }
+            edit(Selection::caret(s), &format!("{ch}{ch}"));
+            set_caret(s + 1);
+            return true;
+        }
+
+        false
+    }
+
+    /// On Backspace, delete an empty auto-pair (e.g. `(|)` → `|`) in one step.
+    pub fn handle_autopair_backspace(&self) -> bool {
+        if !self.settings.auto_close {
+            return false;
+        }
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let CursorMode::Insert(sel) = cursor.mode.clone() else {
+            return false;
+        };
+        let regions = sel.regions();
+        if regions.len() != 1 || regions[0].min() != regions[0].max() {
+            return false;
+        }
+        let s = regions[0].min();
+        if s == 0 {
+            return false;
+        }
+        let text = buf.doc.text().to_string();
+        let bytes = text.as_bytes();
+        let prev = bytes[s - 1];
+        let Some(&next) = bytes.get(s) else {
+            return false;
+        };
+        let is_pair = [(b'(', b')'), (b'[', b']'), (b'{', b'}')]
+            .iter()
+            .any(|(o, c)| prev == *o && next == *c)
+            || (matches!(prev, b'"' | b'\'' | b'`') && prev == next);
+        if !is_pair {
+            return false;
+        }
+        let mut it = std::iter::once((Selection::region(s - 1, s + 1), ""));
+        buf.doc.edit(&mut it, EditType::Delete);
+        editor
+            .cursor
+            .set(Cursor::new(CursorMode::Insert(Selection::caret(s - 1)), None, None));
+        true
+    }
+
     /// Move the caret to the given 1-based line (and optional 1-based column).
     pub fn goto_line(&self, line: usize, col: usize) {
         let Some(buf) = self.active_buffer() else {

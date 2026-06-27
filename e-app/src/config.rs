@@ -14,6 +14,7 @@ pub struct Settings {
     pub trim_on_save: bool,
     pub autosave: bool,
     pub indent_guides: bool,
+    pub auto_close: bool,
 }
 
 impl Default for Settings {
@@ -26,6 +27,7 @@ impl Default for Settings {
             trim_on_save: true,
             autosave: true,
             indent_guides: true,
+            auto_close: true,
         }
     }
 }
@@ -65,6 +67,7 @@ pub fn load_settings() -> Settings {
         trim_on_save: bool_of("trim_on_save", d.trim_on_save),
         autosave: bool_of("autosave", d.autosave),
         indent_guides: bool_of("indent_guides", d.indent_guides),
+        auto_close: bool_of("auto_close", d.auto_close),
     }
 }
 

@@ -91,6 +91,25 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                     if handle_shortcut(state, key, mods) {
                         return CommandExecuted::Yes;
                     }
+                    // Auto-pairing for plain typed brackets/quotes.
+                    if !mods.meta() && !mods.control() && !mods.alt() {
+                        match key {
+                            floem::keyboard::Key::Character(s) if s.chars().count() == 1 => {
+                                let ch = s.chars().next().unwrap();
+                                if matches!(ch, '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`')
+                                    && state.handle_autopair(ch)
+                                {
+                                    return CommandExecuted::Yes;
+                                }
+                            }
+                            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Backspace) => {
+                                if state.handle_autopair_backspace() {
+                                    return CommandExecuted::Yes;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 default_key_handler(editor_sig)(kp, mods)
             })

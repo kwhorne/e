@@ -227,6 +227,10 @@ pub struct AppState {
     pub agent_focused: RwSignal<bool>,
     /// Pulsed on open so the panel grabs focus without re-grabbing on close.
     pub agent_focus_pulse: RwSignal<u64>,
+
+    /// Draggable panel widths (pixels).
+    pub sidebar_width: RwSignal<f64>,
+    pub agent_width: RwSignal<f64>,
 }
 
 fn now_ms() -> u128 {
@@ -291,6 +295,8 @@ impl AppState {
             agent_term: RwSignal::new(None),
             agent_focused: RwSignal::new(false),
             agent_focus_pulse: RwSignal::new(0),
+            sidebar_width: RwSignal::new(240.0),
+            agent_width: RwSignal::new(460.0),
         }
     }
 

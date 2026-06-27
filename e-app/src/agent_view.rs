@@ -16,8 +16,6 @@ use crate::state::AppState;
 use crate::terminal_view::{char_size, key_to_bytes};
 use crate::theme;
 
-const PANEL_WIDTH: f64 = 460.0;
-
 /// Header: agent selector (popout menu) + restart button.
 fn agent_header(state: AppState) -> impl IntoView {
     let title = label(move || {
@@ -158,7 +156,7 @@ pub fn agent_panel(state: AppState) -> impl IntoView {
     stack((agent_header(state), agent_body(state))).style(move |s| {
         let s = s
             .flex_col()
-            .width(PANEL_WIDTH)
+            .width(state.agent_width.get())
             .height_full()
             .border_left(1.0)
             .border_color(theme::border());

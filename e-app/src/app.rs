@@ -201,6 +201,68 @@ fn resolve_args() -> (PathBuf, Option<PathBuf>) {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum ResizeSide {
+    Left,
+    Right,
+}
+
+/// A thin, draggable vertical handle that resizes a panel by updating `width`.
+/// Uses pointer capture (`request_active`) so the drag keeps tracking even when
+/// the cursor leaves the 6px hit area; the `width.get() ± delta` formula is
+/// self-correcting as the handle re-positions during the drag.
+fn resize_handle(
+    state: AppState,
+    side: ResizeSide,
+    width: floem::reactive::RwSignal<f64>,
+    open: floem::reactive::RwSignal<bool>,
+    min: f64,
+    max: f64,
+) -> impl IntoView {
+    let _ = state;
+    let drag_start: floem::reactive::RwSignal<Option<f64>> = floem::reactive::RwSignal::new(None);
+    let view = floem::views::empty();
+    let id = floem::View::id(&view);
+    view.on_event_stop(EventListener::PointerDown, move |e| {
+        id.request_active();
+        if let Event::PointerDown(pe) = e {
+            drag_start.set(Some(pe.pos.x));
+        }
+    })
+    .on_event_stop(EventListener::PointerMove, move |e| {
+        if let Event::PointerMove(pe) = e {
+            if let Some(start) = drag_start.get_untracked() {
+                let delta = pe.pos.x - start;
+                let cur = width.get_untracked();
+                let new = match side {
+                    ResizeSide::Left => cur + delta,
+                    ResizeSide::Right => cur - delta,
+                };
+                width.set(new.clamp(min, max));
+            }
+        }
+    })
+    .on_event_stop(EventListener::PointerUp, move |_| drag_start.set(None))
+    .style(move |s| {
+        let s = s
+            .absolute()
+            .width(6.0)
+            .height_full()
+            .z_index(10)
+            .cursor(floem::style::CursorStyle::ColResize);
+        let s = match side {
+            ResizeSide::Left => s.inset_left(width.get() - 3.0),
+            ResizeSide::Right => s.inset_right(width.get() - 3.0),
+        };
+        let s = s.hover(|s| s.background(theme::accent()));
+        if open.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 fn app_view() -> impl IntoView {
     let (root, file) = resolve_args();
     let state = AppState::new(Scope::current(), root);
@@ -311,7 +373,7 @@ fn app_view() -> impl IntoView {
     let sidebar = stack((file_tree(state), outline_panel(state))).style(move |s| {
         let s = s
             .flex_col()
-            .width(240.0)
+            .width(state.sidebar_width.get())
             .height_full()
             .border_right(1.0)
             .border_color(theme::border());
@@ -322,8 +384,14 @@ fn app_view() -> impl IntoView {
         }
     });
 
-    let main_row = stack((sidebar, editor_column, agent_panel(state)))
-        .style(|s| s.flex_row().size_full());
+    let main_row = stack((
+        sidebar,
+        editor_column,
+        agent_panel(state),
+        resize_handle(state, ResizeSide::Left, state.sidebar_width, state.sidebar_open, 150.0, 600.0),
+        resize_handle(state, ResizeSide::Right, state.agent_width, state.agent_open, 300.0, 900.0),
+    ))
+    .style(|s| s.flex_row().size_full());
 
     stack((
         main_row,

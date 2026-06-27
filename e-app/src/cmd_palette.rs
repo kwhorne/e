@@ -27,6 +27,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("split-terminal", "Split Terminal"),
     ("theme", "Toggle Light/Dark Theme"),
     ("settings", "Open Settings (config.json)"),
+    ("about", "About e"),
     ("close-tab", "Close Tab"),
 ];
 
@@ -65,6 +66,7 @@ pub fn run_command(state: AppState, id: &str) {
         "new-terminal" => state.new_terminal(),
         "split-terminal" => state.split_terminal(),
         "theme" => theme::toggle(),
+        "about" => state.about_open.set(true),
         "settings" => {
             if let Some(home) = std::env::var_os("HOME") {
                 let path = std::path::PathBuf::from(home)

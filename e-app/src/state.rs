@@ -211,6 +211,8 @@ pub struct AppState {
     pub file_op: FileOp,
     /// Bumped after any filesystem change to refresh the file tree.
     pub fs_rev: RwSignal<u64>,
+    /// Whether the About dialog is open.
+    pub about_open: RwSignal<bool>,
 }
 
 fn now_ms() -> u128 {
@@ -268,6 +270,7 @@ impl AppState {
             sidebar_open: RwSignal::new(true),
             file_op: FileOp::new(),
             fs_rev: RwSignal::new(0),
+            about_open: RwSignal::new(false),
         }
     }
 

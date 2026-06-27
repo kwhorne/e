@@ -11,6 +11,7 @@ use floem::views::{stack, Decorators};
 use floem::window::WindowConfig;
 use floem::{Application, IntoView};
 
+use crate::about::about_dialog;
 use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
@@ -162,6 +163,7 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 state.cmd.open.set(false);
                 state.md_preview.set(false);
                 state.diff_open.set(false);
+            state.about_open.set(false);
                 state.close_find();
                 state.close_rename();
                 true
@@ -321,6 +323,7 @@ fn app_view() -> impl IntoView {
         rename_bar(state),
         file_op_prompt(state),
         term_rename_prompt(state),
+        about_dialog(state),
         signature_popup(state),
         completion_popup(state),
         hover_popup(state),

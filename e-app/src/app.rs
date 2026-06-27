@@ -101,6 +101,10 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.open_symbol_search();
                     true
                 }
+                "o" => {
+                    state.open_project_dialog();
+                    true
+                }
                 "f" if shift => {
                     state.open_global_search();
                     true

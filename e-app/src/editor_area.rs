@@ -41,15 +41,20 @@ fn cheat(key: &'static str, desc: &'static str) -> impl IntoView {
 /// The empty-state welcome screen with the key shortcuts.
 fn welcome() -> impl IntoView {
     // The shortcut rows form a left-aligned block...
-    let cheats = stack((
+    let col1 = stack((
         cheat("⌘P", "Find file"),
         cheat("⌘E", "Recent files"),
+        cheat("⌘O", "Open folder/project"),
         cheat("⇧⌘P", "Command palette"),
         cheat("⇧⌘F", "Search in files"),
         cheat("⇧⌘O", "Go to symbol"),
         cheat("⌘F", "Find in file"),
         cheat("⌥⌘F", "Replace in file"),
         cheat("⌃G", "Go to line"),
+    ))
+    .style(|s| s.flex_col().items_start().gap(8.0));
+
+    let col2 = stack((
         cheat("⌘/", "Toggle comment"),
         cheat("⌘T", "Toggle terminal"),
         cheat("⌘L", "Toggle agent panel"),
@@ -60,6 +65,8 @@ fn welcome() -> impl IntoView {
         cheat("F8", "Light / dark theme"),
     ))
     .style(|s| s.flex_col().items_start().gap(8.0));
+
+    let cheats = stack((col1, col2)).style(|s| s.flex_row().gap(40.0));
 
     // ...which is centred as a whole, with the title centred above it.
     stack((

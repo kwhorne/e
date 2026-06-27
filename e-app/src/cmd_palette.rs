@@ -11,6 +11,8 @@ use crate::theme;
 /// `(id, label)` for every command. `id` is matched in [`run_command`].
 const COMMANDS: &[(&str, &str)] = &[
     ("goto-file", "Go to File…"),
+    ("open-folder", "Open Folder…"),
+    ("open-file", "Open File…"),
     ("recent", "Recent Files"),
     ("symbols", "Go to Symbol…"),
     ("search", "Search in Files…"),
@@ -69,6 +71,8 @@ impl CmdPalette {
 pub fn run_command(state: AppState, id: &str) {
     match id {
         "goto-file" => state.palette_open.set(true),
+        "open-folder" => state.open_project_dialog(),
+        "open-file" => state.open_file_dialog(),
         "recent" => state.open_recent(),
         "symbols" => state.open_symbol_search(),
         "search" => state.open_global_search(),

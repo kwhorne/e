@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Open dialogs: ⌘O opens a native folder picker to open another project in a
+  new window; an "Open File…" command opens any file in the current window.
 - Source Control panel (⌘2): branch display, staged / unstaged / untracked file
   groups with stage, unstage, discard and stage-all; commit, push and pull.
 - Editor zoom (`⌘=` / `⌘-` / `⌘0`) and a soft word-wrap toggle (`⌥Z`).

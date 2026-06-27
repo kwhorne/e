@@ -1159,6 +1159,57 @@ impl AppState {
         }
     }
 
+    // ---- Open file / project (native dialogs) --------------------------
+
+    /// Native dialog to open an arbitrary file in the current window.
+    pub fn open_file_dialog(&self) {
+        let state = *self;
+        let opts = floem::file::FileDialogOptions::new()
+            .title("Open File")
+            .force_starting_directory(self.root.get_untracked());
+        floem::action::open_file(opts, move |info| {
+            if let Some(path) = info.and_then(|i| i.path.into_iter().next()) {
+                state.open_path(path);
+            }
+        });
+    }
+
+    /// Native dialog to open a folder as another project (in a new window).
+    pub fn open_project_dialog(&self) {
+        let state = *self;
+        let opts = floem::file::FileDialogOptions::new()
+            .select_directories()
+            .title("Open Folder")
+            .force_starting_directory(self.root.get_untracked());
+        floem::action::open_file(opts, move |info| {
+            if let Some(path) = info.and_then(|i| i.path.into_iter().next()) {
+                state.open_project(path);
+            }
+        });
+    }
+
+    /// Launch a new editor instance on `path` (a project folder or a file).
+    pub fn open_project(&self, path: PathBuf) {
+        let exe = std::env::current_exe().ok();
+        if let Some(exe) = exe.as_ref() {
+            let bundle = exe
+                .ancestors()
+                .find(|p| p.extension().map(|e| e == "app").unwrap_or(false));
+            if let Some(bundle) = bundle {
+                let _ = std::process::Command::new("open")
+                    .arg("-n")
+                    .arg(bundle)
+                    .arg("--args")
+                    .arg(&path)
+                    .spawn();
+                return;
+            }
+        }
+        if let Some(exe) = exe {
+            let _ = std::process::Command::new(exe).arg(&path).spawn();
+        }
+    }
+
     // ---- Auto-update ----------------------------------------------------
 
     /// Check GitHub for a newer release (non-blocking). `announce_up_to_date`

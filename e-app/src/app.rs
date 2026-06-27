@@ -12,6 +12,7 @@ use floem::window::WindowConfig;
 use floem::{Application, IntoView};
 
 use crate::about::about_dialog;
+use crate::editing::goto_bar;
 use crate::agent_view::agent_panel;
 use crate::update_view::update_notice;
 use crate::breadcrumbs::breadcrumbs;
@@ -122,6 +123,26 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.select_next_occurrence();
                     true
                 }
+                "/" => {
+                    state.toggle_comment();
+                    true
+                }
+                "g" if mods.control() && !mods.meta() => {
+                    state.open_goto_line();
+                    true
+                }
+                "k" if shift => {
+                    state.delete_line();
+                    true
+                }
+                "]" => {
+                    state.indent_lines();
+                    true
+                }
+                "[" => {
+                    state.outdent_lines();
+                    true
+                }
                 "m" if shift => {
                     state.toggle_md_preview();
                     true
@@ -166,6 +187,18 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 }
                 true
             }
+            NamedKey::ArrowUp if mods.alt() && !shift => {
+                state.move_line_up();
+                true
+            }
+            NamedKey::ArrowDown if mods.alt() && !shift => {
+                state.move_line_down();
+                true
+            }
+            NamedKey::ArrowDown if mods.alt() && shift => {
+                state.duplicate_line();
+                true
+            }
             NamedKey::Escape => {
                 state.close_completion();
                 state.close_hover();
@@ -178,6 +211,7 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 state.about_open.set(false);
                 state.close_find();
                 state.close_rename();
+                state.close_goto_line();
                 true
             }
             _ => false,
@@ -429,6 +463,7 @@ fn app_view() -> impl IntoView {
         palette(state),
         command_palette(state),
         update_notice(state),
+        goto_bar(state),
     ))
     .style(|s| s.size_full().background(theme::bg()).color(theme::fg()))
     .window_title(move || {

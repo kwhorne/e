@@ -72,6 +72,17 @@ impl Language {
         }
     }
 
+    /// The line-comment token for this language, if it has one.
+    pub fn line_comment(self) -> Option<&'static str> {
+        use Language::*;
+        match self {
+            Rust | C | Cpp | Go | JavaScript | TypeScript | Php | Vue | Svelte => Some("//"),
+            Python | Shell | Toml => Some("#"),
+            // Languages without a line comment (block-only or none).
+            PlainText | Json | Markdown | Html | Css | Blade => None,
+        }
+    }
+
     /// Human-readable name for the status bar.
     pub fn name(self) -> &'static str {
         match self {

@@ -4,6 +4,7 @@
 //! buffer), edit it, and save with Cmd/Ctrl+S. A status bar shows the file
 //! name, language and dirty state. Everything else grows from here.
 
+mod editing;
 mod about;
 mod update_view;
 mod updater;

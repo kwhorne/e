@@ -239,6 +239,9 @@ pub struct AppState {
     pub update_status: RwSignal<crate::updater::UpdateStatus>,
     /// Whether the changelog is expanded in the update notice.
     pub update_notes_open: RwSignal<bool>,
+
+    /// Go-to-line prompt state.
+    pub goto: crate::editing::GotoState,
 }
 
 fn now_ms() -> u128 {
@@ -308,6 +311,7 @@ impl AppState {
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
+            goto: crate::editing::GotoState::new(),
         }
     }
 
@@ -2195,7 +2199,7 @@ fn find_match(bytes: &[u8], from: usize, target: u8, self_ch: u8, forward: bool)
 }
 
 /// Byte offset where each line starts.
-fn line_starts(text: &str) -> Vec<usize> {
+pub(crate) fn line_starts(text: &str) -> Vec<usize> {
     let mut starts = vec![0usize];
     let mut off = 0;
     for line in text.split_inclusive('\n') {
@@ -2210,7 +2214,7 @@ fn line_starts(text: &str) -> Vec<usize> {
     starts
 }
 
-fn line_of(starts: &[usize], byte: usize) -> usize {
+pub(crate) fn line_of(starts: &[usize], byte: usize) -> usize {
     starts.partition_point(|&s| s <= byte).saturating_sub(1)
 }
 

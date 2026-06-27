@@ -2233,6 +2233,14 @@ impl AppState {
             &insert,
             EditType::InsertChars,
         );
+        // Place the caret at the end of the inserted text (not at the old
+        // offset, which would land in the middle of a longer completion).
+        let pos = start + insert.len();
+        editor.cursor.set(Cursor::new(
+            CursorMode::Insert(Selection::caret(pos)),
+            None,
+            None,
+        ));
         true
     }
 

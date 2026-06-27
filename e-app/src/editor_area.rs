@@ -38,10 +38,8 @@ fn cheat(key: &'static str, desc: &'static str) -> impl IntoView {
 
 /// The empty-state welcome screen with the key shortcuts.
 fn welcome() -> impl IntoView {
-    stack((
-        label(|| "e".to_string()).style(|s| s.font_size(44.0).color(theme::fg()).margin_bottom(4.0)),
-        label(|| "A lightning-fast editor in Rust".to_string())
-            .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(22.0)),
+    // The shortcut rows form a left-aligned block...
+    let cheats = stack((
         cheat("⌘P", "Find file"),
         cheat("⇧⌘P", "Command palette"),
         cheat("⇧⌘F", "Search in files"),
@@ -53,7 +51,16 @@ fn welcome() -> impl IntoView {
         cheat("F12", "Go to definition"),
         cheat("F8", "Light / dark theme"),
     ))
-    .style(|s| s.flex_col().items_start().gap(8.0))
+    .style(|s| s.flex_col().items_start().gap(8.0));
+
+    // ...which is centred as a whole, with the title centred above it.
+    stack((
+        label(|| "e".to_string()).style(|s| s.font_size(44.0).color(theme::fg()).margin_bottom(4.0)),
+        label(|| "A lightning-fast editor in Rust".to_string())
+            .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(22.0)),
+        cheats,
+    ))
+    .style(|s| s.flex_col().items_center())
 }
 
 /// One pane: a stack of all buffers, only this pane's active one visible.

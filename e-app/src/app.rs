@@ -28,7 +28,7 @@ use crate::problems::problems_panel;
 use crate::state::AppState;
 use crate::status::status_bar;
 use crate::tabs::tab_bar;
-use crate::terminal_view::terminal_panel;
+use crate::terminal_view::{term_rename_prompt, terminal_panel};
 use crate::theme;
 
 /// Launch the editor.
@@ -73,7 +73,7 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 }
                 "w" => {
                     if state.terminal_focused.get() {
-                        if let Some(id) = state.active_terminal.get() {
+                        if let Some(id) = state.focused_term_id() {
                             state.close_terminal(id);
                         }
                     } else if let Some(id) = state.focused_active_id() {
@@ -320,6 +320,7 @@ fn app_view() -> impl IntoView {
         find_bar(state),
         rename_bar(state),
         file_op_prompt(state),
+        term_rename_prompt(state),
         signature_popup(state),
         completion_popup(state),
         hover_popup(state),

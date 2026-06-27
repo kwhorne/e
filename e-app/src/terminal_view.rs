@@ -4,10 +4,14 @@ use std::ops::Range;
 
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::keyboard::{Key, NamedKey};
+use floem::menu::{Menu, MenuItem};
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate};
 use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
-use floem::views::{dyn_stack, empty, label, rich_text, scroll, stack, Decorators};
+use floem::views::{
+    container, dyn_container, dyn_stack, empty, label, rich_text, scroll, stack, text_input,
+    Decorators,
+};
 use floem::IntoView;
 
 use crate::app::handle_shortcut;
@@ -22,9 +26,20 @@ fn terminal_tabs(state: AppState) -> impl IntoView {
         |(_, t)| t.id,
         move |(i, t)| {
             let id = t.id;
-            let active = state.active_terminal;
+            let name = t.name;
+            let is_active = move || {
+                state.active_terminal.get() == Some(id) || state.active_terminal2.get() == Some(id)
+            };
             stack((
-                label(move || format!("zsh {}", i + 1)).style(|s| s.color(theme::fg())),
+                label(move || {
+                    let n = name.get();
+                    if n.is_empty() {
+                        format!("zsh {}", i + 1)
+                    } else {
+                        n
+                    }
+                })
+                .style(|s| s.color(theme::fg())),
                 label(|| "×".to_string())
                     .style(|s| {
                         s.padding_horiz(4.0)
@@ -44,31 +59,41 @@ fn terminal_tabs(state: AppState) -> impl IntoView {
                     .cursor(floem::style::CursorStyle::Pointer)
                     .border_right(1.0)
                     .border_color(theme::border());
-                if active.get() == Some(id) {
+                if is_active() {
                     s.background(theme::bg_active())
                 } else {
                     s.hover(|s| s.background(theme::bg_hover()))
                 }
             })
             .on_click_stop(move |_| state.focus_terminal(id))
+            .context_menu(move || {
+                Menu::new("")
+                    .entry(MenuItem::new("Rename").action(move || state.start_term_rename(id)))
+                    .entry(MenuItem::new("Split").action(move || state.split_terminal()))
+                    .separator()
+                    .entry(MenuItem::new("Close").action(move || state.close_terminal(id)))
+            })
         },
     )
     .style(|s| s.items_center());
 
-    let add = label(|| "+".to_string())
-        .style(|s| {
+    let icon_btn = |glyph: &'static str| {
+        label(move || glyph.to_string()).style(|s| {
             s.width(28.0)
                 .height(28.0)
                 .items_center()
                 .justify_center()
-                .font_size(16.0)
+                .font_size(15.0)
                 .color(theme::fg_dim())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
         })
-        .on_click_stop(move |_| state.new_terminal());
+    };
 
-    stack((tabs, add)).style(|s| {
+    let split = icon_btn("⊟").on_click_stop(move |_| state.split_terminal());
+    let add = icon_btn("+").on_click_stop(move |_| state.new_terminal());
+
+    stack((tabs, split, add)).style(|s| {
         s.items_center()
             .width_full()
             .height(28.0)
@@ -115,19 +140,20 @@ fn key_to_bytes(ke: &floem::keyboard::KeyEvent) -> Option<Vec<u8>> {
     }
 }
 
-pub fn terminal_panel(state: AppState) -> impl IntoView {
+/// Render one terminal pane: a scrollable coloured screen + cursor + input.
+fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
+    let id_sig = if pane_idx == 1 {
+        state.active_terminal2
+    } else {
+        state.active_terminal
+    };
+
     let content = rich_text(move || {
-        // Track output ticks so the screen repaints.
         state.term_tick.get();
-        let runs = state.terminal_runs();
-
+        let runs = state.term_runs_of(id_sig.get());
         let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
-        let default = Attrs::new()
-            .family(&family)
-            .font_size(13.0)
-            .color(theme::fg());
+        let default = Attrs::new().family(&family).font_size(13.0).color(theme::fg());
         let mut attrs_list = AttrsList::new(default);
-
         let mut text = String::new();
         let mut spans: Vec<(Range<usize>, Color)> = Vec::new();
         for (li, line) in runs.iter().enumerate() {
@@ -145,17 +171,15 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
         for (range, color) in spans {
             attrs_list.add_span(range, Attrs::new().family(&family).font_size(13.0).color(color));
         }
-
         let mut layout = TextLayout::new();
         layout.set_text(&text, attrs_list, None);
         layout
     })
     .style(|s| s.padding(8.0));
 
-    // A block cursor at the terminal's cursor cell.
     let cursor_block = empty().style(move |s| {
         state.term_tick.get();
-        let (row, col) = state.terminal_cursor();
+        let (row, col) = state.term_cursor_of(id_sig.get());
         let (cw, lh) = char_size();
         s.absolute()
             .inset_left(8.0 + col as f64 * cw)
@@ -167,9 +191,9 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
 
     let body = stack((content, cursor_block)).style(|s| s.size_full());
 
-    let term_area = scroll(body)
+    scroll(body)
         .style(|s| {
-            s.width_full()
+            s.size_full()
                 .flex_grow(1.0)
                 .background(Color::from_rgb8(0x14, 0x16, 0x1b))
         })
@@ -182,29 +206,53 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
         .keyboard_navigable()
         .request_focus(move || {
             state.terminal_open.get();
+            state.term_split.get();
         })
         .on_event_cont(EventListener::FocusGained, move |_| {
-            state.terminal_focused.set(true)
+            state.terminal_focused.set(true);
+            state.term_focus_pane.set(pane_idx);
         })
-        .on_event_cont(EventListener::FocusLost, move |_| {
-            state.terminal_focused.set(false)
-        })
+        .on_event_cont(EventListener::FocusLost, move |_| state.terminal_focused.set(false))
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
-                // ⌘-shortcuts (toggle terminal, close, palettes…) take priority
-                // over sending the key to the shell. Ctrl stays in the shell.
                 if ke.modifiers.meta() && handle_shortcut(state, &ke.key.logical_key, ke.modifiers) {
                     return EventPropagation::Stop;
                 }
                 if let Some(bytes) = key_to_bytes(ke) {
-                    state.terminal_input(&bytes);
+                    if let Some(id) = id_sig.get_untracked() {
+                        state.term_input_to(id, &bytes);
+                    }
                     return EventPropagation::Stop;
                 }
             }
             EventPropagation::Continue
-        });
+        })
+}
 
-    stack((terminal_tabs(state), term_area)).style(move |s| {
+pub fn terminal_panel(state: AppState) -> impl IntoView {
+    let panes = dyn_container(
+        move || state.term_split.get(),
+        move |split| {
+            if split {
+                stack((
+                    term_pane(state, 0).style(|s| {
+                        s.flex_grow(1.0)
+                            .height_full()
+                            .border_right(1.0)
+                            .border_color(theme::border())
+                    }),
+                    term_pane(state, 1).style(|s| s.flex_grow(1.0).height_full()),
+                ))
+                .style(|s| s.flex_row().size_full())
+                .into_any()
+            } else {
+                term_pane(state, 0).style(|s| s.size_full()).into_any()
+            }
+        },
+    )
+    .style(|s| s.flex_grow(1.0).width_full());
+
+    stack((terminal_tabs(state), panes)).style(move |s| {
         let s = s
             .flex_col()
             .width_full()
@@ -217,4 +265,50 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
             s.hide()
         }
     })
+}
+
+/// The terminal rename prompt overlay.
+pub fn term_rename_prompt(state: AppState) -> impl IntoView {
+    let input = text_input(state.term_rename_input)
+        .on_enter(move || state.confirm_term_rename())
+        .style(|s| {
+            theme::input_colors(s)
+                .width(280.0)
+                .height(30.0)
+                .padding_horiz(8.0)
+                .border(1.0)
+                .border_radius(4.0)
+        })
+        .request_focus(move || {
+            state.term_rename_id.get();
+        })
+        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
+            state.term_rename_id.set(None)
+        });
+
+    let box_ = stack((
+        label(|| "Rename terminal:".to_string())
+            .style(|s| s.color(theme::fg_dim()).font_size(12.0)),
+        input,
+    ))
+    .style(|s| {
+        s.flex_col()
+            .gap(8.0)
+            .padding(14.0)
+            .background(theme::bg_panel())
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(8.0)
+    });
+
+    container(box_)
+        .style(move |s| {
+            let s = s.absolute().inset(0.0).size_full().justify_center().padding_top(120.0);
+            if state.term_rename_id.get().is_some() {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.term_rename_id.set(None))
 }

@@ -266,6 +266,8 @@ pub struct AppState {
 
     /// Editor font size (reactive, for zoom).
     pub font_size: RwSignal<usize>,
+    /// Whether soft word-wrap is enabled.
+    pub word_wrap: RwSignal<bool>,
 }
 
 fn now_ms() -> u128 {
@@ -345,7 +347,12 @@ impl AppState {
             git_status: RwSignal::new(Vec::new()),
             git_commit_msg: RwSignal::new(String::new()),
             font_size: RwSignal::new(config::load_settings().font_size),
+            word_wrap: RwSignal::new(false),
         }
+    }
+
+    pub fn toggle_word_wrap(&self) {
+        self.word_wrap.update(|w| *w = !*w);
     }
 
     /// Increase / decrease / reset the editor font size (zoom).

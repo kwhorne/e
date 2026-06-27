@@ -64,6 +64,10 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
         Key::Character(s) => {
             let c = s.to_lowercase();
             match c.as_str() {
+                "z" if mods.alt() && !cmd => {
+                    state.toggle_word_wrap();
+                    true
+                }
                 _ if !cmd => false,
                 "p" if shift => {
                     state.cmd.open.set(true);

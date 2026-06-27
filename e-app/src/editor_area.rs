@@ -126,7 +126,14 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 state.settings.tab_width,
             ))
             .editor_style(move |s| {
-                theme::editor_style(s).indent_guide(state.settings.indent_guides)
+                let wrap = if state.word_wrap.get() {
+                    floem::views::editor::text::WrapMethod::EditorWidth
+                } else {
+                    floem::views::editor::text::WrapMethod::None
+                };
+                theme::editor_style(s)
+                    .indent_guide(state.settings.indent_guides)
+                    .wrap_method(wrap)
             })
             .style(|s| s.size_full())
             .pre_command(move |pre| {

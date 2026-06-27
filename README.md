@@ -1,133 +1,186 @@
+<div align="center">
+
 # e
 
-A lightning-fast code editor written in Rust, inspired by [Lapce](https://github.com/lapce/lapce).
-UI built on [Floem](https://github.com/lapce/floem).
+**The editor for the rest of us**
 
-## Status
+A fast, native code editor written in Rust — with first-class PHP/Laravel support,
+a built-in terminal, and an integrated AI agent panel.
 
-Early development. Built incrementally:   jhdjshj
+</div>
 
-- [x] **Milepæl 0** — Skjelett: open a file, edit it, save with Cmd/Ctrl+S, status bar
-- [x] **Milepæl A** — Workspace: file tree, tabs, command palette (⌘P), multi-buffer
-- [x] **Milepæl 3** — Syntaks: tree-sitter (Rust, Python, JS/TS, Go, C, JSON, PHP, HTML, CSS, Blade, Vue, Svelte)
-- [x] **Milepæl 4** — LSP: PHP via Intelephense (diagnostics, completion, hover)
-- [x] **Milepæl 5** — Laravel-lag: `route()`/`view()`/`config()`/`env()`-completion
-- [x] **Milepæl 6** — Go-to-definition (F12), auto-scroll til mål
-- [x] **Milepæl 7C** — Go-to-references (Shift+F12) + symbol-søk (⌘T)
-- [x] **Milepæl 7A** — Inline bølgelinjer (squiggles) under diagnostics i editoren
-- [x] **Milepæl 7B** — Integrert terminal (PTY + VT100, Ctrl+`)
-- [x] **Milepæl 8** — Format-on-save (PHP) + git-gutter (endrede linjer)
-- [x] **Milepæl 9** — Document outline-panel (LSP documentSymbol) i sidebar
-- [x] **Milepæl 10** — Signature help (popup med aktiv-parameter-highlight)
-- [x] **Milepæl 11** — Find-in-file (⌘F), terminal-farger (SGR), split-view (⌘\\)
-- [x] **Milepæl 12** — Workspace-wide search / grep (⌘⇧F)
-- [x] **Milepæl 13** — Session-persistens (gjenåpner filer/faner/split per workspace)
-- [x] **Milepæl 14** — Breadcrumbs (sti + symbol ved cursor)
-- [x] **Milepæl 15** — Auto-save (lagrer skitne buffere etter 1,5 s inaktivitet)
-- [x] **Milepæl 16** — Tema-system (lys/mørk, F8) — reaktiv palett + editor-tema
-- [x] **Milepæl 17** — Terminal-resize til panelstørrelse (on_resize → PTY/grid)
-- [x] **Milepæl 18** — Lokal rename-i-fil (F2, whole-word, virker uten LSP premium)
-- [x] **Milepæl 19** — Markdown-preview (⌘⇧M reading-mode for .md)
-- [x] **Milepæl 20** — Tema-persistens · command palette (⌘⇧P) · git diff-view · multi-cursor (⌘D)
-- [x] **Milepæl 21** — Multi-språk LSP (PHP/intelephense, C·C++/clangd, Rust, TS, Go, Python)
-- [x] **Milepæl 22** — Bracket-matching (highlight av matchende parentes ved cursor)
-- [x] **Milepæl 23** — Snippets (innebygde kode-maler per språk, $0-cursor, i completion)
-- [x] **Milepæl 24** — Bruker-settings (config.json: font/tab/format-on-save/autosave/indent-guides)
-- [x] **Milepæl 25** — Statuslinje: cursor-posisjon (Ln/Col) + seleksjonslengde
-- [x] **Milepæl 26** — Trailing-whitespace-trim + final newline ved lagring
-- [x] **Milepæl 27** — Workspace-wide problems-panel (alle filer, gruppert, klikkbart)
-- [x] **App-ikon** — orange "e" + terminal-cursor på mørk bakgrunn (SVG → .icns) + macOS-bundle-script
+---
 
-## Workspace layout
+## Overview
 
+`e` is a lightweight, GPU-accelerated code editor built from scratch in Rust. It
+pairs a responsive native UI with the tooling developers expect day to day —
+tree-sitter syntax highlighting, Language Server Protocol support, fuzzy file
+navigation, an integrated terminal, and a right-hand panel that runs CLI coding
+agents (Elyra, Claude Code, Codex, …) right next to your code. The UI is
+GPU-accelerated and reactive, with a focus on staying fast and out of your way.
+
+The editor targets the modern web stack out of the box — **PHP, Laravel, Blade,
+Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
+
+## Features
+
+- **Tree-sitter syntax highlighting** for 12+ languages
+- **Language Server Protocol** — diagnostics, completion, hover, go-to-definition,
+  find references, document & workspace symbols, formatting, rename, code actions
+  and signature help, with per-language servers auto-selected
+- **Laravel-aware completion** — `route()`, `view()`, `config()` and `env()` keys
+- **Fuzzy file finder** (`⌘P`) and **command palette** (`⌘⇧P`)
+- **Workspace search** across files (`⌘⇧F`) and **find-in-file** (`⌘F`)
+- **Integrated terminal** — PTY-backed with ANSI colour, multiple tabs, rename and split
+- **AI agent panel** — run Elyra, Claude Code, Codex or any CLI agent in a side panel (`⌘L`)
+- **Split editor** (`⌘\`), **resizable panels** (drag the edges), **multi-cursor** (`⌘D`)
+- **Git integration** — change gutter and inline diff vs `HEAD`
+- **Inline diagnostics**, **bracket matching**, **snippets**, **breadcrumbs**
+- **Markdown preview** (`⌘⇧M`)
+- **Light / dark themes** (`F8`), **auto-save**, **format & trim on save**
+- **Session persistence** — reopens your files, tabs and split layout per workspace
+- **Workspace problems panel** — every diagnostic across the project, grouped and clickable
+
+## Supported languages
+
+Rust · Python · JavaScript · TypeScript · Go · C / C++ · JSON · PHP · HTML · CSS · Blade · Vue · Svelte
+
+Language servers are launched automatically when available on your `PATH`:
+
+| Language        | Server                |
+| --------------- | --------------------- |
+| PHP             | Intelephense          |
+| Rust            | rust-analyzer         |
+| C / C++         | clangd                |
+| TypeScript / JS | typescript-language-server |
+| Go              | gopls                 |
+| Python          | pyright               |
+
+## AI agents
+
+The right-hand **Agent panel** (`⌘L`) runs a CLI coding agent in an embedded
+terminal so it can work on your open project. Switch agents from the panel
+header, and configure them in your global settings (`⌘,`):
+
+```jsonc
+{
+  "agents": {
+    "default": "elyra",
+    "list": [
+      { "id": "elyra",  "name": "Elyra",      "command": "elyra",  "cwd": "" },
+      { "id": "claude", "name": "Claude Code", "command": "claude", "cwd": "" },
+      { "id": "codex",  "name": "Codex",       "command": "codex",  "cwd": "" }
+    ]
+  }
+}
 ```
-e/
-├── e-lsp/    # JSON-RPC LSP client over stdio (Intelephense)       ~ lapce-proxy
-├── e-term/   # PTY + VT100 terminal model                          ~ lapce-proxy
-├── e-core/   # text IO, language detection, tree-sitter syntax    ~ lapce-core
-│   ├── buffer.rs    # file load/save
-│   ├── language.rs  # extension -> Language
-│   └── syntax.rs    # tree-sitter -> per-line highlight spans
-└── e-app/    # Floem UI + the `e` binary                          ~ lapce-app
-    ├── state.rs        # reactive AppState, buffers, LSP, terminal
-    ├── file_tree.rs    # left explorer (+ right-click menu)
-    ├── file_ops.rs     # new/rename/duplicate/delete/copy-path/reveal
-    ├── tabs.rs         # tab strip
-    ├── editor_area.rs  # multi-buffer editor
-    ├── styling.rs      # syntax highlight + diagnostic squiggles
-    ├── palette.rs      # ⌘P fuzzy finder
-    ├── completion.rs   # completion + hover popups
-    ├── laravel.rs      # route/view/config/env completion
-    ├── picker.rs       # references + symbol search overlay
-    ├── problems.rs     # clickable LSP diagnostics panel
-    ├── terminal_view.rs# integrated terminal panel
-    └── status.rs       # status bar (+ error/warning counts)
-```
 
-## PHP / Laravel
+- `command` is run through your login shell (`$SHELL -lc "<command>"`), so your
+  full environment (PATH, nvm, …) is available.
+- `cwd` defaults to the current workspace root when left empty.
+- The default agent is **Elyra**; your selection is saved automatically.
 
-Opening a `.php` file auto-starts [Intelephense](https://intelephense.com)
-(`intelephense --stdio`). You get **diagnostics**, **completion** (auto as you
-type, or ⌘Space) and **hover** (F1). Install Intelephense once:
+## Keyboard shortcuts
+
+> On macOS the modifier is `⌘`; on Linux/Windows use `Ctrl`.
+
+| Shortcut   | Action                       |
+| ---------- | ---------------------------- |
+| `⌘P`       | Find file                    |
+| `⌘⇧P`      | Command palette              |
+| `⌘⇧F`      | Search in files              |
+| `⌘⇧O`      | Go to symbol                 |
+| `⌘F`       | Find in file                 |
+| `⌘S`       | Save file                    |
+| `⌘W`       | Close tab / terminal / agent |
+| `⌘\`       | Split editor                 |
+| `⌘D`       | Add cursor at next match     |
+| `⌘T`       | Toggle terminal              |
+| `⌘L`       | Toggle agent panel           |
+| `⌘1`       | Toggle sidebar               |
+| `⌘⇧M`      | Toggle markdown preview      |
+| `⌘,`       | Open settings                |
+| `⌘Space`   | Trigger completion           |
+| `F1`       | Hover info                   |
+| `F2`       | Rename                       |
+| `F8`       | Toggle light / dark theme    |
+| `F12`      | Go to definition             |
+| `⇧F12`     | Find references              |
+
+## Getting started
+
+### Requirements
+
+- [Rust](https://rustup.rs) 1.87 or newer
+- A language server on your `PATH` for any language you want LSP features for
+  (e.g. `intelephense`, `rust-analyzer`, `clangd`)
+
+### Build & run
 
 ```sh
-npm install -g intelephense
+# Clone and build
+git clone <repo-url> e
+cd e
+cargo build --release
+
+# Run on a directory or file
+cargo run --release -- path/to/project
 ```
 
-## Other language servers
-
-`e` auto-detects and launches the right server per language (if installed):
-clangd (C/C++), rust-analyzer (Rust), typescript-language-server, gopls,
-pyright. Servers that fail to start are skipped silently.
-
-### Laravel awareness
-
-If the workspace contains an `artisan` file, `e` scrapes the project in the
-background (inspired by the official Laravel VS Code extension) and offers
-context-aware completion inside helper strings:
-
-| Inside | Completes |
-|--------|-----------|
-| `route('…')` | route names (`php artisan route:list --json`) |
-| `view('…')` | Blade views as dotted names (`resources/views/**`) |
-| `config('…')` | config files + first-level keys (`config/*.php`) |
-| `env('…')` | keys from `.env` |
-
-Works in both `.php` and `.blade.php` files.
-
-### Keybindings
-
-| Key | Action |
-|-----|--------|
-| ⌘P / Ctrl+P | Find file |
-| ⌘S / Ctrl+S | Save |
-| ⌘Space | Trigger completion |
-| ↑/↓ + Enter/Tab | Navigate / accept completion |
-| F1 | Hover info |
-| F12 | Go to definition |
-| Shift+F12 | Find references |
-| ⌘T | Toggle terminal |
-| ⌘1 | Toggle sidebar |
-| ⌘⇧O | Workspace symbol search |
-| ⌘⇧F | Search across files |
-| ⌘F | Find in file |
-| ⌘\\ | Toggle split view |
-| Ctrl+` | Toggle terminal (alt.) |
-| F8 | Toggle light/dark theme |
-| F2 | Rename in file |
-| ⌘⇧M | Markdown preview (.md) |
-| ⌘⇧P | Command palette |
-| ⌘D | Add cursor at next occurrence |
-| Esc | Dismiss popups |
-
-## Build & run
+On macOS, use the helper script to build, wrap the binary in a `.app` bundle and
+bring the window to the front:
 
 ```sh
-cargo run -- path/to/file.rs
+./scripts/run.sh path/to/project
 ```
 
-The first build is heavy — Floem pulls in wgpu and a large dependency tree.
+To produce a distributable macOS app bundle:
+
+```sh
+./scripts/bundle-macos.sh
+```
+
+## Configuration
+
+Global settings live in `~/.config/e/config.json` (open it with `⌘,`):
+
+```jsonc
+{
+  "dark": true,
+  "font_size": 14,
+  "tab_width": 4,
+  "format_on_save": true,
+  "trim_on_save": true,
+  "autosave": true,
+  "indent_guides": true,
+  "agents": { /* see "AI agents" above */ }
+}
+```
+
+## Architecture
+
+`e` is a Cargo workspace of focused crates:
+
+| Crate     | Responsibility                                                       |
+| --------- | -------------------------------------------------------------------- |
+| `e-core`  | GUI-agnostic core: rope buffers, language detection, tree-sitter syntax, git diff, markdown |
+| `e-lsp`   | Multi-server Language Server Protocol client                         |
+| `e-term`  | PTY-backed terminal with a minimal VT100 screen model                |
+| `e-app`   | The Floem UI — editor, panels, palettes, theming, state              |
+| `e`       | The binary entry point                                               |
+
+Run the test suite with:
+
+```sh
+cargo test --workspace
+```
+
+## Acknowledgements
+
+Thanks to the maintainers of tree-sitter, the language servers, and the wider
+Rust ecosystem that make `e` possible.
 
 ## License
 
-Apache-2.0
+Licensed under the [Apache License 2.0](LICENSE).

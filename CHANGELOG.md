@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-06-27
+
 ### Fixed
 
 - After an in-place auto-update, the bundle Info.plist version is rewritten so the
@@ -135,7 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/kwhorne/e/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/kwhorne/e/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/kwhorne/e/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/kwhorne/e/compare/v0.2.2...v0.2.3

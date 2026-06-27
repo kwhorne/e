@@ -946,6 +946,7 @@ dependencies = [
  "floem",
  "floem-editor-core",
  "lsp-types",
+ "regex",
  "self_update",
  "serde_json",
 ]

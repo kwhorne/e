@@ -99,6 +99,10 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                     state.open_global_search();
                     true
                 }
+                "f" if mods.alt() => {
+                    state.open_replace();
+                    true
+                }
                 "f" => {
                     state.open_find();
                     true
@@ -406,6 +410,9 @@ fn app_view() -> impl IntoView {
     create_effect(move |_| {
         if state.find.open.get() {
             state.find.query.get();
+            state.find.case_sensitive.get();
+            state.find.whole_word.get();
+            state.find.use_regex.get();
             state.run_find();
         }
     });

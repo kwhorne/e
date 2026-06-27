@@ -572,6 +572,13 @@ impl AppState {
 
     pub fn open_find(&self) {
         self.find.open.set(true);
+        self.find.replace_open.set(false);
+    }
+
+    /// Open the find bar with the replace row expanded.
+    pub fn open_replace(&self) {
+        self.find.open.set(true);
+        self.find.replace_open.set(true);
     }
 
     pub fn close_find(&self) {
@@ -596,10 +603,53 @@ impl AppState {
             return;
         }
         let text = buf.doc.text().to_string();
-        let matches = ascii_find_all(&text, &query);
+        let matches = find_all_opts(
+            &text,
+            &query,
+            self.find.case_sensitive.get_untracked(),
+            self.find.whole_word.get_untracked(),
+            self.find.use_regex.get_untracked(),
+        );
         self.find.matches.set(matches);
         self.find.current.set(0);
         self.apply_find_marks();
+    }
+
+    /// Replace the current match with the replacement text, then re-search.
+    pub fn replace_current(&self) {
+        let matches = self.find.matches.get_untracked();
+        if matches.is_empty() {
+            return;
+        }
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let cur = self.find.current.get_untracked().min(matches.len() - 1);
+        let (s, e) = matches[cur];
+        let rep = self.find.replace.get_untracked();
+        let sel = Selection::region(s, e);
+        let mut it = std::iter::once((sel, rep.as_str()));
+        buf.doc.edit(&mut it, EditType::InsertChars);
+        self.run_find();
+    }
+
+    /// Replace every match with the replacement text in one edit.
+    pub fn replace_all(&self) {
+        let matches = self.find.matches.get_untracked();
+        if matches.is_empty() {
+            return;
+        }
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let rep = self.find.replace.get_untracked();
+        let edits: Vec<(Selection, String)> = matches
+            .iter()
+            .map(|(s, e)| (Selection::region(*s, *e), rep.clone()))
+            .collect();
+        let mut it = edits.iter().map(|(s, t)| (s.clone(), t.as_str()));
+        buf.doc.edit(&mut it, EditType::InsertChars);
+        self.run_find();
     }
 
     /// Rebuild per-line highlight spans and move the caret to the current match.
@@ -2111,21 +2161,62 @@ fn whole_word_occurrences(text: &str, word: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// All non-overlapping, ASCII-case-insensitive matches of `needle` in `hay`.
-fn ascii_find_all(hay: &str, needle: &str) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    let (h, n) = (hay.as_bytes(), needle.as_bytes());
-    if n.is_empty() || n.len() > h.len() {
-        return out;
+/// All non-overlapping matches of `query` in `text`, honouring the
+/// case-sensitive / whole-word / regex options.
+fn find_all_opts(
+    text: &str,
+    query: &str,
+    case: bool,
+    word: bool,
+    regex: bool,
+) -> Vec<(usize, usize)> {
+    if query.is_empty() {
+        return Vec::new();
     }
+
+    if regex {
+        let mut pat = query.to_string();
+        if word {
+            pat = format!(r"\b(?:{pat})\b");
+        }
+        if !case {
+            pat = format!("(?i){pat}");
+        }
+        return match regex::Regex::new(&pat) {
+            Ok(re) => re
+                .find_iter(text)
+                .filter(|m| m.end() > m.start())
+                .map(|m| (m.start(), m.end()))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+    }
+
+    let (h, n) = (text.as_bytes(), query.as_bytes());
+    if n.len() > h.len() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
     let mut i = 0;
     while i + n.len() <= h.len() {
-        if h[i..i + n.len()].eq_ignore_ascii_case(n) {
-            out.push((i, i + n.len()));
-            i += n.len();
-        } else {
-            i += 1;
+        let hit = (0..n.len()).all(|k| {
+            if case {
+                h[i + k] == n[k]
+            } else {
+                h[i + k].eq_ignore_ascii_case(&n[k])
+            }
+        });
+        if hit {
+            let (s, e) = (i, i + n.len());
+            let boundary_ok = !word
+                || ((s == 0 || !is_word_byte(h[s - 1])) && (e == h.len() || !is_word_byte(h[e])));
+            if boundary_ok {
+                out.push((s, e));
+                i = e;
+                continue;
+            }
         }
+        i += 1;
     }
     out
 }

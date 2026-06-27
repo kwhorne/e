@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-27
+
 ### Added
 
 - Framework-aware completion: Flux UI components (`<flux:…>`), Livewire `wire:`
@@ -107,7 +109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/kwhorne/e/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/kwhorne/e/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kwhorne/e/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kwhorne/e/compare/v0.1.0...v0.2.0

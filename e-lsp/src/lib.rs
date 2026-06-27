@@ -234,9 +234,10 @@ impl LspClient {
         let resp: GotoDefinitionResponse = serde_json::from_value(res)?;
         let loc = match resp {
             GotoDefinitionResponse::Scalar(l) => Some((l.uri.to_string(), l.range.start)),
-            GotoDefinitionResponse::Array(v) => {
-                v.into_iter().next().map(|l| (l.uri.to_string(), l.range.start))
-            }
+            GotoDefinitionResponse::Array(v) => v
+                .into_iter()
+                .next()
+                .map(|l| (l.uri.to_string(), l.range.start)),
             GotoDefinitionResponse::Link(v) => v
                 .into_iter()
                 .next()
@@ -286,7 +287,12 @@ impl LspClient {
     }
 
     /// Request whole-document formatting. Returns the edits to apply.
-    pub fn formatting(&self, uri: &str, tab_size: u32, insert_spaces: bool) -> Result<Vec<TextEdit>> {
+    pub fn formatting(
+        &self,
+        uri: &str,
+        tab_size: u32,
+        insert_spaces: bool,
+    ) -> Result<Vec<TextEdit>> {
         let params = json!({
             "textDocument": { "uri": uri },
             "options": { "tabSize": tab_size, "insertSpaces": insert_spaces }
@@ -336,7 +342,11 @@ impl LspClient {
     /// Document symbols for `uri` as a flat list `(name, kind, line, char, depth)`.
     pub fn document_symbols(&self, uri: &str) -> Result<Vec<(String, i64, u32, u32, usize)>> {
         let params = json!({ "textDocument": { "uri": uri } });
-        let res = self.request("textDocument/documentSymbol", params, Duration::from_secs(5))?;
+        let res = self.request(
+            "textDocument/documentSymbol",
+            params,
+            Duration::from_secs(5),
+        )?;
         let mut out = Vec::new();
         if let Some(arr) = res.as_array() {
             for s in arr {
@@ -556,7 +566,8 @@ fn read_loop(
             let method = msg["method"].as_str().unwrap_or("");
             if method == "textDocument/publishDiagnostics" {
                 if let Some(params) = msg.get("params") {
-                    if let Ok(p) = serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
+                    if let Ok(p) =
+                        serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
                     {
                         on_diagnostics(p);
                     }
@@ -573,7 +584,10 @@ fn respond_to_server_request(msg: &Value, stdin: &Arc<Mutex<ChildStdin>>) {
     // Reply with sensible defaults so the server proceeds.
     let result = match method {
         "workspace/configuration" => {
-            let n = msg["params"]["items"].as_array().map(|a| a.len()).unwrap_or(0);
+            let n = msg["params"]["items"]
+                .as_array()
+                .map(|a| a.len())
+                .unwrap_or(0);
             Value::Array(vec![Value::Null; n])
         }
         _ => Value::Null,
@@ -654,7 +668,10 @@ mod tests {
         let v = json!([
             { "uri": "file:///a.rs", "range": { "start": { "line": 3, "character": 5 }, "end": {"line":3,"character":9} } }
         ]);
-        assert_eq!(locations_from_value(&v), vec![("file:///a.rs".to_string(), 3, 5)]);
+        assert_eq!(
+            locations_from_value(&v),
+            vec![("file:///a.rs".to_string(), 3, 5)]
+        );
     }
 
     #[test]

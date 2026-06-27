@@ -45,9 +45,13 @@ pub fn rename_bar(state: AppState) -> impl IntoView {
         .request_focus(move || {
             rename.open.get();
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
-            state.close_rename();
-        });
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| {
+                state.close_rename();
+            },
+        );
 
     let box_ = stack((title, input)).style(|s| {
         s.items_center()

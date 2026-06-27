@@ -83,7 +83,10 @@ fn walk(dir: &PathBuf, depth: usize, expanded: &HashSet<PathBuf>, out: &mut Vec<
         .collect();
 
     // Directories first, then alphabetical.
-    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.2.to_lowercase().cmp(&b.2.to_lowercase())));
+    entries.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| a.2.to_lowercase().cmp(&b.2.to_lowercase()))
+    });
 
     for (path, is_dir, name) in entries {
         let is_expanded = expanded.contains(&path);
@@ -169,24 +172,28 @@ pub fn file_tree(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    stack((header, scroll(rows).style(|s| s.flex_grow(1.0).width_full())))
-        .style(|s| {
-            s.flex_col()
-                .width_full()
-                .flex_grow(1.0)
-                .min_height(0.0)
-                .background(theme::bg_panel())
-        })
-        // Right-click on empty space: create items at the workspace root.
-        .context_menu(move || {
-            let root = state.root.get_untracked();
-            Menu::new("")
-                .entry(MenuItem::new("New File").action({
-                    let root = root.clone();
-                    move || state.start_file_op(FileOpKind::NewFile, root.clone())
-                }))
-                .entry(MenuItem::new("New Folder").action(move || {
-                    state.start_file_op(FileOpKind::NewFolder, root.clone())
-                }))
-        })
+    stack((
+        header,
+        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+    ))
+    .style(|s| {
+        s.flex_col()
+            .width_full()
+            .flex_grow(1.0)
+            .min_height(0.0)
+            .background(theme::bg_panel())
+    })
+    // Right-click on empty space: create items at the workspace root.
+    .context_menu(move || {
+        let root = state.root.get_untracked();
+        Menu::new("")
+            .entry(MenuItem::new("New File").action({
+                let root = root.clone();
+                move || state.start_file_op(FileOpKind::NewFile, root.clone())
+            }))
+            .entry(
+                MenuItem::new("New Folder")
+                    .action(move || state.start_file_op(FileOpKind::NewFolder, root.clone())),
+            )
+    })
 }

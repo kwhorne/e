@@ -115,16 +115,28 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
                 p.open.set(false);
             }
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| p.open.set(false))
-        .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {
-            let len = displayed().len();
-            if len > 0 {
-                p.selected.update(|i| *i = (*i + 1).min(len - 1));
-            }
-        })
-        .on_key_down(Key::Named(NamedKey::ArrowUp), |_| true, move |_| {
-            p.selected.update(|i| *i = i.saturating_sub(1));
-        });
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| p.open.set(false),
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowDown),
+            |_| true,
+            move |_| {
+                let len = displayed().len();
+                if len > 0 {
+                    p.selected.update(|i| *i = (*i + 1).min(len - 1));
+                }
+            },
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowUp),
+            |_| true,
+            move |_| {
+                p.selected.update(|i| *i = i.saturating_sub(1));
+            },
+        );
 
     let rows = dyn_stack(
         displayed,

@@ -103,12 +103,8 @@ pub struct LineSpan {
 fn build_config(language: Language) -> Option<HighlightConfiguration> {
     // (grammar, highlights, injections, locals) — queries owned so we can
     // concatenate (e.g. TypeScript = JavaScript + TypeScript highlights).
-    let (lang_fn, highlights, injections, locals): (
-        tree_sitter::Language,
-        String,
-        String,
-        String,
-    ) = match language {
+    let (lang_fn, highlights, injections, locals): (tree_sitter::Language, String, String, String) =
+        match language {
             Language::Rust => (
                 tree_sitter_rust::LANGUAGE.into(),
                 tree_sitter_rust::HIGHLIGHTS_QUERY.into(),
@@ -184,14 +180,9 @@ fn build_config(language: Language) -> Option<HighlightConfiguration> {
             _ => return None,
         };
 
-    let mut config = HighlightConfiguration::new(
-        lang_fn,
-        language.name(),
-        &highlights,
-        &injections,
-        &locals,
-    )
-    .ok()?;
+    let mut config =
+        HighlightConfiguration::new(lang_fn, language.name(), &highlights, &injections, &locals)
+            .ok()?;
     config.configure(NAMES);
     Some(config)
 }

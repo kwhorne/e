@@ -274,13 +274,13 @@ impl Styling for SyntaxStyling {
 fn color_for(kind: HighlightKind) -> Option<Color> {
     use HighlightKind::*;
     let c = match kind {
-        Keyword => Color::from_rgb8(0xc6, 0x78, 0xdd),     // purple
+        Keyword => Color::from_rgb8(0xc6, 0x78, 0xdd), // purple
         Function | Constructor => Color::from_rgb8(0x61, 0xaf, 0xef), // blue
-        Type => Color::from_rgb8(0xe5, 0xc0, 0x7b),        // yellow
-        String => Color::from_rgb8(0x98, 0xc3, 0x79),      // green
+        Type => Color::from_rgb8(0xe5, 0xc0, 0x7b),    // yellow
+        String => Color::from_rgb8(0x98, 0xc3, 0x79),  // green
         Number | Constant => Color::from_rgb8(0xd1, 0x9a, 0x66), // orange
-        Comment => Color::from_rgb8(0x5c, 0x63, 0x70),     // gray
-        Property => Color::from_rgb8(0xe0, 0x6c, 0x75),    // red
+        Comment => Color::from_rgb8(0x5c, 0x63, 0x70), // gray
+        Property => Color::from_rgb8(0xe0, 0x6c, 0x75), // red
         Operator | Escape => Color::from_rgb8(0x56, 0xb6, 0xc2), // cyan
         Namespace => Color::from_rgb8(0xe5, 0xc0, 0x7b),
         Attribute => Color::from_rgb8(0x61, 0xaf, 0xef),

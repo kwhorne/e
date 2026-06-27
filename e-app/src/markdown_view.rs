@@ -20,7 +20,10 @@ fn layout(spans: &[Span], size: f32, base_bold: bool) -> TextLayout {
     let sans: Vec<FamilyOwned> = FamilyOwned::parse_list("sans-serif").collect();
     let mono: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
 
-    let mut base = Attrs::new().family(&sans).font_size(size).color(theme::fg());
+    let mut base = Attrs::new()
+        .family(&sans)
+        .font_size(size)
+        .color(theme::fg());
     if base_bold {
         base = base.weight(Weight::BOLD);
     }
@@ -34,7 +37,11 @@ fn layout(spans: &[Span], size: f32, base_bold: bool) -> TextLayout {
         if sp.code {
             a = a.family(&mono).color(CODE_COLOR);
         } else {
-            a = a.family(&sans).color(if sp.link { theme::accent() } else { theme::fg() });
+            a = a.family(&sans).color(if sp.link {
+                theme::accent()
+            } else {
+                theme::fg()
+            });
         }
         if sp.bold || base_bold {
             a = a.weight(Weight::BOLD);
@@ -92,7 +99,10 @@ fn block_view(block: Block) -> impl IntoView {
         }
         Block::Code(code) => rich_text(move || {
             let mono: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
-            let attrs = Attrs::new().family(&mono).font_size(13.0).color(theme::fg());
+            let attrs = Attrs::new()
+                .family(&mono)
+                .font_size(13.0)
+                .color(theme::fg());
             let mut tl = TextLayout::new();
             tl.set_text(&code, AttrsList::new(attrs), None);
             tl
@@ -155,7 +165,13 @@ pub fn markdown_preview(state: AppState) -> impl IntoView {
                 |(i, _)| *i,
                 move |(_, block)| block_view(block),
             )
-            .style(|s| s.flex_col().width_full().max_width(820.0).gap(10.0).padding(28.0));
+            .style(|s| {
+                s.flex_col()
+                    .width_full()
+                    .max_width(820.0)
+                    .gap(10.0)
+                    .padding(28.0)
+            });
 
             scroll(list)
                 .style(|s| s.size_full().background(theme::bg()))

@@ -12,7 +12,9 @@ use floem::views::editor::core::selection::Selection;
 use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::text::Document;
-use floem::views::{container, dyn_container, dyn_stack, label, stack, text_editor_keys, Decorators};
+use floem::views::{
+    container, dyn_container, dyn_stack, label, stack, text_editor_keys, Decorators,
+};
 use floem::IntoView;
 
 use crate::app::handle_shortcut;
@@ -56,7 +58,8 @@ fn welcome() -> impl IntoView {
 
     // ...which is centred as a whole, with the title centred above it.
     stack((
-        label(|| "e".to_string()).style(|s| s.font_size(44.0).color(theme::fg()).margin_bottom(4.0)),
+        label(|| "e".to_string())
+            .style(|s| s.font_size(44.0).color(theme::fg()).margin_bottom(4.0)),
         label(|| "The editor for the rest of us".to_string())
             .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(22.0)),
         cheats,
@@ -89,41 +92,41 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 default_key_handler(editor_sig)(kp, mods)
             })
             .use_doc(b.doc.clone() as Rc<dyn Document>)
-                .styling(SyntaxStyling::new(
-                    b.highlights.clone(),
-                    b.diag_lines.clone(),
-                    b.git_marks.clone(),
-                    b.find_marks.clone(),
-                    b.bracket_marks.clone(),
-                    state.settings.font_size,
-                    state.settings.tab_width,
-                ))
-                .editor_style(move |s| {
-                    theme::editor_style(s).indent_guide(state.settings.indent_guides)
-                })
-                .style(|s| s.size_full())
-                .pre_command(move |pre| {
-                    if state.completion.open.get_untracked() {
-                        match pre.cmd {
-                            Command::Move(MoveCommand::Down) => {
-                                state.move_completion(1);
-                                return CommandExecuted::Yes;
-                            }
-                            Command::Move(MoveCommand::Up) => {
-                                state.move_completion(-1);
-                                return CommandExecuted::Yes;
-                            }
-                            Command::Edit(EditCommand::InsertNewLine)
-                            | Command::Edit(EditCommand::InsertTab) => {
-                                if state.accept_completion() {
-                                    return CommandExecuted::Yes;
-                                }
-                            }
-                            _ => {}
+            .styling(SyntaxStyling::new(
+                b.highlights.clone(),
+                b.diag_lines.clone(),
+                b.git_marks.clone(),
+                b.find_marks.clone(),
+                b.bracket_marks.clone(),
+                state.settings.font_size,
+                state.settings.tab_width,
+            ))
+            .editor_style(move |s| {
+                theme::editor_style(s).indent_guide(state.settings.indent_guides)
+            })
+            .style(|s| s.size_full())
+            .pre_command(move |pre| {
+                if state.completion.open.get_untracked() {
+                    match pre.cmd {
+                        Command::Move(MoveCommand::Down) => {
+                            state.move_completion(1);
+                            return CommandExecuted::Yes;
                         }
+                        Command::Move(MoveCommand::Up) => {
+                            state.move_completion(-1);
+                            return CommandExecuted::Yes;
+                        }
+                        Command::Edit(EditCommand::InsertNewLine)
+                        | Command::Edit(EditCommand::InsertTab) => {
+                            if state.accept_completion() {
+                                return CommandExecuted::Yes;
+                            }
+                        }
+                        _ => {}
                     }
-                    CommandExecuted::No
-                });
+                }
+                CommandExecuted::No
+            });
 
             let editor_handle = te.editor().clone();
             b.editor.set(Some(editor_handle.clone()));

@@ -42,8 +42,7 @@ fn agent_header(state: AppState) -> impl IntoView {
             let id = a.id.clone();
             let mark = if id == current { "● " } else { "   " };
             menu = menu.entry(
-                MenuItem::new(format!("{mark}{}", a.name))
-                    .action(move || state.select_agent(&id)),
+                MenuItem::new(format!("{mark}{}", a.name)).action(move || state.select_agent(&id)),
             );
         }
         menu.separator()
@@ -85,7 +84,10 @@ fn agent_body(state: AppState) -> impl IntoView {
         state.term_tick.get();
         let runs = state.agent_runs();
         let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
-        let default = Attrs::new().family(&family).font_size(13.0).color(theme::fg());
+        let default = Attrs::new()
+            .family(&family)
+            .font_size(13.0)
+            .color(theme::fg());
         let mut attrs_list = AttrsList::new(default);
         let mut text = String::new();
         let mut spans: Vec<(Range<usize>, Color)> = Vec::new();
@@ -102,7 +104,10 @@ fn agent_body(state: AppState) -> impl IntoView {
             }
         }
         for (range, color) in spans {
-            attrs_list.add_span(range, Attrs::new().family(&family).font_size(13.0).color(color));
+            attrs_list.add_span(
+                range,
+                Attrs::new().family(&family).font_size(13.0).color(color),
+            );
         }
         let mut layout = TextLayout::new();
         layout.set_text(&text, attrs_list, None);
@@ -125,7 +130,11 @@ fn agent_body(state: AppState) -> impl IntoView {
     let body = stack((content, cursor_block)).style(|s| s.size_full());
 
     scroll(body)
-        .style(|s| s.size_full().flex_grow(1.0).background(Color::from_rgb8(0x14, 0x16, 0x1b)))
+        .style(|s| {
+            s.size_full()
+                .flex_grow(1.0)
+                .background(Color::from_rgb8(0x14, 0x16, 0x1b))
+        })
         .on_resize(move |rect| {
             let (cw, lh) = char_size();
             let cols = (((rect.width() - 16.0) / cw).floor() as i64).max(20) as usize;
@@ -136,11 +145,16 @@ fn agent_body(state: AppState) -> impl IntoView {
         .request_focus(move || {
             state.agent_focus_pulse.get();
         })
-        .on_event_cont(EventListener::FocusGained, move |_| state.agent_focused.set(true))
-        .on_event_cont(EventListener::FocusLost, move |_| state.agent_focused.set(false))
+        .on_event_cont(EventListener::FocusGained, move |_| {
+            state.agent_focused.set(true)
+        })
+        .on_event_cont(EventListener::FocusLost, move |_| {
+            state.agent_focused.set(false)
+        })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
-                if ke.modifiers.meta() && handle_shortcut(state, &ke.key.logical_key, ke.modifiers) {
+                if ke.modifiers.meta() && handle_shortcut(state, &ke.key.logical_key, ke.modifiers)
+                {
                     return EventPropagation::Stop;
                 }
                 if let Some(bytes) = key_to_bytes(ke) {

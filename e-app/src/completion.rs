@@ -116,12 +116,18 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
             let detail = item.detail.clone().unwrap_or_default();
             stack((
                 label(move || icon.to_string()).style(move |s| s.width(16.0).color(color)),
-                label(move || lbl.clone()).style(|s| s.color(theme::fg()).flex_grow(1.0).text_ellipsis()),
+                label(move || lbl.clone())
+                    .style(|s| s.color(theme::fg()).flex_grow(1.0).text_ellipsis()),
                 label(move || detail.clone())
                     .style(|s| s.color(theme::fg_dim()).text_ellipsis().max_width(140.0)),
             ))
             .style(move |s| {
-                let s = s.items_center().gap(8.0).height(22.0).width_full().padding_horiz(8.0);
+                let s = s
+                    .items_center()
+                    .gap(8.0)
+                    .height(22.0)
+                    .width_full()
+                    .padding_horiz(8.0);
                 if comp.selected.get() == i {
                     s.background(theme::bg_active())
                 } else {
@@ -132,25 +138,24 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    scroll(rows)
-        .style(move |s| {
-            let anchor = comp.anchor.get();
-            let s = s
-                .absolute()
-                .inset_left(anchor.x)
-                .inset_top(anchor.y + 4.0)
-                .width(420.0)
-                .max_height(240.0)
-                .background(theme::bg_panel())
-                .border(1.0)
-                .border_color(theme::border())
-                .border_radius(6.0);
-            if comp.open.get() && !comp.items.get().is_empty() {
-                s
-            } else {
-                s.hide()
-            }
-        })
+    scroll(rows).style(move |s| {
+        let anchor = comp.anchor.get();
+        let s = s
+            .absolute()
+            .inset_left(anchor.x)
+            .inset_top(anchor.y + 4.0)
+            .width(420.0)
+            .max_height(240.0)
+            .background(theme::bg_panel())
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(6.0);
+        if comp.open.get() && !comp.items.get().is_empty() {
+            s
+        } else {
+            s.hide()
+        }
+    })
 }
 
 pub fn signature_popup(state: AppState) -> impl IntoView {

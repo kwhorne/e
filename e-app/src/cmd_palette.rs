@@ -129,16 +129,28 @@ pub fn command_palette(state: AppState) -> impl IntoView {
                 cmd.open.set(false);
             }
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| cmd.open.set(false))
-        .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {
-            let len = filtered().len();
-            if len > 0 {
-                cmd.selected.update(|i| *i = (*i + 1).min(len - 1));
-            }
-        })
-        .on_key_down(Key::Named(NamedKey::ArrowUp), |_| true, move |_| {
-            cmd.selected.update(|i| *i = i.saturating_sub(1));
-        });
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| cmd.open.set(false),
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowDown),
+            |_| true,
+            move |_| {
+                let len = filtered().len();
+                if len > 0 {
+                    cmd.selected.update(|i| *i = (*i + 1).min(len - 1));
+                }
+            },
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowUp),
+            |_| true,
+            move |_| {
+                cmd.selected.update(|i| *i = i.saturating_sub(1));
+            },
+        );
 
     let rows = dyn_stack(
         move || filtered().into_iter().enumerate().collect::<Vec<_>>(),
@@ -187,7 +199,12 @@ pub fn command_palette(state: AppState) -> impl IntoView {
 
     container(box_)
         .style(move |s| {
-            let s = s.absolute().inset(0.0).size_full().justify_center().padding_top(90.0);
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .justify_center()
+                .padding_top(90.0);
             if cmd.open.get() {
                 s
             } else {

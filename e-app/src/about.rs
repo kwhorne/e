@@ -12,7 +12,8 @@ fn line(text: &'static str, accent: bool, url: Option<&'static str>) -> impl Int
         .style(move |s| {
             let s = s.font_size(14.0);
             let s = if accent {
-                s.color(theme::accent()).font_family("monospace".to_string())
+                s.color(theme::accent())
+                    .font_family("monospace".to_string())
             } else {
                 s.color(theme::fg_dim())
             };
@@ -31,12 +32,21 @@ fn line(text: &'static str, accent: bool, url: Option<&'static str>) -> impl Int
 
 pub fn about_dialog(state: AppState) -> impl IntoView {
     let content = stack((
-        label(|| "e".to_string()).style(|s| s.font_size(40.0).color(theme::fg()).margin_bottom(2.0)),
-        label(|| format!("Version {}", env!("CARGO_PKG_VERSION")))
-            .style(|s| s.font_family("monospace".to_string()).font_size(13.0).color(theme::fg_dim()).margin_bottom(16.0)),
+        label(|| "e".to_string())
+            .style(|s| s.font_size(40.0).color(theme::fg()).margin_bottom(2.0)),
+        label(|| format!("Version {}", env!("CARGO_PKG_VERSION"))).style(|s| {
+            s.font_family("monospace".to_string())
+                .font_size(13.0)
+                .color(theme::fg_dim())
+                .margin_bottom(16.0)
+        }),
         line("A fast, native code editor in Rust.", false, None),
         line("kwhorne.com", true, Some("https://kwhorne.com")),
-        line("github.com/kwhorne/e", true, Some("https://github.com/kwhorne/e")),
+        line(
+            "github.com/kwhorne/e",
+            true,
+            Some("https://github.com/kwhorne/e"),
+        ),
         line("Knut W. Horne", false, None),
         label(|| "Close".to_string())
             .style(|s| {

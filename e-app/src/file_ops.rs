@@ -81,8 +81,8 @@ pub fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 pub fn file_op_prompt(state: AppState) -> impl IntoView {
     let op = state.file_op;
 
-    let title = label(move || op.kind.get().title())
-        .style(|s| s.color(theme::fg_dim()).font_size(12.0));
+    let title =
+        label(move || op.kind.get().title()).style(|s| s.color(theme::fg_dim()).font_size(12.0));
 
     let input = text_input(op.input)
         .on_enter(move || state.confirm_file_op())
@@ -97,7 +97,11 @@ pub fn file_op_prompt(state: AppState) -> impl IntoView {
         .request_focus(move || {
             op.open.get();
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| op.open.set(false));
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| op.open.set(false),
+        );
 
     let box_ = stack((title, input)).style(|s| {
         s.flex_col()

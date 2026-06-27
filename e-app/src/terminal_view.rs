@@ -22,7 +22,14 @@ use crate::theme;
 /// plus a "+" to add a new terminal.
 fn terminal_tabs(state: AppState) -> impl IntoView {
     let tabs = dyn_stack(
-        move || state.terminals.get().into_iter().enumerate().collect::<Vec<_>>(),
+        move || {
+            state
+                .terminals
+                .get()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
         |(_, t)| t.id,
         move |(i, t)| {
             let id = t.id;
@@ -152,7 +159,10 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
         state.term_tick.get();
         let runs = state.term_runs_of(id_sig.get());
         let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
-        let default = Attrs::new().family(&family).font_size(13.0).color(theme::fg());
+        let default = Attrs::new()
+            .family(&family)
+            .font_size(13.0)
+            .color(theme::fg());
         let mut attrs_list = AttrsList::new(default);
         let mut text = String::new();
         let mut spans: Vec<(Range<usize>, Color)> = Vec::new();
@@ -169,7 +179,10 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
             }
         }
         for (range, color) in spans {
-            attrs_list.add_span(range, Attrs::new().family(&family).font_size(13.0).color(color));
+            attrs_list.add_span(
+                range,
+                Attrs::new().family(&family).font_size(13.0).color(color),
+            );
         }
         let mut layout = TextLayout::new();
         layout.set_text(&text, attrs_list, None);
@@ -212,10 +225,13 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
             state.terminal_focused.set(true);
             state.term_focus_pane.set(pane_idx);
         })
-        .on_event_cont(EventListener::FocusLost, move |_| state.terminal_focused.set(false))
+        .on_event_cont(EventListener::FocusLost, move |_| {
+            state.terminal_focused.set(false)
+        })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
-                if ke.modifiers.meta() && handle_shortcut(state, &ke.key.logical_key, ke.modifiers) {
+                if ke.modifiers.meta() && handle_shortcut(state, &ke.key.logical_key, ke.modifiers)
+                {
                     return EventPropagation::Stop;
                 }
                 if let Some(bytes) = key_to_bytes(ke) {
@@ -282,9 +298,11 @@ pub fn term_rename_prompt(state: AppState) -> impl IntoView {
         .request_focus(move || {
             state.term_rename_id.get();
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
-            state.term_rename_id.set(None)
-        });
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| state.term_rename_id.set(None),
+        );
 
     let box_ = stack((
         label(|| "Rename terminal:".to_string())
@@ -303,7 +321,12 @@ pub fn term_rename_prompt(state: AppState) -> impl IntoView {
 
     container(box_)
         .style(move |s| {
-            let s = s.absolute().inset(0.0).size_full().justify_center().padding_top(120.0);
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .justify_center()
+                .padding_top(120.0);
             if state.term_rename_id.get().is_some() {
                 s
             } else {

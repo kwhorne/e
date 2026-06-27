@@ -112,9 +112,15 @@ mod tests {
     fn detects_by_extension() {
         assert_eq!(Language::from_path(Path::new("a.rs")), Language::Rust);
         assert_eq!(Language::from_path(Path::new("a.php")), Language::Php);
-        assert_eq!(Language::from_path(Path::new("view.blade.php")), Language::Blade);
+        assert_eq!(
+            Language::from_path(Path::new("view.blade.php")),
+            Language::Blade
+        );
         assert_eq!(Language::from_path(Path::new("a.vue")), Language::Vue);
         assert_eq!(Language::from_path(Path::new("Cargo.lock")), Language::Toml);
-        assert_eq!(Language::from_path(Path::new("weird.xyz")), Language::PlainText);
+        assert_eq!(
+            Language::from_path(Path::new("weird.xyz")),
+            Language::PlainText
+        );
     }
 }

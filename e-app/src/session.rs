@@ -17,7 +17,12 @@ pub struct SessionData {
 
 fn sessions_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".config").join("e").join("sessions"))
+    Some(
+        PathBuf::from(home)
+            .join(".config")
+            .join("e")
+            .join("sessions"),
+    )
 }
 
 fn session_path(root: &Path) -> Option<PathBuf> {
@@ -34,7 +39,11 @@ pub fn load(root: &Path) -> Option<SessionData> {
     let strings = |key: &str| -> Vec<String> {
         v.get(key)
             .and_then(|x| x.as_array())
-            .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| s.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default()
     };
     Some(SessionData {

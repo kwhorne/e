@@ -44,28 +44,52 @@ fn pick(dark: Color, light: Color) -> Color {
 }
 
 pub fn bg() -> Color {
-    pick(Color::from_rgb8(0x1b, 0x1e, 0x24), Color::from_rgb8(0xf6, 0xf7, 0xf9))
+    pick(
+        Color::from_rgb8(0x1b, 0x1e, 0x24),
+        Color::from_rgb8(0xf6, 0xf7, 0xf9),
+    )
 }
 pub fn bg_panel() -> Color {
-    pick(Color::from_rgb8(0x21, 0x25, 0x2b), Color::from_rgb8(0xec, 0xee, 0xf1))
+    pick(
+        Color::from_rgb8(0x21, 0x25, 0x2b),
+        Color::from_rgb8(0xec, 0xee, 0xf1),
+    )
 }
 pub fn bg_active() -> Color {
-    pick(Color::from_rgb8(0x2c, 0x31, 0x39), Color::from_rgb8(0xff, 0xff, 0xff))
+    pick(
+        Color::from_rgb8(0x2c, 0x31, 0x39),
+        Color::from_rgb8(0xff, 0xff, 0xff),
+    )
 }
 pub fn bg_hover() -> Color {
-    pick(Color::from_rgb8(0x33, 0x39, 0x42), Color::from_rgb8(0xe1, 0xe5, 0xea))
+    pick(
+        Color::from_rgb8(0x33, 0x39, 0x42),
+        Color::from_rgb8(0xe1, 0xe5, 0xea),
+    )
 }
 pub fn border() -> Color {
-    pick(Color::from_rgb8(0x33, 0x39, 0x42), Color::from_rgb8(0xd4, 0xd8, 0xde))
+    pick(
+        Color::from_rgb8(0x33, 0x39, 0x42),
+        Color::from_rgb8(0xd4, 0xd8, 0xde),
+    )
 }
 pub fn fg() -> Color {
-    pick(Color::from_rgb8(0xc5, 0xcb, 0xd6), Color::from_rgb8(0x2b, 0x2f, 0x36))
+    pick(
+        Color::from_rgb8(0xc5, 0xcb, 0xd6),
+        Color::from_rgb8(0x2b, 0x2f, 0x36),
+    )
 }
 pub fn fg_dim() -> Color {
-    pick(Color::from_rgb8(0x7a, 0x82, 0x90), Color::from_rgb8(0x6a, 0x72, 0x80))
+    pick(
+        Color::from_rgb8(0x7a, 0x82, 0x90),
+        Color::from_rgb8(0x6a, 0x72, 0x80),
+    )
 }
 pub fn accent() -> Color {
-    pick(Color::from_rgb8(0x5c, 0x9c, 0xf5), Color::from_rgb8(0x2f, 0x6e, 0xf5))
+    pick(
+        Color::from_rgb8(0x5c, 0x9c, 0xf5),
+        Color::from_rgb8(0x2f, 0x6e, 0xf5),
+    )
 }
 
 /// Themed colours for a `text_input`, overriding Floem's default white
@@ -75,7 +99,11 @@ pub fn input_colors(s: Style) -> Style {
         .color(fg())
         .border_color(border())
         .hover(|s| s.background(bg()))
-        .focus(|s| s.background(bg()).border_color(accent()).hover(|s| s.background(bg())))
+        .focus(|s| {
+            s.background(bg())
+                .border_color(accent())
+                .hover(|s| s.background(bg()))
+        })
 }
 
 /// Editor (text area) colours, switched with the theme. Reactive.

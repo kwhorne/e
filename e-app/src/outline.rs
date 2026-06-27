@@ -80,7 +80,11 @@ pub fn outline_panel(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    stack((header, scroll(rows).style(|s| s.flex_grow(1.0).width_full()))).style(move |s| {
+    stack((
+        header,
+        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+    ))
+    .style(move |s| {
         let s = s
             .flex_col()
             .width_full()

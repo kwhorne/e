@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::ext_event::create_signal_from_channel;
 use floem::keyboard::{Key, Modifiers, NamedKey};
-use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::kurbo::Size;
+use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{stack, Decorators};
 use floem::window::WindowConfig;
 use floem::{Application, IntoView};
@@ -25,8 +25,8 @@ use crate::markdown_view::markdown_preview;
 use crate::outline::outline_panel;
 use crate::palette::palette;
 use crate::picker::picker_overlay;
-use crate::rename::rename_bar;
 use crate::problems::problems_panel;
+use crate::rename::rename_bar;
 use crate::state::AppState;
 use crate::status::status_bar;
 use crate::tabs::tab_bar;
@@ -174,7 +174,7 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 state.cmd.open.set(false);
                 state.md_preview.set(false);
                 state.diff_open.set(false);
-            state.about_open.set(false);
+                state.about_open.set(false);
                 state.close_find();
                 state.close_rename();
                 true
@@ -390,8 +390,22 @@ fn app_view() -> impl IntoView {
         sidebar,
         editor_column,
         agent_panel(state),
-        resize_handle(state, ResizeSide::Left, state.sidebar_width, state.sidebar_open, 150.0, 600.0),
-        resize_handle(state, ResizeSide::Right, state.agent_width, state.agent_open, 300.0, 900.0),
+        resize_handle(
+            state,
+            ResizeSide::Left,
+            state.sidebar_width,
+            state.sidebar_open,
+            150.0,
+            600.0,
+        ),
+        resize_handle(
+            state,
+            ResizeSide::Right,
+            state.agent_width,
+            state.agent_open,
+            300.0,
+            900.0,
+        ),
     ))
     .style(|s| s.flex_row().size_full());
 
@@ -411,21 +425,21 @@ fn app_view() -> impl IntoView {
         palette(state),
         command_palette(state),
     ))
-        .style(|s| s.size_full().background(theme::bg()).color(theme::fg()))
-        .window_title(move || {
-            let (name, dirty) = state
-                .active_buffer()
-                .map(|b| (b.file.display_name(), b.dirty.get()))
-                .unwrap_or_else(|| ("e".to_string(), false));
-            let mark = if dirty { "● " } else { "" };
-            format!("{mark}{name} — e")
-        })
-        .on_event(EventListener::KeyDown, move |e| {
-            if let Event::KeyDown(ke) = e {
-                if handle_shortcut(state, &ke.key.logical_key, ke.modifiers) {
-                    return EventPropagation::Stop;
-                }
+    .style(|s| s.size_full().background(theme::bg()).color(theme::fg()))
+    .window_title(move || {
+        let (name, dirty) = state
+            .active_buffer()
+            .map(|b| (b.file.display_name(), b.dirty.get()))
+            .unwrap_or_else(|| ("e".to_string(), false));
+        let mark = if dirty { "● " } else { "" };
+        format!("{mark}{name} — e")
+    })
+    .on_event(EventListener::KeyDown, move |e| {
+        if let Event::KeyDown(ke) = e {
+            if handle_shortcut(state, &ke.key.logical_key, ke.modifiers) {
+                return EventPropagation::Stop;
             }
-            EventPropagation::Continue
-        })
+        }
+        EventPropagation::Continue
+    })
 }

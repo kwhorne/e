@@ -156,13 +156,19 @@ impl Screen {
         };
         match mode {
             0 => row.iter_mut().skip(self.cx).for_each(|c| *c = Cell::BLANK),
-            1 => row.iter_mut().take(self.cx + 1).for_each(|c| *c = Cell::BLANK),
+            1 => row
+                .iter_mut()
+                .take(self.cx + 1)
+                .for_each(|c| *c = Cell::BLANK),
             _ => row.iter_mut().for_each(|c| *c = Cell::BLANK),
         }
     }
 
     fn sgr(&mut self, params: &Params) {
-        let codes: Vec<u16> = params.iter().map(|p| p.first().copied().unwrap_or(0)).collect();
+        let codes: Vec<u16> = params
+            .iter()
+            .map(|p| p.first().copied().unwrap_or(0))
+            .collect();
         if codes.is_empty() {
             self.fg = None;
             return;
@@ -226,8 +232,16 @@ impl Perform for Screen {
             'd' => self.cy = n.saturating_sub(1).min(self.rows.saturating_sub(1)),
             'H' | 'f' => {
                 let mut it = params.iter();
-                let row = it.next().and_then(|p| p.first().copied()).unwrap_or(1).max(1) as usize;
-                let col = it.next().and_then(|p| p.first().copied()).unwrap_or(1).max(1) as usize;
+                let row = it
+                    .next()
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(1)
+                    .max(1) as usize;
+                let col = it
+                    .next()
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(1)
+                    .max(1) as usize;
                 self.cy = (row - 1).min(self.rows.saturating_sub(1));
                 self.cx = (col - 1).min(self.cols.saturating_sub(1));
             }

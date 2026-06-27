@@ -140,7 +140,11 @@ fn top_level_keys(src: &str) -> Vec<String> {
         let inner = &before[..before.len() - 1];
         if let Some(start) = inner.rfind(quote) {
             let key = &inner[start + 1..];
-            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            if !key.is_empty()
+                && key
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            {
                 keys.push(key.to_string());
             }
         }
@@ -237,10 +241,22 @@ mod tests {
 
     #[test]
     fn detects_helpers() {
-        assert_eq!(detect_context("$x = view('dash"), Some((Helper::View, "dash".into())));
-        assert_eq!(detect_context("return route('users.in"), Some((Helper::Route, "users.in".into())));
-        assert_eq!(detect_context("config(\"app.na"), Some((Helper::Config, "app.na".into())));
-        assert_eq!(detect_context("env('APP_"), Some((Helper::Env, "APP_".into())));
+        assert_eq!(
+            detect_context("$x = view('dash"),
+            Some((Helper::View, "dash".into()))
+        );
+        assert_eq!(
+            detect_context("return route('users.in"),
+            Some((Helper::Route, "users.in".into()))
+        );
+        assert_eq!(
+            detect_context("config(\"app.na"),
+            Some((Helper::Config, "app.na".into()))
+        );
+        assert_eq!(
+            detect_context("env('APP_"),
+            Some((Helper::Env, "APP_".into()))
+        );
         // not a helper / closed string
         assert_eq!(detect_context("$y = preview('x"), None);
         assert_eq!(detect_context("view('done')"), None);
@@ -256,7 +272,10 @@ mod tests {
         std::fs::write(views.join("admin").join("users.blade.php"), "x").unwrap();
         let mut got = load_views(&dir);
         got.sort();
-        assert_eq!(got, vec!["admin.users".to_string(), "dashboard".to_string()]);
+        assert_eq!(
+            got,
+            vec!["admin.users".to_string(), "dashboard".to_string()]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

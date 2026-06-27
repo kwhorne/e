@@ -29,17 +29,17 @@ use e_core::syntax::highlight_lines;
 use e_lsp::{path_to_uri, uri_to_path, LspClient, SignatureInfo};
 use e_term::Terminal;
 
+use crate::cmd_palette::CmdPalette;
 use crate::completion::{Completion, HoverState, SignatureState};
 use crate::config::{self, AgentConfig, Settings};
 use crate::file_ops::{copy_recursive, duplicate_name, FileOp, FileOpKind};
+use crate::find::FindState;
 use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
-use crate::session::{self, SessionData};
 use crate::picker::{Picker, PickerItem, PickerMode};
-use crate::cmd_palette::CmdPalette;
 use crate::rename::RenameState;
+use crate::session::{self, SessionData};
 use crate::snippets;
-use crate::find::FindState;
 use crate::styling::{
     build_diag_lines, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
 };
@@ -359,11 +359,17 @@ impl AppState {
             }
             FileOpKind::NewFolder => std::fs::create_dir_all(base.join(&name)),
             FileOpKind::Rename => {
-                let dst = base.parent().map(|p| p.join(&name)).unwrap_or_else(|| PathBuf::from(&name));
+                let dst = base
+                    .parent()
+                    .map(|p| p.join(&name))
+                    .unwrap_or_else(|| PathBuf::from(&name));
                 std::fs::rename(&base, &dst)
             }
             FileOpKind::Duplicate => {
-                let dst = base.parent().map(|p| p.join(&name)).unwrap_or_else(|| PathBuf::from(&name));
+                let dst = base
+                    .parent()
+                    .map(|p| p.join(&name))
+                    .unwrap_or_else(|| PathBuf::from(&name));
                 copy_recursive(&base, &dst)
             }
         };
@@ -401,7 +407,10 @@ impl AppState {
     }
 
     pub fn reveal_in_finder(&self, path: &std::path::Path) {
-        let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn();
     }
 
     pub fn toggle_md_preview(&self) {
@@ -602,9 +611,11 @@ impl AppState {
 
         if let Some(editor) = buf.editor.get_untracked() {
             if let Some((s, _)) = matches.get(cur) {
-                editor
-                    .cursor
-                    .set(Cursor::new(CursorMode::Insert(Selection::caret(*s)), None, None));
+                editor.cursor.set(Cursor::new(
+                    CursorMode::Insert(Selection::caret(*s)),
+                    None,
+                    None,
+                ));
             }
         }
     }
@@ -614,7 +625,9 @@ impl AppState {
         if n == 0 {
             return;
         }
-        self.find.current.set((self.find.current.get_untracked() + 1) % n);
+        self.find
+            .current
+            .set((self.find.current.get_untracked() + 1) % n);
         self.apply_find_marks();
     }
 
@@ -756,7 +769,9 @@ impl AppState {
     /// Open the rename prompt for a terminal tab.
     pub fn start_term_rename(&self, id: u64) {
         let current = self.terminals.with_untracked(|ts| {
-            ts.iter().find(|t| t.id == id).map(|t| t.name.get_untracked())
+            ts.iter()
+                .find(|t| t.id == id)
+                .map(|t| t.name.get_untracked())
         });
         self.term_rename_input.set(current.unwrap_or_default());
         self.term_rename_id.set(Some(id));
@@ -938,7 +953,8 @@ impl AppState {
     }
 
     pub fn buffer_by_id(&self, id: u64) -> Option<Buffer> {
-        self.buffers.with(|bs| bs.iter().find(|b| b.id == id).cloned())
+        self.buffers
+            .with(|bs| bs.iter().find(|b| b.id == id).cloned())
     }
 
     /// The active-buffer signal of the focused pane.
@@ -981,12 +997,20 @@ impl AppState {
         for p in &data.open {
             self.open_path(PathBuf::from(p));
         }
-        if let Some(a) = data.active.as_deref().and_then(|a| self.buffer_id_by_path(a)) {
+        if let Some(a) = data
+            .active
+            .as_deref()
+            .and_then(|a| self.buffer_id_by_path(a))
+        {
             self.active.set(Some(a));
         }
         if data.split {
             self.split.set(true);
-            if let Some(a2) = data.active2.as_deref().and_then(|a| self.buffer_id_by_path(a)) {
+            if let Some(a2) = data
+                .active2
+                .as_deref()
+                .and_then(|a| self.buffer_id_by_path(a))
+            {
                 self.active2.set(Some(a2));
             }
         }
@@ -1075,7 +1099,8 @@ impl AppState {
         let win = buf.win_origin.get_untracked();
 
         let comp = self.completion;
-        comp.anchor.set(Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0));
+        comp.anchor
+            .set(Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0));
         comp.buffer_id.set(Some(buffer_id));
         comp.start_offset.set(start);
         if items.is_empty() {
@@ -1116,10 +1141,9 @@ impl AppState {
         match LspClient::start(spec.program, spec.args, &root, handler) {
             Ok(client) => {
                 eprintln!("e: started {} for {}", spec.id, root.display());
-                self.lsp_clients
-                    .update(|m| {
-                        m.insert(spec.id.to_string(), client.clone());
-                    });
+                self.lsp_clients.update(|m| {
+                    m.insert(spec.id.to_string(), client.clone());
+                });
                 Some(client)
             }
             Err(e) => {
@@ -1277,9 +1301,11 @@ impl AppState {
         if lsp_language_id(buf.file.language).is_none() {
             return;
         }
-        let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
-        else {
+        let (Some(client), Some(uri), Some(editor)) = (
+            self.lsp_for_active(),
+            buf.uri.clone(),
+            buf.editor.get_untracked(),
+        ) else {
             return;
         };
         let edits = match client.formatting(&uri, 4, true) {
@@ -1291,8 +1317,10 @@ impl AppState {
         let mut offs: Vec<(usize, usize, String)> = edits
             .into_iter()
             .map(|e| {
-                let s = editor
-                    .offset_of_line_col(e.range.start.line as usize, e.range.start.character as usize);
+                let s = editor.offset_of_line_col(
+                    e.range.start.line as usize,
+                    e.range.start.character as usize,
+                );
                 let en = editor
                     .offset_of_line_col(e.range.end.line as usize, e.range.end.character as usize);
                 (s, en, e.new_text)
@@ -1524,13 +1552,16 @@ impl AppState {
 
         match (self.lsp_for_active(), buf.uri.clone()) {
             (Some(client), Some(uri)) => {
-                let send = create_ext_action(self.cx, move |lsp: Vec<lsp_types::CompletionItem>| {
-                    let mut items = snippet_items.clone();
-                    items.extend(lsp);
-                    show(items);
-                });
+                let send =
+                    create_ext_action(self.cx, move |lsp: Vec<lsp_types::CompletionItem>| {
+                        let mut items = snippet_items.clone();
+                        items.extend(lsp);
+                        show(items);
+                    });
                 std::thread::spawn(move || {
-                    let items = client.completion(&uri, line as u32, col as u32).unwrap_or_default();
+                    let items = client
+                        .completion(&uri, line as u32, col as u32)
+                        .unwrap_or_default();
                     send(items);
                 });
             }
@@ -1593,18 +1624,26 @@ impl AppState {
                 let text = buf.doc.text().to_string();
                 let indent = line_indent(&text, start);
                 let (expanded, caret) = snippets::expand(body, &indent);
-                buf.doc
-                    .edit_single(Selection::region(start, end), &expanded, EditType::InsertChars);
+                buf.doc.edit_single(
+                    Selection::region(start, end),
+                    &expanded,
+                    EditType::InsertChars,
+                );
                 let pos = start + caret;
-                editor
-                    .cursor
-                    .set(Cursor::new(CursorMode::Insert(Selection::caret(pos)), None, None));
+                editor.cursor.set(Cursor::new(
+                    CursorMode::Insert(Selection::caret(pos)),
+                    None,
+                    None,
+                ));
                 return true;
             }
         }
 
-        buf.doc
-            .edit_single(Selection::region(start, end), &insert, EditType::InsertChars);
+        buf.doc.edit_single(
+            Selection::region(start, end),
+            &insert,
+            EditType::InsertChars,
+        );
         true
     }
 
@@ -1612,9 +1651,11 @@ impl AppState {
         let Some(buf) = self.active_buffer() else {
             return;
         };
-        let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
-        else {
+        let (Some(client), Some(uri), Some(editor)) = (
+            self.lsp_for_active(),
+            buf.uri.clone(),
+            buf.editor.get_untracked(),
+        ) else {
             return;
         };
         let cursor = editor.cursor.get_untracked();
@@ -1651,9 +1692,11 @@ impl AppState {
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return;
         };
-        let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
-        else {
+        let (Some(client), Some(uri), Some(editor)) = (
+            self.lsp_for_active(),
+            buf.uri.clone(),
+            buf.editor.get_untracked(),
+        ) else {
             return;
         };
         let cursor = editor.cursor.get_untracked();
@@ -1671,13 +1714,17 @@ impl AppState {
         let send = create_ext_action(self.cx, move |info: Option<SignatureInfo>| match info {
             Some(i) => {
                 sig.label.set(i.label);
-                sig.active.set(i.active.map(|(a, b)| (a as usize, b as usize)));
+                sig.active
+                    .set(i.active.map(|(a, b)| (a as usize, b as usize)));
                 sig.open.set(true);
             }
             None => sig.open.set(false),
         });
         std::thread::spawn(move || {
-            let info = client.signature_help(&uri, line as u32, col as u32).ok().flatten();
+            let info = client
+                .signature_help(&uri, line as u32, col as u32)
+                .ok()
+                .flatten();
             send(info);
         });
     }
@@ -1693,9 +1740,11 @@ impl AppState {
         let Some(buf) = self.active_buffer() else {
             return;
         };
-        let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
-        else {
+        let (Some(client), Some(uri), Some(editor)) = (
+            self.lsp_for_active(),
+            buf.uri.clone(),
+            buf.editor.get_untracked(),
+        ) else {
             return;
         };
         let (line, col) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
@@ -1705,7 +1754,10 @@ impl AppState {
             None => eprintln!("e: no definition found"),
         });
         std::thread::spawn(move || {
-            let loc = client.definition(&uri, line as u32, col as u32).ok().flatten();
+            let loc = client
+                .definition(&uri, line as u32, col as u32)
+                .ok()
+                .flatten();
             send(loc);
         });
     }
@@ -1804,9 +1856,11 @@ impl AppState {
         let Some(buf) = self.active_buffer() else {
             return;
         };
-        let (Some(client), Some(uri), Some(editor)) =
-            (self.lsp_for_active(), buf.uri.clone(), buf.editor.get_untracked())
-        else {
+        let (Some(client), Some(uri), Some(editor)) = (
+            self.lsp_for_active(),
+            buf.uri.clone(),
+            buf.editor.get_untracked(),
+        ) else {
             return;
         };
         let (line, col) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
@@ -1824,7 +1878,9 @@ impl AppState {
             p.selected.set(0);
         });
         std::thread::spawn(move || {
-            let refs = client.references(&uri, line as u32, col as u32).unwrap_or_default();
+            let refs = client
+                .references(&uri, line as u32, col as u32)
+                .unwrap_or_default();
             let items = refs
                 .into_iter()
                 .map(|(u, l, c)| PickerItem {
@@ -1847,9 +1903,11 @@ impl AppState {
         };
         if let Some(editor) = buf.editor.get_untracked() {
             let offset = editor.offset_of_line_col(line, col);
-            editor
-                .cursor
-                .set(Cursor::new(CursorMode::Insert(Selection::caret(offset)), None, None));
+            editor.cursor.set(Cursor::new(
+                CursorMode::Insert(Selection::caret(offset)),
+                None,
+                None,
+            ));
         } else {
             // The editor view isn't built yet; apply once it is.
             buf.pending_goto.set(Some((line, col)));
@@ -2085,7 +2143,11 @@ fn grep_workspace(root: &std::path::Path, query: &str, max: usize) -> Vec<Picker
                 Ok(t) if t.is_dir() => stack.push(path),
                 Ok(_) => {
                     // Skip large files; read the rest as UTF-8 (binaries fail).
-                    if entry.metadata().map(|m| m.len() > 2_000_000).unwrap_or(true) {
+                    if entry
+                        .metadata()
+                        .map(|m| m.len() > 2_000_000)
+                        .unwrap_or(true)
+                    {
                         continue;
                     }
                     let Ok(content) = std::fs::read_to_string(&path) else {
@@ -2095,7 +2157,11 @@ fn grep_workspace(root: &std::path::Path, query: &str, max: usize) -> Vec<Picker
                         if let Some(col) = line.to_lowercase().find(&needle) {
                             out.push(PickerItem {
                                 label: line.trim_start().chars().take(120).collect(),
-                                detail: format!("{}:{}", rel_uri(&path_to_uri(&path), root), li + 1),
+                                detail: format!(
+                                    "{}:{}",
+                                    rel_uri(&path_to_uri(&path), root),
+                                    li + 1
+                                ),
                                 uri: path_to_uri(&path),
                                 line: li as u32,
                                 char: col as u32,
@@ -2143,17 +2209,17 @@ mod bracket_tests {
     fn matches_outer_paren() {
         // "foo(bar(baz))" — cursor after first '(' (offset 4)
         let m = compute_bracket_marks("foo(bar(baz))", 4);
-        let mut spans: Vec<(usize,usize)> = m.into_iter().flatten().collect();
+        let mut spans: Vec<(usize, usize)> = m.into_iter().flatten().collect();
         spans.sort();
-        assert_eq!(spans, vec![(3,4),(12,13)]);
+        assert_eq!(spans, vec![(3, 4), (12, 13)]);
     }
     #[test]
     fn matches_close_brace() {
         // cursor right after the closing brace
         let m = compute_bracket_marks("a{b{c}d}", 8);
-        let mut spans: Vec<(usize,usize)> = m.into_iter().flatten().collect();
+        let mut spans: Vec<(usize, usize)> = m.into_iter().flatten().collect();
         spans.sort();
-        assert_eq!(spans, vec![(1,2),(7,8)]);
+        assert_eq!(spans, vec![(1, 2), (7, 8)]);
     }
 }
 
@@ -2173,7 +2239,7 @@ mod rename_tests {
     fn word_under_cursor() {
         let t = "$user->name";
         assert_eq!(word_at(t, 2), "$user"); // cursor inside $user
-        assert_eq!(word_at(t, 8), "name");  // cursor inside name
+        assert_eq!(word_at(t, 8), "name"); // cursor inside name
     }
 }
 

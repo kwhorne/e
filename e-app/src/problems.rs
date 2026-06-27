@@ -55,34 +55,35 @@ fn rows(state: AppState) -> Vec<Row> {
 }
 
 pub fn problems_panel(state: AppState) -> impl IntoView {
-    let header = label(move || format!("PROBLEMS · {}", state.total_diagnostic_count())).style(|s| {
-        s.height(26.0)
-            .width_full()
-            .items_center()
-            .padding_horiz(10.0)
-            .font_size(11.0)
-            .color(theme::fg_dim())
-            .border_bottom(1.0)
-            .border_color(theme::border())
-    });
+    let header =
+        label(move || format!("PROBLEMS · {}", state.total_diagnostic_count())).style(|s| {
+            s.height(26.0)
+                .width_full()
+                .items_center()
+                .padding_horiz(10.0)
+                .font_size(11.0)
+                .color(theme::fg_dim())
+                .border_bottom(1.0)
+                .border_color(theme::border())
+        });
 
     let list = dyn_stack(
         move || rows(state).into_iter().enumerate().collect::<Vec<_>>(),
         |(i, _)| *i,
         move |(_, row)| match row {
-            Row::Header(rel, errors, warnings) => label(move || {
-                format!("{rel}   ⨯ {errors}  ⚠ {warnings}")
-            })
-            .style(|s| {
-                s.height(24.0)
-                    .width_full()
-                    .items_center()
-                    .padding_horiz(10.0)
-                    .font_size(12.0)
-                    .color(theme::fg())
-                    .background(theme::bg_panel())
-            })
-            .into_any(),
+            Row::Header(rel, errors, warnings) => {
+                label(move || format!("{rel}   ⨯ {errors}  ⚠ {warnings}"))
+                    .style(|s| {
+                        s.height(24.0)
+                            .width_full()
+                            .items_center()
+                            .padding_horiz(10.0)
+                            .font_size(12.0)
+                            .color(theme::fg())
+                            .background(theme::bg_panel())
+                    })
+                    .into_any()
+            }
             Row::Item {
                 uri,
                 line,
@@ -110,7 +111,11 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    stack((header, scroll(list).style(|s| s.flex_grow(1.0).width_full()))).style(move |s| {
+    stack((
+        header,
+        scroll(list).style(|s| s.flex_grow(1.0).width_full()),
+    ))
+    .style(move |s| {
         let s = s
             .flex_col()
             .width_full()

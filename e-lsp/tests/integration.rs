@@ -63,8 +63,10 @@ fn clangd_reports_diagnostics() {
 
     assert!(!diags.is_empty(), "expected diagnostics from clangd");
     assert!(
-        diags.iter().any(|m| m.to_lowercase().contains("expected ';'")
-            || m.to_lowercase().contains("expected ';' after")),
+        diags
+            .iter()
+            .any(|m| m.to_lowercase().contains("expected ';'")
+                || m.to_lowercase().contains("expected ';' after")),
         "expected a missing-semicolon diagnostic, got: {diags:?}"
     );
 }

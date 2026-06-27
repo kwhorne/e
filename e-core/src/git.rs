@@ -117,7 +117,9 @@ mod tests {
     #[test]
     fn diff_lines_have_signs() {
         let d = diff("x\ny\n", "x\nY\n");
-        assert!(d.iter().any(|l| l.kind == DiffKind::Removed && l.text == "y"));
+        assert!(d
+            .iter()
+            .any(|l| l.kind == DiffKind::Removed && l.text == "y"));
         assert!(d.iter().any(|l| l.kind == DiffKind::Added && l.text == "Y"));
     }
 }

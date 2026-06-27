@@ -32,7 +32,12 @@ impl Default for Settings {
 
 fn config_path() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".config").join("e").join("config.json"))
+    Some(
+        PathBuf::from(home)
+            .join(".config")
+            .join("e")
+            .join("config.json"),
+    )
 }
 
 fn read() -> Value {
@@ -46,8 +51,12 @@ pub fn load_settings() -> Settings {
     let v = read();
     let d = Settings::default();
     let bool_of = |k: &str, def: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(def);
-    let usize_of =
-        |k: &str, def: usize| v.get(k).and_then(|x| x.as_u64()).map(|n| n as usize).unwrap_or(def);
+    let usize_of = |k: &str, def: usize| {
+        v.get(k)
+            .and_then(|x| x.as_u64())
+            .map(|n| n as usize)
+            .unwrap_or(def)
+    };
     Settings {
         dark: bool_of("dark", d.dark),
         font_size: usize_of("font_size", d.font_size).clamp(8, 40),
@@ -99,7 +108,11 @@ pub fn default_agents() -> Vec<AgentConfig> {
 /// The configured agents (built-ins overridable via `agents.list`).
 pub fn load_agents() -> Vec<AgentConfig> {
     let v = read();
-    let Some(list) = v.get("agents").and_then(|a| a.get("list")).and_then(|l| l.as_array()) else {
+    let Some(list) = v
+        .get("agents")
+        .and_then(|a| a.get("list"))
+        .and_then(|l| l.as_array())
+    else {
         return default_agents();
     };
     let agents: Vec<AgentConfig> = list
@@ -117,7 +130,12 @@ pub fn load_agents() -> Vec<AgentConfig> {
                 .and_then(|c| c.as_str())
                 .unwrap_or("")
                 .to_string();
-            Some(AgentConfig { id, name, command, cwd })
+            Some(AgentConfig {
+                id,
+                name,
+                command,
+                cwd,
+            })
         })
         .collect();
     if agents.is_empty() {

@@ -46,11 +46,23 @@ pub fn find_bar(state: AppState) -> impl IntoView {
         .request_focus(move || {
             find.open.get();
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
-            state.close_find();
-        })
-        .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| state.find_next())
-        .on_key_down(Key::Named(NamedKey::ArrowUp), |_| true, move |_| state.find_prev());
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| {
+                state.close_find();
+            },
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowDown),
+            |_| true,
+            move |_| state.find_next(),
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowUp),
+            |_| true,
+            move |_| state.find_prev(),
+        );
 
     let count = label(move || {
         let n = find.matches.get().len();

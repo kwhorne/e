@@ -109,18 +109,28 @@ pub fn palette(state: AppState) -> impl IntoView {
                 state.palette_open.set(false);
             }
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
-            state.palette_open.set(false)
-        })
-        .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {
-            let len = filtered().len();
-            if len > 0 {
-                selected.update(|i| *i = (*i + 1).min(len - 1));
-            }
-        })
-        .on_key_down(Key::Named(NamedKey::ArrowUp), |_| true, move |_| {
-            selected.update(|i| *i = i.saturating_sub(1));
-        });
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| state.palette_open.set(false),
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowDown),
+            |_| true,
+            move |_| {
+                let len = filtered().len();
+                if len > 0 {
+                    selected.update(|i| *i = (*i + 1).min(len - 1));
+                }
+            },
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowUp),
+            |_| true,
+            move |_| {
+                selected.update(|i| *i = i.saturating_sub(1));
+            },
+        );
 
     let results = dyn_stack(
         move || filtered().into_iter().enumerate().collect::<Vec<_>>(),

@@ -34,6 +34,7 @@ pub fn find_bar(state: AppState) -> impl IntoView {
 
     let input = text_input(find.query)
         .placeholder("Find")
+        .on_enter(move || state.find_next())
         .style(|s| {
             theme::input_colors(s)
                 .width(220.0)
@@ -48,12 +49,8 @@ pub fn find_bar(state: AppState) -> impl IntoView {
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
             state.close_find();
         })
-        .on_key_down(Key::Named(NamedKey::Enter), |m| !m.shift(), move |_| {
-            state.find_next();
-        })
-        .on_key_down(Key::Named(NamedKey::Enter), |m| m.shift(), move |_| {
-            state.find_prev();
-        });
+        .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| state.find_next())
+        .on_key_down(Key::Named(NamedKey::ArrowUp), |_| true, move |_| state.find_prev());
 
     let count = label(move || {
         let n = find.matches.get().len();

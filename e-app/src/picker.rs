@@ -91,6 +91,7 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
 
     let input = text_input(p.query)
         .placeholder("Search…")
+        .on_enter(accept)
         .style(|s| {
             theme::input_colors(s)
                 .width_full()
@@ -103,7 +104,6 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
             p.open.get();
         })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| p.open.set(false))
-        .on_key_down(Key::Named(NamedKey::Enter), |_| true, move |_| accept())
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {
             let len = displayed().len();
             if len > 0 {

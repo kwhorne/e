@@ -87,6 +87,7 @@ pub fn palette(state: AppState) -> impl IntoView {
 
     let input = text_input(query)
         .placeholder("Go to file…")
+        .on_enter(open_selected)
         .style(|s| {
             theme::input_colors(s)
                 .width_full()
@@ -102,7 +103,6 @@ pub fn palette(state: AppState) -> impl IntoView {
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
             state.palette_open.set(false)
         })
-        .on_key_down(Key::Named(NamedKey::Enter), |_| true, move |_| open_selected())
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {
             let len = filtered().len();
             if len > 0 {

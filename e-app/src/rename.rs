@@ -33,6 +33,7 @@ pub fn rename_bar(state: AppState) -> impl IntoView {
         .style(|s| s.color(theme::fg_dim()).font_size(12.0));
 
     let input = text_input(rename.new_name)
+        .on_enter(move || state.apply_rename())
         .style(|s| {
             theme::input_colors(s)
                 .width(220.0)
@@ -46,9 +47,6 @@ pub fn rename_bar(state: AppState) -> impl IntoView {
         })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
             state.close_rename();
-        })
-        .on_key_down(Key::Named(NamedKey::Enter), |_| true, move |_| {
-            state.apply_rename();
         });
 
     let box_ = stack((title, input)).style(|s| {

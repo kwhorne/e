@@ -103,6 +103,7 @@ pub fn command_palette(state: AppState) -> impl IntoView {
 
     let input = text_input(cmd.query)
         .placeholder("Run a command…")
+        .on_enter(run_selected)
         .style(|s| {
             theme::input_colors(s)
                 .width_full()
@@ -115,7 +116,6 @@ pub fn command_palette(state: AppState) -> impl IntoView {
             cmd.open.get();
         })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| cmd.open.set(false))
-        .on_key_down(Key::Named(NamedKey::Enter), |_| true, move |_| run_selected())
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {
             let len = filtered().len();
             if len > 0 {

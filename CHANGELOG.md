@@ -9,19 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Sticky scroll: the enclosing scope lines stay pinned at the top of the editor as
-  you scroll (indentation-based). Configurable via `sticky_scroll`.
-- User-defined snippets in the `snippets` section of `config.json`.
-- Source Control: recent-commit history and stash (Stash / Pop).
-- Tab pinning (right-click a tab) with Close Others; tab overflow scrolls.
 - Inlay hints: inline type and parameter-name hints from the language server,
   shown as dimmed phantom text. Configurable via `inlay_hints`.
-
-### Added
-
-- Workspace replace: the search panel (⌘⇧F) now has a Replace row and "Replace All".
-- Branch switcher: click the branch name in the Source Control panel to switch branches.
-- Reorder editor tabs by dragging.
+- Sticky scroll: the enclosing scope lines stay pinned at the top of the editor
+  as you scroll (indentation-based). Configurable via `sticky_scroll`.
+- Workspace replace: the search panel (`⌘⇧F`) now has a Replace row and "Replace
+  All".
+- Source Control: branch switcher (click the branch name), recent-commit history,
+  and stash (Stash / Pop).
+- Editor tabs: drag to reorder, and right-click to pin (with Close Others).
+- User-defined snippets in the `snippets` section of `config.json`.
 
 ## [0.2.6] - 2026-06-27
 

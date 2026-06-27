@@ -41,16 +41,17 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 
 - **Tree-sitter syntax highlighting** for 12+ languages, with file-type icons in the explorer
 - **Language Server Protocol** — diagnostics, completion, hover, go-to-definition,
-  find references, document & workspace symbols, formatting, rename, code actions
-  and signature help, with per-language servers auto-selected
+  find references, document & workspace symbols, formatting, rename, code actions,
+  signature help and **inlay hints**, with per-language servers auto-selected
 - **Framework-aware completion** — Flux UI (`<flux:…>`), Livewire (`wire:`),
   Tailwind classes, Vue/Svelte directives, and Laravel helpers (`route()`,
   `view()`, `config()`, `env()`)
 - **Built-in completion** — keywords and buffer words, with or without a language server
 - **Fuzzy file finder** (`⌘P`), **command palette** (`⌘⇧P`), **recent files** (`⌘E`)
 - **Open another project** (`⌘O`), **new file** (`⌘N`), **go to line** (`⌃G`)
-- **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search** (`⌘⇧F`)
-- **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch, inline blame, merge-conflict resolution
+- **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search & replace** (`⌘⇧F`)
+- **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch switcher, commit history, stash, blame, merge-conflict resolution
+- **Sticky scroll**, **drag-to-reorder & pinnable tabs**, **user-defined snippets**
 - **Integrated terminal** (`⌘T`) — PTY-backed with ANSI colour, multiple tabs, rename and split
 - **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent beside your code
 - **Editing essentials** — comment toggle (`⌘/`), line move/duplicate/delete, indent, multi-cursor (`⌘⇧D`), auto-closing brackets

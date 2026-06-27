@@ -105,9 +105,11 @@ pub fn palette(state: AppState) -> impl IntoView {
             focus_pulse.get();
         })
         .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
-            if state.palette_open.get_untracked() {
-                state.palette_open.set(false);
-            }
+            floem::action::exec_after(std::time::Duration::from_millis(150), move |_| {
+                if state.palette_open.get_untracked() {
+                    state.palette_open.set(false);
+                }
+            });
         })
         .on_key_down(
             Key::Named(NamedKey::Escape),

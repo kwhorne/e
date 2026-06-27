@@ -114,9 +114,11 @@ pub fn recent_palette(state: AppState) -> impl IntoView {
             recent.focus_pulse.get();
         })
         .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
-            if recent.open.get_untracked() {
-                recent.open.set(false);
-            }
+            floem::action::exec_after(std::time::Duration::from_millis(150), move |_| {
+                if recent.open.get_untracked() {
+                    recent.open.set(false);
+                }
+            });
         })
         .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| recent.open.set(false))
         .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {

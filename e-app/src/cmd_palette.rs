@@ -167,9 +167,12 @@ pub fn command_palette(state: AppState) -> impl IntoView {
             focus_pulse.get();
         })
         .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
-            if cmd.open.get_untracked() {
-                cmd.open.set(false);
-            }
+            // Defer so a click on a list item runs before the palette closes.
+            floem::action::exec_after(std::time::Duration::from_millis(150), move |_| {
+                if cmd.open.get_untracked() {
+                    cmd.open.set(false);
+                }
+            });
         })
         .on_key_down(
             Key::Named(NamedKey::Escape),

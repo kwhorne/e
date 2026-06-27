@@ -1,7 +1,7 @@
 //! The About dialog.
 
 use floem::reactive::{SignalGet, SignalUpdate};
-use floem::views::{container, label, stack, svg, Decorators};
+use floem::views::{container, label, scroll, stack, svg, Decorators};
 use floem::IntoView;
 
 use crate::state::AppState;
@@ -48,21 +48,25 @@ fn card(heading: &'static str, value: &'static str, url: Option<&'static str>) -
 
 pub fn about_dialog(state: AppState) -> impl IntoView {
     let box_ = stack((
-        svg(|| ICON.to_string()).style(|s| s.width(84.0).height(84.0).margin_bottom(16.0)),
-        label(|| "e".to_string()).style(|s| s.font_size(34.0).color(theme::fg())),
-        label(|| format!("Version {}", env!("CARGO_PKG_VERSION")))
-            .style(|s| s.font_family("monospace".to_string()).font_size(13.0).color(theme::fg_dim()).margin_bottom(18.0)),
-        label(|| "The editor for the rest of us — a fast, native code editor written in Rust.".to_string())
-            .style(|s| s.color(theme::fg_dim()).font_size(14.0).line_height(1.4).margin_bottom(22.0)),
+        svg(|| ICON.to_string()).style(|s| s.width(68.0).height(68.0).margin_bottom(12.0)),
+        label(|| "e".to_string()).style(|s| s.font_size(30.0).color(theme::fg())),
+        label(|| format!("Version {}", env!("CARGO_PKG_VERSION"))).style(|s| {
+            s.font_family("monospace".to_string())
+                .font_size(12.0)
+                .color(theme::fg_dim())
+                .margin_bottom(14.0)
+        }),
+        label(|| "A fast, native code editor in Rust.".to_string())
+            .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(18.0)),
         card("WEBSITE", "kwhorne.com", Some("https://kwhorne.com")),
         card("GITHUB", "github.com/kwhorne/e", Some("https://github.com/kwhorne/e")),
         card("DEVELOPED BY", "Knut W. Horne", None),
         label(|| "Close".to_string())
             .style(|s| {
-                s.margin_top(22.0)
+                s.margin_top(18.0)
                     .padding_horiz(24.0)
-                    .padding_vert(8.0)
-                    .background(theme::bg_panel())
+                    .padding_vert(7.0)
+                    .background(theme::bg())
                     .color(theme::fg())
                     .border(1.0)
                     .border_color(theme::border())
@@ -75,9 +79,9 @@ pub fn about_dialog(state: AppState) -> impl IntoView {
     .style(|s| {
         s.flex_col()
             .items_center()
-            .width(440.0)
-            .padding(28.0)
-            .gap(8.0)
+            .width(400.0)
+            .padding(26.0)
+            .gap(6.0)
             .background(theme::bg_panel())
             .border(1.0)
             .border_color(theme::border())
@@ -85,14 +89,21 @@ pub fn about_dialog(state: AppState) -> impl IntoView {
     })
     .on_click_stop(|_| {});
 
-    container(box_)
+    // Scrollable + centred, so it works even in small windows.
+    let centred = container(box_).style(|s| {
+        s.min_height_full()
+            .width_full()
+            .items_center()
+            .justify_center()
+            .padding_vert(24.0)
+    });
+
+    scroll(centred)
         .style(move |s| {
             let s = s
                 .absolute()
                 .inset(0.0)
                 .size_full()
-                .items_center()
-                .justify_center()
                 .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
             if state.about_open.get() {
                 s

@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changelog in a notice, and installs the update in place on confirmation.
   Manual check available via the command palette ("Check for Updates").
 - Release workflow that publishes per-platform binary assets for each tag.
+- Find & Replace: replace and replace-all in the active file, with
+  case-sensitive, whole-word and regex toggles (`⌥⌘F`).
+- Editing essentials: toggle line comment (`⌘/`), go to line (`⌃G`), move line
+  up/down (`⌥↑/↓`), duplicate line (`⇧⌥↓`), delete line (`⌘⇧K`), and
+  indent/outdent (`⌘]` / `⌘[`).
+- Auto-closing brackets and quotes (with type-over and pair-aware backspace) and
+  auto-indent on newline. Configurable via `auto_close`.
+- Unsaved-changes confirmation when closing a tab.
+- External file-change detection: clean buffers reload automatically; buffers
+  with unsaved edits show a reload/keep prompt.
 
 ## [0.1.0] - 2026-06-27
 

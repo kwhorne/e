@@ -21,6 +21,41 @@ use crate::state::AppState;
 use crate::styling::SyntaxStyling;
 use crate::theme;
 
+/// One shortcut row in the welcome cheatsheet: key chip + description.
+fn cheat(key: &'static str, desc: &'static str) -> impl IntoView {
+    stack((
+        label(move || key.to_string()).style(|s| {
+            s.width(64.0)
+                .justify_end()
+                .font_family("monospace".to_string())
+                .font_size(12.0)
+                .color(theme::fg())
+        }),
+        label(move || desc.to_string()).style(|s| s.color(theme::fg_dim()).font_size(13.0)),
+    ))
+    .style(|s| s.items_center().gap(16.0).height(26.0))
+}
+
+/// The empty-state welcome screen with the key shortcuts.
+fn welcome() -> impl IntoView {
+    stack((
+        label(|| "e".to_string()).style(|s| s.font_size(44.0).color(theme::fg()).margin_bottom(4.0)),
+        label(|| "A lightning-fast editor in Rust".to_string())
+            .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(22.0)),
+        cheat("⌘P", "Find file"),
+        cheat("⇧⌘P", "Command palette"),
+        cheat("⇧⌘F", "Search in files"),
+        cheat("⇧⌘O", "Go to symbol"),
+        cheat("⌘F", "Find in file"),
+        cheat("⌘T", "Toggle terminal"),
+        cheat("⌘1", "Toggle sidebar"),
+        cheat("⌘\\", "Split editor"),
+        cheat("F12", "Go to definition"),
+        cheat("F8", "Light / dark theme"),
+    ))
+    .style(|s| s.flex_col().items_start().gap(8.0))
+}
+
 /// One pane: a stack of all buffers, only this pane's active one visible.
 fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
     let active_sig: RwSignal<Option<u64>> = if pane_idx == 1 {
@@ -130,20 +165,14 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                 .style(|s| s.flex_row().size_full().background(theme::bg()))
                 .into_any()
             } else {
-                let placeholder =
-                    container(label(|| "No file open — press ⌘P to find a file".to_string()))
-                        .style(move |s| {
-                            let s = s
-                                .size_full()
-                                .items_center()
-                                .justify_center()
-                                .color(theme::fg_dim());
-                            if state.buffers.with(|b| b.is_empty()) {
-                                s
-                            } else {
-                                s.hide()
-                            }
-                        });
+                let placeholder = container(welcome()).style(move |s| {
+                    let s = s.size_full().items_center().justify_center();
+                    if state.buffers.with(|b| b.is_empty()) {
+                        s
+                    } else {
+                        s.hide()
+                    }
+                });
                 stack((placeholder, pane(state, 0)))
                     .style(|s| s.size_full().background(theme::bg()))
                     .into_any()

@@ -34,12 +34,25 @@ impl AppState {
             Some(repo) => {
                 self.git_branch.set(git::current_branch(&repo));
                 self.git_status.set(git::status(&repo));
+                self.git_log.set(git::log(&repo, 20));
+                self.git_stash_count.set(git::stash_count(&repo));
             }
             None => {
                 self.git_branch.set(None);
                 self.git_status.set(Vec::new());
+                self.git_log.set(Vec::new());
+                self.git_stash_count.set(0);
             }
         }
+    }
+
+    pub fn git_stash(&self) {
+        self.with_repo(git::stash_push);
+        self.fs_rev.update(|r| *r += 1);
+    }
+    pub fn git_stash_pop(&self) {
+        self.with_repo(git::stash_pop);
+        self.fs_rev.update(|r| *r += 1);
     }
 
     fn with_repo(&self, f: impl FnOnce(&std::path::Path) -> Result<(), String>) {
@@ -297,12 +310,95 @@ pub fn git_panel(state: AppState) -> impl IntoView {
         })
         .on_click_stop(move |_| state.git_stage_all());
 
-    let commit_area = stack((msg, stack((stage_all, commit_btn)).style(|s| s.gap(6.0).width_full())))
-        .style(|s| s.flex_col().gap(6.0).padding(8.0));
+    let small = |text: String| {
+        label(move || text.clone()).style(|s| {
+            s.height(26.0)
+                .padding_horiz(10.0)
+                .items_center()
+                .justify_center()
+                .flex_grow(1.0)
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+    };
+    let stash_btn = small("Stash".to_string()).on_click_stop(move |_| state.git_stash());
+    let pop_btn = label(move || format!("Pop ({})", state.git_stash_count.get()))
+        .style(move |s| {
+            let s = s
+                .height(26.0)
+                .padding_horiz(10.0)
+                .items_center()
+                .justify_center()
+                .flex_grow(1.0)
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()));
+            if state.git_stash_count.get() == 0 {
+                s.color(theme::fg_dim())
+            } else {
+                s
+            }
+        })
+        .on_click_stop(move |_| state.git_stash_pop());
+
+    let commit_area = stack((
+        msg,
+        stack((stage_all, commit_btn)).style(|s| s.gap(6.0).width_full()),
+        stack((stash_btn, pop_btn)).style(|s| s.gap(6.0).width_full()),
+    ))
+    .style(|s| s.flex_col().gap(6.0).padding(8.0));
+
+    // Recent commits.
+    let commits_rows = dyn_stack(
+        move || state.git_log.get().into_iter().enumerate().collect::<Vec<_>>(),
+        |(i, c)| (*i, c.0.clone()),
+        move |(_, (hash, author, when, summary))| {
+            stack((
+                stack((
+                    label(move || hash.clone())
+                        .style(|s| s.color(theme::accent()).font_size(11.0).font_family("monospace".to_string())),
+                    label(move || summary.clone())
+                        .style(|s| s.color(theme::fg()).font_size(12.0).flex_grow(1.0).text_ellipsis().min_width(0.0)),
+                ))
+                .style(|s| s.items_center().gap(8.0).width_full()),
+                label(move || format!("{author} · {when}"))
+                    .style(|s| s.color(theme::fg_dim()).font_size(10.0)),
+            ))
+            .style(|s| s.flex_col().gap(1.0).width_full().padding_horiz(8.0).padding_vert(4.0))
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+
+    let commits = stack((
+        label(|| "RECENT COMMITS".to_string()).style(|s| {
+            s.color(theme::fg_dim())
+                .font_size(11.0)
+                .padding_horiz(8.0)
+                .padding_vert(4.0)
+                .margin_top(6.0)
+                .border_top(1.0)
+                .border_color(theme::border())
+        }),
+        commits_rows,
+    ))
+    .style(|s| s.flex_col().width_full());
 
     let lists = scroll(
-        stack((group(state, "STAGED CHANGES", true), group(state, "CHANGES", false)))
-            .style(|s| s.flex_col().width_full()),
+        stack((
+            group(state, "STAGED CHANGES", true),
+            group(state, "CHANGES", false),
+            commits,
+        ))
+        .style(|s| s.flex_col().width_full()),
     )
     .style(|s| s.flex_grow(1.0).width_full());
 

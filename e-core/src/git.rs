@@ -229,6 +229,56 @@ pub fn discard(root: &Path, path: &str) -> Result<(), String> {
     run_git(root, &["checkout", "--", path])
 }
 
+/// Recent commits: `(short hash, author, relative time, summary)`.
+pub fn log(root: &Path, max: usize) -> Vec<(String, String, String, String)> {
+    let out = match Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "log",
+            &format!("-n{max}"),
+            "--pretty=format:%h\x1f%an\x1f%ar\x1f%s",
+        ])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\x1f');
+            Some((
+                parts.next()?.to_string(),
+                parts.next()?.to_string(),
+                parts.next()?.to_string(),
+                parts.next().unwrap_or("").to_string(),
+            ))
+        })
+        .collect()
+}
+
+pub fn stash_push(root: &Path) -> Result<(), String> {
+    run_git(root, &["stash", "push", "-u"])
+}
+
+pub fn stash_pop(root: &Path) -> Result<(), String> {
+    run_git(root, &["stash", "pop"])
+}
+
+/// Number of stash entries.
+pub fn stash_count(root: &Path) -> usize {
+    Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["stash", "list"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+        .unwrap_or(0)
+}
+
 /// The repository root for a workspace path, if any.
 pub fn repo_root(path: &Path) -> Option<std::path::PathBuf> {
     git_root(path)

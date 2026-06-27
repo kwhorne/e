@@ -269,6 +269,10 @@ pub struct AppState {
     pub git_status: RwSignal<Vec<git::StatusEntry>>,
     /// The commit-message input.
     pub git_commit_msg: RwSignal<String>,
+    /// Recent commits: `(hash, author, rel time, summary)`.
+    pub git_log: RwSignal<Vec<(String, String, String, String)>>,
+    /// Number of stash entries.
+    pub git_stash_count: RwSignal<usize>,
 
     /// Editor font size (reactive, for zoom).
     pub font_size: RwSignal<usize>,
@@ -357,6 +361,8 @@ impl AppState {
             git_branch: RwSignal::new(None),
             git_status: RwSignal::new(Vec::new()),
             git_commit_msg: RwSignal::new(String::new()),
+            git_log: RwSignal::new(Vec::new()),
+            git_stash_count: RwSignal::new(0),
             font_size: RwSignal::new(config::load_settings().font_size),
             word_wrap: RwSignal::new(false),
             nav_back_stack: RwSignal::new(Vec::new()),

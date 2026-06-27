@@ -20,6 +20,7 @@ Open it any time with **`⌘,`** (it is created on first use).
   "autosave": true,        // save dirty buffers after a short idle period
   "indent_guides": true,   // show indentation guide lines
   "auto_close": true,      // auto-close brackets and quotes
+  "inlay_hints": true,     // show LSP inlay hints (types, parameter names)
   "sidebar_side": "left",  // explorer/Git panel side: "left" or "right"
   "agent_side": "right",   // agent panel side: "right" or "left"
   "agents": { /* see below */ }
@@ -36,6 +37,7 @@ Open it any time with **`⌘,`** (it is created on first use).
 | `autosave` | bool | `true` | Idle auto-save |
 | `indent_guides` | bool | `true` | Indentation guides |
 | `auto_close` | bool | `true` | Auto-close brackets/quotes |
+| `inlay_hints` | bool | `true` | Show LSP inlay hints |
 | `sidebar_side` | string | `"left"` | Side of the explorer/Git sidebar (`"left"` or `"right"`) |
 | `agent_side` | string | `"right"` | Side of the agent panel (`"right"` or `"left"`) |
 | `agents` | object | built-ins | AI agent configuration |

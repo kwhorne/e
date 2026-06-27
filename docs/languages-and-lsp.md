@@ -25,6 +25,7 @@ and provides:
 - **Formatting** — on save, or via the "Format Document" command.
 - **Rename** and **code actions** (where the server supports them).
 - **Signature help** — parameter hints while typing a call.
+- **Inlay hints** — inline type and parameter-name hints from the language server.
 
 ### Supported servers
 

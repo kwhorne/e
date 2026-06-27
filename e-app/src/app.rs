@@ -464,6 +464,7 @@ fn app_view() -> impl IntoView {
     create_effect(move |_| {
         state.active.get();
         state.request_outline();
+        state.request_inlay_hints_active();
     });
 
     // Highlight the matching bracket as the cursor moves.

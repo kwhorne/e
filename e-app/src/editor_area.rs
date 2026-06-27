@@ -122,7 +122,8 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 }
                 default_key_handler(editor_sig)(kp, mods)
             })
-            .use_doc(b.doc.clone() as Rc<dyn Document>)
+            .use_doc(Rc::new(crate::hints_doc::HintsDoc::new(b.doc.clone(), b.inlay_hints))
+                as Rc<dyn Document>)
             .styling(SyntaxStyling::new(
                 b.highlights.clone(),
                 b.diag_lines.clone(),

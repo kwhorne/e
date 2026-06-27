@@ -10,6 +10,7 @@ mod recent;
 mod git_view;
 mod builtin_completion;
 mod framework_completion;
+mod hints_doc;
 mod about;
 mod update_view;
 mod updater;

@@ -76,6 +76,8 @@ pub struct Buffer {
     pub disk_changed: RwSignal<bool>,
     /// Per-line git blame: `(author, unix_time, summary)`.
     pub blame: Rc<RefCell<Vec<(String, i64, String)>>>,
+    /// LSP inlay hints: `(line, character, label)`, shown as phantom text.
+    pub inlay_hints: RwSignal<Vec<(u32, u32, String)>>,
 }
 
 /// One terminal session (a running shell).
@@ -690,6 +692,7 @@ impl AppState {
                 {
                     client.did_save(uri, &text);
                 }
+                self.request_inlay_hints(b.id);
             }
         }
     }
@@ -957,6 +960,44 @@ impl AppState {
     }
 
     /// Load the document outline for the active buffer (LSP documentSymbol).
+    /// Request LSP inlay hints for a buffer and store them as phantom text.
+    pub fn request_inlay_hints(&self, id: u64) {
+        if !self.settings.inlay_hints {
+            return;
+        }
+        let Some(buf) = self.buffer_by_id(id) else {
+            return;
+        };
+        if lsp_language_id(buf.file.language).is_none() {
+            return;
+        }
+        let (Some(client), Some(uri)) =
+            (self.lsp_for_language(buf.file.language), buf.uri.clone())
+        else {
+            return;
+        };
+        let end_line = buf.doc.text().to_string().split('\n').count().max(1) as u32;
+        let hints_sig = buf.inlay_hints;
+        let cache = buf.doc.cache_rev();
+        let send = create_ext_action(self.cx, move |hints: Vec<(u32, u32, String)>| {
+            // Only repaint when the hints actually changed.
+            if hints != hints_sig.get_untracked() {
+                hints_sig.set(hints);
+                cache.update(|r| *r += 1);
+            }
+        });
+        std::thread::spawn(move || {
+            let hints = client.inlay_hints(&uri, end_line).unwrap_or_default();
+            send(hints);
+        });
+    }
+
+    pub fn request_inlay_hints_active(&self) {
+        if let Some(id) = self.focused_active_id() {
+            self.request_inlay_hints(id);
+        }
+    }
+
     pub fn request_outline(&self) {
         let outline = self.outline;
         let Some(buf) = self.active_buffer() else {
@@ -1295,6 +1336,7 @@ impl AppState {
             disk_mtime: RwSignal::new(None),
             disk_changed: RwSignal::new(false),
             blame: Rc::new(RefCell::new(Vec::new())),
+            inlay_hints: RwSignal::new(Vec::new()),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
@@ -1838,10 +1880,12 @@ impl AppState {
             disk_mtime: RwSignal::new(disk_mtime),
             disk_changed: RwSignal::new(false),
             blame: Rc::new(RefCell::new(Vec::new())),
+            inlay_hints: RwSignal::new(Vec::new()),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
         self.load_blame(id);
+        self.request_inlay_hints(id);
     }
 
     /// Close a tab; focus a neighbour if it was active.
@@ -2001,6 +2045,7 @@ impl AppState {
                 Self::refresh_disk_mtime(&buf);
                 self.fs_rev.update(|r| *r += 1);
                 self.load_blame(buf.id);
+                self.request_inlay_hints(buf.id);
                 eprintln!("e: saved {}", path.display());
                 if let (Some(uri), Some(client)) =
                     (buf.uri.as_ref(), self.lsp_for_language(buf.file.language))

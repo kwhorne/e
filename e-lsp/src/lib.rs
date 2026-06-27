@@ -420,6 +420,39 @@ impl LspClient {
         let hover: Hover = serde_json::from_value(res)?;
         Ok(Some(hover_to_string(hover.contents)))
     }
+
+    /// Request inlay hints for lines `0..=end_line`. Returns `(line, character,
+    /// label)` per hint. Blocking; call off the UI thread.
+    pub fn inlay_hints(&self, uri: &str, end_line: u32) -> Result<Vec<(u32, u32, String)>> {
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": end_line, "character": 0 }
+            }
+        });
+        let res = self.request("textDocument/inlayHint", params, Duration::from_secs(5))?;
+        let mut out = Vec::new();
+        if let Some(arr) = res.as_array() {
+            for h in arr {
+                let Some(pos) = h.get("position") else { continue };
+                let line = pos.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let ch = pos.get("character").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let label = match h.get("label") {
+                    Some(Value::String(s)) => s.clone(),
+                    Some(Value::Array(parts)) => parts
+                        .iter()
+                        .filter_map(|p| p.get("value").and_then(|v| v.as_str()))
+                        .collect::<String>(),
+                    _ => continue,
+                };
+                if !label.is_empty() {
+                    out.push((line, ch, label.trim().to_string()));
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// Recursively flatten a `DocumentSymbol` (or `SymbolInformation`).

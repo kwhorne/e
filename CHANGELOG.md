@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Inlay hints: inline type and parameter-name hints from the language server,
+  shown as dimmed phantom text. Configurable via `inlay_hints`.
+
+### Added
+
 - Workspace replace: the search panel (⌘⇧F) now has a Replace row and "Replace All".
 - Branch switcher: click the branch name in the Source Control panel to switch branches.
 - Reorder editor tabs by dragging.

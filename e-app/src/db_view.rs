@@ -781,7 +781,12 @@ fn result_grid(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col());
 
-    stack((header, rows)).style(|s| s.flex_col().min_width_full())
+    stack((header, rows)).style(move |s| {
+        let n = state
+            .db_result
+            .with(|r| r.as_ref().map(|r| r.columns.len()).unwrap_or(0));
+        s.flex_col().width((n.max(1) as f64) * 180.0)
+    })
 }
 
 /// The structure (columns) view of the browsed table.
@@ -865,5 +870,5 @@ fn structure_grid(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col());
 
-    stack((header, rows)).style(|s| s.flex_col().min_width_full())
+    stack((header, rows)).style(|s| s.flex_col().width(520.0))
 }

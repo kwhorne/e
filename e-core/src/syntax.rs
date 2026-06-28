@@ -212,12 +212,108 @@ pub fn highlight_lines(language: Language, text: &str) -> Vec<Vec<LineSpan>> {
 
     let spans = match language {
         Language::Blade => blade_spans(text),
+        Language::Html | Language::Vue => merge_spans(ts_spans(language, text), class_spans(text)),
         _ => ts_spans(language, text),
     };
     for (start, end, kind) in spans {
         push_span(&line_bounds, &mut lines, start, end, kind);
     }
     lines
+}
+
+/// Highlight Tailwind utility classes inside `class="…"` / `class='…'`
+/// attributes: variant prefixes (`sm:`, `dark:`, `hover:`) as keywords, the
+/// utility as a function colour, and arbitrary values `[…]` as numbers. Scanned
+/// textually so it survives even when the surrounding markup fails to parse.
+fn class_spans(text: &str) -> Vec<Span> {
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    let len = text.len();
+    let mut search = 0;
+    while let Some(rel) = text[search..].find("class") {
+        let pos = search + rel;
+        search = pos + 5;
+        if pos > 0 && is_word(bytes[pos - 1]) {
+            continue; // part of a longer word
+        }
+        let mut j = pos + 5;
+        while j < len && (bytes[j] == b' ' || bytes[j] == b'\t') {
+            j += 1;
+        }
+        if j >= len || bytes[j] != b'=' {
+            continue;
+        }
+        j += 1;
+        while j < len && (bytes[j] == b' ' || bytes[j] == b'\t') {
+            j += 1;
+        }
+        if j >= len || (bytes[j] != b'"' && bytes[j] != b'\'') {
+            continue;
+        }
+        let quote = bytes[j] as char;
+        let vstart = j + 1;
+        let Some(qrel) = text[vstart..].find(quote) else {
+            continue;
+        };
+        let vend = vstart + qrel;
+        color_classes(&text[vstart..vend], vstart, &mut out);
+        search = vend + 1;
+    }
+    out
+}
+
+fn color_classes(val: &str, base: usize, out: &mut Vec<Span>) {
+    let b = val.as_bytes();
+    let n = b.len();
+    let mut i = 0;
+    while i < n {
+        while i < n && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= n {
+            break;
+        }
+        let ts = i;
+        let mut bracket = 0i32;
+        while i < n && (!b[i].is_ascii_whitespace() || bracket > 0) {
+            match b[i] {
+                b'[' => bracket += 1,
+                b']' => bracket -= 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        let te = i;
+        let token = &val[ts..te];
+        // Leave Blade/dynamic expressions to the PHP/JS highlighter.
+        if token.contains(['{', '}', '$']) {
+            continue;
+        }
+        // Split the variant prefix (everything up to the last top-level ':').
+        let mut colon = None;
+        let mut br = 0i32;
+        for (k, c) in token.char_indices() {
+            match c {
+                '[' => br += 1,
+                ']' => br -= 1,
+                ':' if br == 0 => colon = Some(k),
+                _ => {}
+            }
+        }
+        let util = colon.map(|k| k + 1).unwrap_or(0);
+        if util > 0 {
+            out.push((base + ts, base + ts + util, HighlightKind::Keyword));
+        }
+        if let Some(bs) = token[util..].find('[') {
+            let abs = util + bs;
+            if abs > util {
+                out.push((base + ts + util, base + ts + abs, HighlightKind::Function));
+            }
+            out.push((base + ts + abs, base + te, HighlightKind::Number));
+        } else {
+            out.push((base + ts + util, base + te, HighlightKind::Function));
+        }
+    }
 }
 
 type Span = (usize, usize, HighlightKind);
@@ -345,6 +441,7 @@ fn blade_spans(text: &str) -> Vec<Span> {
         }
         i += 1;
     }
+    over.extend(class_spans(text));
     merge_spans(html, over)
 }
 

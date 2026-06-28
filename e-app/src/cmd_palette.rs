@@ -16,6 +16,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("open-file", "Open File…"),
     ("add-folder", "Add Folder to Workspace…"),
     ("laravel-refresh", "Laravel: Refresh Project Data"),
+    ("toggle-database", "Toggle Database Panel"),
     ("save-as", "Save As…"),
     ("recent", "Recent Files"),
     ("symbols", "Go to Symbol…"),

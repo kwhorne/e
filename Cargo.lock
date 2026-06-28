@@ -1261,6 +1261,7 @@ dependencies = [
  "anyhow",
  "crossbeam-channel",
  "e-core",
+ "e-db",
  "e-lsp",
  "e-term",
  "floem",

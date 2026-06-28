@@ -319,11 +319,28 @@ fn app_view() -> impl IntoView {
     // the explorer/Git sidebar and the agent panel can each sit left or right.
     let sidebar_right = state.settings.get_untracked().sidebar_right;
     let agent_left = state.settings.get_untracked().agent_left;
+    let database_left = state.settings.get_untracked().database_left;
     let sidebar_handle_side = if sidebar_right { ResizeSide::Right } else { ResizeSide::Left };
     let agent_handle_side = if agent_left { ResizeSide::Left } else { ResizeSide::Right };
+    let db_handle_side = if database_left { ResizeSide::Left } else { ResizeSide::Right };
 
     let sidebar = sidebar.into_any();
     let agent = agent_panel(state).into_any();
+    let database = crate::db_view::database_panel(state)
+        .style(move |s| {
+            let s = s
+                .width(state.db_width.get())
+                .height_full()
+                .border_left(1.0)
+                .border_right(1.0)
+                .border_color(theme::border());
+            if state.db_open.get() {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .into_any();
     let editor = editor_column.into_any();
 
     let mut left: Vec<floem::AnyView> = Vec::new();
@@ -338,6 +355,11 @@ fn app_view() -> impl IntoView {
     } else {
         right.push(agent);
     }
+    if database_left {
+        left.push(database);
+    } else {
+        right.push(database);
+    }
 
     let mut cols: Vec<floem::AnyView> = Vec::new();
     cols.extend(left);
@@ -351,11 +373,15 @@ fn app_view() -> impl IntoView {
         resize_handle(state, agent_handle_side, state.agent_width, state.agent_open, 300.0, 900.0)
             .into_any(),
     );
+    cols.push(
+        resize_handle(state, db_handle_side, state.db_width, state.db_open, 220.0, 800.0).into_any(),
+    );
 
     let main_row = floem::views::stack_from_iter(cols).style(|s| s.flex_row().size_full());
 
     stack((
-        main_row,
+        stack((main_row, crate::db_view::db_result_overlay(state)))
+            .style(|s| s.size_full()),
         markdown_preview(state),
         diff_view(state),
         find_bar(state),

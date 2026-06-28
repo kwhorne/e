@@ -24,6 +24,8 @@ pub struct Settings {
     pub sidebar_right: bool,
     /// Agent panel on the left instead of the right.
     pub agent_left: bool,
+    /// Database panel on the left instead of the right (default right).
+    pub database_left: bool,
 }
 
 impl Default for Settings {
@@ -42,6 +44,7 @@ impl Default for Settings {
             laravel: true,
             sidebar_right: false,
             agent_left: false,
+            database_left: false,
         }
     }
 }
@@ -87,6 +90,7 @@ pub fn load_settings() -> Settings {
         laravel: bool_of("laravel", d.laravel),
         sidebar_right: v.get("sidebar_side").and_then(|x| x.as_str()) == Some("right"),
         agent_left: v.get("agent_side").and_then(|x| x.as_str()) == Some("left"),
+        database_left: v.get("database_side").and_then(|x| x.as_str()) == Some("left"),
     }
 }
 

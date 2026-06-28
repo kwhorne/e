@@ -221,6 +221,15 @@ pub fn settings_view(state: AppState) -> impl IntoView {
                 config::set_str("agent_side", v);
             },
         ),
+        segmented_row(
+            "Database panel",
+            &[("left", "Left"), ("right", "Right")],
+            move || if s.settings.get().database_left { "left".into() } else { "right".into() },
+            move |v| {
+                s.settings.update(|st| st.database_left = v == "left");
+                config::set_str("database_side", v);
+            },
+        ),
         section("AGENT"),
         default_agent_row(state),
     ))

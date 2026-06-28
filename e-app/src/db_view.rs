@@ -1,0 +1,603 @@
+//! The Database panel (right side by default, toggled with ⌘3) and the results
+//! overlay. Inspired by the Conductor database panel.
+
+use floem::peniko::Color;
+use floem::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate, SignalWith};
+use floem::views::{dyn_stack, empty, label, scroll, stack, text_input, Decorators};
+use floem::IntoView;
+
+use crate::state::{AppState, DbEntry, DbForm};
+use crate::theme;
+
+fn engine_icon(engine: &str) -> &'static str {
+    match engine {
+        "mysql" | "mariadb" => "🐬",
+        "postgres" | "postgresql" | "pgsql" => "🐘",
+        "sqlite" => "📦",
+        _ => "🗄",
+    }
+}
+
+/// One connection row + its (lazy) table list.
+fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
+    let e1 = entry.clone();
+    let e_toggle = entry.clone();
+    let caret = label(move || {
+        if e1.connecting.get() {
+            "◌".to_string()
+        } else if e1.conn.get().is_some() && e1.expanded.get() {
+            "▾".to_string()
+        } else {
+            "▸".to_string()
+        }
+    })
+    .style(|s| s.width(12.0).color(theme::fg_dim()));
+
+    let eng = entry.config.engine.clone();
+    let glyph = label(move || engine_icon(&eng).to_string());
+    let name_cfg = entry.config.clone();
+    let name = label(move || name_cfg.display_name()).style(|s| {
+        s.flex_grow(1.0)
+            .color(theme::fg())
+            .text_ellipsis()
+            .min_width(0.0)
+    });
+    let e_count = entry.clone();
+    let count = label(move || {
+        let c = e_count.tables.get().len();
+        if e_count.conn.get().is_some() {
+            c.to_string()
+        } else {
+            String::new()
+        }
+    })
+    .style(|s| s.color(theme::fg_dim()).font_size(10.0));
+
+    let head = stack((caret, glyph, name, count))
+        .style(|s| {
+            s.flex_row()
+                .items_center()
+                .gap(6.0)
+                .flex_grow(1.0)
+                .padding_horiz(4.0)
+                .padding_vert(4.0)
+                .min_width(0.0)
+                .cursor(floem::style::CursorStyle::Pointer)
+        })
+        .on_click_stop(move |_| state.db_toggle(e_toggle.clone()));
+
+    // Action buttons (query / refresh / disconnect / remove).
+    let e_q = entry.clone();
+    let q_btn = action_glyph("⌗", move || state.db_new_query(e_q.clone()));
+    let e_r = entry.clone();
+    let r_btn = action_glyph("⟳", move || state.db_refresh_tables(e_r.clone()));
+    let e_d = entry.clone();
+    let d_btn = action_glyph("⏏", move || state.db_disconnect(e_d.clone()));
+    let key_rm = entry.key();
+    let x_btn = action_glyph("✕", move || state.db_remove(key_rm.clone()));
+    let e_actions = entry.clone();
+    let actions = stack((q_btn, r_btn, d_btn, x_btn)).style(move |s| {
+        let s = s.flex_row().gap(2.0).items_center();
+        if e_actions.conn.get().is_some() {
+            s
+        } else {
+            s
+        }
+    });
+
+    let row = stack((head, actions)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .width_full()
+            .border_radius(5.0)
+            .hover(|s| s.background(theme::bg_hover()))
+    });
+
+    // Error line.
+    let e_err = entry.clone();
+    let err = label(move || e_err.error.get().unwrap_or_default()).style(move |s| {
+        let s = s
+            .color(Color::from_rgb8(0xf7, 0x76, 0x8e))
+            .font_size(11.0)
+            .padding_horiz(22.0)
+            .padding_vert(2.0);
+        if e_err.error.get().is_some() {
+            s
+        } else {
+            s.height(0.0).hide()
+        }
+    });
+
+    // Table list (shown when expanded + connected).
+    let e_filter = entry.clone();
+    let filter = text_input(entry.filter)
+        .placeholder("Filter tables…")
+        .style(move |s| {
+            let s = theme::input_colors(s)
+                .margin_left(20.0)
+                .margin_vert(2.0)
+                .font_size(11.0)
+                .padding_horiz(6.0)
+                .padding_vert(2.0);
+            if e_filter.expanded.get() && e_filter.conn.get().is_some() {
+                s
+            } else {
+                s.height(0.0).hide()
+            }
+        });
+
+    let e_tables = entry.clone();
+    let tables = dyn_stack(
+        move || {
+            let f = e_tables.filter.get().to_lowercase();
+            if e_tables.expanded.get() && e_tables.conn.get().is_some() {
+                e_tables
+                    .tables
+                    .get()
+                    .into_iter()
+                    .filter(|t| f.is_empty() || t.to_lowercase().contains(&f))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            }
+        },
+        |t| t.clone(),
+        move |t| {
+            let entry = entry.clone();
+            let table = t.clone();
+            let tn = t.clone();
+            stack((
+                label(|| "▦".to_string()).style(|s| s.color(theme::fg_dim()).font_size(11.0)),
+                label(move || tn.clone())
+                    .style(|s| s.color(theme::fg()).text_ellipsis().min_width(0.0)),
+            ))
+            .style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .gap(7.0)
+                    .width_full()
+                    .padding_left(22.0)
+                    .padding_vert(3.0)
+                    .border_radius(5.0)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.background(theme::bg_hover()))
+            })
+            .on_click_stop(move |_| state.db_open_table(entry.clone(), table.clone()))
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+
+    stack((row, err, filter, tables)).style(|s| s.flex_col().width_full().margin_bottom(2.0))
+}
+
+fn action_glyph(glyph: &'static str, on: impl Fn() + 'static) -> impl IntoView {
+    label(move || glyph.to_string())
+        .style(|s| {
+            s.padding_horiz(5.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .color(theme::fg_dim())
+                .font_size(12.0)
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg()).color(theme::fg()))
+        })
+        .on_click_stop(move |_| on())
+}
+
+fn form_field(
+    label_text: &'static str,
+    sig: RwSignal<String>,
+    placeholder: &'static str,
+    _password: bool,
+) -> impl IntoView {
+    let input = text_input(sig).placeholder(placeholder);
+    stack((
+        label(move || label_text.to_string())
+            .style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        input.style(|s| {
+            theme::input_colors(s)
+                .width_full()
+                .font_size(12.0)
+                .padding_horiz(6.0)
+                .padding_vert(3.0)
+        }),
+    ))
+    .style(|s| s.flex_col().gap(2.0).width_full())
+}
+
+fn add_form(state: AppState) -> impl IntoView {
+    // Bind the form struct's fields to local signals, syncing back on change.
+    let f = state.db_form.get_untracked();
+    let engine = create_rw_signal(f.engine.clone());
+    let host = create_rw_signal(f.host.clone());
+    let port = create_rw_signal(f.port.clone());
+    let database = create_rw_signal(f.database.clone());
+    let username = create_rw_signal(f.username.clone());
+    let password = create_rw_signal(f.password.clone());
+    let path = create_rw_signal(f.path.clone());
+    let group = create_rw_signal(f.group.clone());
+
+    let sync = move || {
+        state.db_form.set(DbForm {
+            engine: engine.get_untracked(),
+            host: host.get_untracked(),
+            port: port.get_untracked(),
+            database: database.get_untracked(),
+            username: username.get_untracked(),
+            password: password.get_untracked(),
+            path: path.get_untracked(),
+            group: group.get_untracked(),
+        });
+    };
+
+    // Engine selector (clickable chips).
+    let engine_chip = move |id: &'static str, name: &'static str| {
+        label(move || name.to_string())
+            .style(move |s| {
+                let active = engine.get() == id;
+                let s = s
+                    .padding_horiz(8.0)
+                    .padding_vert(3.0)
+                    .border_radius(5.0)
+                    .font_size(11.0)
+                    .cursor(floem::style::CursorStyle::Pointer);
+                if active {
+                    s.background(theme::accent())
+                        .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                } else {
+                    s.border(1.0).border_color(theme::border()).color(theme::fg())
+                }
+            })
+            .on_click_stop(move |_| {
+                engine.set(id.to_string());
+                let def = match id {
+                    "mysql" => "3306",
+                    "postgres" => "5432",
+                    _ => "",
+                };
+                if !def.is_empty() {
+                    port.set(def.to_string());
+                }
+            })
+    };
+
+    let engines = stack((
+        engine_chip("mysql", "MySQL"),
+        engine_chip("postgres", "Postgres"),
+        engine_chip("sqlite", "SQLite"),
+    ))
+    .style(|s| s.flex_row().gap(5.0));
+
+    let from_env = label(|| "From .env".to_string())
+        .style(|s| {
+            s.width_full()
+                .height(28.0)
+                .items_center()
+                .justify_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .background(theme::accent())
+                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .cursor(floem::style::CursorStyle::Pointer)
+        })
+        .on_click_stop(move |_| {
+            state.db_add_from_env();
+            state.db_adding.set(false);
+        });
+
+    // Connection fields — sqlite shows just a path; others show host/port/etc.
+    let net_fields = dyn_stack(
+        move || {
+            if engine.get() == "sqlite" {
+                vec!["path"]
+            } else {
+                vec!["host", "port", "database", "username", "password"]
+            }
+        },
+        |k| k.to_string(),
+        move |k| match k {
+            "path" => form_field("File path", path, "/path/to/database.sqlite", false).into_any(),
+            "host" => form_field("Host", host, "127.0.0.1", false).into_any(),
+            "port" => form_field("Port", port, "3306", false).into_any(),
+            "database" => form_field("Database", database, "", false).into_any(),
+            "username" => form_field("User", username, "root", false).into_any(),
+            "password" => form_field("Password", password, "", true).into_any(),
+            _ => empty().into_any(),
+        },
+    )
+    .style(|s| s.flex_col().gap(6.0).width_full());
+
+    let connect = label(|| "Connect & save".to_string())
+        .style(|s| {
+            s.width_full()
+                .height(28.0)
+                .items_center()
+                .justify_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| {
+            sync();
+            state.db_add_manual();
+        });
+
+    let hint = label(|| "Saved in ~/.config/e — never written to the project.".to_string())
+        .style(|s| s.font_size(10.0).color(theme::fg_dim()));
+
+    stack((
+        from_env,
+        label(|| "or connect manually:".to_string())
+            .style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        engines,
+        net_fields,
+        form_field("Group", group, "(optional)", false),
+        connect,
+        hint,
+    ))
+    .style(|s| {
+        s.flex_col()
+            .gap(8.0)
+            .padding(12.0)
+            .width_full()
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    })
+}
+
+pub fn database_panel(state: AppState) -> impl IntoView {
+    let title = label(|| "Database".to_string())
+        .style(|s| s.flex_grow(1.0).font_size(13.0).font_bold().color(theme::fg()));
+    let add = label(|| "＋".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .padding_vert(1.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(6.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_adding.update(|a| *a = !*a));
+    let header = stack((title, add)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(6.0)
+            .padding_horiz(12.0)
+            .padding_top(10.0)
+            .padding_bottom(6.0)
+            .width_full()
+    });
+
+    let form = dyn_stack(
+        move || if state.db_adding.get() { vec![0] } else { vec![] },
+        |i| *i,
+        move |_| add_form(state),
+    );
+
+    let list = scroll(
+        dyn_stack(
+            move || state.db_conns.get(),
+            |e| e.key(),
+            move |e| conn_row(state, e),
+        )
+        .style(|s| s.flex_col().width_full().padding_horiz(6.0).padding_bottom(10.0)),
+    )
+    .style(|s| s.flex_col().flex_grow(1.0).width_full());
+
+    let empty_hint = label(|| "No connections yet.".to_string()).style(move |s| {
+        let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
+        if state.db_conns.with(|c| c.is_empty()) && !state.db_adding.get() {
+            s
+        } else {
+            s.hide()
+        }
+    });
+
+    stack((header, form, empty_hint, list)).style(|s| {
+        s.flex_col()
+            .height_full()
+            .width_full()
+            .background(theme::bg())
+    })
+}
+
+// ---- Results overlay ------------------------------------------------------
+
+pub fn db_result_overlay(state: AppState) -> impl IntoView {
+    let title = label(move || state.db_result_title.get())
+        .style(|s| s.flex_grow(1.0).font_size(13.0).font_bold().color(theme::fg()));
+    let close = label(|| "✕".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.close_db_result());
+    let header = stack((title, close)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .padding_horiz(12.0)
+            .padding_vert(8.0)
+            .width_full()
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+
+    // Query editor row.
+    let sql = text_input(state.db_query_text)
+        .placeholder("SQL — ⌘↵ to run")
+        .style(|s| {
+            theme::input_colors(s)
+                .flex_grow(1.0)
+                .font_family("monospace".to_string())
+                .font_size(12.0)
+                .padding_horiz(8.0)
+                .padding_vert(5.0)
+        })
+        .on_event_stop(floem::event::EventListener::KeyDown, move |e| {
+            if let floem::event::Event::KeyDown(ke) = e {
+                let enter = matches!(
+                    ke.key.logical_key,
+                    floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter)
+                );
+                if enter && (ke.modifiers.meta() || ke.modifiers.control()) {
+                    state.db_run_query();
+                }
+            }
+        });
+    let run = label(|| "Run".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .justify_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .background(theme::accent())
+                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .cursor(floem::style::CursorStyle::Pointer)
+        })
+        .on_click_stop(move |_| state.db_run_query());
+    let query_row = stack((sql, run)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(8.0)
+            .padding(10.0)
+            .width_full()
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+
+    // Status / error line.
+    let status = label(move || {
+        if state.db_result_loading.get() {
+            "Running…".to_string()
+        } else if let Some(e) = state.db_result_error.get() {
+            e
+        } else if let Some(r) = state.db_result.get() {
+            if r.is_select {
+                let t = if r.truncated { " (truncated)" } else { "" };
+                format!("{} rows · {} ms{}", r.rows.len(), r.elapsed_ms, t)
+            } else {
+                format!(
+                    "{} rows affected · {} ms",
+                    r.rows_affected.unwrap_or(0),
+                    r.elapsed_ms
+                )
+            }
+        } else {
+            String::new()
+        }
+    })
+    .style(move |s| {
+        let s = s.padding_horiz(12.0).padding_vert(4.0).font_size(11.0);
+        if state.db_result_error.get().is_some() {
+            s.color(Color::from_rgb8(0xf7, 0x76, 0x8e))
+        } else {
+            s.color(theme::fg_dim())
+        }
+    });
+
+    let grid = scroll(result_grid(state)).style(|s| s.flex_grow(1.0).width_full());
+
+    stack((header, query_row, status, grid))
+        .style(move |s| {
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .flex_col()
+                .background(theme::bg());
+            if state.db_result_open.get() {
+                s
+            } else {
+                s.hide()
+            }
+        })
+}
+
+fn result_grid(state: AppState) -> impl IntoView {
+    // Header row.
+    let header = dyn_stack(
+        move || {
+            state
+                .db_result
+                .get()
+                .map(|r| r.columns)
+                .unwrap_or_default()
+        },
+        |c| c.clone(),
+        move |c| {
+            label(move || c.clone()).style(|s| {
+                s.min_width(120.0)
+                    .padding_horiz(8.0)
+                    .padding_vert(5.0)
+                    .font_size(11.0)
+                    .font_bold()
+                    .color(theme::fg_dim())
+                    .border_right(1.0)
+                    .border_color(theme::border())
+            })
+        },
+    )
+    .style(|s| {
+        s.flex_row()
+            .border_bottom(1.0)
+            .border_color(theme::border())
+            .background(theme::bg_hover())
+    });
+
+    // Data rows.
+    let rows = dyn_stack(
+        move || {
+            state
+                .db_result
+                .get()
+                .map(|r| r.rows.into_iter().enumerate().collect::<Vec<_>>())
+                .unwrap_or_default()
+        },
+        |(i, _)| *i,
+        move |(_, row)| {
+            dyn_stack(
+                move || row.clone().into_iter().enumerate().collect::<Vec<_>>(),
+                |(i, _)| *i,
+                move |(_, cell)| {
+                    let is_null = cell.is_none();
+                    let text = cell.unwrap_or_else(|| "NULL".to_string());
+                    label(move || text.clone()).style(move |s| {
+                        let s = s
+                            .min_width(120.0)
+                            .max_width(360.0)
+                            .padding_horiz(8.0)
+                            .padding_vert(4.0)
+                            .font_size(12.0)
+                            .text_ellipsis()
+                            .border_right(1.0)
+                            .border_color(theme::border());
+                        if is_null {
+                            s.color(theme::fg_dim())
+                        } else {
+                            s.color(theme::fg())
+                        }
+                    })
+                },
+            )
+            .style(|s| {
+                s.flex_row()
+                    .border_bottom(1.0)
+                    .border_color(theme::border())
+                    .hover(|s| s.background(theme::bg_hover()))
+            })
+        },
+    )
+    .style(|s| s.flex_col());
+
+    stack((header, rows)).style(|s| s.flex_col().min_width_full())
+}

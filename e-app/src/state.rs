@@ -47,6 +47,80 @@ use crate::styling::{
 };
 
 /// One open file/tab.
+/// A saved database connection plus its live UI state.
+#[derive(Clone)]
+pub struct DbEntry {
+    pub config: e_db::DbConfig,
+    /// The live connection (None when disconnected).
+    pub conn: RwSignal<Option<Arc<e_db::Conn>>>,
+    pub expanded: RwSignal<bool>,
+    pub connecting: RwSignal<bool>,
+    pub tables: RwSignal<Vec<String>>,
+    pub error: RwSignal<Option<String>>,
+    pub filter: RwSignal<String>,
+}
+
+impl DbEntry {
+    pub fn new(cx: Scope, config: e_db::DbConfig) -> Self {
+        DbEntry {
+            config,
+            conn: cx.create_rw_signal(None),
+            expanded: cx.create_rw_signal(false),
+            connecting: cx.create_rw_signal(false),
+            tables: cx.create_rw_signal(Vec::new()),
+            error: cx.create_rw_signal(None),
+            filter: cx.create_rw_signal(String::new()),
+        }
+    }
+    pub fn key(&self) -> String {
+        self.config.key()
+    }
+}
+
+/// The manual add-connection form.
+#[derive(Clone, Debug)]
+pub struct DbForm {
+    pub engine: String,
+    pub host: String,
+    pub port: String,
+    pub database: String,
+    pub username: String,
+    pub password: String,
+    pub path: String,
+    pub group: String,
+}
+
+impl Default for DbForm {
+    fn default() -> Self {
+        DbForm {
+            engine: "mysql".into(),
+            host: "127.0.0.1".into(),
+            port: "3306".into(),
+            database: String::new(),
+            username: "root".into(),
+            password: String::new(),
+            path: String::new(),
+            group: String::new(),
+        }
+    }
+}
+
+impl DbForm {
+    pub fn to_config(&self) -> e_db::DbConfig {
+        e_db::DbConfig {
+            engine: self.engine.clone(),
+            host: self.host.clone(),
+            port: self.port.parse().unwrap_or(0),
+            database: self.database.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            path: self.path.clone(),
+            group: self.group.clone(),
+            label: String::new(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Buffer {
     pub id: u64,
@@ -247,6 +321,27 @@ pub struct AppState {
     /// Draggable panel widths (pixels).
     pub sidebar_width: RwSignal<f64>,
     pub agent_width: RwSignal<f64>,
+    pub db_width: RwSignal<f64>,
+
+    // ---- Database panel -------------------------------------------------
+    /// Whether the Database panel is visible (toggled with ⌘3).
+    pub db_open: RwSignal<bool>,
+    /// Saved connections for the current project.
+    pub db_conns: RwSignal<Vec<DbEntry>>,
+    /// Whether the add-connection form is showing.
+    pub db_adding: RwSignal<bool>,
+    /// The manual-connection form contents.
+    pub db_form: RwSignal<DbForm>,
+    /// Results overlay (table browse / query).
+    pub db_result_open: RwSignal<bool>,
+    pub db_result: RwSignal<Option<e_db::QueryResult>>,
+    pub db_result_title: RwSignal<String>,
+    pub db_result_error: RwSignal<Option<String>>,
+    pub db_result_loading: RwSignal<bool>,
+    /// The connection the results view runs queries against.
+    pub db_result_key: RwSignal<Option<String>>,
+    /// The SQL editor text in query mode.
+    pub db_query_text: RwSignal<String>,
 
     // ---- Auto-update ----------------------------------------------------
     /// The available update, if GitHub reports a newer release.
@@ -364,6 +459,18 @@ impl AppState {
             agent_focus_pulse: RwSignal::new(0),
             sidebar_width: RwSignal::new(240.0),
             agent_width: RwSignal::new(460.0),
+            db_width: RwSignal::new(280.0),
+            db_open: RwSignal::new(false),
+            db_conns: RwSignal::new(Vec::new()),
+            db_adding: RwSignal::new(false),
+            db_form: RwSignal::new(DbForm::default()),
+            db_result_open: RwSignal::new(false),
+            db_result: RwSignal::new(None),
+            db_result_title: RwSignal::new(String::new()),
+            db_result_error: RwSignal::new(None),
+            db_result_loading: RwSignal::new(false),
+            db_result_key: RwSignal::new(None),
+            db_query_text: RwSignal::new(String::new()),
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
@@ -1865,6 +1972,210 @@ impl AppState {
             let data = laravel::load(&root);
             send(data);
         });
+    }
+
+    // ---- Database panel ------------------------------------------------
+
+    pub fn toggle_db_panel(&self) {
+        let open = !self.db_open.get_untracked();
+        self.db_open.set(open);
+        if open && self.db_conns.with_untracked(|c| c.is_empty()) {
+            self.load_databases();
+        }
+    }
+
+    /// Load saved connections for the project; offer `.env` detection if empty.
+    pub fn load_databases(&self) {
+        let root = self.root.get_untracked();
+        let saved = e_db::load_connections(&root);
+        let entries: Vec<DbEntry> = saved
+            .into_iter()
+            .map(|c| DbEntry::new(self.cx, c))
+            .collect();
+        self.db_conns.set(entries);
+    }
+
+    fn db_persist(&self) {
+        let root = self.root.get_untracked();
+        let configs: Vec<e_db::DbConfig> =
+            self.db_conns.with_untracked(|c| c.iter().map(|e| e.config.clone()).collect());
+        let _ = e_db::save_connections(&root, &configs);
+    }
+
+    /// Add the connection inferred from the project's `.env`.
+    pub fn db_add_from_env(&self) {
+        let root = self.root.get_untracked();
+        let Some(cfg) = e_db::from_env(&root) else {
+            Self::notify("No DB_CONNECTION found in .env");
+            return;
+        };
+        self.db_add_config(cfg);
+    }
+
+    pub fn db_add_manual(&self) {
+        let cfg = self.db_form.get_untracked().to_config();
+        self.db_add_config(cfg);
+        self.db_form.set(DbForm::default());
+        self.db_adding.set(false);
+    }
+
+    fn db_add_config(&self, cfg: e_db::DbConfig) {
+        let key = cfg.key();
+        if self.db_conns.with_untracked(|c| c.iter().any(|e| e.key() == key)) {
+            return;
+        }
+        let entry = DbEntry::new(self.cx, cfg);
+        self.db_conns.update(|c| c.push(entry.clone()));
+        self.db_persist();
+        self.db_connect(entry);
+    }
+
+    pub fn db_remove(&self, key: String) {
+        self.db_conns.update(|c| c.retain(|e| e.key() != key));
+        self.db_persist();
+    }
+
+    pub fn db_connect(&self, entry: DbEntry) {
+        if entry.connecting.get_untracked() {
+            return;
+        }
+        entry.connecting.set(true);
+        entry.error.set(None);
+        let cfg = entry.config.clone();
+        let send = create_ext_action(
+            self.cx,
+            move |res: Result<(Arc<e_db::Conn>, Vec<String>), String>| {
+                entry.connecting.set(false);
+                match res {
+                    Ok((conn, tables)) => {
+                        entry.conn.set(Some(conn));
+                        entry.tables.set(tables);
+                        entry.expanded.set(true);
+                    }
+                    Err(e) => entry.error.set(Some(e)),
+                }
+            },
+        );
+        std::thread::spawn(move || {
+            let res = e_db::connect(&cfg).and_then(|conn| {
+                let conn = Arc::new(conn);
+                let tables = e_db::tables(&conn)?;
+                Ok((conn, tables))
+            });
+            send(res);
+        });
+    }
+
+    pub fn db_disconnect(&self, entry: DbEntry) {
+        entry.conn.set(None);
+        entry.tables.set(Vec::new());
+        entry.expanded.set(false);
+    }
+
+    pub fn db_toggle(&self, entry: DbEntry) {
+        if entry.conn.get_untracked().is_some() {
+            entry.expanded.update(|e| *e = !*e);
+        } else {
+            self.db_connect(entry);
+        }
+    }
+
+    pub fn db_refresh_tables(&self, entry: DbEntry) {
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let send = create_ext_action(self.cx, move |tables: Vec<String>| {
+            entry.tables.set(tables);
+        });
+        std::thread::spawn(move || {
+            let tables = e_db::tables(&conn).unwrap_or_default();
+            send(tables);
+        });
+    }
+
+    /// Open a table's rows in the results overlay.
+    pub fn db_open_table(&self, entry: DbEntry, table: String) {
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let engine = entry.config.engine.clone();
+        self.db_result_key.set(Some(entry.key()));
+        self.db_result_title.set(format!("{} · {}", entry.config.display_name(), table));
+        self.db_query_text.set(format!("SELECT * FROM {table} LIMIT 200"));
+        self.db_result_open.set(true);
+        self.db_result_loading.set(true);
+        self.db_result_error.set(None);
+        let send = create_ext_action(self.cx, {
+            let state = *self;
+            move |res: Result<e_db::QueryResult, String>| state.db_apply_result(res)
+        });
+        std::thread::spawn(move || {
+            send(e_db::table_data(&conn, &engine, &table, 200));
+        });
+    }
+
+    /// Open a blank query editor for a connection.
+    pub fn db_new_query(&self, entry: DbEntry) {
+        if entry.conn.get_untracked().is_none() {
+            self.db_connect(entry.clone());
+        }
+        self.db_result_key.set(Some(entry.key()));
+        self.db_result_title
+            .set(format!("{} · query", entry.config.display_name()));
+        self.db_result.set(None);
+        self.db_result_error.set(None);
+        if self.db_query_text.with_untracked(|q| q.trim().is_empty()) {
+            self.db_query_text.set("SELECT 1".into());
+        }
+        self.db_result_open.set(true);
+    }
+
+    /// Run the SQL currently in the query editor against the bound connection.
+    pub fn db_run_query(&self) {
+        let Some(key) = self.db_result_key.get_untracked() else {
+            return;
+        };
+        let Some(entry) = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            self.db_result_error.set(Some("Not connected".into()));
+            return;
+        };
+        let sql = self.db_query_text.get_untracked();
+        if sql.trim().is_empty() {
+            return;
+        }
+        self.db_result_loading.set(true);
+        self.db_result_error.set(None);
+        let send = create_ext_action(self.cx, {
+            let state = *self;
+            move |res: Result<e_db::QueryResult, String>| state.db_apply_result(res)
+        });
+        std::thread::spawn(move || {
+            send(e_db::query(&conn, &sql, e_db::MAX_ROWS));
+        });
+    }
+
+    fn db_apply_result(&self, res: Result<e_db::QueryResult, String>) {
+        self.db_result_loading.set(false);
+        match res {
+            Ok(r) => {
+                self.db_result_error.set(None);
+                self.db_result.set(Some(r));
+            }
+            Err(e) => {
+                self.db_result.set(None);
+                self.db_result_error.set(Some(e));
+            }
+        }
+    }
+
+    pub fn close_db_result(&self) {
+        self.db_result_open.set(false);
     }
 
     /// Offer Laravel completions if the cursor is inside a helper string.

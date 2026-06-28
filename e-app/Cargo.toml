@@ -15,6 +15,7 @@ path = "src/bin/e.rs"
 
 [dependencies]
 e-core             = { workspace = true }
+e-db               = { workspace = true }
 e-lsp              = { workspace = true }
 e-term             = { workspace = true }
 floem              = { workspace = true }

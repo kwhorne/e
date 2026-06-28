@@ -696,6 +696,59 @@ pub fn save_connections(project: &Path, conns: &[DbConfig]) -> Result<(), String
     .map_err(|e| e.to_string())
 }
 
+// ── saved queries (per project, in ~/.config/e/queries.json) ───
+
+fn queries_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(
+        PathBuf::from(home)
+            .join(".config")
+            .join("e")
+            .join("queries.json"),
+    )
+}
+
+fn read_queries_store() -> serde_json::Value {
+    queries_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+/// A named, saved SQL query.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SavedQuery {
+    pub name: String,
+    pub sql: String,
+}
+
+/// Load the saved queries for a project.
+pub fn load_queries(project: &Path) -> Vec<SavedQuery> {
+    read_queries_store()
+        .get(project.to_string_lossy().as_ref())
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// Persist the saved queries for a project.
+pub fn save_queries(project: &Path, queries: &[SavedQuery]) -> Result<(), String> {
+    let mut store = read_queries_store();
+    let obj = store.as_object_mut().ok_or("invalid store")?;
+    obj.insert(
+        project.to_string_lossy().into_owned(),
+        serde_json::to_value(queries).map_err(|e| e.to_string())?,
+    );
+    let path = queries_path().ok_or("no HOME")?;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&store).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

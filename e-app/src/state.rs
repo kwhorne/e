@@ -363,6 +363,12 @@ pub struct AppState {
     pub db_edit: RwSignal<Option<(usize, usize, String)>>,
     pub db_edit_value: RwSignal<String>,
     pub db_edit_null: RwSignal<bool>,
+    /// Saved queries for the current project.
+    pub db_queries: RwSignal<Vec<e_db::SavedQuery>>,
+    /// Whether the "name this query" input is showing.
+    pub db_saving_query: RwSignal<bool>,
+    /// The name being typed for the query about to be saved.
+    pub db_query_name: RwSignal<String>,
 
     // ---- Auto-update ----------------------------------------------------
     /// The available update, if GitHub reports a newer release.
@@ -515,6 +521,9 @@ impl AppState {
             db_edit: RwSignal::new(None),
             db_edit_value: RwSignal::new(String::new()),
             db_edit_null: RwSignal::new(false),
+            db_queries: RwSignal::new(Vec::new()),
+            db_saving_query: RwSignal::new(false),
+            db_query_name: RwSignal::new(String::new()),
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
@@ -2035,6 +2044,35 @@ impl AppState {
             .map(|c| DbEntry::new(self.cx, c))
             .collect();
         self.db_conns.set(entries);
+        self.db_queries.set(e_db::load_queries(&root));
+    }
+
+    /// Save the current query editor text under the typed name.
+    pub fn db_save_query(&self) {
+        let name = self.db_query_name.get_untracked().trim().to_string();
+        let sql = self.db_query_text.get_untracked();
+        if name.is_empty() || sql.trim().is_empty() {
+            self.db_saving_query.set(false);
+            return;
+        }
+        self.db_queries.update(|q| {
+            q.retain(|x| x.name != name);
+            q.push(e_db::SavedQuery { name, sql });
+            q.sort_by(|a, b| a.name.cmp(&b.name));
+        });
+        let _ = e_db::save_queries(&self.root.get_untracked(), &self.db_queries.get_untracked());
+        self.db_query_name.set(String::new());
+        self.db_saving_query.set(false);
+    }
+
+    /// Load a saved query into the editor.
+    pub fn db_load_query(&self, sql: String) {
+        self.db_query_text.set(sql);
+    }
+
+    pub fn db_delete_query(&self, name: String) {
+        self.db_queries.update(|q| q.retain(|x| x.name != name));
+        let _ = e_db::save_queries(&self.root.get_untracked(), &self.db_queries.get_untracked());
     }
 
     fn db_persist(&self) {

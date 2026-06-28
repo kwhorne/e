@@ -650,9 +650,82 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     });
 
     let spacer = empty().style(|s| s.flex_grow(1.0));
+
+    // Saved queries: a popout menu to load them, and a save button + name input.
+    let saved_menu = label(|| "Saved ▾".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .font_size(11.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
+        })
+        .popout_menu(move || {
+            use floem::menu::{Menu, MenuItem};
+            let queries = state.db_queries.get_untracked();
+            if queries.is_empty() {
+                return Menu::new("").entry(MenuItem::new("(no saved queries)"));
+            }
+            let mut menu = Menu::new("");
+            for q in queries {
+                let sql = q.sql.clone();
+                let name = q.name.clone();
+                let del_name = q.name.clone();
+                menu = menu.entry(
+                    MenuItem::new(q.name.clone()).action(move || state.db_load_query(sql.clone())),
+                );
+                let _ = (name, del_name);
+            }
+            menu
+        });
+    let save_btn = toolbar_btn(
+        "💾",
+        Box::new(move || {
+            state.db_query_name.set(String::new());
+            state.db_saving_query.set(true);
+        }),
+    );
+    let name_input = text_input(state.db_query_name)
+        .placeholder("query name — ↵ to save")
+        .style(move |s| {
+            let s = theme::input_colors(s)
+                .width(180.0)
+                .font_size(11.0)
+                .padding_horiz(6.0)
+                .padding_vert(2.0);
+            if state.db_saving_query.get() {
+                s
+            } else {
+                s.width(0.0).hide()
+            }
+        })
+        .on_key_down(
+            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter),
+            |_| true,
+            move |_| state.db_save_query(),
+        )
+        .on_key_down(
+            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Escape),
+            |_| true,
+            move |_| state.db_saving_query.set(false),
+        )
+        .request_focus(move || {
+            state.db_saving_query.get();
+        });
     let export = toolbar_btn("⬇ CSV", Box::new(move || state.db_export_csv()));
 
-    let toolbar = stack((subview_chips, pager, spacer, export)).style(|s| {
+    let toolbar = stack((
+        subview_chips,
+        pager,
+        spacer,
+        saved_menu,
+        name_input,
+        save_btn,
+        export,
+    ))
+    .style(|s| {
         s.flex_row()
             .items_center()
             .gap(10.0)

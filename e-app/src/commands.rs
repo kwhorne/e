@@ -99,7 +99,12 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
 
 /// Context-aware close (⌘W): agent panel, then terminal, then the active tab.
 fn close_focused(state: AppState) {
-    if state.agent_focused.get() {
+    // The database results overlay (and its edit popup) take priority.
+    if state.db_edit.get().is_some() {
+        state.db_cancel_edit();
+    } else if state.db_result_open.get() {
+        state.close_db_result();
+    } else if state.agent_focused.get() {
         state.agent_open.set(false);
     } else if state.terminal_focused.get() {
         if let Some(id) = state.focused_term_id() {
@@ -112,6 +117,11 @@ fn close_focused(state: AppState) {
 
 /// Dismiss every open overlay (Escape).
 fn close_overlays(state: AppState) {
+    if state.db_edit.get().is_some() {
+        state.db_cancel_edit();
+        return;
+    }
+    state.close_db_result();
     state.close_completion();
     state.close_hover();
     state.close_signature();

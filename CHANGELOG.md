@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-06-28
+
 ### Added
 
 - Tailwind CSS highlighting inside `class="…"` attributes (Blade, HTML, Vue):
@@ -248,7 +250,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/kwhorne/e/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/kwhorne/e/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/kwhorne/e/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/kwhorne/e/compare/v0.4.1...v0.4.2

@@ -6,7 +6,10 @@ All settings live in a single global JSON file:
 ~/.config/e/config.json
 ```
 
-Open it any time with **`⌘,`** (it is created on first use).
+Press **`⌘,`** for a graphical settings page covering the common options. The
+raw file (with advanced sections like `agents`, `snippets`, `keybindings`) can be
+opened from the command palette via **Open Settings (config.json)** — it is
+created on first use.
 
 ## Settings reference
 

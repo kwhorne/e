@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Graphical settings page (⌘,): toggles and steppers for the common options,
+  applied live and persisted to `config.json`. The raw JSON is still available
+  via "Open Settings (config.json)".
+
+### Added
+
 - Customizable keybindings: every action is a named command, rebindable in the
   `keybindings` section of `config.json`.
 

@@ -408,4 +408,13 @@ fn app_view() -> impl IntoView {
         }
         EventPropagation::Continue
     })
+    .on_event_stop(EventListener::DroppedFile, move |e| {
+        if let Event::DroppedFile(ev) = e {
+            if ev.path.is_dir() {
+                state.open_project(ev.path.clone());
+            } else {
+                state.open_path(ev.path.clone());
+            }
+        }
+    })
 }

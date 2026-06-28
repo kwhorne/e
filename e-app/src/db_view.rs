@@ -9,6 +9,26 @@ use floem::IntoView;
 use crate::state::{AppState, DbEntry, DbForm};
 use crate::theme;
 
+/// Collapse a cell value to a single line for the grid (DB values often hold
+/// multi-line text, which would otherwise blow up the row height).
+fn sanitize_cell(s: &str) -> String {
+    let mut out = String::with_capacity(s.len().min(200));
+    let mut n = 0usize;
+    for c in s.chars() {
+        if n >= 200 {
+            out.push('…');
+            break;
+        }
+        out.push(if c == '\n' || c == '\r' || c == '\t' {
+            ' '
+        } else {
+            c
+        });
+        n += 1;
+    }
+    out
+}
+
 fn engine_icon(engine: &str) -> &'static str {
     match engine {
         "mysql" | "mariadb" => "🐬",
@@ -496,10 +516,11 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         .style(|s| {
             theme::input_colors(s)
                 .flex_grow(1.0)
+                .min_height(40.0)
                 .font_family("monospace".to_string())
-                .font_size(12.0)
-                .padding_horiz(8.0)
-                .padding_vert(5.0)
+                .font_size(13.0)
+                .padding_horiz(10.0)
+                .padding_vert(10.0)
         })
         .on_event_stop(floem::event::EventListener::KeyDown, move |e| {
             if let floem::event::Event::KeyDown(ke) = e {
@@ -514,8 +535,8 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         });
     let run = label(|| "Run".to_string())
         .style(|s| {
-            s.padding_horiz(14.0)
-                .height(28.0)
+            s.padding_horiz(18.0)
+                .height(40.0)
                 .items_center()
                 .justify_center()
                 .border_radius(5.0)
@@ -728,11 +749,15 @@ fn result_grid(state: AppState) -> impl IntoView {
                 |(i, _)| *i,
                 move |(_, cell)| {
                     let is_null = cell.is_none();
-                    let text = cell.unwrap_or_else(|| "NULL".to_string());
+                    let text = match &cell {
+                        Some(s) => sanitize_cell(s),
+                        None => "NULL".to_string(),
+                    };
                     label(move || text.clone()).style(move |s| {
                         let s = s
                             .min_width(120.0)
                             .max_width(360.0)
+                            .height(26.0)
                             .padding_horiz(8.0)
                             .padding_vert(4.0)
                             .font_size(12.0)
@@ -749,6 +774,8 @@ fn result_grid(state: AppState) -> impl IntoView {
             )
             .style(|s| {
                 s.flex_row()
+                    .items_center()
+                    .height(26.0)
                     .border_bottom(1.0)
                     .border_color(theme::border())
                     .hover(|s| s.background(theme::bg_hover()))

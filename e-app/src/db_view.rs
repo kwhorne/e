@@ -522,17 +522,11 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .padding_horiz(10.0)
                 .padding_vert(10.0)
         })
-        .on_event_stop(floem::event::EventListener::KeyDown, move |e| {
-            if let floem::event::Event::KeyDown(ke) = e {
-                let enter = matches!(
-                    ke.key.logical_key,
-                    floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter)
-                );
-                if enter && (ke.modifiers.meta() || ke.modifiers.control()) {
-                    state.db_run_query();
-                }
-            }
-        });
+        .on_key_down(
+            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter),
+            |m| m.meta() || m.control(),
+            move |_| state.db_run_query(),
+        );
     let run = label(|| "Run".to_string())
         .style(|s| {
             s.padding_horiz(18.0)

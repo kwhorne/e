@@ -142,6 +142,8 @@ pub struct AppState {
     pub cx: Scope,
     /// Workspace root shown in the file tree.
     pub root: RwSignal<PathBuf>,
+    /// All workspace root folders (multi-root). The first is the primary root.
+    pub roots: RwSignal<Vec<PathBuf>>,
     /// All open buffers, in tab order.
     pub buffers: RwSignal<Vec<Buffer>>,
     /// Pane 0's active buffer id.
@@ -306,6 +308,7 @@ impl AppState {
         let (term_tx, term_rx) = channel();
         Self {
             cx,
+            roots: RwSignal::new(vec![root.clone()]),
             root: RwSignal::new(root),
             buffers: RwSignal::new(Vec::new()),
             active: RwSignal::new(None),
@@ -1532,6 +1535,34 @@ impl AppState {
             .spawn();
     }
 
+    /// Add another root folder to the workspace (multi-root).
+    pub fn add_workspace_folder(&self) {
+        let state = *self;
+        let opts = floem::file::FileDialogOptions::new()
+            .select_directories()
+            .title("Add Folder to Workspace")
+            .force_starting_directory(self.root.get_untracked());
+        floem::action::open_file(opts, move |info| {
+            if let Some(path) = info.and_then(|i| i.path.into_iter().next()) {
+                state.roots.update(|r| {
+                    if !r.contains(&path) {
+                        r.push(path);
+                    }
+                });
+                state.fs_rev.update(|x| *x += 1);
+            }
+        });
+    }
+
+    /// Remove a root folder from the workspace (keeps at least the primary).
+    pub fn remove_workspace_folder(&self, path: PathBuf) {
+        self.roots.update(|r| r.retain(|p| p != &path));
+        if self.roots.with_untracked(|r| r.is_empty()) {
+            self.roots.set(vec![self.root.get_untracked()]);
+        }
+        self.fs_rev.update(|x| *x += 1);
+    }
+
     /// Launch a new editor instance on `path` (a project folder or a file).
     pub fn open_project(&self, path: PathBuf) {
         let exe = std::env::current_exe().ok();
@@ -2650,7 +2681,7 @@ impl AppState {
         }
         let gen = p.gen.get_untracked() + 1;
         p.gen.set(gen);
-        let root = self.root.get();
+        let roots = self.roots.get();
         let send = create_ext_action(self.cx, move |(g, items): (u64, Vec<PickerItem>)| {
             if g == p.gen.get_untracked() {
                 p.items.set(items);
@@ -2658,7 +2689,14 @@ impl AppState {
             }
         });
         std::thread::spawn(move || {
-            let items = grep_workspace(&root, &query, 300);
+            let mut items = Vec::new();
+            for root in &roots {
+                items.extend(grep_workspace(root, &query, 300));
+                if items.len() >= 300 {
+                    items.truncate(300);
+                    break;
+                }
+            }
             send((gen, items));
         });
     }

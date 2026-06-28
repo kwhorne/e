@@ -16,6 +16,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "recent" => state.open_recent(),
         "open-folder" => state.open_project_dialog(),
         "open-file" => state.open_file_dialog(),
+        "add-folder" => state.add_workspace_folder(),
         "symbols" => state.open_symbol_search(),
         "search" => state.open_global_search(),
         "find" => state.open_find(),

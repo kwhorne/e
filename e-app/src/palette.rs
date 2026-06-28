@@ -61,7 +61,13 @@ pub fn palette(state: AppState) -> impl IntoView {
     // (Re)load the file list whenever the palette opens.
     create_effect(move |_| {
         if state.palette_open.get() {
-            files.set(collect_files(&state.root.get()));
+            let all: Vec<PathBuf> = state
+                .roots
+                .get()
+                .iter()
+                .flat_map(|r| collect_files(r))
+                .collect();
+            files.set(all);
             query.set(String::new());
             selected.set(0);
             focus_pulse.update(|x| *x += 1);

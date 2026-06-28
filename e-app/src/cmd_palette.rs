@@ -14,6 +14,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("open-folder", "Open Folder…"),
     ("new-file", "New File"),
     ("open-file", "Open File…"),
+    ("add-folder", "Add Folder to Workspace…"),
     ("save-as", "Save As…"),
     ("recent", "Recent Files"),
     ("symbols", "Go to Symbol…"),

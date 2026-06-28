@@ -72,7 +72,18 @@ fn file_glyph(name: &str, is_dir: bool, expanded: bool) -> &'static str {
 /// Context menu for a tree item.
 fn item_menu(state: AppState, path: PathBuf) -> Menu {
     let p = || path.clone();
-    Menu::new("")
+    let is_root = state.roots.with_untracked(|r| r.contains(&path) && r.len() > 1);
+
+    let mut menu = Menu::new("")
+        .entry(MenuItem::new("Add Folder to Workspace…").action(move || state.add_workspace_folder()));
+    if is_root {
+        let rp = path.clone();
+        menu = menu.entry(
+            MenuItem::new("Remove Folder from Workspace")
+                .action(move || state.remove_workspace_folder(rp.clone())),
+        );
+    }
+    menu.separator()
         .entry(MenuItem::new("New File").action({
             let p = p();
             move || state.start_file_op(FileOpKind::NewFile, p.clone())
@@ -116,9 +127,31 @@ struct Row {
 
 /// Walk the workspace from `root`, descending only into expanded directories,
 /// and produce a flat, ordered list of visible rows.
-fn flatten(root: &PathBuf, expanded: &HashSet<PathBuf>) -> Vec<Row> {
+fn flatten(roots: &[PathBuf], expanded: &HashSet<PathBuf>) -> Vec<Row> {
     let mut out = Vec::new();
-    walk(root, 0, expanded, &mut out);
+    let multi = roots.len() > 1;
+    for root in roots {
+        if multi {
+            // Each root is a collapsible top-level folder (expanded by default).
+            let name = root
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| root.to_string_lossy().into_owned());
+            let is_expanded = !expanded.contains(root);
+            out.push(Row {
+                path: root.clone(),
+                name,
+                is_dir: true,
+                depth: 0,
+                expanded: is_expanded,
+            });
+            if is_expanded {
+                walk(root, 1, expanded, &mut out);
+            }
+        } else {
+            walk(root, 0, expanded, &mut out);
+        }
+    }
     out
 }
 
@@ -180,7 +213,7 @@ pub fn file_tree(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state.fs_rev.get(); // refresh after filesystem operations
-            flatten(&state.root.get(), &expanded.get())
+            flatten(&state.roots.get(), &expanded.get())
         },
         |r| r.path.clone(),
         move |r| {

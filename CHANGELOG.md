@@ -9,20 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Graphical settings page (⌘,): toggles and steppers for the common options,
-  applied live and persisted to `config.json`. The raw JSON is still available
-  via "Open Settings (config.json)".
-
-### Added
-
+- Task runner (`⌘⇧B`): detects npm/yarn/pnpm/bun, Composer, Cargo, Go, Laravel
+  artisan, Pest/PHPUnit and Makefile tasks and runs the chosen one in a named
+  terminal. "Run Tests" runs the project's test command.
 - Customizable keybindings: every action is a named command, rebindable in the
   `keybindings` section of `config.json`.
-
-### Added
-
-- Task runner (⌘⇧B): detects npm/yarn/pnpm, composer, cargo, go, artisan, Pest/
-  PHPUnit and Makefile tasks and runs the chosen one in a named terminal. "Run
-  Tests" runs the project test command.
+- Graphical settings page (`⌘,`): toggles and steppers for the common options,
+  applied live and persisted to `config.json`. The raw JSON is still available
+  via "Open Settings (config.json)".
 
 ## [0.3.0] - 2026-06-27
 

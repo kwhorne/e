@@ -52,6 +52,8 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search & replace** (`⌘⇧F`)
 - **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch switcher, commit history, stash, blame, merge-conflict resolution
 - **Sticky scroll**, **drag-to-reorder & pinnable tabs**, **user-defined snippets**
+- **Task runner** (`⌘⇧B`) — npm/Composer/Cargo/Go/artisan/Make tasks and tests
+- **Graphical settings** (`⌘,`) and **customizable keybindings**
 - **Integrated terminal** (`⌘T`) — PTY-backed with ANSI colour, multiple tabs, rename and split
 - **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent beside your code
 - **Editing essentials** — comment toggle (`⌘/`), line move/duplicate/delete, indent, multi-cursor (`⌘⇧D`), auto-closing brackets

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The `⌘P` file finder now uses ranked fuzzy matching (file-name and short-path
+  matches rank highest, e.g. `wbp` finds `welcome.blade.php`) and builds its
+  index in the background, so it opens instantly even on very large folders.
+
 ## [0.4.2] - 2026-06-28
 
 ### Added

@@ -2,8 +2,11 @@
 
 ## Fuzzy file finder (`⌘P`)
 
-Type part of a file name or path to jump to any file in the workspace. Use
-`↑` / `↓` to select and `Enter` to open.
+Type part of a file name or path to jump to any file in the workspace. Matching
+is fuzzy (`wbp` finds `welcome.blade.php`) and ranked — file-name matches and
+shorter paths rank highest. The index is built in the background, so the finder
+opens instantly even on a large folder. Use `↑` / `↓` to select and `Enter` to
+open.
 
 ## Recent files (`⌘E`)
 

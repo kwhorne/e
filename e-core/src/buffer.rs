@@ -62,6 +62,41 @@ pub fn read_to_string(path: &Path) -> Result<String> {
     }
 }
 
+/// Read a file, decoding it from a detected encoding. Returns the UTF-8 text and
+/// the encoding label (e.g. `UTF-8`, `windows-1252`, `UTF-16LE`).
+pub fn read_with_encoding(path: &Path) -> Result<(String, String)> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((String::new(), "UTF-8".to_string()))
+        }
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    // Honour a byte-order mark if present.
+    if let Some((enc, _)) = encoding_rs::Encoding::for_bom(&bytes) {
+        let (text, _, _) = enc.decode(&bytes);
+        return Ok((text.into_owned(), enc.name().to_string()));
+    }
+    // Plain UTF-8?
+    if let Ok(s) = std::str::from_utf8(&bytes) {
+        return Ok((s.to_string(), "UTF-8".to_string()));
+    }
+    // Fall back to Windows-1252, which maps every byte.
+    let enc = encoding_rs::WINDOWS_1252;
+    let (text, _, _) = enc.decode(&bytes);
+    Ok((text.into_owned(), enc.name().to_string()))
+}
+
+/// Write `contents` to `path`, re-encoding from UTF-8 into `encoding`.
+pub fn write_with_encoding(path: &Path, contents: &str, encoding: &str) -> Result<()> {
+    if encoding.is_empty() || encoding.eq_ignore_ascii_case("UTF-8") {
+        return write(path, contents);
+    }
+    let enc = encoding_rs::Encoding::for_label(encoding.as_bytes()).unwrap_or(encoding_rs::UTF_8);
+    let (bytes, _, _) = enc.encode(contents);
+    std::fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))
+}
+
 /// Write `contents` to `path`, creating parent directories as needed.
 pub fn write(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {

@@ -80,6 +80,8 @@ pub struct Buffer {
     pub inlay_hints: RwSignal<Vec<(u32, u32, String)>>,
     /// Very large file — expensive per-edit features are skipped for speed.
     pub large: bool,
+    /// Text encoding label (e.g. `UTF-8`, `windows-1252`).
+    pub encoding: RwSignal<String>,
 }
 
 /// One terminal session (a running shell).
@@ -758,7 +760,7 @@ impl AppState {
                 continue;
             };
             let text = b.doc.text().to_string();
-            if buffer::write(path, &text).is_ok() {
+            if buffer::write_with_encoding(path, &text, &b.encoding.get_untracked()).is_ok() {
                 b.dirty.set(false);
                 Self::refresh_disk_mtime(b);
                 if let (Some(uri), Some(client)) =
@@ -1461,6 +1463,7 @@ impl AppState {
             blame: Rc::new(RefCell::new(Vec::new())),
             inlay_hints: RwSignal::new(Vec::new()),
             large: false,
+            encoding: RwSignal::new("UTF-8".to_string()),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
@@ -1964,7 +1967,7 @@ impl AppState {
             return;
         }
 
-        let content = match buffer::read_to_string(&canon) {
+        let (content, encoding) = match buffer::read_with_encoding(&canon) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("e: open failed: {e:#}");
@@ -2068,6 +2071,7 @@ impl AppState {
             blame: Rc::new(RefCell::new(Vec::new())),
             inlay_hints: RwSignal::new(Vec::new()),
             large,
+            encoding: RwSignal::new(encoding),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
@@ -2225,7 +2229,7 @@ impl AppState {
             return;
         };
         let text = buf.doc.text().to_string();
-        match buffer::write(path, &text) {
+        match buffer::write_with_encoding(path, &text, &buf.encoding.get_untracked()) {
             Ok(()) => {
                 buf.dirty.set(false);
                 buf.disk_changed.set(false);

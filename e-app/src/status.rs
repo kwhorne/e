@@ -59,10 +59,7 @@ pub fn status_bar(state: AppState) -> impl IntoView {
             .entry(floem::menu::MenuItem::new("CRLF").action(move || state.set_line_ending(true)))
     });
 
-    let encoding = label(move || match state.active_buffer() {
-        Some(_) => "UTF-8".to_string(),
-        None => String::new(),
-    });
+    let encoding = label(move || state.active_buffer().map(|b| b.encoding.get()).unwrap_or_default());
 
     let blame = label(move || {
         state.blame_rev.get();

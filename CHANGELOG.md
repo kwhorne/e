@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Line-ending conversion: click LF/CRLF in the status bar to convert the buffer.
+- Non-UTF-8 files now open (BOM detection + Windows-1252 fallback); the detected
+  encoding is shown in the status bar and preserved on save.
+
+### Changed
+
+- Large files (>1MB) skip tree-sitter highlighting, git markers, blame, inlay
+  hints and bracket matching to stay responsive.
+
 ## [0.3.2] - 2026-06-28
 
 ### Added

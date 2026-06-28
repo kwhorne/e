@@ -515,7 +515,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         .placeholder("SQL — ⌘↵ to run")
         .style(|s| {
             theme::input_colors(s)
-                .flex_grow(1.0)
+                .width_full()
                 .min_height(40.0)
                 .font_family("monospace".to_string())
                 .font_size(13.0)
@@ -546,7 +546,8 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_run_query());
-    let query_row = stack((sql, run)).style(|s| {
+    let sql_wrap = floem::views::container(sql).style(|s| s.flex_grow(1.0).min_width(0.0));
+    let query_row = stack((sql_wrap, run)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(8.0)

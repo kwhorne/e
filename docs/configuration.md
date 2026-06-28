@@ -24,6 +24,7 @@ Open it any time with **`⌘,`** (it is created on first use).
   "sticky_scroll": true,   // pin enclosing scope lines at the top while scrolling
   "sidebar_side": "left",  // explorer/Git panel side: "left" or "right"
   "agent_side": "right",   // agent panel side: "right" or "left"
+  "keybindings": { "cmd+k": "delete-line" }, // override or add bindings
   "agents": { /* see below */ }
 }
 ```
@@ -47,6 +48,11 @@ Open it any time with **`⌘,`** (it is created on first use).
 > **Panel layout** (`sidebar_side`, `agent_side`) is read at startup — restart
 > `e` after changing it. By default the explorer/Git sidebar is on the left and
 > the agent panel on the right; set them to swap sides.
+
+## Keybindings
+
+Every action is a named command; rebind any of them in the `keybindings` section.
+See [Keybindings](keybindings.md) for the syntax and the full command list.
 
 ## Themes
 

@@ -73,58 +73,9 @@ impl CmdPalette {
     }
 }
 
+
 pub fn run_command(state: AppState, id: &str) {
-    match id {
-        "goto-file" => state.palette_open.set(true),
-        "open-folder" => state.open_project_dialog(),
-        "new-file" => state.new_untitled(),
-        "open-file" => state.open_file_dialog(),
-        "save-as" => state.save_active_as(),
-        "recent" => state.open_recent(),
-        "symbols" => state.open_symbol_search(),
-        "search" => state.open_global_search(),
-        "find" => state.open_find(),
-        "replace" => state.open_replace(),
-        "goto-line" => state.open_goto_line(),
-        "comment" => state.toggle_comment(),
-        "move-line-up" => state.move_line_up(),
-        "move-line-down" => state.move_line_down(),
-        "duplicate-line" => state.duplicate_line(),
-        "delete-line" => state.delete_line(),
-        "save" => state.save_active(),
-        "format" => state.format_active(),
-        "rename" => state.open_rename(),
-        "definition" => state.goto_definition(),
-        "references" => state.request_references(),
-        "nav-back" => state.nav_back(),
-        "nav-forward" => state.nav_forward(),
-        "markdown" => state.toggle_md_preview(),
-        "diff" => state.toggle_diff(),
-        "run-task" => state.open_task_palette(),
-        "run-test" => state.run_test(),
-        "source-control" => state.toggle_git_panel(),
-        "split" => state.toggle_split(),
-        "terminal" => state.toggle_terminal(),
-        "new-terminal" => state.new_terminal(),
-        "split-terminal" => state.split_terminal(),
-        "agent" => state.toggle_agent(),
-        "restart-agent" => state.restart_agent(),
-        "theme" => theme::toggle(),
-        "zoom-in" => state.zoom(1),
-        "zoom-out" => state.zoom(-1),
-        "zoom-reset" => state.zoom_reset(),
-        "word-wrap" => state.toggle_word_wrap(),
-        "check-updates" => state.check_for_updates(true),
-        "about" => state.about_open.set(true),
-        "settings" => state.open_settings(),
-        "install-cli" => state.install_cli(),
-        "close-tab" => {
-            if let Some(id) = state.focused_active_id() {
-                state.close(id);
-            }
-        }
-        _ => {}
-    }
+    crate::commands::dispatch(state, id);
 }
 
 pub fn command_palette(state: AppState) -> impl IntoView {

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::ext_event::create_signal_from_channel;
-use floem::keyboard::{Key, Modifiers, NamedKey};
+use floem::keyboard::{Key, Modifiers};
 use floem::kurbo::Size;
 use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_container, stack, Decorators};
@@ -52,234 +52,16 @@ pub fn launch() {
         .run();
 }
 
+
 /// Central keyboard shortcut dispatch. Returns true if the key was handled.
 ///
-/// This is invoked both from the editor's key handler (so shortcuts work while
-/// the editor is focused — it otherwise consumes every key) and from a global
-/// fallback listener (for when nothing focusable is active).
+/// Keys are resolved through the (default + user-overridable) keymap and routed
+/// to the matching command. Invoked from the editor key handler and a global
+/// fallback listener.
 pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bool {
-    let cmd = mods.meta() || mods.control();
-    let shift = mods.shift();
-
-    match key {
-        Key::Character(s) => {
-            let c = s.to_lowercase();
-            match c.as_str() {
-                "z" if mods.alt() && !cmd => {
-                    state.toggle_word_wrap();
-                    true
-                }
-                _ if !cmd => false,
-                "p" if shift => {
-                    state.cmd.open.set(true);
-                    true
-                }
-                "b" if shift => {
-                    state.open_task_palette();
-                    true
-                }
-                "p" => {
-                    state.palette_open.update(|o| *o = !*o);
-                    true
-                }
-                "n" => {
-                    state.new_untitled();
-                    true
-                }
-                "s" if shift => {
-                    state.save_active_as();
-                    true
-                }
-                "s" => {
-                    state.save_active();
-                    true
-                }
-                "w" => {
-                    if state.agent_focused.get() {
-                        state.agent_open.set(false);
-                    } else if state.terminal_focused.get() {
-                        if let Some(id) = state.focused_term_id() {
-                            state.close_terminal(id);
-                        }
-                    } else if let Some(id) = state.focused_active_id() {
-                        state.close(id);
-                    }
-                    true
-                }
-                "t" => {
-                    state.toggle_terminal();
-                    true
-                }
-                "o" if shift => {
-                    state.open_symbol_search();
-                    true
-                }
-                "o" => {
-                    state.open_project_dialog();
-                    true
-                }
-                "f" if shift => {
-                    state.open_global_search();
-                    true
-                }
-                "f" if mods.alt() => {
-                    state.open_replace();
-                    true
-                }
-                "f" => {
-                    state.open_find();
-                    true
-                }
-                "\\" => {
-                    state.toggle_split();
-                    true
-                }
-                "1" => {
-                    state.sidebar_open.update(|o| *o = !*o);
-                    true
-                }
-                "2" => {
-                    state.toggle_git_panel();
-                    true
-                }
-                "=" | "+" => {
-                    state.zoom(1);
-                    true
-                }
-                "-" if mods.control() && !mods.meta() && shift => {
-                    state.nav_forward();
-                    true
-                }
-                "-" if mods.control() && !mods.meta() => {
-                    state.nav_back();
-                    true
-                }
-                "-" => {
-                    state.zoom(-1);
-                    true
-                }
-                "0" => {
-                    state.zoom_reset();
-                    true
-                }
-                "l" => {
-                    state.toggle_agent();
-                    true
-                }
-                "," => {
-                    state.open_settings();
-                    true
-                }
-                "d" if shift => {
-                    state.select_next_occurrence();
-                    true
-                }
-                "d" => {
-                    state.duplicate_line();
-                    true
-                }
-                "e" => {
-                    state.open_recent();
-                    true
-                }
-                "/" => {
-                    state.toggle_comment();
-                    true
-                }
-                "g" if mods.control() && !mods.meta() => {
-                    state.open_goto_line();
-                    true
-                }
-                "k" if shift => {
-                    state.delete_line();
-                    true
-                }
-                "]" => {
-                    state.indent_lines();
-                    true
-                }
-                "[" => {
-                    state.outdent_lines();
-                    true
-                }
-                "m" if shift => {
-                    state.toggle_md_preview();
-                    true
-                }
-                "`" if mods.control() => {
-                    state.toggle_terminal();
-                    true
-                }
-                " " => {
-                    if let Some(id) = state.focused_active_id() {
-                        state.request_completion(id);
-                    }
-                    true
-                }
-                _ => false,
-            }
-        }
-        Key::Named(named) => match named {
-            NamedKey::F1 if mods.is_empty() => {
-                state.request_hover();
-                true
-            }
-            NamedKey::F2 if mods.is_empty() => {
-                state.open_rename();
-                true
-            }
-            NamedKey::F8 if mods.is_empty() => {
-                theme::toggle();
-                true
-            }
-            NamedKey::F12 if shift => {
-                state.request_references();
-                true
-            }
-            NamedKey::F12 if mods.is_empty() => {
-                state.goto_definition();
-                true
-            }
-            NamedKey::Space if cmd => {
-                if let Some(id) = state.focused_active_id() {
-                    state.request_completion(id);
-                }
-                true
-            }
-            NamedKey::ArrowUp if mods.alt() && !shift => {
-                state.move_line_up();
-                true
-            }
-            NamedKey::ArrowDown if mods.alt() && !shift => {
-                state.move_line_down();
-                true
-            }
-            NamedKey::ArrowDown if mods.alt() && shift => {
-                state.duplicate_line();
-                true
-            }
-            NamedKey::Escape => {
-                state.close_completion();
-                state.close_hover();
-                state.close_signature();
-                state.picker.open.set(false);
-                state.palette_open.set(false);
-                state.cmd.open.set(false);
-                state.md_preview.set(false);
-                state.diff_open.set(false);
-                state.about_open.set(false);
-                state.close_find();
-                state.close_rename();
-                state.close_goto_line();
-
-                state.cancel_close();
-                state.close_recent();
-                state.task.open.set(false);
-                true
-            }
-            _ => false,
-        },
-        _ => false,
+    match crate::keymap::command_for(key, mods) {
+        Some(id) => crate::commands::dispatch(state, &id),
+        None => false,
     }
 }
 
@@ -367,6 +149,7 @@ fn app_view() -> impl IntoView {
     let (root, file) = resolve_args();
     let state = AppState::new(Scope::current(), root);
     crate::snippets::set_user(crate::config::load_user_snippets());
+    crate::keymap::load(crate::config::load_user_keybindings());
 
     // Restore the saved theme, and persist it whenever it changes.
     theme::set_dark(crate::config::load_dark());

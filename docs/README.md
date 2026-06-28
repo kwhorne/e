@@ -23,7 +23,7 @@ native code editor written in Rust.
 - [AI Agents](agents.md) — running coding agents in the editor
 
 ### Configuration & maintenance
-- [Configuration](configuration.md) — `config.json`, themes, settings
+- [Configuration](configuration.md) · [Keybindings](keybindings.md) — `config.json`, themes, settings
 - [Updating](updating.md) — the built-in auto-updater
 - [Troubleshooting](troubleshooting.md) — common issues and fixes
 

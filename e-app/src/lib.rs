@@ -13,6 +13,8 @@ mod framework_completion;
 mod hints_doc;
 mod task_palette;
 mod tasks;
+mod commands;
+mod keymap;
 mod about;
 mod update_view;
 mod updater;

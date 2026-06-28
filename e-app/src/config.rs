@@ -205,6 +205,19 @@ pub fn settings_path() -> Option<PathBuf> {
 
 /// User-defined snippets, keyed by language id, from the `snippets` section:
 /// `"snippets": { "php": [ { "prefix": "dd", "body": "dd($0);" } ] }`.
+pub fn load_user_keybindings() -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let v = read();
+    if let Some(obj) = v.get("keybindings").and_then(|s| s.as_object()) {
+        for (k, val) in obj {
+            if let Some(cmd) = val.as_str() {
+                out.insert(k.clone(), cmd.to_string());
+            }
+        }
+    }
+    out
+}
+
 pub fn load_user_snippets() -> std::collections::HashMap<String, Vec<(String, String)>> {
     let mut out = std::collections::HashMap::new();
     let v = read();

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Database: inline cell editing (double-click a cell in a table with a primary
+  key), saved queries (per project), ClickHouse support (HTTP interface), and SSH
+  tunnels for remote databases.
+
 ## [0.4.0] - 2026-06-28
 
 ### Added

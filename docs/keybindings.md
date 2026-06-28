@@ -57,6 +57,7 @@ Examples: `cmd+shift+p`, `ctrl+g`, `alt+up`, `cmd+/`, `f12`, `shift+f12`.
 | `delete-line` | `cmd+shift+k` | Delete line |
 | `indent` / `outdent` | `cmd+]` / `cmd+[` | Indent / outdent |
 | `select-next-occurrence` | `cmd+shift+d` | Add cursor at next match |
+| `select-all-occurrences` | `cmd+shift+l` | Add cursor at all matches |
 | `completion` | `cmd+space` | Trigger completion |
 | `hover` | `f1` | Hover info |
 | `definition` / `references` | `f12` / `shift+f12` | Go to definition / references |

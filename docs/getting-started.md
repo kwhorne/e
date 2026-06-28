@@ -42,6 +42,8 @@ e path/to/file # open a file
 └───────────┴─────────────────────────────────────┴───────────────┘
 ```
 
+- Add more root folders with **Add Folder to Workspace** (multi-root); drag files
+  from Finder into the window to open them.
 - **Sidebar** (`⌘1`) — file explorer and document outline, or the Source Control
   panel (`⌘2`). Files show type-specific icons.
 - **Editor** — tabs, breadcrumbs, and the code area. Split with `⌘\`.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Multi-root workspaces: "Add Folder to Workspace" adds more root folders; the
+  explorer, file finder and search span them all.
+- Drag & drop files from Finder into the window to open them (folders open in a
+  new window).
+- Select all occurrences of the word/selection (⌘⇧L).
+
 ## [0.3.1] - 2026-06-28
 
 ### Added

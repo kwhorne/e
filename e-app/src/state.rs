@@ -356,6 +356,9 @@ pub struct AppState {
     pub db_test_state: RwSignal<String>,
     /// The connection key being edited (None when adding a new one).
     pub db_editing_key: RwSignal<Option<String>>,
+    /// Pending scroll delta for the results grid `(dx, dy, tick)`; the tick
+    /// makes every key press a distinct value so the scroll effect re-fires.
+    pub db_scroll: RwSignal<(f64, f64, u64)>,
 
     // ---- Auto-update ----------------------------------------------------
     /// The available update, if GitHub reports a newer release.
@@ -504,6 +507,7 @@ impl AppState {
             db_page: RwSignal::new(0),
             db_test_state: RwSignal::new(String::new()),
             db_editing_key: RwSignal::new(None),
+            db_scroll: RwSignal::new((0.0, 0.0, 0)),
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),

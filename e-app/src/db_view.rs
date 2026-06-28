@@ -9,6 +9,16 @@ use floem::IntoView;
 use crate::state::{AppState, DbEntry, DbForm};
 use crate::theme;
 
+/// Nudge the results-grid scroll by `(dx, dy)`; the tick makes each call a
+/// distinct signal value so the `scroll_delta` effect always re-fires.
+fn db_scroll(state: AppState, dx: f64, dy: f64) {
+    state.db_scroll.update(|(x, y, t)| {
+        *x = dx;
+        *y = dy;
+        *t = t.wrapping_add(1);
+    });
+}
+
 /// Collapse a cell value to a single line for the grid (DB values often hold
 /// multi-line text, which would otherwise blow up the row height).
 fn sanitize_cell(s: &str) -> String {
@@ -674,7 +684,35 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             s.items_start().width(w)
         }),
     )
-    .style(|s| s.flex_grow(1.0).width_full());
+    .scroll_delta(move || {
+        let (x, y, _) = state.db_scroll.get();
+        floem::kurbo::Vec2::new(x, y)
+    })
+    .style(|s| s.flex_grow(1.0).width_full())
+    .keyboard_navigable()
+    .request_focus(move || {
+        state.db_result_open.get();
+    })
+    .on_key_down(
+        floem::keyboard::Key::Named(floem::keyboard::NamedKey::ArrowRight),
+        |_| true,
+        move |_| db_scroll(state, 90.0, 0.0),
+    )
+    .on_key_down(
+        floem::keyboard::Key::Named(floem::keyboard::NamedKey::ArrowLeft),
+        |_| true,
+        move |_| db_scroll(state, -90.0, 0.0),
+    )
+    .on_key_down(
+        floem::keyboard::Key::Named(floem::keyboard::NamedKey::ArrowDown),
+        |_| true,
+        move |_| db_scroll(state, 0.0, 60.0),
+    )
+    .on_key_down(
+        floem::keyboard::Key::Named(floem::keyboard::NamedKey::ArrowUp),
+        |_| true,
+        move |_| db_scroll(state, 0.0, -60.0),
+    );
 
     stack((header, query_row, toolbar, status, grid)).style(move |s| {
         let s = s

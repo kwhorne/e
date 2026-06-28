@@ -68,6 +68,9 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "split-terminal" => state.split_terminal(),
         "agent" | "toggle-agent" => state.toggle_agent(),
         "toggle-database" => state.toggle_db_panel(),
+        "emmet-expand" => {
+            state.try_emmet_expand();
+        }
         "restart-agent" => state.restart_agent(),
         "markdown" => state.toggle_md_preview(),
         "theme" => theme::toggle(),

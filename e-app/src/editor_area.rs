@@ -226,6 +226,11 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                                     return CommandExecuted::Yes;
                                 }
                             }
+                            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Tab) => {
+                                if state.try_emmet_expand() {
+                                    return CommandExecuted::Yes;
+                                }
+                            }
                             _ => {}
                         }
                     }

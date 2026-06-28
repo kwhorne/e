@@ -17,6 +17,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("add-folder", "Add Folder to Workspace…"),
     ("laravel-refresh", "Laravel: Refresh Project Data"),
     ("toggle-database", "Toggle Database Panel"),
+    ("emmet-expand", "Emmet: Expand Abbreviation"),
     ("save-as", "Save As…"),
     ("recent", "Recent Files"),
     ("symbols", "Go to Symbol…"),

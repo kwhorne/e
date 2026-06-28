@@ -959,6 +959,59 @@ impl AppState {
 
     // ---- Merge conflicts ------------------------------------------------
 
+    /// Expand an Emmet abbreviation before the cursor (HTML-family languages).
+    /// Returns true when something was expanded (so Tab is consumed).
+    pub fn try_emmet_expand(&self) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        if !matches!(
+            buf.file.language,
+            Language::Html | Language::Php | Language::Blade | Language::Vue | Language::Svelte
+        ) {
+            return false;
+        }
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let end = editor.cursor.get_untracked().offset();
+        let text = buf.doc.text().to_string();
+        let end = end.min(text.len());
+        let line_start = text[..end].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_before = &text[line_start..end];
+
+        let Some((rel_start, abbr)) = crate::emmet::abbreviation_at(line_before) else {
+            return false;
+        };
+        if !crate::emmet::is_expandable(&abbr) {
+            return false;
+        }
+        let unit = " ".repeat(self.settings.get_untracked().tab_width.clamp(1, 8));
+        let Some(markup) = crate::emmet::expand(&abbr, &unit) else {
+            return false;
+        };
+
+        // Re-indent continuation lines to the current line's indentation.
+        let base = line_indent(&text, line_start);
+        let markup = markup.replace('\n', &format!("\n{base}"));
+        let caret = markup.find('\0').unwrap_or(markup.len());
+        let markup = markup.replace('\0', "");
+
+        let start = line_start + rel_start;
+        buf.doc.edit_single(
+            Selection::region(start, end),
+            &markup,
+            EditType::InsertChars,
+        );
+        let pos = start + caret;
+        editor.cursor.set(Cursor::new(
+            CursorMode::Insert(Selection::caret(pos)),
+            None,
+            None,
+        ));
+        true
+    }
+
     /// Convert the active buffer's line endings to CRLF (`true`) or LF.
     pub fn set_line_ending(&self, crlf: bool) {
         let Some(buf) = self.active_buffer() else {

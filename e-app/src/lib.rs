@@ -18,6 +18,7 @@ mod dialogs;
 mod diff_view;
 mod editing;
 mod editor_area;
+mod emmet;
 mod file_ops;
 mod file_tree;
 mod find;

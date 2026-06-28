@@ -12,10 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database panel (⌘3): browse and query MySQL/MariaDB, PostgreSQL and SQLite
   databases. Connect from the project's `.env` or manually (with a Test button),
   browse tables with sortable columns, paging, a Data/Structure view and CSV
-  export, and run SQL in a results grid. Right by default; configurable left.
-
-### Added
-
+  export, and run SQL in a results grid (⌘↵ to run, horizontal scroll and arrow
+  keys to pan). Right by default; configurable left.
 - Laravel features on par with the official VS Code extension: completion, hover
   and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()`/`trans()`
   and `<x-...>` Blade components, sourced from your project via `php artisan`.

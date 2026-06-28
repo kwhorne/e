@@ -210,17 +210,31 @@ pub fn highlight_lines(language: Language, text: &str) -> Vec<Vec<LineSpan>> {
     let line_bounds = line_bounds(text);
     let mut lines: Vec<Vec<LineSpan>> = vec![Vec::new(); line_bounds.len()];
 
+    let spans = match language {
+        Language::Blade => blade_spans(text),
+        _ => ts_spans(language, text),
+    };
+    for (start, end, kind) in spans {
+        push_span(&line_bounds, &mut lines, start, end, kind);
+    }
+    lines
+}
+
+type Span = (usize, usize, HighlightKind);
+
+/// Run a tree-sitter grammar and return flat (start, end, kind) byte spans.
+fn ts_spans(language: Language, text: &str) -> Vec<Span> {
     with_config(language, |config| {
         let Some(config) = config else {
-            return;
+            return Vec::new();
         };
         let mut highlighter = Highlighter::new();
         let events = match highlighter.highlight(config, text.as_bytes(), None, |_| None) {
             Ok(ev) => ev,
-            Err(_) => return,
+            Err(_) => return Vec::new(),
         };
-
         let mut stack: Vec<Highlight> = Vec::new();
+        let mut out = Vec::new();
         for event in events {
             match event {
                 Ok(HighlightEvent::HighlightStart(h)) => stack.push(h),
@@ -228,17 +242,156 @@ pub fn highlight_lines(language: Language, text: &str) -> Vec<Vec<LineSpan>> {
                     stack.pop();
                 }
                 Ok(HighlightEvent::Source { start, end }) => {
-                    let Some(h) = stack.last() else { continue };
-                    let Some(name) = NAMES.get(h.0) else { continue };
-                    let kind = name_to_kind(name);
-                    push_span(&line_bounds, &mut lines, start, end, kind);
+                    if let Some(h) = stack.last() {
+                        if let Some(name) = NAMES.get(h.0) {
+                            out.push((start, end, name_to_kind(name)));
+                        }
+                    }
                 }
-                Err(_) => return,
+                Err(_) => return Vec::new(),
             }
         }
-    });
+        out
+    })
+}
 
-    lines
+/// Highlight a fragment of PHP (no `<?php` tag) by wrapping it, mapping the
+/// resulting spans back into the original document at `base`.
+fn php_fragment_spans(inner: &str, base: usize, out: &mut Vec<Span>) {
+    const PREFIX: &str = "<?php ";
+    let wrapped = format!("{PREFIX}{inner}");
+    for (s, e, k) in ts_spans(Language::Php, &wrapped) {
+        if s >= PREFIX.len() {
+            out.push((base + s - PREFIX.len(), base + e - PREFIX.len(), k));
+        }
+    }
+}
+
+/// Blade = HTML + embedded PHP (`@php…@endphp`, `{{ }}`, `{!! !!}`) + directives.
+fn blade_spans(text: &str) -> Vec<Span> {
+    let html = ts_spans(Language::Html, text);
+    let mut over: Vec<Span> = Vec::new();
+    let len = text.len();
+    let mut i = 0;
+    while i < len {
+        if !text.is_char_boundary(i) {
+            i += 1;
+            continue;
+        }
+        let rest = &text[i..];
+        // Blade comment: {{-- … --}}
+        if rest.starts_with("{{--") {
+            let end = rest[4..].find("--}}").map(|p| i + 4 + p + 4).unwrap_or(len);
+            over.push((i, end, HighlightKind::Comment));
+            i = end;
+            continue;
+        }
+        // Raw echo: {!! … !!}
+        if rest.starts_with("{!!") {
+            let close = rest[3..].find("!!}").map(|p| i + 3 + p).unwrap_or(len);
+            over.push((i, (i + 3).min(len), HighlightKind::Operator));
+            php_fragment_spans(
+                &text[(i + 3).min(close)..close],
+                (i + 3).min(close),
+                &mut over,
+            );
+            let after = (close + 3).min(len);
+            if close < len {
+                over.push((close, after, HighlightKind::Operator));
+            }
+            i = after;
+            continue;
+        }
+        // Echo: {{ … }}
+        if rest.starts_with("{{") {
+            let close = rest[2..].find("}}").map(|p| i + 2 + p).unwrap_or(len);
+            over.push((i, (i + 2).min(len), HighlightKind::Operator));
+            php_fragment_spans(
+                &text[(i + 2).min(close)..close],
+                (i + 2).min(close),
+                &mut over,
+            );
+            let after = (close + 2).min(len);
+            if close < len {
+                over.push((close, after, HighlightKind::Operator));
+            }
+            i = after;
+            continue;
+        }
+        // @php … @endphp block.
+        let rb = rest.as_bytes();
+        if rest.starts_with("@php") && rb.get(4).is_none_or(|b| !is_word(*b)) {
+            over.push((i, i + 4, HighlightKind::Keyword));
+            if let Some(p) = rest.find("@endphp") {
+                let inner_start = i + 4;
+                let endphp = i + p;
+                php_fragment_spans(&text[inner_start..endphp], inner_start, &mut over);
+                over.push((endphp, endphp + 7, HighlightKind::Keyword));
+                i = endphp + 7;
+            } else {
+                i += 4;
+            }
+            continue;
+        }
+        // A Blade directive: @word
+        if rest.starts_with('@') && rb.get(1).is_some_and(|b| b.is_ascii_alphabetic()) {
+            let mut j = 1;
+            while j < rb.len() && is_word(rb[j]) {
+                j += 1;
+            }
+            over.push((i, i + j, HighlightKind::Keyword));
+            i += j;
+            continue;
+        }
+        i += 1;
+    }
+    merge_spans(html, over)
+}
+
+fn is_word(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Combine base spans with override spans: where they overlap, the override
+/// wins. Returns a flat (possibly unsorted) list of non-overlapping spans.
+fn merge_spans(base: Vec<Span>, over: Vec<Span>) -> Vec<Span> {
+    // Merge the override byte ranges into disjoint intervals.
+    let mut iv: Vec<(usize, usize)> = over.iter().map(|(s, e, _)| (*s, *e)).collect();
+    iv.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (s, e) in iv {
+        if let Some(last) = merged.last_mut() {
+            if s <= last.1 {
+                last.1 = last.1.max(e);
+                continue;
+            }
+        }
+        merged.push((s, e));
+    }
+
+    let mut out = over;
+    for (hs, he, hk) in base {
+        let mut cur = hs;
+        for &(cs, ce) in &merged {
+            if ce <= cur {
+                continue;
+            }
+            if cs >= he {
+                break;
+            }
+            if cs > cur {
+                out.push((cur, cs.min(he), hk));
+            }
+            cur = cur.max(ce);
+            if cur >= he {
+                break;
+            }
+        }
+        if cur < he {
+            out.push((cur, he, hk));
+        }
+    }
+    out
 }
 
 /// `(line_start_byte, content_end_byte)` per line, excluding the newline.
@@ -305,5 +458,49 @@ mod tests {
         let kinds: Vec<_> = lines[0].iter().map(|s| s.kind).collect();
         assert!(kinds.contains(&HighlightKind::Keyword));
         assert!(kinds.contains(&HighlightKind::Function));
+    }
+}
+
+#[cfg(test)]
+mod blade_tests {
+    use super::{highlight_lines, HighlightKind};
+    use crate::language::Language;
+
+    #[test]
+    fn blade_directives_and_php() {
+        let src =
+            "@php\n$x = route('home');\n@endphp\n{{ $user->name }}\n{{-- c --}}\n<div>hi</div>\n";
+        let lines = highlight_lines(Language::Blade, src);
+        // @php is a keyword
+        assert!(
+            lines[0].iter().any(|s| s.kind == HighlightKind::Keyword),
+            "line0={:?}",
+            lines[0]
+        );
+        // embedded PHP: variable + function/string somewhere on line 1
+        let k1: Vec<_> = lines[1].iter().map(|s| s.kind).collect();
+        assert!(
+            k1.contains(&HighlightKind::Variable) || k1.contains(&HighlightKind::String),
+            "line1={:?}",
+            lines[1]
+        );
+        // {{ }} echo has operator braces + variable inside (line 3)
+        assert!(
+            lines[3].iter().any(|s| s.kind == HighlightKind::Operator),
+            "line3={:?}",
+            lines[3]
+        );
+        // comment line 4
+        assert!(
+            lines[4].iter().any(|s| s.kind == HighlightKind::Comment),
+            "line4={:?}",
+            lines[4]
+        );
+        // html tag line 5
+        assert!(
+            lines[5].iter().any(|s| s.kind == HighlightKind::Tag),
+            "line5={:?}",
+            lines[5]
+        );
     }
 }

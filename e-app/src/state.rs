@@ -2147,6 +2147,7 @@ impl AppState {
         self.db_query_text.set(sql);
     }
 
+    #[allow(dead_code)]
     pub fn db_delete_query(&self, name: String) {
         self.db_queries.update(|q| q.retain(|x| x.name != name));
         let _ = e_db::save_queries(&self.root.get_untracked(), &self.db_queries.get_untracked());

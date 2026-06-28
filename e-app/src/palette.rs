@@ -10,14 +10,37 @@ use floem::IntoView;
 use crate::state::AppState;
 use crate::theme;
 
-const MAX_FILES: usize = 5000;
+const MAX_FILES: usize = 40_000;
 const MAX_RESULTS: usize = 200;
 
-/// Recursively collect files under `root`, skipping noise.
+/// Directories that are almost never the target of a quick-open and would
+/// otherwise blow up the index (especially when a high-level folder is opened).
+fn skip_dir(name: &str) -> bool {
+    name.starts_with('.')
+        || matches!(
+            name,
+            "target"
+                | "node_modules"
+                | "vendor"
+                | "dist"
+                | "build"
+                | "Pods"
+                | "DerivedData"
+                | "System"
+                | "Library"
+                | "Applications"
+        )
+}
+
+/// Collect files under `root`, breadth-first so shallow (more relevant) files
+/// are indexed first, skipping noise. Capped at `MAX_FILES`.
 fn collect_files(root: &Path) -> Vec<PathBuf> {
+    use std::collections::VecDeque;
     let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
+    let mut queue = VecDeque::new();
+    queue.push_back(root.to_path_buf());
+    let is_root = root == Path::new("/");
+    while let Some(dir) = queue.pop_front() {
         if out.len() >= MAX_FILES {
             break;
         }
@@ -27,19 +50,81 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
         for entry in read.filter_map(|e| e.ok()) {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with('.') || name == "target" || name == "node_modules" {
+            // Only apply the heavyweight system-dir skips near the filesystem
+            // root; inside a project, those names are unlikely and harmless.
+            if name.starts_with('.')
+                || matches!(name.as_ref(), "target" | "node_modules" | "vendor")
+                || (is_root && skip_dir(&name))
+            {
                 continue;
             }
             let path = entry.path();
             match entry.file_type() {
-                Ok(t) if t.is_dir() => stack.push(path),
+                Ok(t) if t.is_dir() => queue.push_back(path),
                 Ok(_) => out.push(path),
                 Err(_) => {}
             }
         }
     }
-    out.sort();
     out
+}
+
+/// Subsequence fuzzy score; higher is better. `None` if `q` is not a
+/// subsequence of `text`. Rewards consecutive matches and word boundaries.
+fn fuzzy_score(q: &str, text: &str) -> Option<i64> {
+    if q.is_empty() {
+        return Some(0);
+    }
+    let tb = text.as_bytes();
+    let qb = q.as_bytes();
+    let (mut ti, mut qi) = (0usize, 0usize);
+    let mut score = 0i64;
+    let mut last: i64 = -2;
+    while ti < tb.len() && qi < qb.len() {
+        if tb[ti] == qb[qi] {
+            let mut s = 1i64;
+            if ti as i64 == last + 1 {
+                s += 6; // consecutive
+            }
+            if ti == 0 || matches!(tb[ti - 1], b'/' | b'_' | b'-' | b'.' | b' ') {
+                s += 10; // start of a path/word segment
+            }
+            score += s;
+            last = ti as i64;
+            qi += 1;
+        }
+        ti += 1;
+    }
+    if qi == qb.len() {
+        Some(score)
+    } else {
+        None
+    }
+}
+
+/// Rank a file (relative path) against a lowercase query. Filename matches are
+/// weighted far above path matches, and shorter paths win ties.
+fn rank(q: &str, rel: &str) -> Option<i64> {
+    let rel_l = rel.to_lowercase();
+    let name = rel_l.rsplit('/').next().unwrap_or(&rel_l);
+
+    let mut score = if let Some(ns) = fuzzy_score(q, name) {
+        let mut s = ns * 8 + 200;
+        if name == q {
+            s += 2000;
+        } else if name.starts_with(q) {
+            s += 600;
+        } else if name.contains(q) {
+            s += 250;
+        }
+        s + fuzzy_score(q, &rel_l).unwrap_or(0)
+    } else {
+        fuzzy_score(q, &rel_l)?
+    };
+    // Prefer shorter, shallower paths.
+    score -= (rel_l.len() as i64) / 6;
+    score -= rel_l.matches('/').count() as i64 * 2;
+    Some(score)
 }
 
 fn rel(path: &Path, root: &Path) -> String {
@@ -47,6 +132,37 @@ fn rel(path: &Path, root: &Path) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rank, MAX_RESULTS};
+
+    fn best<'a>(q: &str, paths: &[&'a str]) -> &'a str {
+        let mut scored: Vec<(i64, &str)> = paths
+            .iter()
+            .filter_map(|p| rank(q, p).map(|s| (s, *p)))
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
+        scored.first().map(|(_, p)| *p).unwrap_or("")
+    }
+
+    #[test]
+    fn filename_beats_deep_path() {
+        let paths = [
+            "Applications/Devin.app/Contents/Resources/app/out/vs/workbench/contrib/welcomeGettingStarted.js",
+            "resources/views/welcome.blade.php",
+        ];
+        assert_eq!(best("welcome", &paths), "resources/views/welcome.blade.php");
+        assert_eq!(best("welc", &paths), "resources/views/welcome.blade.php");
+    }
+
+    #[test]
+    fn fuzzy_subsequence_matches() {
+        assert!(rank("wbp", "resources/views/welcome.blade.php").is_some());
+        assert!(rank("xyz", "resources/views/welcome.blade.php").is_none());
+        assert!(MAX_RESULTS > 0);
+    }
 }
 
 pub fn palette(state: AppState) -> impl IntoView {
@@ -58,19 +174,22 @@ pub fn palette(state: AppState) -> impl IntoView {
     // tracking `open` (which would re-grab on close and steal/loop focus).
     let focus_pulse: RwSignal<u64> = RwSignal::new(0);
 
-    // (Re)load the file list whenever the palette opens.
+    // (Re)load the file list whenever the palette opens — off the UI thread so
+    // it stays instant even when a huge folder (or `/`) is open.
     create_effect(move |_| {
         if state.palette_open.get() {
-            let all: Vec<PathBuf> = state
-                .roots
-                .get()
-                .iter()
-                .flat_map(|r| collect_files(r))
-                .collect();
-            files.set(all);
             query.set(String::new());
             selected.set(0);
+            files.set(Vec::new());
             focus_pulse.update(|x| *x += 1);
+            let roots = state.roots.get_untracked();
+            let send = floem::ext_event::create_ext_action(state.cx, move |all: Vec<PathBuf>| {
+                files.set(all);
+            });
+            std::thread::spawn(move || {
+                let all: Vec<PathBuf> = roots.iter().flat_map(|r| collect_files(r)).collect();
+                send(all);
+            });
         }
     });
 
@@ -78,11 +197,26 @@ pub fn palette(state: AppState) -> impl IntoView {
     let filtered = move || -> Vec<PathBuf> {
         let q = query.get().to_lowercase();
         let root = state.root.get();
-        files
-            .get()
+        let all = files.get();
+        if q.is_empty() {
+            return all.into_iter().take(MAX_RESULTS).collect();
+        }
+        let mut scored: Vec<(i64, PathBuf)> = all
             .into_iter()
-            .filter(|p| q.is_empty() || rel(p, &root).to_lowercase().contains(&q))
+            .filter_map(|p| {
+                let r = rel(&p, &root);
+                rank(&q, &r).map(|s| (s, p))
+            })
+            .collect();
+        // Highest score first; break ties by shorter path.
+        scored.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| rel(&a.1, &root).len().cmp(&rel(&b.1, &root).len()))
+        });
+        scored
+            .into_iter()
             .take(MAX_RESULTS)
+            .map(|(_, p)| p)
             .collect()
     };
 

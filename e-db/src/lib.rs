@@ -270,6 +270,108 @@ pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
     }
 }
 
+/// Column metadata for the structure view.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct ColumnInfo {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub key: String,
+}
+
+pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
+    match conn {
+        Conn::Mysql(pool) => {
+            use mysql::prelude::Queryable;
+            let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            let q = format!("SHOW COLUMNS FROM `{}`", table.replace('`', "``"));
+            let rows: Vec<(String, String, String, String, Option<String>, String)> =
+                c.query(q).map_err(|e| e.to_string())?;
+            Ok(rows
+                .into_iter()
+                .map(|(field, ty, null, key, _d, _e)| ColumnInfo {
+                    name: field,
+                    data_type: ty,
+                    nullable: null.eq_ignore_ascii_case("YES"),
+                    key,
+                })
+                .collect())
+        }
+        Conn::Sqlite(path) => {
+            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let q = format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\""));
+            let mut stmt = c.prepare(&q).map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(ColumnInfo {
+                        name: r.get::<_, String>(1)?,
+                        data_type: r.get::<_, String>(2).unwrap_or_default(),
+                        nullable: r.get::<_, i64>(3).unwrap_or(0) == 0,
+                        key: if r.get::<_, i64>(5).unwrap_or(0) > 0 {
+                            "PRI".into()
+                        } else {
+                            String::new()
+                        },
+                    })
+                })
+                .map_err(|e| e.to_string())?;
+            Ok(rows.filter_map(|r| r.ok()).collect())
+        }
+        Conn::Postgres(m) => {
+            let mut client = m.lock().unwrap();
+            let t = table.replace('\'', "''");
+            let pk = pg_query(
+                &mut client,
+                &format!(
+                    "SELECT kcu.column_name FROM information_schema.table_constraints tc \
+                     JOIN information_schema.key_column_usage kcu \
+                       ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema \
+                     WHERE tc.table_name = '{t}' AND tc.constraint_type = 'PRIMARY KEY'"
+                ),
+                MAX_ROWS,
+            )?;
+            let pks: std::collections::HashSet<String> = pk
+                .rows
+                .into_iter()
+                .filter_map(|r| r.into_iter().next().flatten())
+                .collect();
+            let res = pg_query(
+                &mut client,
+                &format!(
+                    "SELECT column_name, data_type, is_nullable FROM information_schema.columns \
+                     WHERE table_name = '{t}' ORDER BY ordinal_position"
+                ),
+                MAX_ROWS,
+            )?;
+            Ok(res
+                .rows
+                .into_iter()
+                .map(|r| {
+                    let name = r.first().cloned().flatten().unwrap_or_default();
+                    let data_type = r.get(1).cloned().flatten().unwrap_or_default();
+                    let nullable = r
+                        .get(2)
+                        .cloned()
+                        .flatten()
+                        .unwrap_or_default()
+                        .eq_ignore_ascii_case("YES");
+                    let key = if pks.contains(&name) {
+                        "PRI".to_string()
+                    } else {
+                        String::new()
+                    };
+                    ColumnInfo {
+                        name,
+                        data_type,
+                        nullable,
+                        key,
+                    }
+                })
+                .collect())
+        }
+    }
+}
+
 /// Quote an identifier for the given engine.
 fn quote_ident(engine: &str, ident: &str) -> String {
     match engine {
@@ -280,8 +382,28 @@ fn quote_ident(engine: &str, ident: &str) -> String {
 
 /// `SELECT * FROM <table> LIMIT <max>` for browsing a table.
 pub fn table_data(conn: &Conn, engine: &str, table: &str, max: usize) -> Result<QueryResult, String> {
-    let sql = format!("SELECT * FROM {} LIMIT {}", quote_ident(engine, table), max);
+    let sql = browse_sql(engine, table, None, max, 0);
     query(conn, &sql, max)
+}
+
+/// Build a browsing query with optional sort + pagination.
+pub fn browse_sql(
+    engine: &str,
+    table: &str,
+    order_by: Option<(&str, bool)>,
+    limit: usize,
+    offset: usize,
+) -> String {
+    let mut sql = format!("SELECT * FROM {}", quote_ident(engine, table));
+    if let Some((col, asc)) = order_by {
+        sql.push_str(&format!(
+            " ORDER BY {} {}",
+            quote_ident(engine, col),
+            if asc { "ASC" } else { "DESC" }
+        ));
+    }
+    sql.push_str(&format!(" LIMIT {limit} OFFSET {offset}"));
+    sql
 }
 
 // ── query ──────────────────────────────────────────────────────

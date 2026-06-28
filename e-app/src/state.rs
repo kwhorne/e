@@ -342,6 +342,20 @@ pub struct AppState {
     pub db_result_key: RwSignal<Option<String>>,
     /// The SQL editor text in query mode.
     pub db_query_text: RwSignal<String>,
+    /// The table being browsed (None in free-query mode).
+    pub db_result_table: RwSignal<Option<String>>,
+    /// Results subview: `data` or `structure`.
+    pub db_subview: RwSignal<String>,
+    /// Structure (column) metadata for the browsed table.
+    pub db_columns: RwSignal<Vec<e_db::ColumnInfo>>,
+    /// Active sort: `(column, ascending)`.
+    pub db_sort: RwSignal<Option<(String, bool)>>,
+    /// Current page (0-based) when browsing a table.
+    pub db_page: RwSignal<usize>,
+    /// Test-connection state for the add form: ``/`testing`/`ok`/error.
+    pub db_test_state: RwSignal<String>,
+    /// The connection key being edited (None when adding a new one).
+    pub db_editing_key: RwSignal<Option<String>>,
 
     // ---- Auto-update ----------------------------------------------------
     /// The available update, if GitHub reports a newer release.
@@ -392,6 +406,18 @@ pub struct AppState {
     pub nav_fwd_stack: RwSignal<Vec<(PathBuf, usize, usize)>>,
     /// Bumped when blame data finishes loading, to refresh the status bar.
     pub blame_rev: RwSignal<u64>,
+}
+
+/// Rows per page when browsing a table in the Database panel.
+const DB_PAGE: usize = 200;
+
+/// Quote a CSV field if it contains a comma, quote or newline.
+fn csv_escape(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
 }
 
 fn now_ms() -> u128 {
@@ -471,6 +497,13 @@ impl AppState {
             db_result_loading: RwSignal::new(false),
             db_result_key: RwSignal::new(None),
             db_query_text: RwSignal::new(String::new()),
+            db_result_table: RwSignal::new(None),
+            db_subview: RwSignal::new("data".into()),
+            db_columns: RwSignal::new(Vec::new()),
+            db_sort: RwSignal::new(None),
+            db_page: RwSignal::new(0),
+            db_test_state: RwSignal::new(String::new()),
+            db_editing_key: RwSignal::new(None),
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
@@ -2012,13 +2045,6 @@ impl AppState {
         self.db_add_config(cfg);
     }
 
-    pub fn db_add_manual(&self) {
-        let cfg = self.db_form.get_untracked().to_config();
-        self.db_add_config(cfg);
-        self.db_form.set(DbForm::default());
-        self.db_adding.set(false);
-    }
-
     fn db_add_config(&self, cfg: e_db::DbConfig) {
         let key = cfg.key();
         if self.db_conns.with_untracked(|c| c.iter().any(|e| e.key() == key)) {
@@ -2095,14 +2121,45 @@ impl AppState {
 
     /// Open a table's rows in the results overlay.
     pub fn db_open_table(&self, entry: DbEntry, table: String) {
+        if entry.conn.get_untracked().is_none() {
+            return;
+        }
+        self.db_result_key.set(Some(entry.key()));
+        self.db_result_table.set(Some(table.clone()));
+        self.db_result_title
+            .set(format!("{} · {}", entry.config.display_name(), table));
+        self.db_subview.set("data".into());
+        self.db_sort.set(None);
+        self.db_page.set(0);
+        self.db_columns.set(Vec::new());
+        self.db_result_open.set(true);
+        self.db_load_columns(entry.clone(), table.clone());
+        self.db_reload_table();
+    }
+
+    /// (Re)run the browse query for the current table, sort and page.
+    pub fn db_reload_table(&self) {
+        let (Some(key), Some(table)) =
+            (self.db_result_key.get_untracked(), self.db_result_table.get_untracked())
+        else {
+            return;
+        };
+        let Some(entry) = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
         let Some(conn) = entry.conn.get_untracked() else {
             return;
         };
         let engine = entry.config.engine.clone();
-        self.db_result_key.set(Some(entry.key()));
-        self.db_result_title.set(format!("{} · {}", entry.config.display_name(), table));
-        self.db_query_text.set(format!("SELECT * FROM {table} LIMIT 200"));
-        self.db_result_open.set(true);
+        let page = self.db_page.get_untracked();
+        let sort = self.db_sort.get_untracked();
+        self.db_query_text.set({
+            let by = sort.as_ref().map(|(c, a)| (c.as_str(), *a));
+            e_db::browse_sql(&engine, &table, by, DB_PAGE, page * DB_PAGE)
+        });
         self.db_result_loading.set(true);
         self.db_result_error.set(None);
         let send = create_ext_action(self.cx, {
@@ -2110,7 +2167,137 @@ impl AppState {
             move |res: Result<e_db::QueryResult, String>| state.db_apply_result(res)
         });
         std::thread::spawn(move || {
-            send(e_db::table_data(&conn, &engine, &table, 200));
+            let by = sort.as_ref().map(|(c, a)| (c.as_str(), *a));
+            let sql = e_db::browse_sql(&engine, &table, by, DB_PAGE, page * DB_PAGE);
+            send(e_db::query(&conn, &sql, DB_PAGE));
+        });
+    }
+
+    /// Toggle the sort on a column (asc → desc → off) and reload.
+    pub fn db_sort_by(&self, col: String) {
+        let next = match self.db_sort.get_untracked() {
+            Some((c, true)) if c == col => Some((col, false)),
+            Some((c, false)) if c == col => None,
+            _ => Some((col, true)),
+        };
+        self.db_sort.set(next);
+        self.db_page.set(0);
+        self.db_reload_table();
+    }
+
+    /// Move to the next/previous page when browsing a table.
+    pub fn db_page_by(&self, delta: i64) {
+        let cur = self.db_page.get_untracked() as i64;
+        let next = (cur + delta).max(0) as usize;
+        if next == self.db_page.get_untracked() {
+            return;
+        }
+        // Don't page past the end (a short page means we're at the last one).
+        if delta > 0 {
+            let len = self.db_result.with_untracked(|r| r.as_ref().map(|r| r.rows.len()).unwrap_or(0));
+            if len < DB_PAGE {
+                return;
+            }
+        }
+        self.db_page.set(next);
+        self.db_reload_table();
+    }
+
+    pub fn db_set_subview(&self, view: &str) {
+        self.db_subview.set(view.to_string());
+    }
+
+    fn db_load_columns(&self, entry: DbEntry, table: String) {
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let send = create_ext_action(self.cx, {
+            let state = *self;
+            move |cols: Vec<e_db::ColumnInfo>| state.db_columns.set(cols)
+        });
+        std::thread::spawn(move || {
+            send(e_db::columns(&conn, &table).unwrap_or_default());
+        });
+    }
+
+    /// Test the current add-form connection without saving it.
+    pub fn db_test_connection(&self) {
+        let cfg = self.db_form.get_untracked().to_config();
+        self.db_test_state.set("testing".into());
+        let send = create_ext_action(self.cx, {
+            let state = *self;
+            move |res: Result<(), String>| {
+                state
+                    .db_test_state
+                    .set(match res {
+                        Ok(()) => "ok".into(),
+                        Err(e) => e,
+                    });
+            }
+        });
+        std::thread::spawn(move || {
+            send(e_db::test(&cfg));
+        });
+    }
+
+    /// Begin editing an existing connection (load it into the form).
+    pub fn db_start_edit(&self, entry: DbEntry) {
+        let c = &entry.config;
+        self.db_form.set(DbForm {
+            engine: c.engine.clone(),
+            host: c.host.clone(),
+            port: if c.port == 0 { String::new() } else { c.port.to_string() },
+            database: c.database.clone(),
+            username: c.username.clone(),
+            password: c.password.clone(),
+            path: c.path.clone(),
+            group: c.group.clone(),
+        });
+        self.db_editing_key.set(Some(entry.key()));
+        self.db_test_state.set(String::new());
+        self.db_adding.set(true);
+    }
+
+    /// Save the add/edit form: either add a new connection or replace one.
+    pub fn db_submit_form(&self) {
+        let cfg = self.db_form.get_untracked().to_config();
+        if let Some(old_key) = self.db_editing_key.get_untracked() {
+            self.db_conns.update(|c| c.retain(|e| e.key() != old_key));
+            self.db_editing_key.set(None);
+        }
+        self.db_form.set(DbForm::default());
+        self.db_adding.set(false);
+        self.db_test_state.set(String::new());
+        self.db_add_config(cfg);
+    }
+
+    /// Export the current result grid to a CSV file.
+    pub fn db_export_csv(&self) {
+        let Some(result) = self.db_result.get_untracked() else {
+            return;
+        };
+        if result.columns.is_empty() {
+            return;
+        }
+        let opts = floem::file::FileDialogOptions::new()
+            .title("Export results as CSV")
+            .default_name("results.csv");
+        floem::action::save_as(opts, move |info| {
+            let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
+                return;
+            };
+            let mut out = String::new();
+            out.push_str(&result.columns.join(","));
+            out.push('\n');
+            for row in &result.rows {
+                let cells: Vec<String> = row
+                    .iter()
+                    .map(|c| csv_escape(c.as_deref().unwrap_or("")))
+                    .collect();
+                out.push_str(&cells.join(","));
+                out.push('\n');
+            }
+            let _ = std::fs::write(&path, out);
         });
     }
 

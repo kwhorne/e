@@ -662,7 +662,17 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 }
             },
         )
-        .style(|s| s.min_width_full()),
+        .style(move |s| {
+            let w = if state.db_subview.get() == "structure" {
+                520.0
+            } else {
+                let n = state
+                    .db_result
+                    .with(|r| r.as_ref().map(|r| r.columns.len()).unwrap_or(0));
+                (n.max(1) as f64) * 180.0
+            };
+            s.items_start().width(w)
+        }),
     )
     .style(|s| s.flex_grow(1.0).width_full());
 

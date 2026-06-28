@@ -52,7 +52,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Open another project** (`⌘O`), **new file** (`⌘N`), **go to line** (`⌃G`)
 - **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search & replace** (`⌘⇧F`)
 - **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch switcher, commit history, stash, blame, merge-conflict resolution
-- **Database panel** (`⌘3`) — browse & query MySQL, PostgreSQL and SQLite; connect from `.env` or manually, sortable columns, structure view, CSV export, SQL editor
+- **Database panel** (`⌘3`) — browse & query MySQL, PostgreSQL, SQLite and ClickHouse; connect from `.env` or manually (with SSH tunnels), sortable columns, structure view, inline cell editing, saved queries, CSV export
 - **Laravel intelligence** — completion, hover and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()` and `<x-…>` components, sourced from your project
 - **Sticky scroll**, **drag-to-reorder & pinnable tabs**, **user-defined snippets**
 - **Task runner** (`⌘⇧B`) — npm/Composer/Cargo/Go/artisan/Make tasks and tests

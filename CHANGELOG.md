@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key), saved queries (per project), ClickHouse support (HTTP interface), and SSH
   tunnels for remote databases.
 
+### Changed
+
+- New application icon.
+
 ## [0.4.0] - 2026-06-28
 
 ### Added

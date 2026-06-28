@@ -359,6 +359,10 @@ pub struct AppState {
     /// Pending scroll delta for the results grid `(dx, dy, tick)`; the tick
     /// makes every key press a distinct value so the scroll effect re-fires.
     pub db_scroll: RwSignal<(f64, f64, u64)>,
+    /// The cell currently being edited `(row, col, column_name)`.
+    pub db_edit: RwSignal<Option<(usize, usize, String)>>,
+    pub db_edit_value: RwSignal<String>,
+    pub db_edit_null: RwSignal<bool>,
 
     // ---- Auto-update ----------------------------------------------------
     /// The available update, if GitHub reports a newer release.
@@ -508,6 +512,9 @@ impl AppState {
             db_test_state: RwSignal::new(String::new()),
             db_editing_key: RwSignal::new(None),
             db_scroll: RwSignal::new((0.0, 0.0, 0)),
+            db_edit: RwSignal::new(None),
+            db_edit_value: RwSignal::new(String::new()),
+            db_edit_null: RwSignal::new(false),
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
@@ -2374,6 +2381,107 @@ impl AppState {
 
     pub fn close_db_result(&self) {
         self.db_result_open.set(false);
+        self.db_edit.set(None);
+    }
+
+    /// Whether the current results grid supports inline editing (a browsed table
+    /// in data view, with a known primary key).
+    pub fn db_editable(&self) -> bool {
+        self.db_result_table.get_untracked().is_some()
+            && self.db_subview.get_untracked() == "data"
+            && self
+                .db_columns
+                .with_untracked(|c| c.iter().any(|c| c.key == "PRI"))
+    }
+
+    /// Begin editing the cell at `(row, col)`.
+    pub fn db_begin_edit(&self, row: usize, col: usize) {
+        if !self.db_editable() {
+            return;
+        }
+        let Some(result) = self.db_result.get_untracked() else {
+            return;
+        };
+        let Some(cell) = result.rows.get(row).and_then(|r| r.get(col)) else {
+            return;
+        };
+        let column = result.columns.get(col).cloned().unwrap_or_default();
+        self.db_edit_null.set(cell.is_none());
+        self.db_edit_value.set(cell.clone().unwrap_or_default());
+        self.db_edit.set(Some((row, col, column)));
+    }
+
+    pub fn db_cancel_edit(&self) {
+        self.db_edit.set(None);
+    }
+
+    /// Write the edited cell back to the database.
+    pub fn db_commit_edit(&self) {
+        let Some((row, col, column)) = self.db_edit.get_untracked() else {
+            return;
+        };
+        let (Some(key), Some(table)) = (
+            self.db_result_key.get_untracked(),
+            self.db_result_table.get_untracked(),
+        ) else {
+            return;
+        };
+        let Some(entry) = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let Some(result) = self.db_result.get_untracked() else {
+            return;
+        };
+        // Build the primary-key conditions from the row's current values.
+        let pk_names: Vec<String> = self.db_columns.with_untracked(|cols| {
+            cols.iter()
+                .filter(|c| c.key == "PRI")
+                .map(|c| c.name.clone())
+                .collect()
+        });
+        let mut pk: Vec<(String, Option<String>)> = Vec::new();
+        for name in &pk_names {
+            if let Some(idx) = result.columns.iter().position(|c| c == name) {
+                pk.push((name.clone(), result.rows[row].get(idx).cloned().flatten()));
+            }
+        }
+        let engine = entry.config.engine.clone();
+        let is_null = self.db_edit_null.get_untracked();
+        let value = self.db_edit_value.get_untracked();
+        let set_val = if is_null { None } else { Some(value.clone()) };
+
+        let state = *self;
+        let send = create_ext_action(self.cx, move |res: Result<u64, String>| match res {
+            Ok(_) => {
+                // Reflect the change in the in-memory grid.
+                state.db_result.update(|r| {
+                    if let Some(r) = r {
+                        if let Some(cell) = r.rows.get_mut(row).and_then(|row| row.get_mut(col)) {
+                            *cell = if is_null { None } else { Some(value.clone()) };
+                        }
+                    }
+                });
+                state.db_edit.set(None);
+            }
+            Err(e) => state.db_result_error.set(Some(e)),
+        });
+        std::thread::spawn(move || {
+            let pk_ref = pk;
+            send(e_db::update_cell(
+                &conn,
+                &engine,
+                &table,
+                &column,
+                set_val.as_deref(),
+                &pk_ref,
+            ));
+        });
     }
 
     /// Offer Laravel completions if the cursor is inside a helper string.

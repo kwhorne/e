@@ -3,7 +3,9 @@
 
 use floem::peniko::Color;
 use floem::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{dyn_container, dyn_stack, empty, label, scroll, stack, text_input, Decorators};
+use floem::views::{
+    container, dyn_container, dyn_stack, empty, label, scroll, stack, text_input, Decorators,
+};
 use floem::IntoView;
 
 use crate::state::{AppState, DbEntry, DbForm};
@@ -714,7 +716,15 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         move |_| db_scroll(state, 0.0, -60.0),
     );
 
-    stack((header, query_row, toolbar, status, grid)).style(move |s| {
+    stack((
+        header,
+        query_row,
+        toolbar,
+        status,
+        grid,
+        db_edit_popup(state),
+    ))
+    .style(move |s| {
         let s = s
             .absolute()
             .inset(0.0)
@@ -722,6 +732,131 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             .flex_col()
             .background(theme::bg());
         if state.db_result_open.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
+/// The inline cell-edit popup (double-click a cell in a browsed table).
+fn db_edit_popup(state: AppState) -> impl IntoView {
+    let title = label(move || match state.db_edit.get() {
+        Some((_, _, col)) => format!("Edit  {col}"),
+        None => String::new(),
+    })
+    .style(|s| {
+        s.font_size(13.0)
+            .font_bold()
+            .color(theme::fg())
+            .margin_bottom(8.0)
+    });
+
+    let input = text_input(state.db_edit_value)
+        .placeholder("value")
+        .style(move |s| {
+            let s = theme::input_colors(s)
+                .width_full()
+                .min_height(34.0)
+                .font_family("monospace".to_string())
+                .font_size(13.0)
+                .padding_horiz(8.0)
+                .padding_vert(6.0);
+            if state.db_edit_null.get() {
+                s.color(theme::fg_dim())
+            } else {
+                s
+            }
+        })
+        .on_key_down(
+            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter),
+            |m| m.meta() || m.control(),
+            move |_| state.db_commit_edit(),
+        )
+        .on_key_down(
+            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Escape),
+            |_| true,
+            move |_| state.db_cancel_edit(),
+        )
+        .request_focus(move || {
+            state.db_edit.get();
+        });
+
+    let null_toggle = label(move || {
+        if state.db_edit_null.get() {
+            "☑ NULL".to_string()
+        } else {
+            "☐ NULL".to_string()
+        }
+    })
+    .style(|s| {
+        s.font_size(12.0)
+            .color(theme::fg_dim())
+            .cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.color(theme::fg()))
+    })
+    .on_click_stop(move |_| state.db_edit_null.update(|n| *n = !*n));
+
+    let save = label(|| "Save  ⌘↵".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .background(theme::accent())
+                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .cursor(floem::style::CursorStyle::Pointer)
+        })
+        .on_click_stop(move |_| state.db_commit_edit());
+    let cancel = label(|| "Cancel".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_cancel_edit());
+
+    let buttons = stack((
+        null_toggle,
+        empty().style(|s| s.flex_grow(1.0)),
+        cancel,
+        save,
+    ))
+    .style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .margin_top(12.0)
+    });
+
+    let card = stack((title, input, buttons)).style(|s| {
+        s.flex_col()
+            .width(420.0)
+            .padding(16.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg())
+    });
+
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 120));
+        if state.db_edit.get().is_some() {
             s
         } else {
             s.hide()
@@ -743,7 +878,11 @@ fn result_grid(state: AppState) -> impl IntoView {
                     Some((sc, false)) if sc == col2 => " ▼",
                     _ => "",
                 };
-                format!("{col2}{arrow}")
+                let pk = state
+                    .db_columns
+                    .with(|cols| cols.iter().any(|c| c.name == col2 && c.key == "PRI"));
+                let key = if pk { "🔑 " } else { "" };
+                format!("{key}{col2}{arrow}")
             })
             .style(move |s| {
                 let s = s
@@ -788,33 +927,40 @@ fn result_grid(state: AppState) -> impl IntoView {
                 .unwrap_or_default()
         },
         |(i, _)| *i,
-        move |(_, row)| {
+        move |(ri, row)| {
             dyn_stack(
                 move || row.clone().into_iter().enumerate().collect::<Vec<_>>(),
                 |(i, _)| *i,
-                move |(_, cell)| {
+                move |(ci, cell)| {
                     let is_null = cell.is_none();
                     let text = match &cell {
                         Some(s) => sanitize_cell(s),
                         None => "NULL".to_string(),
                     };
-                    label(move || text.clone()).style(move |s| {
-                        let s = s
-                            .width(180.0)
-                            .flex_shrink(0.0)
-                            .height(26.0)
-                            .padding_horiz(8.0)
-                            .padding_vert(4.0)
-                            .font_size(12.0)
-                            .text_ellipsis()
-                            .border_right(1.0)
-                            .border_color(theme::border());
-                        if is_null {
-                            s.color(theme::fg_dim())
-                        } else {
-                            s.color(theme::fg())
-                        }
-                    })
+                    label(move || text.clone())
+                        .style(move |s| {
+                            let s = s
+                                .width(180.0)
+                                .flex_shrink(0.0)
+                                .height(26.0)
+                                .padding_horiz(8.0)
+                                .padding_vert(4.0)
+                                .font_size(12.0)
+                                .text_ellipsis()
+                                .border_right(1.0)
+                                .border_color(theme::border());
+                            let s = if is_null {
+                                s.color(theme::fg_dim())
+                            } else {
+                                s.color(theme::fg())
+                            };
+                            if state.db_editable() {
+                                s.cursor(floem::style::CursorStyle::Text)
+                            } else {
+                                s
+                            }
+                        })
+                        .on_double_click_stop(move |_| state.db_begin_edit(ri, ci))
                 },
             )
             .style(|s| {

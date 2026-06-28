@@ -385,8 +385,49 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
 fn quote_ident(engine: &str, ident: &str) -> String {
     match engine {
         "postgres" | "postgresql" | "pgsql" => format!("\"{}\"", ident.replace('"', "\"\"")),
+        "clickhouse" | "ch" => format!("`{}`", ident.replace('`', "``")),
         _ => format!("`{}`", ident.replace('`', "``")),
     }
+}
+
+/// Escape a string literal (double single-quotes).
+fn esc(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+/// Update a single cell, identified by the table's primary-key columns.
+/// `pk` is a list of `(column, value)` for the row's primary key.
+pub fn update_cell(
+    conn: &Conn,
+    engine: &str,
+    table: &str,
+    set_col: &str,
+    set_val: Option<&str>,
+    pk: &[(String, Option<String>)],
+) -> Result<u64, String> {
+    if pk.is_empty() {
+        return Err("Table has no primary key — cannot edit safely".into());
+    }
+    let set_expr = match set_val {
+        Some(v) => format!("'{}'", esc(v)),
+        None => "NULL".to_string(),
+    };
+    let conds: Vec<String> = pk
+        .iter()
+        .map(|(c, v)| match v {
+            Some(v) => format!("{} = '{}'", quote_ident(engine, c), esc(v)),
+            None => format!("{} IS NULL", quote_ident(engine, c)),
+        })
+        .collect();
+    let sql = format!(
+        "UPDATE {} SET {} = {} WHERE {}",
+        quote_ident(engine, table),
+        quote_ident(engine, set_col),
+        set_expr,
+        conds.join(" AND ")
+    );
+    let r = query(conn, &sql, 0)?;
+    Ok(r.rows_affected.unwrap_or(0))
 }
 
 /// `SELECT * FROM <table> LIMIT <max>` for browsing a table.

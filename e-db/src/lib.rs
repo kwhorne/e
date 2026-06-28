@@ -85,6 +85,13 @@ pub enum Conn {
     Mysql(mysql::Pool),
     Sqlite(String),
     Postgres(Mutex<postgres::Client>),
+    /// ClickHouse over its HTTP interface.
+    Clickhouse {
+        base_url: String,
+        user: String,
+        password: String,
+        database: String,
+    },
 }
 
 /// A query (or table) result, all cells stringified.
@@ -168,6 +175,23 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
             label,
             ..Default::default()
         }),
+        "clickhouse" => Some(DbConfig {
+            engine: "clickhouse".into(),
+            host,
+            // HTTP interface (native protocol is 9000; HTTP is 8123).
+            port: env
+                .get("DB_PORT")
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(8123),
+            database: env.get("DB_DATABASE").cloned().unwrap_or_default(),
+            username: env
+                .get("DB_USERNAME")
+                .cloned()
+                .unwrap_or_else(|| "default".into()),
+            password: env.get("DB_PASSWORD").cloned().unwrap_or_default(),
+            label,
+            ..Default::default()
+        }),
         "sqlite" => {
             let raw = env.get("DB_DATABASE").cloned().unwrap_or_default();
             let path = if raw.is_empty() {
@@ -235,6 +259,27 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
             let client = pg.connect(postgres::NoTls).map_err(|e| e.to_string())?;
             Conn::Postgres(Mutex::new(client))
         }
+        "clickhouse" | "ch" => {
+            let host = if config.host.is_empty() {
+                "127.0.0.1"
+            } else {
+                &config.host
+            };
+            let port = if config.port == 0 { 8123 } else { config.port };
+            let conn = Conn::Clickhouse {
+                base_url: format!("http://{host}:{port}/"),
+                user: if config.username.is_empty() {
+                    "default".to_string()
+                } else {
+                    config.username.clone()
+                },
+                password: config.password.clone(),
+                database: config.database.clone(),
+            };
+            // Validate eagerly.
+            ch_query(&conn, "SELECT 1", 1)?;
+            conn
+        }
         other => return Err(format!("Unsupported engine: {other}")),
     })
 }
@@ -276,7 +321,118 @@ pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
                 .filter_map(|r| r.into_iter().next().flatten())
                 .collect())
         }
+        Conn::Clickhouse { .. } => {
+            let res = ch_query(conn, "SHOW TABLES", MAX_ROWS)?;
+            Ok(res
+                .rows
+                .into_iter()
+                .filter_map(|r| r.into_iter().next().flatten())
+                .collect())
+        }
     }
+}
+
+// ── ClickHouse over HTTP ───────────────────────────────────────
+
+fn tsv_unescape(s: &str) -> String {
+    if !s.contains('\\') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('t') => out.push('\t'),
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('\\') => out.push('\\'),
+                Some('0') => out.push('\0'),
+                Some(other) => out.push(other),
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn ch_query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> {
+    let Conn::Clickhouse {
+        base_url,
+        user,
+        password,
+        database,
+    } = conn
+    else {
+        return Err("not a ClickHouse connection".into());
+    };
+    let select = is_select(sql);
+    let body = if select {
+        format!("{sql}\nFORMAT TabSeparatedWithNames")
+    } else {
+        sql.to_string()
+    };
+    let mut url = base_url.clone();
+    if !database.is_empty() {
+        url.push_str("?database=");
+        url.push_str(database);
+    }
+    let start = Instant::now();
+    let resp = ureq::post(&url)
+        .set("X-ClickHouse-User", user)
+        .set("X-ClickHouse-Key", password)
+        .send_string(&body);
+    let text = match resp {
+        Ok(r) => r.into_string().map_err(|e| e.to_string())?,
+        Err(ureq::Error::Status(_, r)) => {
+            return Err(r
+                .into_string()
+                .unwrap_or_else(|_| "ClickHouse error".into()))
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    if !select {
+        return Ok(QueryResult {
+            rows_affected: Some(0),
+            elapsed_ms,
+            ..Default::default()
+        });
+    }
+    let mut lines = text.lines();
+    let columns: Vec<String> = lines
+        .next()
+        .map(|l| l.split('\t').map(tsv_unescape).collect())
+        .unwrap_or_default();
+    let mut rows = Vec::new();
+    let mut truncated = false;
+    for line in lines {
+        if rows.len() >= max {
+            truncated = true;
+            break;
+        }
+        let cells: Vec<Option<String>> = line
+            .split('\t')
+            .map(|c| {
+                if c == "\\N" {
+                    None
+                } else {
+                    Some(tsv_unescape(c))
+                }
+            })
+            .collect();
+        rows.push(cells);
+    }
+    Ok(QueryResult {
+        columns,
+        rows,
+        elapsed_ms,
+        is_select: true,
+        truncated,
+        ..Default::default()
+    })
 }
 
 /// Column metadata for the structure view.
@@ -374,6 +530,26 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
                         data_type,
                         nullable,
                         key,
+                    }
+                })
+                .collect())
+        }
+        Conn::Clickhouse { .. } => {
+            let q = format!("DESCRIBE TABLE `{}`", table.replace('`', "``"));
+            let res = ch_query(conn, &q, MAX_ROWS)?;
+            // DESCRIBE columns: name, type, default_type, default_expression, …
+            Ok(res
+                .rows
+                .into_iter()
+                .map(|r| {
+                    let name = r.first().cloned().flatten().unwrap_or_default();
+                    let data_type = r.get(1).cloned().flatten().unwrap_or_default();
+                    let nullable = data_type.starts_with("Nullable(");
+                    ColumnInfo {
+                        name,
+                        data_type,
+                        nullable,
+                        key: String::new(),
                     }
                 })
                 .collect())
@@ -585,6 +761,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
                 })
             }
         }
+        Conn::Clickhouse { .. } => ch_query(conn, sql, max),
     }
 }
 

@@ -11,3 +11,4 @@ serde_json = { workspace = true }
 mysql      = "25"
 postgres   = "0.19"
 rusqlite   = { version = "0.32", features = ["bundled"] }
+ureq       = "2"

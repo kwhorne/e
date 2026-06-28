@@ -46,6 +46,7 @@ fn engine_icon(engine: &str) -> &'static str {
         "mysql" | "mariadb" => "🐬",
         "postgres" | "postgresql" | "pgsql" => "🐘",
         "sqlite" => "📦",
+        "clickhouse" | "ch" => "🟡",
         _ => "🗄",
     }
 }
@@ -282,6 +283,7 @@ fn add_form(state: AppState) -> impl IntoView {
                 let def = match id {
                     "mysql" => "3306",
                     "postgres" => "5432",
+                    "clickhouse" => "8123",
                     _ => "",
                 };
                 if !def.is_empty() {
@@ -294,8 +296,13 @@ fn add_form(state: AppState) -> impl IntoView {
         engine_chip("mysql", "MySQL"),
         engine_chip("postgres", "Postgres"),
         engine_chip("sqlite", "SQLite"),
+        engine_chip("clickhouse", "ClickHouse"),
     ))
-    .style(|s| s.flex_row().gap(5.0));
+    .style(|s| {
+        s.flex_row()
+            .gap(5.0)
+            .flex_wrap(floem::taffy::style::FlexWrap::Wrap)
+    });
 
     let from_env = label(|| "From .env".to_string())
         .style(|s| {

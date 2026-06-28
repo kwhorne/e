@@ -69,6 +69,22 @@ server.)
 
 See [Configuration](configuration.md) to adjust these.
 
+## Emmet
+
+In HTML, Blade, Vue, Svelte and PHP files, type an Emmet abbreviation and press
+**Tab** to expand it (or run *Emmet: Expand Abbreviation* from the palette):
+
+| Abbreviation | Expands to |
+| ------------ | ---------- |
+| `.card>h2{Title}+p` | a `div.card` containing an `<h2>` and a `<p>` |
+| `ul>li.item$*3` | a `<ul>` with three `<li class="item1…3">` |
+| `a` / `img` / `input` | tags with their default attributes |
+| `nav>(a+a+a)` | grouping with `()` |
+
+Supported: tags, `.class`, `#id`, `[attr=value]`, `{text}`, child `>`, sibling
+`+`, grouping `()`, multiplication `*N` and `$` numbering. The caret lands at the
+first sensible insertion point.
+
 ## Encoding & line endings
 
 The status bar shows the file encoding and line-ending style. Click the **LF /

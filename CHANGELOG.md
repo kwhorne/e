@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Emmet abbreviation expansion (Tab) in HTML, Blade, Vue, Svelte and PHP:
+  tags, classes, ids, attributes, text, nesting, grouping, multiplication and
+  `$` numbering.
+
 ## [0.4.1] - 2026-06-28
 
 ### Added

@@ -69,6 +69,12 @@ server.)
 
 See [Configuration](configuration.md) to adjust these.
 
+## Encoding & line endings
+
+The status bar shows the file encoding and line-ending style. Click the **LF /
+ CRLF** indicator to convert the buffer. Non-UTF-8 files are detected on open
+(BOM or Windows-1252) and saved back in their original encoding.
+
 ## Unsaved changes & external edits
 
 - Closing a tab with unsaved changes prompts you to **Save**, **Don't Save**, or

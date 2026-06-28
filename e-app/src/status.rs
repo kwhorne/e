@@ -52,14 +52,22 @@ pub fn status_bar(state: AppState) -> impl IntoView {
         Some(_) => "LF".to_string(),
         None => String::new(),
     })
-    .style(|s| s.cursor(floem::style::CursorStyle::Pointer).hover(|s| s.color(theme::fg())))
+    .style(|s| {
+        s.cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.color(theme::fg()))
+    })
     .popout_menu(move || {
         floem::menu::Menu::new("Line endings")
             .entry(floem::menu::MenuItem::new("LF").action(move || state.set_line_ending(false)))
             .entry(floem::menu::MenuItem::new("CRLF").action(move || state.set_line_ending(true)))
     });
 
-    let encoding = label(move || state.active_buffer().map(|b| b.encoding.get()).unwrap_or_default());
+    let encoding = label(move || {
+        state
+            .active_buffer()
+            .map(|b| b.encoding.get())
+            .unwrap_or_default()
+    });
 
     let blame = label(move || {
         state.blame_rev.get();
@@ -68,8 +76,16 @@ pub fn status_bar(state: AppState) -> impl IntoView {
     })
     .style(|s| s.color(theme::fg_dim()).text_ellipsis().max_width(360.0));
 
-    let right = stack((diags, branch, position, indent, line_ending, encoding, language))
-        .style(|s| s.items_center().gap(14.0));
+    let right = stack((
+        diags,
+        branch,
+        position,
+        indent,
+        line_ending,
+        encoding,
+        language,
+    ))
+    .style(|s| s.items_center().gap(14.0));
 
     let left = stack((left, blame)).style(|s| s.items_center().gap(14.0).min_width(0.0));
 

@@ -73,7 +73,11 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
                     drag_tab.set(None);
                 })
                 .context_menu(move || {
-                    let pin_label = if state.is_pinned(id) { "Unpin Tab" } else { "Pin Tab" };
+                    let pin_label = if state.is_pinned(id) {
+                        "Unpin Tab"
+                    } else {
+                        "Pin Tab"
+                    };
                     Menu::new("")
                         .entry(MenuItem::new(pin_label).action(move || state.toggle_pin(id)))
                         .separator()

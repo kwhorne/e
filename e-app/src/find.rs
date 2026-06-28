@@ -26,7 +26,8 @@ fn opt_toggle(glyph: &'static str, sig: RwSignal<bool>, tip: &'static str) -> im
                 s.background(theme::accent())
                     .color(floem::peniko::Color::from_rgb8(0x14, 0x16, 0x1b))
             } else {
-                s.color(theme::fg_dim()).hover(|s| s.background(theme::bg_hover()))
+                s.color(theme::fg_dim())
+                    .hover(|s| s.background(theme::bg_hover()))
             }
         })
         .on_click_stop(move |_| sig.update(|v| *v = !*v))

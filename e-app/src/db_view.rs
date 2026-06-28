@@ -3,9 +3,7 @@
 
 use floem::peniko::Color;
 use floem::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{
-    dyn_container, dyn_stack, empty, label, scroll, stack, text_input, Decorators,
-};
+use floem::views::{dyn_container, dyn_stack, empty, label, scroll, stack, text_input, Decorators};
 use floem::IntoView;
 
 use crate::state::{AppState, DbEntry, DbForm};
@@ -189,8 +187,7 @@ fn form_field(
 ) -> impl IntoView {
     let input = text_input(sig).placeholder(placeholder);
     stack((
-        label(move || label_text.to_string())
-            .style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        label(move || label_text.to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
         input.style(|s| {
             theme::input_colors(s)
                 .width_full()
@@ -243,7 +240,9 @@ fn add_form(state: AppState) -> impl IntoView {
                     s.background(theme::accent())
                         .color(Color::from_rgb8(0x14, 0x16, 0x1b))
                 } else {
-                    s.border(1.0).border_color(theme::border()).color(theme::fg())
+                    s.border(1.0)
+                        .border_color(theme::border())
+                        .color(theme::fg())
                 }
             })
             .on_click_stop(move |_| {
@@ -392,8 +391,12 @@ fn add_form(state: AppState) -> impl IntoView {
 }
 
 pub fn database_panel(state: AppState) -> impl IntoView {
-    let title = label(|| "Database".to_string())
-        .style(|s| s.flex_grow(1.0).font_size(13.0).font_bold().color(theme::fg()));
+    let title = label(|| "Database".to_string()).style(|s| {
+        s.flex_grow(1.0)
+            .font_size(13.0)
+            .font_bold()
+            .color(theme::fg())
+    });
     let add = label(|| "＋".to_string())
         .style(|s| {
             s.padding_horiz(8.0)
@@ -417,7 +420,13 @@ pub fn database_panel(state: AppState) -> impl IntoView {
     });
 
     let form = dyn_stack(
-        move || if state.db_adding.get() { vec![0] } else { vec![] },
+        move || {
+            if state.db_adding.get() {
+                vec![0]
+            } else {
+                vec![]
+            }
+        },
         |i| *i,
         move |_| add_form(state),
     );
@@ -428,7 +437,12 @@ pub fn database_panel(state: AppState) -> impl IntoView {
             |e| e.key(),
             move |e| conn_row(state, e),
         )
-        .style(|s| s.flex_col().width_full().padding_horiz(6.0).padding_bottom(10.0)),
+        .style(|s| {
+            s.flex_col()
+                .width_full()
+                .padding_horiz(6.0)
+                .padding_bottom(10.0)
+        }),
     )
     .style(|s| s.flex_col().flex_grow(1.0).width_full());
 
@@ -452,8 +466,12 @@ pub fn database_panel(state: AppState) -> impl IntoView {
 // ---- Results overlay ------------------------------------------------------
 
 pub fn db_result_overlay(state: AppState) -> impl IntoView {
-    let title = label(move || state.db_result_title.get())
-        .style(|s| s.flex_grow(1.0).font_size(13.0).font_bold().color(theme::fg()));
+    let title = label(move || state.db_result_title.get()).style(|s| {
+        s.flex_grow(1.0)
+            .font_size(13.0)
+            .font_bold()
+            .color(theme::fg())
+    });
     let close = label(|| "✕".to_string())
         .style(|s| {
             s.padding_horiz(8.0)
@@ -567,16 +585,15 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             })
             .on_click_stop(move |_| state.db_set_subview(id))
     };
-    let subview_chips = stack((chip("data", "Data"), chip("structure", "Structure"))).style(
-        move |s| {
+    let subview_chips =
+        stack((chip("data", "Data"), chip("structure", "Structure"))).style(move |s| {
             let s = s.flex_row().gap(4.0).items_center();
             if state.db_result_table.get().is_some() {
                 s
             } else {
                 s.hide()
             }
-        },
-    );
+        });
 
     let toolbar_btn = |glyph: &'static str, on: Box<dyn Fn()>| {
         label(move || glyph.to_string())
@@ -633,32 +650,25 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_grow(1.0).width_full());
 
-    stack((header, query_row, toolbar, status, grid))
-        .style(move |s| {
-            let s = s
-                .absolute()
-                .inset(0.0)
-                .size_full()
-                .flex_col()
-                .background(theme::bg());
-            if state.db_result_open.get() {
-                s
-            } else {
-                s.hide()
-            }
-        })
+    stack((header, query_row, toolbar, status, grid)).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .flex_col()
+            .background(theme::bg());
+        if state.db_result_open.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
 }
 
 fn result_grid(state: AppState) -> impl IntoView {
     // Header row.
     let header = dyn_stack(
-        move || {
-            state
-                .db_result
-                .get()
-                .map(|r| r.columns)
-                .unwrap_or_default()
-        },
+        move || state.db_result.get().map(|r| r.columns).unwrap_or_default(),
         |c| c.clone(),
         move |c| {
             let col = c.clone();
@@ -808,7 +818,15 @@ fn structure_grid(state: AppState) -> impl IntoView {
             stack((
                 cell(c.name.clone(), 200.0, false),
                 cell(c.data_type.clone(), 200.0, true),
-                cell(if c.nullable { "YES".into() } else { "NO".into() }, 60.0, true),
+                cell(
+                    if c.nullable {
+                        "YES".into()
+                    } else {
+                        "NO".into()
+                    },
+                    60.0,
+                    true,
+                ),
                 cell(c.key.clone(), 60.0, true),
             ))
             .style(|s| {

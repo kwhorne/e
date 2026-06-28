@@ -102,7 +102,13 @@ fn normalize_string(s: &str) -> String {
     let (key, mods) = parts.split_last().unwrap();
     let key = key.to_lowercase();
     let has = |m: &str| mods.iter().any(|p| p.eq_ignore_ascii_case(m));
-    build(has("cmd") || has("meta"), has("ctrl") || has("control"), has("alt") || has("option"), has("shift"), &key)
+    build(
+        has("cmd") || has("meta"),
+        has("ctrl") || has("control"),
+        has("alt") || has("option"),
+        has("shift"),
+        &key,
+    )
 }
 
 /// Build the canonical string for a set of modifiers + key name.
@@ -170,5 +176,11 @@ pub fn normalize(key: &Key, mods: Modifiers) -> Option<String> {
     if key_name.is_empty() {
         return None;
     }
-    Some(build(mods.meta(), mods.control(), mods.alt(), mods.shift(), &key_name))
+    Some(build(
+        mods.meta(),
+        mods.control(),
+        mods.alt(),
+        mods.shift(),
+        &key_name,
+    ))
 }

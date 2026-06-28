@@ -90,19 +90,37 @@ pub fn task_palette(state: AppState) -> impl IntoView {
                 }
             });
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| task.open.set(false))
-        .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {
-            let len = state.filtered_tasks().len();
-            if len > 0 {
-                task.selected.update(|i| *i = (*i + 1).min(len - 1));
-            }
-        })
-        .on_key_down(Key::Named(NamedKey::ArrowUp), |_| true, move |_| {
-            task.selected.update(|i| *i = i.saturating_sub(1));
-        });
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| task.open.set(false),
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowDown),
+            |_| true,
+            move |_| {
+                let len = state.filtered_tasks().len();
+                if len > 0 {
+                    task.selected.update(|i| *i = (*i + 1).min(len - 1));
+                }
+            },
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowUp),
+            |_| true,
+            move |_| {
+                task.selected.update(|i| *i = i.saturating_sub(1));
+            },
+        );
 
     let rows = dyn_stack(
-        move || state.filtered_tasks().into_iter().enumerate().collect::<Vec<_>>(),
+        move || {
+            state
+                .filtered_tasks()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
         |(i, t)| (*i, t.label.clone()),
         move |(i, t)| {
             let lbl = t.label.clone();
@@ -111,8 +129,11 @@ pub fn task_palette(state: AppState) -> impl IntoView {
             let run_cmd = t.command.clone();
             stack((
                 label(move || lbl.clone()).style(|s| s.color(theme::fg())),
-                label(move || cmd.clone())
-                    .style(|s| s.color(theme::fg_dim()).font_size(11.0).font_family("monospace".to_string())),
+                label(move || cmd.clone()).style(|s| {
+                    s.color(theme::fg_dim())
+                        .font_size(11.0)
+                        .font_family("monospace".to_string())
+                }),
             ))
             .style(move |s| {
                 let s = s

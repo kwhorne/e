@@ -131,14 +131,12 @@ fn notice_body(state: AppState) -> impl IntoView {
                     move |open| {
                         if open {
                             let notes = notes.clone();
-                            scroll(
-                                label(move || notes.clone()).style(|s| {
-                                    s.color(theme::fg_dim())
-                                        .font_size(12.0)
-                                        .line_height(1.4)
-                                        .width(300.0)
-                                }),
-                            )
+                            scroll(label(move || notes.clone()).style(|s| {
+                                s.color(theme::fg_dim())
+                                    .font_size(12.0)
+                                    .line_height(1.4)
+                                    .width(300.0)
+                            }))
                             .style(|s| s.max_height(220.0).width(308.0).margin_top(8.0))
                             .into_any()
                         } else {
@@ -166,7 +164,10 @@ pub fn update_notice(state: AppState) -> impl IntoView {
         state.update_info.get().is_some()
             || matches!(
                 state.update_status.get(),
-                UpdateStatus::Downloading | UpdateStatus::Installed | UpdateStatus::Failed(_) | UpdateStatus::UpToDate
+                UpdateStatus::Downloading
+                    | UpdateStatus::Installed
+                    | UpdateStatus::Failed(_)
+                    | UpdateStatus::UpToDate
             )
     };
 

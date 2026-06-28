@@ -78,7 +78,6 @@ impl CmdPalette {
     }
 }
 
-
 pub fn run_command(state: AppState, id: &str) {
     crate::commands::dispatch(state, id);
 }

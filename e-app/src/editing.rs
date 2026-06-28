@@ -137,7 +137,11 @@ impl AppState {
                 // Remove the token and a single following space, if present.
                 let after = tok_at + token.len();
                 let rest = &text[after..line_end(l)];
-                let end = if rest.starts_with(' ') { after + 1 } else { after };
+                let end = if rest.starts_with(' ') {
+                    after + 1
+                } else {
+                    after
+                };
                 edits.push((Selection::region(tok_at, end), String::new()));
             } else {
                 edits.push((Selection::caret(tok_at), format!("{token} ")));
@@ -179,14 +183,18 @@ impl AppState {
         let quotes = ['"', '\'', '`'];
 
         let set_caret = |off: usize| {
-            editor
-                .cursor
-                .set(Cursor::new(CursorMode::Insert(Selection::caret(off)), None, None));
+            editor.cursor.set(Cursor::new(
+                CursorMode::Insert(Selection::caret(off)),
+                None,
+                None,
+            ));
         };
         let set_region = |a: usize, b: usize| {
-            editor
-                .cursor
-                .set(Cursor::new(CursorMode::Insert(Selection::region(a, b)), None, None));
+            editor.cursor.set(Cursor::new(
+                CursorMode::Insert(Selection::region(a, b)),
+                None,
+                None,
+            ));
         };
         let edit = |sel: Selection, t: &str| {
             let mut it = std::iter::once((sel, t));
@@ -196,7 +204,10 @@ impl AppState {
         // Opening bracket: wrap selection or insert a pair.
         if let Some(&(open, close)) = pairs.iter().find(|(o, _)| *o == ch) {
             if s < e {
-                edit(Selection::region(s, e), &format!("{open}{}{close}", &text[s..e]));
+                edit(
+                    Selection::region(s, e),
+                    &format!("{open}{}{close}", &text[s..e]),
+                );
                 set_region(s + 1, e + 1);
             } else {
                 edit(Selection::caret(s), &format!("{open}{close}"));
@@ -227,7 +238,10 @@ impl AppState {
                 return true;
             }
             let prev_word = s > 0 && crate::state::is_word_byte(bytes[s - 1]);
-            let next_word = bytes.get(s).map(|b| crate::state::is_word_byte(*b)).unwrap_or(false);
+            let next_word = bytes
+                .get(s)
+                .map(|b| crate::state::is_word_byte(*b))
+                .unwrap_or(false);
             if (ch == '\'' && prev_word) || next_word {
                 return false;
             }
@@ -277,9 +291,11 @@ impl AppState {
         }
         let mut it = std::iter::once((Selection::region(s - 1, s + 1), ""));
         buf.doc.edit(&mut it, EditType::Delete);
-        editor
-            .cursor
-            .set(Cursor::new(CursorMode::Insert(Selection::caret(s - 1)), None, None));
+        editor.cursor.set(Cursor::new(
+            CursorMode::Insert(Selection::caret(s - 1)),
+            None,
+            None,
+        ));
         true
     }
 
@@ -304,9 +320,11 @@ impl AppState {
             text.len()
         };
         let offset = (line_start + col.saturating_sub(1)).min(line_end);
-        editor
-            .cursor
-            .set(Cursor::new(CursorMode::Insert(Selection::caret(offset)), None, None));
+        editor.cursor.set(Cursor::new(
+            CursorMode::Insert(Selection::caret(offset)),
+            None,
+            None,
+        ));
     }
 
     /// Open the go-to-line prompt.
@@ -327,7 +345,10 @@ impl AppState {
         let Some(line) = parts.next().and_then(|s| s.trim().parse::<usize>().ok()) else {
             return;
         };
-        let col = parts.next().and_then(|s| s.trim().parse::<usize>().ok()).unwrap_or(1);
+        let col = parts
+            .next()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .unwrap_or(1);
         self.goto_line(line, col);
     }
 }
@@ -352,9 +373,11 @@ pub fn goto_bar(state: AppState) -> impl floem::IntoView {
         .request_focus(move || {
             goto.open.get();
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| {
-            state.close_goto_line()
-        });
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| state.close_goto_line(),
+        );
 
     let box_ = stack((
         label(|| "Go to line".to_string()).style(|s| s.color(theme::fg_dim()).font_size(12.0)),
@@ -372,7 +395,12 @@ pub fn goto_bar(state: AppState) -> impl floem::IntoView {
 
     container(box_)
         .style(move |s| {
-            let s = s.absolute().inset(0.0).size_full().justify_center().padding_top(90.0);
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .justify_center()
+                .padding_top(90.0);
             if goto.open.get() {
                 s
             } else {

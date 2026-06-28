@@ -29,18 +29,18 @@ use e_core::syntax::highlight_lines;
 use e_lsp::{path_to_uri, uri_to_path, LspClient, SignatureInfo};
 use e_term::Terminal;
 
+use crate::builtin_completion;
 use crate::cmd_palette::CmdPalette;
 use crate::completion::{Completion, HoverState, SignatureState};
 use crate::config::{self, AgentConfig, Settings};
 use crate::file_ops::{copy_recursive, duplicate_name, FileOp, FileOpKind};
 use crate::find::FindState;
+use crate::framework_completion;
 use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
 use crate::picker::{Picker, PickerItem, PickerMode};
 use crate::rename::RenameState;
 use crate::session::{self, SessionData};
-use crate::builtin_completion;
-use crate::framework_completion;
 use crate::snippets;
 use crate::styling::{
     build_diag_lines, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
@@ -1208,8 +1208,7 @@ impl AppState {
         if lsp_language_id(buf.file.language).is_none() {
             return;
         }
-        let (Some(client), Some(uri)) =
-            (self.lsp_for_language(buf.file.language), buf.uri.clone())
+        let (Some(client), Some(uri)) = (self.lsp_for_language(buf.file.language), buf.uri.clone())
         else {
             return;
         };
@@ -1767,21 +1766,23 @@ impl AppState {
         self.update_status.set(UpdateStatus::Checking);
         let info_sig = self.update_info;
         let status_sig = self.update_status;
-        let send = create_ext_action(self.cx, move |result: Option<updater::UpdateInfo>| {
-            match result {
-                Some(info) => {
-                    info_sig.set(Some(info));
-                    status_sig.set(UpdateStatus::Idle);
-                }
-                None => {
-                    status_sig.set(if announce_up_to_date {
-                        UpdateStatus::UpToDate
-                    } else {
-                        UpdateStatus::Idle
-                    });
-                }
-            }
-        });
+        let send =
+            create_ext_action(
+                self.cx,
+                move |result: Option<updater::UpdateInfo>| match result {
+                    Some(info) => {
+                        info_sig.set(Some(info));
+                        status_sig.set(UpdateStatus::Idle);
+                    }
+                    None => {
+                        status_sig.set(if announce_up_to_date {
+                            UpdateStatus::UpToDate
+                        } else {
+                            UpdateStatus::Idle
+                        });
+                    }
+                },
+            );
         std::thread::spawn(move || {
             let result = updater::check().unwrap_or(None);
             send(result);
@@ -1908,10 +1909,7 @@ impl AppState {
                 return;
             };
             let b = bs.remove(from);
-            let to = bs
-                .iter()
-                .position(|x| x.id == target)
-                .unwrap_or(bs.len());
+            let to = bs.iter().position(|x| x.id == target).unwrap_or(bs.len());
             bs.insert(to, b);
         });
     }
@@ -2030,8 +2028,9 @@ impl AppState {
 
     fn db_persist(&self) {
         let root = self.root.get_untracked();
-        let configs: Vec<e_db::DbConfig> =
-            self.db_conns.with_untracked(|c| c.iter().map(|e| e.config.clone()).collect());
+        let configs: Vec<e_db::DbConfig> = self
+            .db_conns
+            .with_untracked(|c| c.iter().map(|e| e.config.clone()).collect());
         let _ = e_db::save_connections(&root, &configs);
     }
 
@@ -2047,7 +2046,10 @@ impl AppState {
 
     fn db_add_config(&self, cfg: e_db::DbConfig) {
         let key = cfg.key();
-        if self.db_conns.with_untracked(|c| c.iter().any(|e| e.key() == key)) {
+        if self
+            .db_conns
+            .with_untracked(|c| c.iter().any(|e| e.key() == key))
+        {
             return;
         }
         let entry = DbEntry::new(self.cx, cfg);
@@ -2139,9 +2141,10 @@ impl AppState {
 
     /// (Re)run the browse query for the current table, sort and page.
     pub fn db_reload_table(&self) {
-        let (Some(key), Some(table)) =
-            (self.db_result_key.get_untracked(), self.db_result_table.get_untracked())
-        else {
+        let (Some(key), Some(table)) = (
+            self.db_result_key.get_untracked(),
+            self.db_result_table.get_untracked(),
+        ) else {
             return;
         };
         let Some(entry) = self
@@ -2194,7 +2197,9 @@ impl AppState {
         }
         // Don't page past the end (a short page means we're at the last one).
         if delta > 0 {
-            let len = self.db_result.with_untracked(|r| r.as_ref().map(|r| r.rows.len()).unwrap_or(0));
+            let len = self
+                .db_result
+                .with_untracked(|r| r.as_ref().map(|r| r.rows.len()).unwrap_or(0));
             if len < DB_PAGE {
                 return;
             }
@@ -2227,12 +2232,10 @@ impl AppState {
         let send = create_ext_action(self.cx, {
             let state = *self;
             move |res: Result<(), String>| {
-                state
-                    .db_test_state
-                    .set(match res {
-                        Ok(()) => "ok".into(),
-                        Err(e) => e,
-                    });
+                state.db_test_state.set(match res {
+                    Ok(()) => "ok".into(),
+                    Err(e) => e,
+                });
             }
         });
         std::thread::spawn(move || {
@@ -2246,7 +2249,11 @@ impl AppState {
         self.db_form.set(DbForm {
             engine: c.engine.clone(),
             host: c.host.clone(),
-            port: if c.port == 0 { String::new() } else { c.port.to_string() },
+            port: if c.port == 0 {
+                String::new()
+            } else {
+                c.port.to_string()
+            },
             database: c.database.clone(),
             username: c.username.clone(),
             password: c.password.clone(),
@@ -2585,7 +2592,11 @@ impl AppState {
     pub fn close(&self, id: u64) {
         let dirty = self
             .buffers
-            .with_untracked(|bs| bs.iter().find(|b| b.id == id).map(|b| b.dirty.get_untracked()))
+            .with_untracked(|bs| {
+                bs.iter()
+                    .find(|b| b.id == id)
+                    .map(|b| b.dirty.get_untracked())
+            })
             .unwrap_or(false);
         if dirty {
             self.close_confirm.set(Some(id));
@@ -3396,9 +3407,11 @@ impl AppState {
     /// Record the current location as a back-navigation target.
     fn record_nav(&self) {
         if let Some(loc) = self.current_location() {
-            let dup = self
-                .nav_back_stack
-                .with_untracked(|v| v.last().map(|l| l.0 == loc.0 && l.1 == loc.1).unwrap_or(false));
+            let dup = self.nav_back_stack.with_untracked(|v| {
+                v.last()
+                    .map(|l| l.0 == loc.0 && l.1 == loc.1)
+                    .unwrap_or(false)
+            });
             if !dup {
                 self.nav_back_stack.update(|v| {
                     v.push(loc);
@@ -3471,7 +3484,10 @@ fn find_conflict(text: &str, cursor: usize) -> Option<(usize, usize, String, Str
                     None
                 }
             })?;
-        let end = text[gt..].find('\n').map(|i| gt + i + 1).unwrap_or(text.len());
+        let end = text[gt..]
+            .find('\n')
+            .map(|i| gt + i + 1)
+            .unwrap_or(text.len());
 
         if (start..end).contains(&cursor) {
             let current = text[after_marker..sep].to_string();
@@ -3503,7 +3519,11 @@ fn replace_in_dir(root: &std::path::Path, query: &str, replace: &str) -> usize {
             match entry.file_type() {
                 Ok(t) if t.is_dir() => stack.push(path),
                 Ok(_) => {
-                    if entry.metadata().map(|m| m.len() > 2_000_000).unwrap_or(true) {
+                    if entry
+                        .metadata()
+                        .map(|m| m.len() > 2_000_000)
+                        .unwrap_or(true)
+                    {
                         continue;
                     }
                     let Ok(content) = std::fs::read_to_string(&path) else {

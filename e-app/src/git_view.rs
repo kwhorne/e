@@ -160,10 +160,13 @@ fn file_row(state: AppState, entry: StatusEntry, staged: bool) -> impl IntoView 
     };
 
     stack((
-        label(move || badge.to_string())
-            .style(move |s| s.width(16.0).color(color).font_size(12.0)),
-        label(move || name.clone())
-            .style(|s| s.flex_grow(1.0).color(theme::fg()).text_ellipsis().min_width(0.0)),
+        label(move || badge.to_string()).style(move |s| s.width(16.0).color(color).font_size(12.0)),
+        label(move || name.clone()).style(|s| {
+            s.flex_grow(1.0)
+                .color(theme::fg())
+                .text_ellipsis()
+                .min_width(0.0)
+        }),
         actions,
     ))
     .style(|s| {
@@ -190,7 +193,13 @@ fn group(state: AppState, title: &'static str, staged: bool) -> impl IntoView {
         move || {
             state.git_status.with(|st| {
                 st.iter()
-                    .filter(|e| if staged { e.is_staged() } else { e.is_unstaged() })
+                    .filter(|e| {
+                        if staged {
+                            e.is_staged()
+                        } else {
+                            e.is_unstaged()
+                        }
+                    })
                     .cloned()
                     .enumerate()
                     .collect::<Vec<_>>()
@@ -203,8 +212,13 @@ fn group(state: AppState, title: &'static str, staged: bool) -> impl IntoView {
 
     let any = move || {
         state.git_status.with(|st| {
-            st.iter()
-                .any(|e| if staged { e.is_staged() } else { e.is_unstaged() })
+            st.iter().any(|e| {
+                if staged {
+                    e.is_staged()
+                } else {
+                    e.is_unstaged()
+                }
+            })
         })
     };
 
@@ -359,21 +373,42 @@ pub fn git_panel(state: AppState) -> impl IntoView {
 
     // Recent commits.
     let commits_rows = dyn_stack(
-        move || state.git_log.get().into_iter().enumerate().collect::<Vec<_>>(),
+        move || {
+            state
+                .git_log
+                .get()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
         |(i, c)| (*i, c.0.clone()),
         move |(_, (hash, author, when, summary))| {
             stack((
                 stack((
-                    label(move || hash.clone())
-                        .style(|s| s.color(theme::accent()).font_size(11.0).font_family("monospace".to_string())),
-                    label(move || summary.clone())
-                        .style(|s| s.color(theme::fg()).font_size(12.0).flex_grow(1.0).text_ellipsis().min_width(0.0)),
+                    label(move || hash.clone()).style(|s| {
+                        s.color(theme::accent())
+                            .font_size(11.0)
+                            .font_family("monospace".to_string())
+                    }),
+                    label(move || summary.clone()).style(|s| {
+                        s.color(theme::fg())
+                            .font_size(12.0)
+                            .flex_grow(1.0)
+                            .text_ellipsis()
+                            .min_width(0.0)
+                    }),
                 ))
                 .style(|s| s.items_center().gap(8.0).width_full()),
                 label(move || format!("{author} · {when}"))
                     .style(|s| s.color(theme::fg_dim()).font_size(10.0)),
             ))
-            .style(|s| s.flex_col().gap(1.0).width_full().padding_horiz(8.0).padding_vert(4.0))
+            .style(|s| {
+                s.flex_col()
+                    .gap(1.0)
+                    .width_full()
+                    .padding_horiz(8.0)
+                    .padding_vert(4.0)
+            })
         },
     )
     .style(|s| s.flex_col().width_full());

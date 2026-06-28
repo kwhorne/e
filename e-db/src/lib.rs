@@ -145,7 +145,10 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
         "mysql" | "mariadb" => Some(DbConfig {
             engine: "mysql".into(),
             host,
-            port: env.get("DB_PORT").and_then(|p| p.parse().ok()).unwrap_or(3306),
+            port: env
+                .get("DB_PORT")
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(3306),
             database: env.get("DB_DATABASE").cloned().unwrap_or_default(),
             username: env.get("DB_USERNAME").cloned().unwrap_or_default(),
             password: env.get("DB_PASSWORD").cloned().unwrap_or_default(),
@@ -155,7 +158,10 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
         "pgsql" | "postgres" | "postgresql" => Some(DbConfig {
             engine: "postgres".into(),
             host,
-            port: env.get("DB_PORT").and_then(|p| p.parse().ok()).unwrap_or(5432),
+            port: env
+                .get("DB_PORT")
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(5432),
             database: env.get("DB_DATABASE").cloned().unwrap_or_default(),
             username: env.get("DB_USERNAME").cloned().unwrap_or_default(),
             password: env.get("DB_PASSWORD").cloned().unwrap_or_default(),
@@ -165,7 +171,10 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
         "sqlite" => {
             let raw = env.get("DB_DATABASE").cloned().unwrap_or_default();
             let path = if raw.is_empty() {
-                project.join("database/database.sqlite").to_string_lossy().into_owned()
+                project
+                    .join("database/database.sqlite")
+                    .to_string_lossy()
+                    .into_owned()
             } else if Path::new(&raw).is_absolute() {
                 raw
             } else {
@@ -381,7 +390,12 @@ fn quote_ident(engine: &str, ident: &str) -> String {
 }
 
 /// `SELECT * FROM <table> LIMIT <max>` for browsing a table.
-pub fn table_data(conn: &Conn, engine: &str, table: &str, max: usize) -> Result<QueryResult, String> {
+pub fn table_data(
+    conn: &Conn,
+    engine: &str,
+    table: &str,
+    max: usize,
+) -> Result<QueryResult, String> {
     let sql = browse_sql(engine, table, None, max, 0);
     query(conn, &sql, max)
 }
@@ -583,7 +597,9 @@ fn mysql_value_to_string(v: &mysql::Value) -> Option<String> {
         UInt(u) => Some(u.to_string()),
         Float(f) => Some(f.to_string()),
         Double(d) => Some(d.to_string()),
-        Date(y, mo, d, h, mi, s, _us) => Some(format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02}")),
+        Date(y, mo, d, h, mi, s, _us) => {
+            Some(format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02}"))
+        }
         Time(neg, days, h, mi, s, _us) => Some(format!(
             "{}{}:{mi:02}:{s:02}",
             if *neg { "-" } else { "" },

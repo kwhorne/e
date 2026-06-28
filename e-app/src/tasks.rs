@@ -101,7 +101,9 @@ pub fn detect(root: &Path) -> Vec<Task> {
     // Makefile targets.
     if let Ok(text) = std::fs::read_to_string(root.join("Makefile")) {
         for line in text.lines() {
-            let Some(colon) = line.find(':') else { continue };
+            let Some(colon) = line.find(':') else {
+                continue;
+            };
             let target = &line[..colon];
             let valid = !target.is_empty()
                 && !line.starts_with('\t')
@@ -111,7 +113,10 @@ pub fn detect(root: &Path) -> Vec<Task> {
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '_' || c == '-');
             if valid {
-                tasks.push(Task::new(format!("make {target}"), format!("make {target}")));
+                tasks.push(Task::new(
+                    format!("make {target}"),
+                    format!("make {target}"),
+                ));
             }
         }
     }

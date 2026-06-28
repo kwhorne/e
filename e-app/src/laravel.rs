@@ -85,12 +85,7 @@ pub fn load(root: &Path) -> LaravelData {
 
 /// PHP flags that silence deprecation/warning noise (PHP 8.x writes these to
 /// stdout in CLI, which would otherwise corrupt the JSON output).
-const PHP_QUIET: [&str; 4] = [
-    "-d",
-    "error_reporting=0",
-    "-d",
-    "display_errors=0",
-];
+const PHP_QUIET: [&str; 4] = ["-d", "error_reporting=0", "-d", "display_errors=0"];
 
 /// Parse the first JSON value embedded in `bytes`, tolerating leading noise.
 fn parse_json(bytes: &[u8]) -> Option<serde_json::Value> {
@@ -672,11 +667,7 @@ pub fn hover_text(data: &LaravelData, helper: Helper, token: &str) -> Option<Str
         }
         Helper::View => {
             let v = data.views.iter().find(|v| v.name == token)?;
-            let rel = v
-                .path
-                .strip_prefix(&data.root)
-                .unwrap_or(&v.path)
-                .display();
+            let rel = v.path.strip_prefix(&data.root).unwrap_or(&v.path).display();
             Some(format!("**View** `{}`\n\n{}", v.name, rel))
         }
         Helper::Config => {
@@ -701,7 +692,11 @@ pub fn hover_text(data: &LaravelData, helper: Helper, token: &str) -> Option<Str
 // ---- Go to definition -----------------------------------------------------
 
 /// Resolve the token under the cursor to a target `(path, line, col)`.
-pub fn navigate(data: &LaravelData, helper: Helper, token: &str) -> Option<(PathBuf, usize, usize)> {
+pub fn navigate(
+    data: &LaravelData,
+    helper: Helper,
+    token: &str,
+) -> Option<(PathBuf, usize, usize)> {
     match helper {
         Helper::View => {
             let v = data.views.iter().find(|v| v.name == token)?;
@@ -791,7 +786,8 @@ fn find_key_line(path: &Path, key: &str) -> Option<usize> {
 fn find_env_line(path: &Path, key: &str) -> Option<usize> {
     let src = std::fs::read_to_string(path).ok()?;
     let needle = format!("{key}=");
-    src.lines().position(|l| l.trim_start().starts_with(&needle))
+    src.lines()
+        .position(|l| l.trim_start().starts_with(&needle))
 }
 
 fn find_function_line(path: &Path, method: &str) -> Option<usize> {
@@ -861,7 +857,10 @@ mod tests {
         std::fs::write(views.join("admin").join("users.blade.php"), "x").unwrap();
         let mut got: Vec<String> = load_views(&dir).into_iter().map(|v| v.name).collect();
         got.sort();
-        assert_eq!(got, vec!["admin.users".to_string(), "dashboard".to_string()]);
+        assert_eq!(
+            got,
+            vec!["admin.users".to_string(), "dashboard".to_string()]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

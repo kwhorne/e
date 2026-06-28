@@ -78,7 +78,9 @@ pub fn patch_bundle_version(version: &str) {
     let content = replace_plist_string(&content, "CFBundleVersion", version);
     let _ = std::fs::write(&plist, content);
     // Nudge LaunchServices to pick up the change on next launch.
-    let _ = std::process::Command::new("/usr/bin/touch").arg(bundle).status();
+    let _ = std::process::Command::new("/usr/bin/touch")
+        .arg(bundle)
+        .status();
 }
 
 /// Replace the `<string>` value that follows `<key>{key}</key>` in a plist.

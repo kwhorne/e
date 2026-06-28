@@ -49,8 +49,7 @@ fn toggle_row(
     stack((
         stack((
             label(move || text.to_string()).style(|s| s.color(theme::fg()).font_size(13.0)),
-            label(move || note.to_string())
-                .style(|s| s.color(theme::fg_dim()).font_size(11.0)),
+            label(move || note.to_string()).style(|s| s.color(theme::fg_dim()).font_size(11.0)),
         ))
         .style(|s| s.flex_col().flex_grow(1.0)),
         switch,
@@ -87,10 +86,15 @@ fn number_row(
         })
     };
     stack((
-        label(move || text.to_string()).style(|s| s.color(theme::fg()).font_size(13.0).flex_grow(1.0)),
+        label(move || text.to_string())
+            .style(|s| s.color(theme::fg()).font_size(13.0).flex_grow(1.0)),
         btn("−").on_click_stop(step(-1)),
-        label(move || format!("{}", value()))
-            .style(|s| s.width(34.0).items_center().justify_center().color(theme::fg())),
+        label(move || format!("{}", value())).style(|s| {
+            s.width(34.0)
+                .items_center()
+                .justify_center()
+                .color(theme::fg())
+        }),
         btn("+").on_click_stop(step(1)),
     ))
     .style(|s| s.items_center().gap(6.0).width_full().padding_vert(6.0))
@@ -119,7 +123,8 @@ fn segmented_row(
                     s.background(theme::accent())
                         .color(Color::from_rgb8(0x14, 0x16, 0x1b))
                 } else {
-                    s.color(theme::fg()).hover(|s| s.background(theme::bg_hover()))
+                    s.color(theme::fg())
+                        .hover(|s| s.background(theme::bg_hover()))
                 }
             })
             .on_click_stop(move |_| on_set(id))
@@ -131,7 +136,8 @@ fn segmented_row(
             .border_radius(6.0)
     });
     stack((
-        label(move || text.to_string()).style(|s| s.color(theme::fg()).font_size(13.0).flex_grow(1.0)),
+        label(move || text.to_string())
+            .style(|s| s.color(theme::fg()).font_size(13.0).flex_grow(1.0)),
         seg_stack,
     ))
     .style(|s| s.items_center().width_full().padding_vert(6.0))
@@ -142,10 +148,15 @@ pub fn settings_view(state: AppState) -> impl IntoView {
 
     let appearance = stack((
         section("APPEARANCE"),
-        toggle_row("Dark theme", "", move || s.settings.get().dark, move |v| {
-            s.settings.update(|st| st.dark = v);
-            theme::set_dark(v);
-        }),
+        toggle_row(
+            "Dark theme",
+            "",
+            move || s.settings.get().dark,
+            move |v| {
+                s.settings.update(|st| st.dark = v);
+                theme::set_dark(v);
+            },
+        ),
     ))
     .style(|s| s.flex_col().width_full());
 
@@ -186,18 +197,33 @@ pub fn settings_view(state: AppState) -> impl IntoView {
 
     let on_save = stack((
         section("ON SAVE"),
-        toggle_row("Format on save", "", move || s.settings.get().format_on_save, move |v| {
-            s.settings.update(|st| st.format_on_save = v);
-            config::set_bool("format_on_save", v);
-        }),
-        toggle_row("Trim trailing whitespace", "", move || s.settings.get().trim_on_save, move |v| {
-            s.settings.update(|st| st.trim_on_save = v);
-            config::set_bool("trim_on_save", v);
-        }),
-        toggle_row("Auto-save", "Save after a short idle period", move || s.settings.get().autosave, move |v| {
-            s.settings.update(|st| st.autosave = v);
-            config::set_bool("autosave", v);
-        }),
+        toggle_row(
+            "Format on save",
+            "",
+            move || s.settings.get().format_on_save,
+            move |v| {
+                s.settings.update(|st| st.format_on_save = v);
+                config::set_bool("format_on_save", v);
+            },
+        ),
+        toggle_row(
+            "Trim trailing whitespace",
+            "",
+            move || s.settings.get().trim_on_save,
+            move |v| {
+                s.settings.update(|st| st.trim_on_save = v);
+                config::set_bool("trim_on_save", v);
+            },
+        ),
+        toggle_row(
+            "Auto-save",
+            "Save after a short idle period",
+            move || s.settings.get().autosave,
+            move |v| {
+                s.settings.update(|st| st.autosave = v);
+                config::set_bool("autosave", v);
+            },
+        ),
     ))
     .style(|s| s.flex_col().width_full());
 
@@ -206,7 +232,13 @@ pub fn settings_view(state: AppState) -> impl IntoView {
         segmented_row(
             "Explorer / Git sidebar",
             &[("left", "Left"), ("right", "Right")],
-            move || if s.settings.get().sidebar_right { "right".into() } else { "left".into() },
+            move || {
+                if s.settings.get().sidebar_right {
+                    "right".into()
+                } else {
+                    "left".into()
+                }
+            },
             move |v| {
                 s.settings.update(|st| st.sidebar_right = v == "right");
                 config::set_str("sidebar_side", v);
@@ -215,7 +247,13 @@ pub fn settings_view(state: AppState) -> impl IntoView {
         segmented_row(
             "Agent panel",
             &[("left", "Left"), ("right", "Right")],
-            move || if s.settings.get().agent_left { "left".into() } else { "right".into() },
+            move || {
+                if s.settings.get().agent_left {
+                    "left".into()
+                } else {
+                    "right".into()
+                }
+            },
             move |v| {
                 s.settings.update(|st| st.agent_left = v == "left");
                 config::set_str("agent_side", v);
@@ -224,7 +262,13 @@ pub fn settings_view(state: AppState) -> impl IntoView {
         segmented_row(
             "Database panel",
             &[("left", "Left"), ("right", "Right")],
-            move || if s.settings.get().database_left { "left".into() } else { "right".into() },
+            move || {
+                if s.settings.get().database_left {
+                    "left".into()
+                } else {
+                    "right".into()
+                }
+            },
             move |v| {
                 s.settings.update(|st| st.database_left = v == "left");
                 config::set_str("database_side", v);
@@ -293,7 +337,11 @@ fn default_agent_row(state: AppState) -> impl IntoView {
         let id = state.agent_current.get();
         state
             .agents
-            .with(|list| list.iter().find(|a| a.id == id).map(|a| format!("{}  ▾", a.name)))
+            .with(|list| {
+                list.iter()
+                    .find(|a| a.id == id)
+                    .map(|a| format!("{}  ▾", a.name))
+            })
             .unwrap_or_default()
     })
     .style(|s| {

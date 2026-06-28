@@ -119,7 +119,11 @@ fn scope_headers(text: &str, top_line: usize) -> Vec<(usize, String)> {
 /// Sticky-scroll header: shows the enclosing scope lines pinned at the top of
 /// the editor as you scroll. Click a line to jump to it.
 fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
-    let active_sig = if pane_idx == 1 { state.active2 } else { state.active };
+    let active_sig = if pane_idx == 1 {
+        state.active2
+    } else {
+        state.active
+    };
 
     let headers = move || -> Vec<(usize, String)> {
         if !state.settings.get().sticky_scroll {
@@ -209,8 +213,10 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                         match key {
                             floem::keyboard::Key::Character(s) if s.chars().count() == 1 => {
                                 let ch = s.chars().next().unwrap();
-                                if matches!(ch, '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`')
-                                    && state.handle_autopair(ch)
+                                if matches!(
+                                    ch,
+                                    '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`'
+                                ) && state.handle_autopair(ch)
                                 {
                                     return CommandExecuted::Yes;
                                 }
@@ -226,8 +232,10 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 }
                 default_key_handler(editor_sig)(kp, mods)
             })
-            .use_doc(Rc::new(crate::hints_doc::HintsDoc::new(b.doc.clone(), b.inlay_hints))
-                as Rc<dyn Document>)
+            .use_doc(Rc::new(crate::hints_doc::HintsDoc::new(
+                b.doc.clone(),
+                b.inlay_hints,
+            )) as Rc<dyn Document>)
             .styling(SyntaxStyling::new(
                 b.highlights.clone(),
                 b.diag_lines.clone(),

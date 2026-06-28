@@ -12,17 +12,13 @@ use floem::window::WindowConfig;
 use floem::{Application, IntoView};
 
 use crate::about::about_dialog;
-use crate::recent::recent_palette;
-use crate::task_palette::task_palette;
-use crate::settings_view::settings_view;
-use crate::dialogs::{close_confirm_dialog, disk_conflict_bar, merge_conflict_bar};
-use crate::editing::goto_bar;
 use crate::agent_view::agent_panel;
-use crate::update_view::update_notice;
 use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
+use crate::dialogs::{close_confirm_dialog, disk_conflict_bar, merge_conflict_bar};
 use crate::diff_view::diff_view;
+use crate::editing::goto_bar;
 use crate::editor_area::editor_area;
 use crate::file_ops::file_op_prompt;
 use crate::file_tree::file_tree;
@@ -32,12 +28,16 @@ use crate::outline::outline_panel;
 use crate::palette::palette;
 use crate::picker::picker_overlay;
 use crate::problems::problems_panel;
+use crate::recent::recent_palette;
 use crate::rename::rename_bar;
+use crate::settings_view::settings_view;
 use crate::state::AppState;
 use crate::status::status_bar;
 use crate::tabs::tab_bar;
+use crate::task_palette::task_palette;
 use crate::terminal_view::{term_rename_prompt, terminal_panel};
 use crate::theme;
+use crate::update_view::update_notice;
 
 /// Launch the editor.
 pub fn launch() {
@@ -52,7 +52,6 @@ pub fn launch() {
         )
         .run();
 }
-
 
 /// Central keyboard shortcut dispatch. Returns true if the key was handled.
 ///
@@ -204,10 +203,11 @@ fn app_view() -> impl IntoView {
     // Track recently-used files (newest first) for the ⌘E switcher.
     create_effect(move |_| {
         if let Some(id) = state.focused_active_id() {
-            if let Some(path) = state
-                .buffers
-                .with(|bs| bs.iter().find(|b| b.id == id).and_then(|b| b.file.path.clone()))
-            {
+            if let Some(path) = state.buffers.with(|bs| {
+                bs.iter()
+                    .find(|b| b.id == id)
+                    .and_then(|b| b.file.path.clone())
+            }) {
                 state.push_recent(path);
             }
         }
@@ -321,9 +321,21 @@ fn app_view() -> impl IntoView {
     let sidebar_right = state.settings.get_untracked().sidebar_right;
     let agent_left = state.settings.get_untracked().agent_left;
     let database_left = state.settings.get_untracked().database_left;
-    let sidebar_handle_side = if sidebar_right { ResizeSide::Right } else { ResizeSide::Left };
-    let agent_handle_side = if agent_left { ResizeSide::Left } else { ResizeSide::Right };
-    let db_handle_side = if database_left { ResizeSide::Left } else { ResizeSide::Right };
+    let sidebar_handle_side = if sidebar_right {
+        ResizeSide::Right
+    } else {
+        ResizeSide::Left
+    };
+    let agent_handle_side = if agent_left {
+        ResizeSide::Left
+    } else {
+        ResizeSide::Right
+    };
+    let db_handle_side = if database_left {
+        ResizeSide::Left
+    } else {
+        ResizeSide::Right
+    };
 
     let sidebar = sidebar.into_any();
     let agent = agent_panel(state).into_any();
@@ -367,22 +379,43 @@ fn app_view() -> impl IntoView {
     cols.push(editor);
     cols.extend(right);
     cols.push(
-        resize_handle(state, sidebar_handle_side, state.sidebar_width, state.sidebar_open, 150.0, 600.0)
-            .into_any(),
+        resize_handle(
+            state,
+            sidebar_handle_side,
+            state.sidebar_width,
+            state.sidebar_open,
+            150.0,
+            600.0,
+        )
+        .into_any(),
     );
     cols.push(
-        resize_handle(state, agent_handle_side, state.agent_width, state.agent_open, 300.0, 900.0)
-            .into_any(),
+        resize_handle(
+            state,
+            agent_handle_side,
+            state.agent_width,
+            state.agent_open,
+            300.0,
+            900.0,
+        )
+        .into_any(),
     );
     cols.push(
-        resize_handle(state, db_handle_side, state.db_width, state.db_open, 220.0, 800.0).into_any(),
+        resize_handle(
+            state,
+            db_handle_side,
+            state.db_width,
+            state.db_open,
+            220.0,
+            800.0,
+        )
+        .into_any(),
     );
 
     let main_row = floem::views::stack_from_iter(cols).style(|s| s.flex_row().size_full());
 
     stack((
-        stack((main_row, crate::db_view::db_result_overlay(state)))
-            .style(|s| s.size_full()),
+        stack((main_row, crate::db_view::db_result_overlay(state))).style(|s| s.size_full()),
         markdown_preview(state),
         diff_view(state),
         find_bar(state),

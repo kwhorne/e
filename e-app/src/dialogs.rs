@@ -33,9 +33,11 @@ pub fn close_confirm_dialog(state: AppState) -> impl IntoView {
     let name = move || {
         let id = state.close_confirm.get();
         id.and_then(|id| {
-            state
-                .buffers
-                .with(|bs| bs.iter().find(|b| b.id == id).map(|b| b.file.display_name()))
+            state.buffers.with(|bs| {
+                bs.iter()
+                    .find(|b| b.id == id)
+                    .map(|b| b.file.display_name())
+            })
         })
         .unwrap_or_default()
     };

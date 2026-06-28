@@ -435,7 +435,9 @@ impl LspClient {
         let mut out = Vec::new();
         if let Some(arr) = res.as_array() {
             for h in arr {
-                let Some(pos) = h.get("position") else { continue };
+                let Some(pos) = h.get("position") else {
+                    continue;
+                };
                 let line = pos.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let ch = pos.get("character").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let label = match h.get("label") {

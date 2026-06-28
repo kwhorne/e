@@ -72,10 +72,13 @@ fn file_glyph(name: &str, is_dir: bool, expanded: bool) -> &'static str {
 /// Context menu for a tree item.
 fn item_menu(state: AppState, path: PathBuf) -> Menu {
     let p = || path.clone();
-    let is_root = state.roots.with_untracked(|r| r.contains(&path) && r.len() > 1);
+    let is_root = state
+        .roots
+        .with_untracked(|r| r.contains(&path) && r.len() > 1);
 
-    let mut menu = Menu::new("")
-        .entry(MenuItem::new("Add Folder to Workspace…").action(move || state.add_workspace_folder()));
+    let mut menu = Menu::new("").entry(
+        MenuItem::new("Add Folder to Workspace…").action(move || state.add_workspace_folder()),
+    );
     if is_root {
         let rp = path.clone();
         menu = menu.entry(

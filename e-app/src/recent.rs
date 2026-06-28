@@ -120,19 +120,37 @@ pub fn recent_palette(state: AppState) -> impl IntoView {
                 }
             });
         })
-        .on_key_down(Key::Named(NamedKey::Escape), |_| true, move |_| recent.open.set(false))
-        .on_key_down(Key::Named(NamedKey::ArrowDown), |_| true, move |_| {
-            let len = state.recent_paths().len();
-            if len > 0 {
-                recent.selected.update(|i| *i = (*i + 1).min(len - 1));
-            }
-        })
-        .on_key_down(Key::Named(NamedKey::ArrowUp), |_| true, move |_| {
-            recent.selected.update(|i| *i = i.saturating_sub(1));
-        });
+        .on_key_down(
+            Key::Named(NamedKey::Escape),
+            |_| true,
+            move |_| recent.open.set(false),
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowDown),
+            |_| true,
+            move |_| {
+                let len = state.recent_paths().len();
+                if len > 0 {
+                    recent.selected.update(|i| *i = (*i + 1).min(len - 1));
+                }
+            },
+        )
+        .on_key_down(
+            Key::Named(NamedKey::ArrowUp),
+            |_| true,
+            move |_| {
+                recent.selected.update(|i| *i = i.saturating_sub(1));
+            },
+        );
 
     let results = dyn_stack(
-        move || state.recent_paths().into_iter().enumerate().collect::<Vec<_>>(),
+        move || {
+            state
+                .recent_paths()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
         |(i, p)| (*i, p.clone()),
         move |(i, path)| {
             let root = state.root.get();

@@ -3,20 +3,41 @@
 `e` ships with PHP/Laravel-aware features on top of the
 [Intelephense](languages-and-lsp.md) language server.
 
+Inspired by the official Laravel VS Code extension, `e` introspects your project
+(via `php artisan` and the filesystem) to provide completion, hover and
+navigation for Laravel's helpers. It is enabled automatically in any project
+with an `artisan` file; toggle it under **Settings → Laravel features** (or the
+`laravel` config key). Run **Laravel: Refresh Project Data** from the command
+palette (`⌘⇧P`) after adding routes, views or config.
+
 ## Helper completion
 
-When the caret is inside one of Laravel's string helpers, `e` offers completions
-sourced from your project:
+When the caret is inside one of Laravel's helpers, `e` offers completions sourced
+from your project:
 
-| Helper       | Completes |
-| ------------ | --------- |
-| `route('…')` | named routes |
-| `view('…')`  | Blade view names |
-| `config('…')`| config keys |
-| `env('…')`   | environment variables |
+| Helper                         | Completes |
+| ------------------------------ | --------- |
+| `route('…')`                   | named routes (with method + URI) |
+| `view('…')`                    | Blade view names |
+| `config('…')`                  | config keys (with resolved value) |
+| `env('…')`                     | environment variables (with value) |
+| `__('…')`, `trans('…')`, `@lang` | translation keys (with text) |
+| `<x-…>`                        | Blade components |
 
 These are read from your project, so they reflect your actual routes, views,
-config, and `.env`.
+config, `.env`, language files and components.
+
+## Hover & go to definition
+
+- **Hover** (`F1`) over a helper string shows the resolved value — a config
+  value, a route's method/URI/action, an env value, or a translation's text.
+- **Go to definition** (`F12`) jumps to the target:
+  - `route('…')` → the controller method
+  - `view('…')` → the Blade file
+  - `config('…')` → the config file (and the key's line)
+  - `env('…')` → the `.env` line
+  - `__('…')` → the language file
+  - `<x-…>` → the component's Blade file
 
 ## Blade templates
 

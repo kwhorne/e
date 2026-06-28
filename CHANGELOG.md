@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Laravel features on par with the official VS Code extension: completion, hover
+  and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()`/`trans()`
+  and `<x-...>` Blade components, sourced from your project via `php artisan`.
+  Auto-enabled in Laravel projects; toggle under Settings → Laravel features.
+
 ## [0.3.3] - 2026-06-28
 
 ### Added

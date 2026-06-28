@@ -14,6 +14,7 @@ mod hints_doc;
 mod task_palette;
 mod tasks;
 mod commands;
+mod settings_view;
 mod keymap;
 mod about;
 mod update_view;

@@ -154,7 +154,7 @@ impl AppState {
     /// Auto-pairing for a typed bracket/quote. Returns `true` if it handled the
     /// input (the caller should then consume the key); `false` to type normally.
     pub fn handle_autopair(&self, ch: char) -> bool {
-        if !self.settings.auto_close {
+        if !self.settings.get_untracked().auto_close {
             return false;
         }
         let Some(buf) = self.active_buffer() else {
@@ -241,7 +241,7 @@ impl AppState {
 
     /// On Backspace, delete an empty auto-pair (e.g. `(|)` → `|`) in one step.
     pub fn handle_autopair_backspace(&self) -> bool {
-        if !self.settings.auto_close {
+        if !self.settings.get_untracked().auto_close {
             return false;
         }
         let Some(buf) = self.active_buffer() else {

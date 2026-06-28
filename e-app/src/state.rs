@@ -214,7 +214,7 @@ pub struct AppState {
     /// Git diff reading-mode toggle.
     pub diff_open: RwSignal<bool>,
     /// User settings loaded from config.json.
-    pub settings: Settings,
+    pub settings: RwSignal<Settings>,
     /// Whether the left sidebar (file explorer) is visible.
     pub sidebar_open: RwSignal<bool>,
     /// File-operation name prompt (new/rename/duplicate).
@@ -261,6 +261,8 @@ pub struct AppState {
     pub recent_files: RwSignal<Vec<PathBuf>>,
     pub recent: crate::recent::RecentState,
 
+    // Whether the graphical settings page is open.
+    pub settings_open: RwSignal<bool>,
     // Pinned tab ids.
     pub pinned_tabs: RwSignal<HashSet<u64>>,
 
@@ -342,7 +344,7 @@ impl AppState {
             md_preview: RwSignal::new(false),
             cmd: CmdPalette::new(),
             diff_open: RwSignal::new(false),
-            settings: config::load_settings(),
+            settings: RwSignal::new(config::load_settings()),
             sidebar_open: RwSignal::new(true),
             file_op: FileOp::new(),
             fs_rev: RwSignal::new(0),
@@ -364,6 +366,7 @@ impl AppState {
             close_confirm: RwSignal::new(None),
             recent_files: RwSignal::new(Vec::new()),
             recent: crate::recent::RecentState::new(),
+            settings_open: RwSignal::new(false),
             pinned_tabs: RwSignal::new(HashSet::new()),
             git_panel_open: RwSignal::new(false),
             git_root: RwSignal::new(None),
@@ -429,7 +432,7 @@ impl AppState {
     }
 
     pub fn zoom_reset(&self) {
-        self.font_size.set(self.settings.font_size);
+        self.font_size.set(self.settings.get_untracked().font_size);
         self.repaint_all_buffers();
     }
 
@@ -682,7 +685,7 @@ impl AppState {
 
     /// Save all dirty buffers to disk (no formatting) — used by idle auto-save.
     pub fn maybe_autosave(&self) {
-        if !self.settings.autosave {
+        if !self.settings.get_untracked().autosave {
             return;
         }
         let last = self.last_edit.get_untracked();
@@ -977,7 +980,7 @@ impl AppState {
     /// Load the document outline for the active buffer (LSP documentSymbol).
     /// Request LSP inlay hints for a buffer and store them as phantom text.
     pub fn request_inlay_hints(&self, id: u64) {
-        if !self.settings.inlay_hints {
+        if !self.settings.get_untracked().inlay_hints {
             return;
         }
         let Some(buf) = self.buffer_by_id(id) else {
@@ -2092,10 +2095,10 @@ impl AppState {
 
     /// Save the active buffer to disk (formatting / trimming first, if enabled).
     pub fn save_active(&self) {
-        if self.settings.format_on_save {
+        if self.settings.get_untracked().format_on_save {
             self.format_active();
         }
-        if self.settings.trim_on_save {
+        if self.settings.get_untracked().trim_on_save {
             self.trim_active();
         }
         let Some(buf) = self.active_buffer() else {

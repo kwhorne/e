@@ -203,6 +203,34 @@ pub fn settings_path() -> Option<PathBuf> {
     config_path()
 }
 
+/// Merge a single key/value into `config.json`, preserving everything else.
+pub fn set_value(key: &str, value: Value) {
+    let Some(path) = config_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut v = read();
+    if !v.is_object() {
+        v = json!({});
+    }
+    v[key] = value;
+    if let Ok(text) = serde_json::to_string_pretty(&v) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+pub fn set_bool(key: &str, b: bool) {
+    set_value(key, json!(b));
+}
+pub fn set_usize(key: &str, n: usize) {
+    set_value(key, json!(n));
+}
+pub fn set_str(key: &str, s: &str) {
+    set_value(key, json!(s));
+}
+
 /// User-defined snippets, keyed by language id, from the `snippets` section:
 /// `"snippets": { "php": [ { "prefix": "dd", "body": "dd($0);" } ] }`.
 pub fn load_user_keybindings() -> std::collections::HashMap<String, String> {

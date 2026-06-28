@@ -45,7 +45,7 @@ pub fn status_bar(state: AppState) -> impl IntoView {
             .unwrap_or_default()
     });
 
-    let indent = label(move || format!("Spaces: {}", state.settings.tab_width));
+    let indent = label(move || format!("Spaces: {}", state.settings.get().tab_width));
 
     let line_ending = label(move || match state.active_buffer() {
         Some(b) if b.doc.text().to_string().contains("\r\n") => "CRLF".to_string(),

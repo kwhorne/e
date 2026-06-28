@@ -73,7 +73,8 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "word-wrap" => state.toggle_word_wrap(),
 
         // App.
-        "settings" => state.open_settings(),
+        "settings" => state.settings_open.set(true),
+        "settings-json" => state.open_settings(),
         "about" => state.about_open.set(true),
         "check-updates" => state.check_for_updates(true),
         "install-cli" => state.install_cli(),
@@ -122,4 +123,5 @@ fn close_overlays(state: AppState) {
     state.cancel_close();
     state.close_recent();
     state.task.open.set(false);
+    state.settings_open.set(false);
 }

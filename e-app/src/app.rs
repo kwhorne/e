@@ -14,6 +14,7 @@ use floem::{Application, IntoView};
 use crate::about::about_dialog;
 use crate::recent::recent_palette;
 use crate::task_palette::task_palette;
+use crate::settings_view::settings_view;
 use crate::dialogs::{close_confirm_dialog, disk_conflict_bar, merge_conflict_bar};
 use crate::editing::goto_bar;
 use crate::agent_view::agent_panel;
@@ -316,8 +317,8 @@ fn app_view() -> impl IntoView {
 
     // Panel sides are configurable (config keys `sidebar_side` / `agent_side`):
     // the explorer/Git sidebar and the agent panel can each sit left or right.
-    let sidebar_right = state.settings.sidebar_right;
-    let agent_left = state.settings.agent_left;
+    let sidebar_right = state.settings.get_untracked().sidebar_right;
+    let agent_left = state.settings.get_untracked().agent_left;
     let sidebar_handle_side = if sidebar_right { ResizeSide::Right } else { ResizeSide::Left };
     let agent_handle_side = if agent_left { ResizeSide::Left } else { ResizeSide::Right };
 
@@ -374,6 +375,7 @@ fn app_view() -> impl IntoView {
             close_confirm_dialog(state),
             recent_palette(state),
             task_palette(state),
+            settings_view(state),
         ))
         .style(move |s| {
             let s = s.absolute().inset(0.0).size_full();
@@ -381,6 +383,7 @@ fn app_view() -> impl IntoView {
                 || state.close_confirm.get().is_some()
                 || state.recent.open.get()
                 || state.task.open.get()
+                || state.settings_open.get()
             {
                 s
             } else {

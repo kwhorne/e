@@ -122,7 +122,7 @@ fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
     let active_sig = if pane_idx == 1 { state.active2 } else { state.active };
 
     let headers = move || -> Vec<(usize, String)> {
-        if !state.settings.sticky_scroll {
+        if !state.settings.get().sticky_scroll {
             return Vec::new();
         }
         let Some(id) = active_sig.get() else {
@@ -235,7 +235,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 b.find_marks.clone(),
                 b.bracket_marks.clone(),
                 state.font_size,
-                state.settings.tab_width,
+                state.settings.get_untracked().tab_width,
             ))
             .editor_style(move |s| {
                 let wrap = if state.word_wrap.get() {
@@ -244,7 +244,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                     floem::views::editor::text::WrapMethod::None
                 };
                 theme::editor_style(s)
-                    .indent_guide(state.settings.indent_guides)
+                    .indent_guide(state.settings.get().indent_guides)
                     .wrap_method(wrap)
             })
             .style(|s| s.size_full())

@@ -19,6 +19,7 @@ native code editor written in Rust.
 
 ### Panels & tools
 - [Source Control](source-control.md) — staging, commits, blame, conflicts
+- [Database](database.md) — browse & query MySQL, Postgres, SQLite
 - [Terminal](terminal.md) — the integrated terminal
 - [AI Agents](agents.md) — running coding agents in the editor
 

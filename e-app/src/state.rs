@@ -88,6 +88,14 @@ pub struct DbForm {
     pub password: String,
     pub path: String,
     pub group: String,
+    pub use_ssh: bool,
+    pub ssh_host: String,
+    pub ssh_port: String,
+    pub ssh_user: String,
+    pub ssh_auth: String,
+    pub ssh_password: String,
+    pub ssh_key_path: String,
+    pub ssh_passphrase: String,
 }
 
 impl Default for DbForm {
@@ -101,6 +109,14 @@ impl Default for DbForm {
             password: String::new(),
             path: String::new(),
             group: String::new(),
+            use_ssh: false,
+            ssh_host: String::new(),
+            ssh_port: "22".into(),
+            ssh_user: String::new(),
+            ssh_auth: "key".into(),
+            ssh_password: String::new(),
+            ssh_key_path: String::new(),
+            ssh_passphrase: String::new(),
         }
     }
 }
@@ -117,6 +133,14 @@ impl DbForm {
             path: self.path.clone(),
             group: self.group.clone(),
             label: String::new(),
+            use_ssh: self.use_ssh,
+            ssh_host: self.ssh_host.clone(),
+            ssh_port: self.ssh_port.parse().unwrap_or(22),
+            ssh_user: self.ssh_user.clone(),
+            ssh_auth: self.ssh_auth.clone(),
+            ssh_password: self.ssh_password.clone(),
+            ssh_key_path: self.ssh_key_path.clone(),
+            ssh_passphrase: self.ssh_passphrase.clone(),
         }
     }
 }
@@ -2308,6 +2332,22 @@ impl AppState {
             password: c.password.clone(),
             path: c.path.clone(),
             group: c.group.clone(),
+            use_ssh: c.use_ssh,
+            ssh_host: c.ssh_host.clone(),
+            ssh_port: if c.ssh_port == 0 {
+                "22".into()
+            } else {
+                c.ssh_port.to_string()
+            },
+            ssh_user: c.ssh_user.clone(),
+            ssh_auth: if c.ssh_auth.is_empty() {
+                "key".into()
+            } else {
+                c.ssh_auth.clone()
+            },
+            ssh_password: c.ssh_password.clone(),
+            ssh_key_path: c.ssh_key_path.clone(),
+            ssh_passphrase: c.ssh_passphrase.clone(),
         });
         self.db_editing_key.set(Some(entry.key()));
         self.db_test_state.set(String::new());

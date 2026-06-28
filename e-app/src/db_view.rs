@@ -243,6 +243,14 @@ fn add_form(state: AppState) -> impl IntoView {
     let password = create_rw_signal(f.password.clone());
     let path = create_rw_signal(f.path.clone());
     let group = create_rw_signal(f.group.clone());
+    let use_ssh = create_rw_signal(f.use_ssh);
+    let ssh_host = create_rw_signal(f.ssh_host.clone());
+    let ssh_port = create_rw_signal(f.ssh_port.clone());
+    let ssh_user = create_rw_signal(f.ssh_user.clone());
+    let ssh_auth = create_rw_signal(f.ssh_auth.clone());
+    let ssh_password = create_rw_signal(f.ssh_password.clone());
+    let ssh_key_path = create_rw_signal(f.ssh_key_path.clone());
+    let ssh_passphrase = create_rw_signal(f.ssh_passphrase.clone());
 
     let sync = std::rc::Rc::new(move || {
         state.db_form.set(DbForm {
@@ -254,6 +262,14 @@ fn add_form(state: AppState) -> impl IntoView {
             password: password.get_untracked(),
             path: path.get_untracked(),
             group: group.get_untracked(),
+            use_ssh: use_ssh.get_untracked(),
+            ssh_host: ssh_host.get_untracked(),
+            ssh_port: ssh_port.get_untracked(),
+            ssh_user: ssh_user.get_untracked(),
+            ssh_auth: ssh_auth.get_untracked(),
+            ssh_password: ssh_password.get_untracked(),
+            ssh_key_path: ssh_key_path.get_untracked(),
+            ssh_passphrase: ssh_passphrase.get_untracked(),
         });
     });
     let sync_test = sync.clone();
@@ -344,6 +360,96 @@ fn add_form(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().gap(6.0).width_full());
 
+    // SSH tunnel toggle + fields (hidden for sqlite).
+    let ssh_toggle = label(move || {
+        if use_ssh.get() {
+            "☑ Use SSH tunnel".to_string()
+        } else {
+            "☐ Use SSH tunnel".to_string()
+        }
+    })
+    .style(move |s| {
+        let s = s
+            .font_size(12.0)
+            .color(theme::fg_dim())
+            .cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.color(theme::fg()));
+        if engine.get() == "sqlite" {
+            s.hide()
+        } else {
+            s
+        }
+    })
+    .on_click_stop(move |_| use_ssh.update(|v| *v = !*v));
+
+    let auth_chip = move |id: &'static str, name: &'static str| {
+        label(move || name.to_string())
+            .style(move |s| {
+                let active = ssh_auth.get() == id;
+                let s = s
+                    .padding_horiz(8.0)
+                    .padding_vert(2.0)
+                    .border_radius(5.0)
+                    .font_size(11.0)
+                    .cursor(floem::style::CursorStyle::Pointer);
+                if active {
+                    s.background(theme::accent())
+                        .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                } else {
+                    s.border(1.0)
+                        .border_color(theme::border())
+                        .color(theme::fg())
+                }
+            })
+            .on_click_stop(move |_| ssh_auth.set(id.to_string()))
+    };
+    let ssh_fields = dyn_stack(
+        move || {
+            if use_ssh.get() && engine.get() != "sqlite" {
+                let mut v = vec!["host", "port", "user", "auth"];
+                if ssh_auth.get() == "password" {
+                    v.push("sshpass");
+                } else {
+                    v.push("key");
+                    v.push("passphrase");
+                }
+                v
+            } else {
+                vec![]
+            }
+        },
+        |k| k.to_string(),
+        move |k| match k {
+            "host" => form_field("SSH host", ssh_host, "ssh.example.com", false).into_any(),
+            "port" => form_field("SSH port", ssh_port, "22", false).into_any(),
+            "user" => form_field("SSH user", ssh_user, "deploy", false).into_any(),
+            "auth" => stack((
+                label(|| "Auth".to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
+                stack((
+                    auth_chip("key", "Public key"),
+                    auth_chip("password", "Password"),
+                ))
+                .style(|s| s.flex_row().gap(5.0)),
+            ))
+            .style(|s| s.flex_col().gap(3.0))
+            .into_any(),
+            "sshpass" => form_field("SSH password", ssh_password, "", true).into_any(),
+            "key" => form_field("Private key", ssh_key_path, "~/.ssh/id_ed25519", false).into_any(),
+            "passphrase" => form_field("Passphrase", ssh_passphrase, "", true).into_any(),
+            _ => empty().into_any(),
+        },
+    )
+    .style(|s| {
+        s.flex_col()
+            .gap(6.0)
+            .width_full()
+            .padding(8.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(8.0)
+            .background(theme::bg_hover())
+    });
+
     // Test connection + status.
     let test = label(|| "Test".to_string())
         .style(|s| {
@@ -414,6 +520,8 @@ fn add_form(state: AppState) -> impl IntoView {
             .style(|s| s.font_size(11.0).color(theme::fg_dim())),
         engines,
         net_fields,
+        ssh_toggle,
+        ssh_fields,
         form_field("Group", group, "(optional)", false),
         test_row,
         connect,

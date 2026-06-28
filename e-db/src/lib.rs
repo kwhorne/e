@@ -38,6 +38,24 @@ pub struct DbConfig {
     /// Optional group/folder name for organising connections in the panel.
     #[serde(default)]
     pub group: String,
+    /// Tunnel the database connection through SSH (remote databases).
+    #[serde(default)]
+    pub use_ssh: bool,
+    #[serde(default)]
+    pub ssh_host: String,
+    #[serde(default)]
+    pub ssh_port: u16,
+    #[serde(default)]
+    pub ssh_user: String,
+    /// `key` | `password`.
+    #[serde(default)]
+    pub ssh_auth: String,
+    #[serde(default)]
+    pub ssh_password: String,
+    #[serde(default)]
+    pub ssh_key_path: String,
+    #[serde(default)]
+    pub ssh_passphrase: String,
 }
 
 impl DbConfig {
@@ -80,8 +98,8 @@ impl DbConfig {
     }
 }
 
-/// A live connection.
-pub enum Conn {
+/// The engine-specific transport behind a connection.
+enum Backend {
     Mysql(mysql::Pool),
     Sqlite(String),
     Postgres(Mutex<postgres::Client>),
@@ -92,6 +110,27 @@ pub enum Conn {
         password: String,
         database: String,
     },
+}
+
+/// A live connection, optionally keeping an SSH tunnel alive for its lifetime.
+pub struct Conn {
+    backend: Backend,
+    /// Dropped (killing the `ssh` child) when the connection is dropped.
+    _tunnel: Option<Mutex<SshTunnel>>,
+}
+
+/// An SSH local port-forward run via the system `ssh` binary.
+struct SshTunnel {
+    child: std::process::Child,
+    #[allow(dead_code)]
+    local_port: u16,
+}
+
+impl Drop for SshTunnel {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 /// A query (or table) result, all cells stringified.
@@ -218,6 +257,15 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
 // ── connect / test ─────────────────────────────────────────────
 
 pub fn connect(config: &DbConfig) -> Result<Conn, String> {
+    let (eff, tunnel) = prepare(config)?;
+    let backend = build_backend(&eff)?;
+    Ok(Conn {
+        backend,
+        _tunnel: tunnel.map(Mutex::new),
+    })
+}
+
+fn build_backend(config: &DbConfig) -> Result<Backend, String> {
     Ok(match config.engine.as_str() {
         "mysql" => {
             let opts = mysql::OptsBuilder::new()
@@ -232,14 +280,14 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
                 });
             let pool = mysql::Pool::new(opts).map_err(|e| e.to_string())?;
             let _ = pool.get_conn().map_err(|e| e.to_string())?;
-            Conn::Mysql(pool)
+            Backend::Mysql(pool)
         }
         "sqlite" => {
             if !Path::new(&config.path).exists() {
                 return Err(format!("SQLite file not found: {}", config.path));
             }
             rusqlite::Connection::open(&config.path).map_err(|e| e.to_string())?;
-            Conn::Sqlite(config.path.clone())
+            Backend::Sqlite(config.path.clone())
         }
         "postgres" | "postgresql" | "pgsql" => {
             let mut pg = postgres::Config::new();
@@ -257,7 +305,7 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
                 pg.dbname(&config.database);
             }
             let client = pg.connect(postgres::NoTls).map_err(|e| e.to_string())?;
-            Conn::Postgres(Mutex::new(client))
+            Backend::Postgres(Mutex::new(client))
         }
         "clickhouse" | "ch" => {
             let host = if config.host.is_empty() {
@@ -266,7 +314,7 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
                 &config.host
             };
             let port = if config.port == 0 { 8123 } else { config.port };
-            let conn = Conn::Clickhouse {
+            let conn = Backend::Clickhouse {
                 base_url: format!("http://{host}:{port}/"),
                 user: if config.username.is_empty() {
                     "default".to_string()
@@ -289,16 +337,191 @@ pub fn test(config: &DbConfig) -> Result<(), String> {
     connect(config).map(|_| ())
 }
 
+// ── SSH tunnel (remote databases) ──────────────────────────────
+// Shell out to the system `ssh` with a local port-forward; it handles key and
+// password auth and is available everywhere. Secrets are fed via SSH_ASKPASS.
+
+fn engine_default_port(engine: &str) -> u16 {
+    match engine {
+        "mysql" | "mariadb" => 3306,
+        "postgres" | "postgresql" | "pgsql" => 5432,
+        "clickhouse" | "ch" => 8123,
+        _ => 0,
+    }
+}
+
+fn free_local_port() -> Result<u16, String> {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+    Ok(l.local_addr().map_err(|e| e.to_string())?.port())
+}
+
+fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return format!("{home}/{rest}");
+        }
+    }
+    path.to_string()
+}
+
+/// Write a temporary SSH_ASKPASS helper (mode 0700) that echoes the secret.
+#[cfg(unix)]
+fn write_askpass(secret: &str) -> Result<PathBuf, String> {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut path = std::env::temp_dir();
+    path.push(format!("e-askpass-{}-{}.sh", std::process::id(), nanos));
+    let escaped = secret.replace('\'', "'\\''");
+    let script = format!("#!/bin/sh\nprintf '%s\\n' '{escaped}'\n");
+    let mut f = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    f.write_all(script.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+        .map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+fn wait_port(
+    port: u16,
+    child: &mut std::process::Child,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    use std::io::Read;
+    let start = std::time::Instant::now();
+    loop {
+        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
+            let mut err = String::new();
+            if let Some(mut s) = child.stderr.take() {
+                let _ = s.read_to_string(&mut err);
+            }
+            let msg = err.trim();
+            return Err(if msg.is_empty() {
+                "SSH tunnel failed (ssh exited)".to_string()
+            } else {
+                format!("SSH tunnel failed: {msg}")
+            });
+        }
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return Ok(());
+        }
+        if start.elapsed() > timeout {
+            return Err("SSH tunnel timed out (port did not open)".to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+}
+
+#[cfg(unix)]
+fn start_tunnel(config: &DbConfig) -> Result<SshTunnel, String> {
+    if config.ssh_host.trim().is_empty() {
+        return Err("SSH host is required".to_string());
+    }
+    if config.ssh_user.trim().is_empty() {
+        return Err("SSH user is required".to_string());
+    }
+    let local_port = free_local_port()?;
+    let db_host = if config.host.is_empty() {
+        "127.0.0.1".to_string()
+    } else {
+        config.host.clone()
+    };
+    let db_port = if config.port == 0 {
+        engine_default_port(&config.engine)
+    } else {
+        config.port
+    };
+    let ssh_port = if config.ssh_port == 0 {
+        22
+    } else {
+        config.ssh_port
+    };
+
+    let mut cmd = std::process::Command::new("ssh");
+    cmd.arg("-N")
+        .args(["-o", "ExitOnForwardFailure=yes"])
+        .args(["-o", "StrictHostKeyChecking=accept-new"])
+        .args(["-o", "ConnectTimeout=10"])
+        .args(["-o", "ServerAliveInterval=30"])
+        .args(["-o", "NumberOfPasswordPrompts=1"])
+        .args(["-p", &ssh_port.to_string()])
+        .args(["-L", &format!("127.0.0.1:{local_port}:{db_host}:{db_port}")]);
+
+    let password_auth = config.ssh_auth == "password";
+    let secret = if password_auth {
+        config.ssh_password.clone()
+    } else {
+        config.ssh_passphrase.clone()
+    };
+    if password_auth {
+        cmd.args(["-o", "PubkeyAuthentication=no"]);
+        cmd.args([
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+        ]);
+    } else if !config.ssh_key_path.trim().is_empty() {
+        cmd.args(["-i", &expand_tilde(config.ssh_key_path.trim())]);
+        cmd.args(["-o", "IdentitiesOnly=yes"]);
+    }
+
+    let mut askpass: Option<PathBuf> = None;
+    if secret.is_empty() {
+        cmd.args(["-o", "BatchMode=yes"]);
+    } else {
+        let p = write_askpass(&secret)?;
+        cmd.env("SSH_ASKPASS", &p);
+        cmd.env("SSH_ASKPASS_REQUIRE", "force");
+        cmd.env("DISPLAY", "localhost:0");
+        askpass = Some(p);
+    }
+
+    cmd.arg(format!("{}@{}", config.ssh_user, config.ssh_host));
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to start ssh: {e}"))?;
+    let res = wait_port(local_port, &mut child, std::time::Duration::from_secs(15));
+    if let Some(p) = &askpass {
+        let _ = std::fs::remove_file(p);
+    }
+    res?;
+    Ok(SshTunnel { child, local_port })
+}
+
+#[cfg(not(unix))]
+fn start_tunnel(_config: &DbConfig) -> Result<SshTunnel, String> {
+    Err("SSH tunnels are only supported on Unix".to_string())
+}
+
+/// Resolve a config to what we should actually connect to. When SSH is enabled,
+/// start a tunnel and point the connection at the local forwarded port.
+fn prepare(config: &DbConfig) -> Result<(DbConfig, Option<SshTunnel>), String> {
+    if config.use_ssh && config.engine != "sqlite" {
+        let tunnel = start_tunnel(config)?;
+        let mut eff = config.clone();
+        eff.host = "127.0.0.1".to_string();
+        eff.port = tunnel.local_port;
+        Ok((eff, Some(tunnel)))
+    } else {
+        Ok((config.clone(), None))
+    }
+}
+
 // ── schema ─────────────────────────────────────────────────────
 
 pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
-    match conn {
-        Conn::Mysql(pool) => {
+    match &conn.backend {
+        Backend::Mysql(pool) => {
             use mysql::prelude::Queryable;
             let mut c = pool.get_conn().map_err(|e| e.to_string())?;
             c.query("SHOW TABLES").map_err(|e| e.to_string())
         }
-        Conn::Sqlite(path) => {
+        Backend::Sqlite(path) => {
             let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
             let mut stmt = c
                 .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -308,7 +531,7 @@ pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
                 .map_err(|e| e.to_string())?;
             Ok(rows.filter_map(|r| r.ok()).collect())
         }
-        Conn::Postgres(m) => {
+        Backend::Postgres(m) => {
             let mut client = m.lock().unwrap();
             let res = pg_query(
                 &mut client,
@@ -321,8 +544,8 @@ pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
                 .filter_map(|r| r.into_iter().next().flatten())
                 .collect())
         }
-        Conn::Clickhouse { .. } => {
-            let res = ch_query(conn, "SHOW TABLES", MAX_ROWS)?;
+        Backend::Clickhouse { .. } => {
+            let res = ch_query(&conn.backend, "SHOW TABLES", MAX_ROWS)?;
             Ok(res
                 .rows
                 .into_iter()
@@ -358,13 +581,13 @@ fn tsv_unescape(s: &str) -> String {
     out
 }
 
-fn ch_query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> {
-    let Conn::Clickhouse {
+fn ch_query(backend: &Backend, sql: &str, max: usize) -> Result<QueryResult, String> {
+    let Backend::Clickhouse {
         base_url,
         user,
         password,
         database,
-    } = conn
+    } = backend
     else {
         return Err("not a ClickHouse connection".into());
     };
@@ -445,8 +668,8 @@ pub struct ColumnInfo {
 }
 
 pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
-    match conn {
-        Conn::Mysql(pool) => {
+    match &conn.backend {
+        Backend::Mysql(pool) => {
             use mysql::prelude::Queryable;
             let mut c = pool.get_conn().map_err(|e| e.to_string())?;
             let q = format!("SHOW COLUMNS FROM `{}`", table.replace('`', "``"));
@@ -462,7 +685,7 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
                 })
                 .collect())
         }
-        Conn::Sqlite(path) => {
+        Backend::Sqlite(path) => {
             let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
             let q = format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\""));
             let mut stmt = c.prepare(&q).map_err(|e| e.to_string())?;
@@ -482,7 +705,7 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
                 .map_err(|e| e.to_string())?;
             Ok(rows.filter_map(|r| r.ok()).collect())
         }
-        Conn::Postgres(m) => {
+        Backend::Postgres(m) => {
             let mut client = m.lock().unwrap();
             let t = table.replace('\'', "''");
             let pk = pg_query(
@@ -534,9 +757,9 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
                 })
                 .collect())
         }
-        Conn::Clickhouse { .. } => {
+        Backend::Clickhouse { .. } => {
             let q = format!("DESCRIBE TABLE `{}`", table.replace('`', "``"));
-            let res = ch_query(conn, &q, MAX_ROWS)?;
+            let res = ch_query(&conn.backend, &q, MAX_ROWS)?;
             // DESCRIBE columns: name, type, default_type, default_expression, …
             Ok(res
                 .rows
@@ -653,8 +876,8 @@ fn is_select(sql: &str) -> bool {
 pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> {
     let select = is_select(sql);
     let start = Instant::now();
-    match conn {
-        Conn::Mysql(pool) => {
+    match &conn.backend {
+        Backend::Mysql(pool) => {
             use mysql::prelude::Queryable;
             let mut c = pool.get_conn().map_err(|e| e.to_string())?;
             if select {
@@ -695,7 +918,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
                 })
             }
         }
-        Conn::Sqlite(path) => {
+        Backend::Sqlite(path) => {
             let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
             if select {
                 let mut stmt = c.prepare(sql).map_err(|e| e.to_string())?;
@@ -741,7 +964,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
                 })
             }
         }
-        Conn::Postgres(m) => {
+        Backend::Postgres(m) => {
             let mut client = m.lock().unwrap();
             let res = pg_query(&mut client, sql, max)?;
             if select || !res.columns.is_empty() {
@@ -761,7 +984,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
                 })
             }
         }
-        Conn::Clickhouse { .. } => ch_query(conn, sql, max),
+        Backend::Clickhouse { .. } => ch_query(&conn.backend, sql, max),
     }
 }
 

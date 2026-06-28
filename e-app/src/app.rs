@@ -13,6 +13,7 @@ use floem::{Application, IntoView};
 
 use crate::about::about_dialog;
 use crate::recent::recent_palette;
+use crate::task_palette::task_palette;
 use crate::dialogs::{close_confirm_dialog, disk_conflict_bar, merge_conflict_bar};
 use crate::editing::goto_bar;
 use crate::agent_view::agent_panel;
@@ -71,6 +72,10 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
                 _ if !cmd => false,
                 "p" if shift => {
                     state.cmd.open.set(true);
+                    true
+                }
+                "b" if shift => {
+                    state.open_task_palette();
                     true
                 }
                 "p" => {
@@ -269,6 +274,7 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
 
                 state.cancel_close();
                 state.close_recent();
+                state.task.open.set(false);
                 true
             }
             _ => false,
@@ -580,9 +586,19 @@ fn app_view() -> impl IntoView {
         palette(state),
         command_palette(state),
         update_notice(state),
-        stack((goto_bar(state), close_confirm_dialog(state), recent_palette(state))).style(move |s| {
+        stack((
+            goto_bar(state),
+            close_confirm_dialog(state),
+            recent_palette(state),
+            task_palette(state),
+        ))
+        .style(move |s| {
             let s = s.absolute().inset(0.0).size_full();
-            if state.goto.open.get() || state.close_confirm.get().is_some() || state.recent.open.get() {
+            if state.goto.open.get()
+                || state.close_confirm.get().is_some()
+                || state.recent.open.get()
+                || state.task.open.get()
+            {
                 s
             } else {
                 s.hide()

@@ -11,6 +11,8 @@ mod git_view;
 mod builtin_completion;
 mod framework_completion;
 mod hints_doc;
+mod task_palette;
+mod tasks;
 mod about;
 mod update_view;
 mod updater;

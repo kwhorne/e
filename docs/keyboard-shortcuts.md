@@ -60,6 +60,7 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | `⌘1`     | Toggle sidebar |
 | `⌘2`     | Toggle Source Control panel |
 | `⌘T`     | Toggle terminal |
+| `⌘⇧B`    | Run task |
 | `⌘L`     | Toggle agent panel |
 | `⌘\`     | Split editor |
 | `⌘⇧M`    | Toggle markdown preview |

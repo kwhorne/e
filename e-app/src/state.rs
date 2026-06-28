@@ -252,6 +252,9 @@ pub struct AppState {
 
     /// Go-to-line prompt state.
     pub goto: crate::editing::GotoState,
+    /// Task-runner palette state + detected tasks.
+    pub task: crate::task_palette::TaskState,
+    pub task_list: RwSignal<Vec<crate::tasks::Task>>,
     /// Buffer id awaiting a close confirmation (unsaved changes).
     pub close_confirm: RwSignal<Option<u64>>,
     /// Most-recently-used files (newest first) and the ⌘E switcher state.
@@ -356,6 +359,8 @@ impl AppState {
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
             goto: crate::editing::GotoState::new(),
+            task: crate::task_palette::TaskState::new(),
+            task_list: RwSignal::new(Vec::new()),
             close_confirm: RwSignal::new(None),
             recent_files: RwSignal::new(Vec::new()),
             recent: crate::recent::RecentState::new(),
@@ -1037,6 +1042,34 @@ impl AppState {
                 .collect();
             send(items);
         });
+    }
+
+    // ---- Task runner ---------------------------------------------------
+
+    /// Run a shell command in a new, named terminal tab.
+    pub fn run_task(&self, name: &str, command: &str) {
+        let Some(id) = self.spawn_terminal() else {
+            return;
+        };
+        let pane = self.term_focus_pane.get_untracked();
+        self.pane_active(pane).set(Some(id));
+        self.terminal_open.set(true);
+        self.rename_terminal(id, name.to_string());
+        // Give the shell a moment to start before sending the command.
+        let app = *self;
+        let cmd = format!("{command}\n");
+        floem::action::exec_after(std::time::Duration::from_millis(300), move |_| {
+            app.term_input_to(id, cmd.as_bytes());
+        });
+    }
+
+    /// Run the project's test command, if one can be detected.
+    pub fn run_test(&self) {
+        if let Some(cmd) = crate::tasks::test_command(&self.root.get_untracked()) {
+            self.run_task("test", &cmd);
+        } else {
+            eprintln!("e: no test command detected for this project");
+        }
     }
 
     // ---- Integrated terminal -------------------------------------------

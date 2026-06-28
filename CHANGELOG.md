@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Task runner (⌘⇧B): detects npm/yarn/pnpm, composer, cargo, go, artisan, Pest/
+  PHPUnit and Makefile tasks and runs the chosen one in a named terminal. "Run
+  Tests" runs the project test command.
+
 ## [0.3.0] - 2026-06-27
 
 ### Added

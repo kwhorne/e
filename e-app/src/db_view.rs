@@ -699,11 +699,13 @@ fn result_grid(state: AppState) -> impl IntoView {
             })
             .style(move |s| {
                 let s = s
-                    .min_width(120.0)
+                    .width(180.0)
+                    .flex_shrink(0.0)
                     .padding_horiz(8.0)
                     .padding_vert(5.0)
                     .font_size(11.0)
                     .font_bold()
+                    .text_ellipsis()
                     .color(theme::fg_dim())
                     .border_right(1.0)
                     .border_color(theme::border());
@@ -750,8 +752,8 @@ fn result_grid(state: AppState) -> impl IntoView {
                     };
                     label(move || text.clone()).style(move |s| {
                         let s = s
-                            .min_width(120.0)
-                            .max_width(360.0)
+                            .width(180.0)
+                            .flex_shrink(0.0)
                             .height(26.0)
                             .padding_horiz(8.0)
                             .padding_vert(4.0)
@@ -787,6 +789,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
     let head_cell = |t: &'static str, w: f64| {
         label(move || t.to_string()).style(move |s| {
             s.width(w)
+                .flex_shrink(0.0)
                 .padding_horiz(8.0)
                 .padding_vert(5.0)
                 .font_size(11.0)
@@ -824,6 +827,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
                 label(move || t.clone()).style(move |s| {
                     let s = s
                         .width(w)
+                        .flex_shrink(0.0)
                         .padding_horiz(8.0)
                         .padding_vert(4.0)
                         .font_size(12.0)

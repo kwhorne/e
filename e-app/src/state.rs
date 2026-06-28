@@ -1849,6 +1849,9 @@ impl AppState {
 
     /// If the workspace is a Laravel project, scrape its data in the background.
     pub fn load_laravel(&self) {
+        if !self.settings.get_untracked().laravel {
+            return;
+        }
         let root = self.root.get();
         if !laravel::is_laravel(&root) {
             return;
@@ -2550,15 +2553,30 @@ impl AppState {
         true
     }
 
+    /// Resolve the Laravel helper token under the cursor, if any.
+    fn laravel_token(&self) -> Option<(laravel::Helper, String, Rc<LaravelData>)> {
+        let data = self.laravel.get()?;
+        let buf = self.active_buffer()?;
+        let editor = buf.editor.get_untracked()?;
+        let offset = editor.cursor.get_untracked().offset();
+        let text = buf.doc.text().to_string();
+        let upto = offset.min(text.len());
+        let line_start = text[..upto].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let before = &text[line_start..upto];
+        let line_end = text[upto..]
+            .find('\n')
+            .map(|i| upto + i)
+            .unwrap_or(text.len());
+        let after = &text[upto..line_end];
+        let (helper, token) = laravel::token_at(before, after)?;
+        Some((helper, token, data))
+    }
+
     pub fn request_hover(&self) {
         let Some(buf) = self.active_buffer() else {
             return;
         };
-        let (Some(client), Some(uri), Some(editor)) = (
-            self.lsp_for_active(),
-            buf.uri.clone(),
-            buf.editor.get_untracked(),
-        ) else {
+        let Some(editor) = buf.editor.get_untracked() else {
             return;
         };
         let cursor = editor.cursor.get_untracked();
@@ -2572,6 +2590,19 @@ impl AppState {
 
         let hover = self.hover;
         hover.anchor.set(anchor);
+
+        // Laravel hover takes precedence inside helper strings.
+        if let Some((helper, token, data)) = self.laravel_token() {
+            if let Some(text) = laravel::hover_text(&data, helper, &token) {
+                hover.text.set(text);
+                hover.open.set(true);
+                return;
+            }
+        }
+
+        let (Some(client), Some(uri)) = (self.lsp_for_active(), buf.uri.clone()) else {
+            return;
+        };
         let send = create_ext_action(self.cx, move |text: Option<String>| match text {
             Some(text) if !text.trim().is_empty() => {
                 hover.text.set(text);
@@ -2640,6 +2671,14 @@ impl AppState {
 
     /// Jump to the definition of the symbol under the cursor (LSP).
     pub fn goto_definition(&self) {
+        // Laravel navigation first: route -> controller, view -> blade, etc.
+        if let Some((helper, token, data)) = self.laravel_token() {
+            if let Some((path, line, col)) = laravel::navigate(&data, helper, &token) {
+                let uri = path_to_uri(&path);
+                self.jump_to(&uri, line, col);
+                return;
+            }
+        }
         let Some(buf) = self.active_buffer() else {
             return;
         };

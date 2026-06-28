@@ -17,6 +17,9 @@ pub struct Settings {
     pub auto_close: bool,
     pub inlay_hints: bool,
     pub sticky_scroll: bool,
+    /// Laravel-aware completion, hover and navigation (auto-enabled in Laravel
+    /// projects; set to false to turn off).
+    pub laravel: bool,
     /// Explorer/Git sidebar on the right instead of the left.
     pub sidebar_right: bool,
     /// Agent panel on the left instead of the right.
@@ -36,6 +39,7 @@ impl Default for Settings {
             auto_close: true,
             inlay_hints: true,
             sticky_scroll: true,
+            laravel: true,
             sidebar_right: false,
             agent_left: false,
         }
@@ -80,6 +84,7 @@ pub fn load_settings() -> Settings {
         auto_close: bool_of("auto_close", d.auto_close),
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
+        laravel: bool_of("laravel", d.laravel),
         sidebar_right: v.get("sidebar_side").and_then(|x| x.as_str()) == Some("right"),
         agent_left: v.get("agent_side").and_then(|x| x.as_str()) == Some("left"),
     }

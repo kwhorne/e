@@ -176,6 +176,11 @@ pub fn settings_view(state: AppState) -> impl IntoView {
             s.settings.update(|st| st.sticky_scroll = v);
             config::set_bool("sticky_scroll", v);
         }),
+        toggle_row("Laravel features", "Completion, hover & navigation for routes, views, config, env, translations & components", move || s.settings.get().laravel, move |v| {
+            s.settings.update(|st| st.laravel = v);
+            config::set_bool("laravel", v);
+            if v { s.load_laravel(); }
+        }),
     ))
     .style(|s| s.flex_col().width_full());
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-06-28
+
 ### Added
 
 - Emmet abbreviation expansion (Tab) in HTML, Blade, Vue, Svelte and PHP:
@@ -224,7 +226,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/kwhorne/e/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/kwhorne/e/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/kwhorne/e/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/kwhorne/e/compare/v0.3.2...v0.3.3

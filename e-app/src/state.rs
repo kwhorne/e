@@ -655,6 +655,54 @@ impl AppState {
             .set(Cursor::new(CursorMode::Insert(new_sel), None, None));
     }
 
+    /// Place a cursor on every occurrence of the current word/selection (⌘⇧L).
+    pub fn select_all_occurrences(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let CursorMode::Insert(sel) = cursor.mode.clone() else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        let regions = sel.regions().to_vec();
+        let all_carets = regions.iter().all(|r| r.start == r.end);
+
+        let (term, whole) = if all_carets {
+            let Some(r) = regions.last() else {
+                return;
+            };
+            let (a, b) = word_range(&text, r.max());
+            if b <= a {
+                return;
+            }
+            (text[a..b].to_string(), true)
+        } else {
+            let Some(last) = regions.iter().rev().find(|r| r.max() > r.min()) else {
+                return;
+            };
+            (text[last.min()..last.max()].to_string(), false)
+        };
+
+        if term.is_empty() {
+            return;
+        }
+        let occ = find_all_opts(&text, &term, true, whole, false);
+        if occ.is_empty() {
+            return;
+        }
+        let mut s = Selection::new();
+        for (a, b) in occ {
+            s.add_region(SelRegion::new(a, b, None));
+        }
+        editor
+            .cursor
+            .set(Cursor::new(CursorMode::Insert(s), None, None));
+    }
+
     /// Replace every whole-word occurrence of the original identifier.
     pub fn apply_rename(&self) {
         let r = self.rename;

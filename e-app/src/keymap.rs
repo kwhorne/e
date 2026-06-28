@@ -32,6 +32,7 @@ const DEFAULT: &[(&str, &str)] = &[
     ("cmd+/", "comment"),
     ("cmd+d", "duplicate-line"),
     ("cmd+shift+d", "select-next-occurrence"),
+    ("cmd+shift+l", "select-all-occurrences"),
     ("cmd+shift+k", "delete-line"),
     ("cmd+]", "indent"),
     ("cmd+[", "outdent"),

@@ -38,6 +38,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "indent" => state.indent_lines(),
         "outdent" => state.outdent_lines(),
         "select-next-occurrence" => state.select_next_occurrence(),
+        "select-all-occurrences" => state.select_all_occurrences(),
         "completion" => {
             if let Some(id) = state.focused_active_id() {
                 state.request_completion(id);

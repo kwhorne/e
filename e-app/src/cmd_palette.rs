@@ -35,6 +35,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("nav-forward", "Go Forward"),
     ("markdown", "Toggle Markdown Preview"),
     ("diff", "Show Git Diff vs HEAD"),
+    ("select-all-occurrences", "Select All Occurrences"),
     ("run-task", "Run Task…"),
     ("run-test", "Run Tests"),
     ("source-control", "Toggle Source Control"),

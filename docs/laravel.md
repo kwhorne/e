@@ -41,9 +41,10 @@ config, `.env`, language files and components.
 
 ## Blade templates
 
-`*.blade.php` files are detected as **Blade** and highlighted using the HTML
-grammar, which covers tags, attributes, and Tailwind utility classes alongside
-Blade directives.
+`*.blade.php` files are detected as **Blade** with full syntax highlighting:
+HTML tags, attributes and Tailwind utility classes, Blade directives
+(`@php`, `@if`, `@foreach`, `@push`, …), `{{-- comments --}}`, and the embedded
+PHP inside `@php … @endphp` blocks, `{{ … }}` and `{!! … !!}` expressions.
 
 ## Working on a Laravel project
 

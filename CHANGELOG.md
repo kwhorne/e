@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Blade syntax highlighting now colours Blade directives, `{{ }}`/`{!! !!}`
+  expressions, `{{-- comments --}}` and the embedded PHP inside `@php` blocks and
+  echoes — in addition to HTML, attributes and Tailwind classes.
+
 ## [0.4.3] - 2026-06-28
 
 ### Changed

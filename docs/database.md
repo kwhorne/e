@@ -21,18 +21,26 @@ Click **＋** in the panel header:
 Connections are saved per project in `~/.config/e/databases.json` — never written
 into the project folder, so nothing can be committed.
 
+When adding manually you can press **Test** to verify the connection before
+saving.
+
 ## Browsing & querying
 
 - Click a connection to **connect** and list its tables.
 - Use the **filter** box to narrow the table list.
-- Click a table to open its rows in the results grid (`SELECT * … LIMIT 200`).
+- Click a table to open its rows in the results grid (200 per page).
+  - Switch between **Data** and **Structure** (columns, types, nullability,
+    keys).
+  - Click a **column header** to sort (ascending → descending → off).
+  - Page through rows with **‹ Prev** / **Next ›**.
+  - **⬇ CSV** exports the current result to a file.
 - Click **⌗** on a connection to open a blank **query editor**. Type SQL and
   press **⌘↵** (or **Run**) to execute. `SELECT`/`SHOW`/`EXPLAIN` show a grid;
   other statements report the number of affected rows.
 
-Row and `NULL` values are shown in the grid; results are capped at 1000 rows.
+Results are capped at 1000 rows.
 
 ## Connection actions
 
 Hover a connection for its actions: **⌗** new query, **⟳** refresh tables,
-**⏏** disconnect, **✕** remove.
+**⏏** disconnect, **✎** edit, **✕** remove.

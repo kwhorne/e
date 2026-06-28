@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Database panel (⌘3): browse and query MySQL/MariaDB, PostgreSQL and SQLite
-  databases. Connect from the project's `.env` or manually, browse tables, and
-  run SQL in a results grid. Right by default; configurable to the left.
+  databases. Connect from the project's `.env` or manually (with a Test button),
+  browse tables with sortable columns, paging, a Data/Structure view and CSV
+  export, and run SQL in a results grid. Right by default; configurable left.
 
 ### Added
 

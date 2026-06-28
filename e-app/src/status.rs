@@ -51,6 +51,12 @@ pub fn status_bar(state: AppState) -> impl IntoView {
         Some(b) if b.doc.text().to_string().contains("\r\n") => "CRLF".to_string(),
         Some(_) => "LF".to_string(),
         None => String::new(),
+    })
+    .style(|s| s.cursor(floem::style::CursorStyle::Pointer).hover(|s| s.color(theme::fg())))
+    .popout_menu(move || {
+        floem::menu::Menu::new("Line endings")
+            .entry(floem::menu::MenuItem::new("LF").action(move || state.set_line_ending(false)))
+            .entry(floem::menu::MenuItem::new("CRLF").action(move || state.set_line_ending(true)))
     });
 
     let encoding = label(move || match state.active_buffer() {

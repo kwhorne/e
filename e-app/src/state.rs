@@ -78,6 +78,8 @@ pub struct Buffer {
     pub blame: Rc<RefCell<Vec<(String, i64, String)>>>,
     /// LSP inlay hints: `(line, character, label)`, shown as phantom text.
     pub inlay_hints: RwSignal<Vec<(u32, u32, String)>>,
+    /// Very large file — expensive per-edit features are skipped for speed.
+    pub large: bool,
 }
 
 /// One terminal session (a running shell).
@@ -391,6 +393,9 @@ impl AppState {
         let Some(buf) = self.buffer_by_id(id) else {
             return;
         };
+        if buf.large {
+            return;
+        }
         let Some(path) = buf.file.path.clone() else {
             return;
         };
@@ -768,6 +773,21 @@ impl AppState {
 
     // ---- Merge conflicts ------------------------------------------------
 
+    /// Convert the active buffer's line endings to CRLF (`true`) or LF.
+    pub fn set_line_ending(&self, crlf: bool) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        let lf = text.replace("\r\n", "\n");
+        let new = if crlf { lf.replace('\n', "\r\n") } else { lf };
+        if new == text {
+            return;
+        }
+        let mut it = std::iter::once((Selection::region(0, text.len()), new.as_str()));
+        buf.doc.edit(&mut it, EditType::InsertChars);
+    }
+
     /// Whether the active buffer contains conflict markers.
     pub fn active_has_conflicts(&self) -> bool {
         self.active_buffer()
@@ -1019,6 +1039,9 @@ impl AppState {
         let Some(buf) = self.active_buffer() else {
             return;
         };
+        if buf.large {
+            return;
+        }
         let Some(editor) = buf.editor.get_untracked() else {
             return;
         };
@@ -1037,6 +1060,9 @@ impl AppState {
         let Some(buf) = self.buffer_by_id(id) else {
             return;
         };
+        if buf.large {
+            return;
+        }
         if lsp_language_id(buf.file.language).is_none() {
             return;
         }
@@ -1434,6 +1460,7 @@ impl AppState {
             disk_changed: RwSignal::new(false),
             blame: Rc::new(RefCell::new(Vec::new())),
             inlay_hints: RwSignal::new(Vec::new()),
+            large: false,
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
@@ -1952,7 +1979,14 @@ impl AppState {
         let language = file.language;
         let uri = file.path.as_ref().map(|p| path_to_uri(p));
 
-        let highlights: Highlights = Rc::new(RefCell::new(highlight_lines(language, &content)));
+        // Very large files skip tree-sitter highlighting (and other per-edit
+        // work) to stay responsive.
+        let large = content.len() > 1_000_000;
+        let highlights: Highlights = Rc::new(RefCell::new(if large {
+            Vec::new()
+        } else {
+            highlight_lines(language, &content)
+        }));
 
         // Git change markers vs HEAD.
         let head_text = file.path.as_ref().and_then(|p| git::head_text(p));
@@ -1988,10 +2022,12 @@ impl AppState {
                 dirty.set(true);
                 app.last_edit.set(now_ms());
                 let text = doc.text().to_string();
-                *highlights.borrow_mut() = highlight_lines(language, &text);
-                if let Some(head) = &head_text {
-                    let lc = text.split_inclusive('\n').count().max(1);
-                    *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                if !large {
+                    *highlights.borrow_mut() = highlight_lines(language, &text);
+                    if let Some(head) = &head_text {
+                        let lc = text.split_inclusive('\n').count().max(1);
+                        *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                    }
                 }
                 doc.cache_rev().update(|r| *r += 1);
 
@@ -2031,6 +2067,7 @@ impl AppState {
             disk_changed: RwSignal::new(false),
             blame: Rc::new(RefCell::new(Vec::new())),
             inlay_hints: RwSignal::new(Vec::new()),
+            large,
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Tailwind CSS highlighting inside `class="…"` attributes (Blade, HTML, Vue):
+  utility classes, variant prefixes (`sm:`, `dark:`, `hover:`) and arbitrary
+  values (`w-[680px]`) are coloured distinctly.
+
 ## [0.4.4] - 2026-06-28
 
 ### Changed

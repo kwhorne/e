@@ -100,6 +100,23 @@ impl AppState {
         self.git_commit_msg.set(String::new());
     }
 
+    /// Suggest a Conventional Commits message from the current changes and put
+    /// it in the message box (off the UI thread).
+    pub fn suggest_commit_message(&self) {
+        let Some(repo) = self.git_root.get_untracked() else {
+            return;
+        };
+        let target = self.git_commit_msg;
+        let send = floem::ext_event::create_ext_action(self.cx, move |s: String| {
+            if !s.is_empty() {
+                target.set(s);
+            }
+        });
+        std::thread::spawn(move || {
+            send(git::suggest_commit(&repo));
+        });
+    }
+
     /// Open a status file in the editor.
     pub fn open_git_file(&self, rel: String) {
         if let Some(repo) = self.git_root.get_untracked() {
@@ -282,17 +299,33 @@ pub fn git_panel(state: AppState) -> impl IntoView {
     });
 
     // Commit message + buttons.
-    let msg = text_input(state.git_commit_msg)
+    let msg_input = text_input(state.git_commit_msg)
         .placeholder("Message (Enter to commit)")
         .on_enter(move || state.git_commit())
         .style(|s| {
             theme::input_colors(s)
-                .width_full()
+                .flex_grow(1.0)
                 .height(30.0)
                 .padding_horiz(8.0)
                 .border(1.0)
                 .border_radius(4.0)
         });
+    let suggest = label(|| "✨".to_string())
+        .style(|s| {
+            s.height(30.0)
+                .padding_horiz(8.0)
+                .items_center()
+                .justify_center()
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(4.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.suggest_commit_message());
+    let msg =
+        stack((msg_input, suggest)).style(|s| s.flex_row().gap(4.0).width_full().items_center());
 
     let commit_btn = label(|| "Commit".to_string())
         .style(|s| {

@@ -50,6 +50,13 @@ bar appears above the editor with one-click resolution:
 - **Accept Incoming** — keep the other side.
 - **Accept Both** — keep both, removing the markers.
 
+## Suggested commit messages
+
+Click the ✨ button next to the message box to generate a Conventional Commits
+subject line from your staged (or otherwise changed) files — e.g.
+`feat(app): add settings`, `docs: update readme`, `fix: update parser`. It is a
+starting point you can edit before committing.
+
 ## Commit history & stash
 
 The panel lists recent commits (hash, summary, author, time), and the Stash /

@@ -216,6 +216,137 @@ pub fn commit(root: &Path, message: &str) -> Result<(), String> {
     run_git(root, &["commit", "-m", message])
 }
 
+/// Suggest a Conventional Commits subject line from the staged (or, if nothing
+/// is staged, all) changes. Best-effort heuristic — meant as an editable
+/// starting point.
+pub fn suggest_commit(root: &Path) -> String {
+    let entries = status(root);
+    let staged: Vec<&StatusEntry> = entries.iter().filter(|e| e.is_staged()).collect();
+    let use_staged = !staged.is_empty();
+    let items: Vec<&StatusEntry> = if use_staged {
+        staged
+    } else {
+        entries.iter().collect()
+    };
+    if items.is_empty() {
+        return String::new();
+    }
+
+    // (path, effective change code) where '?' counts as added.
+    let mut files: Vec<(String, char)> = Vec::new();
+    let (mut added, mut modified, mut deleted) = (0u32, 0u32, 0u32);
+    for e in &items {
+        let raw = if use_staged {
+            e.index
+        } else if e.index != ' ' && e.index != '?' {
+            e.index
+        } else {
+            e.worktree
+        };
+        let code = if raw == '?' { 'A' } else { raw };
+        match code {
+            'A' => added += 1,
+            'D' => deleted += 1,
+            _ => modified += 1,
+        }
+        files.push((e.path.clone(), code));
+    }
+
+    let ty = commit_type(&files, added);
+    let scope = commit_scope(&files);
+    let verb = if added > 0 && modified == 0 && deleted == 0 {
+        "add"
+    } else if deleted > 0 && added == 0 && modified == 0 {
+        "remove"
+    } else {
+        "update"
+    };
+    let targets = commit_targets(&files);
+
+    let mut subject = ty.to_string();
+    if let Some(s) = scope {
+        subject.push_str(&format!("({s})"));
+    }
+    subject.push_str(&format!(": {verb} {targets}"));
+    subject
+}
+
+fn file_stem(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let trimmed = name.trim_start_matches('.');
+    let stem = trimmed.split('.').next().unwrap_or(trimmed);
+    if stem.is_empty() {
+        name.trim_start_matches('.').to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+fn commit_type(files: &[(String, char)], added: u32) -> &'static str {
+    let all = |pred: &dyn Fn(&str) -> bool| files.iter().all(|(p, _)| pred(&p.to_lowercase()));
+    if all(&|p| p.ends_with(".md") || p.starts_with("docs/") || p.contains("/docs/")) {
+        return "docs";
+    }
+    if all(&|p| {
+        p.starts_with("tests/") || p.contains("/tests/") || p.contains("test") || p.contains("spec")
+    }) {
+        return "test";
+    }
+    if all(&|p| p.ends_with(".css") || p.ends_with(".scss") || p.ends_with(".sass")) {
+        return "style";
+    }
+    if all(&|p| {
+        p.ends_with("cargo.toml")
+            || p.ends_with("cargo.lock")
+            || p.ends_with("package.json")
+            || p.ends_with("package-lock.json")
+            || p.ends_with(".lock")
+            || p.ends_with(".yml")
+            || p.ends_with(".yaml")
+            || p.ends_with(".toml")
+            || p.ends_with("dockerfile")
+            || p.ends_with(".gitignore")
+            || p.starts_with(".github/")
+    }) {
+        return "chore";
+    }
+    if added > 0 {
+        "feat"
+    } else {
+        "fix"
+    }
+}
+
+fn commit_scope(files: &[(String, char)]) -> Option<String> {
+    let first_seg = |p: &str| p.split('/').next().unwrap_or(p).to_string();
+    let first = first_seg(&files[0].0);
+    if files.iter().all(|(p, _)| first_seg(p) == first)
+        && !first.is_empty()
+        && !first.contains('.')
+        && first != "src"
+    {
+        // Trim a leading crate prefix for readability (e-app -> app).
+        Some(first.strip_prefix("e-").unwrap_or(&first).to_string())
+    } else {
+        None
+    }
+}
+
+fn commit_targets(files: &[(String, char)]) -> String {
+    let mut stems: Vec<String> = Vec::new();
+    for (p, _) in files {
+        let s = file_stem(p);
+        if !s.is_empty() && !stems.contains(&s) {
+            stems.push(s);
+        }
+    }
+    match stems.len() {
+        0 => "changes".to_string(),
+        1..=3 => stems.join(", "),
+        n => format!("{} and {} more", stems[..2].join(", "), n - 2),
+    }
+}
+
 pub fn push(root: &Path) -> Result<(), String> {
     run_git(root, &["push"])
 }

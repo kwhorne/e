@@ -131,7 +131,9 @@ A selection — see [the full list](docs/keyboard-shortcuts.md).
 
 ## Documentation
 
-Full user documentation lives in [`docs/`](docs/README.md):
+Online documentation: **<https://elyracode.com/docs/e>**
+
+Full user documentation also lives in [`docs/`](docs/README.md):
 
 - [Installation](docs/installation.md) · [Getting started](docs/getting-started.md) · [Keyboard shortcuts](docs/keyboard-shortcuts.md)
 - [Editing](docs/editing.md) · [Find & Replace](docs/find-and-replace.md) · [Navigation](docs/navigation.md)

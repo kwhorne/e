@@ -41,7 +41,12 @@ pub fn about_dialog(state: AppState) -> impl IntoView {
                 .margin_bottom(16.0)
         }),
         line("A fast, native code editor in Rust.", false, None),
-        line("kwhorne.com", true, Some("https://kwhorne.com")),
+        line("elyracode.com/e", true, Some("https://elyracode.com/e")),
+        line(
+            "elyracode.com/docs/e",
+            true,
+            Some("https://elyracode.com/docs/e"),
+        ),
         line(
             "github.com/kwhorne/e",
             true,

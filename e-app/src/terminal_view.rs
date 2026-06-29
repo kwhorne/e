@@ -170,7 +170,7 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
             if li > 0 {
                 text.push('\n');
             }
-            for (seg, fg) in line {
+            for (seg, fg, _bg) in line {
                 let start = text.len();
                 text.push_str(seg);
                 if let Some((r, g, b)) = fg {
@@ -190,19 +190,56 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
     })
     .style(|s| s.padding(8.0));
 
+    // Background-colour rectangles (drawn behind the text), since the text
+    // layout engine only supports foreground colour.
+    let bg_layer = dyn_stack(
+        move || {
+            state.term_tick.get();
+            let runs = state.term_runs_of(id_sig.get());
+            let mut rects: Vec<(usize, usize, usize, u8, u8, u8)> = Vec::new();
+            for (li, line) in runs.iter().enumerate() {
+                let mut col = 0usize;
+                for (seg, _fg, bg) in line {
+                    let w = seg.chars().count();
+                    if let Some((r, g, b)) = bg {
+                        rects.push((li, col, w, *r, *g, *b));
+                    }
+                    col += w;
+                }
+            }
+            rects.into_iter().enumerate().collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, (li, col, w, r, g, b))| {
+            let (cw, lh) = char_size();
+            empty().style(move |s| {
+                s.absolute()
+                    .inset_left(8.0 + col as f64 * cw)
+                    .inset_top(8.0 + li as f64 * lh)
+                    .width(w as f64 * cw)
+                    .height(lh)
+                    .background(Color::from_rgb8(r, g, b))
+            })
+        },
+    )
+    .style(|s| s.absolute().inset(0.0));
+
     let cursor_block = empty().style(move |s| {
         state.term_tick.get();
-        let (row, col) = state.term_cursor_of(id_sig.get());
         let (cw, lh) = char_size();
-        s.absolute()
-            .inset_left(8.0 + col as f64 * cw)
-            .inset_top(8.0 + row as f64 * lh)
-            .width(cw)
-            .height(lh)
-            .background(Color::from_rgba8(0xe8, 0xee, 0xfc, 0x88))
+        match state.term_cursor_of(id_sig.get()) {
+            Some((row, col)) => s
+                .absolute()
+                .inset_left(8.0 + col as f64 * cw)
+                .inset_top(8.0 + row as f64 * lh)
+                .width(cw)
+                .height(lh)
+                .background(Color::from_rgba8(0xe8, 0xee, 0xfc, 0x88)),
+            None => s.absolute().hide(),
+        }
     });
 
-    let body = stack((content, cursor_block)).style(|s| s.size_full());
+    let body = stack((bg_layer, content, cursor_block)).style(|s| s.size_full());
 
     scroll(body)
         .style(|s| {
@@ -215,6 +252,16 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
             let cols = (((rect.width() - 16.0) / cw).floor() as i64).max(20) as usize;
             let rows = (((rect.height() - 16.0) / lh).floor() as i64).max(5) as usize;
             state.resize_terminal(rows, cols);
+        })
+        .on_event_stop(EventListener::PointerWheel, move |e| {
+            if let Event::PointerWheel(pe) = e {
+                let dy = pe.delta.y;
+                if dy != 0.0 {
+                    let lines = ((dy.abs() / 24.0).ceil() as usize).max(1);
+                    // Wheel up (negative dy) scrolls into the scrollback history.
+                    state.term_scroll(id_sig.get_untracked(), dy < 0.0, lines);
+                }
+            }
         })
         .keyboard_navigable()
         .request_focus(move || {
@@ -236,6 +283,8 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 }
                 if let Some(bytes) = key_to_bytes(ke) {
                     if let Some(id) = id_sig.get_untracked() {
+                        // Typing snaps the view back to the live bottom.
+                        state.term_scroll_bottom(Some(id));
                         state.term_input_to(id, &bytes);
                     }
                     return EventPropagation::Stop;

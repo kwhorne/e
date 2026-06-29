@@ -1585,10 +1585,27 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    pub fn term_cursor_of(&self, id: Option<u64>) -> (usize, usize) {
+    pub fn term_cursor_of(&self, id: Option<u64>) -> Option<(usize, usize)> {
         id.and_then(|i| self.term_by_id(i))
-            .map(|t| t.borrow().cursor())
-            .unwrap_or((0, 0))
+            .and_then(|t| t.borrow().cursor())
+    }
+
+    /// Scroll a terminal's scrollback. `up` scrolls into history.
+    pub fn term_scroll(&self, id: Option<u64>, up: bool, lines: usize) {
+        if let Some(t) = id.and_then(|i| self.term_by_id(i)) {
+            if up {
+                t.borrow().scroll_up(lines);
+            } else {
+                t.borrow().scroll_down(lines);
+            }
+            self.term_tick.update(|x| *x += 1);
+        }
+    }
+
+    pub fn term_scroll_bottom(&self, id: Option<u64>) {
+        if let Some(t) = id.and_then(|i| self.term_by_id(i)) {
+            t.borrow().scroll_to_bottom();
+        }
     }
 
     // ---- Agent panel ----------------------------------------------------
@@ -1664,11 +1681,10 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    pub fn agent_cursor(&self) -> (usize, usize) {
+    pub fn agent_cursor(&self) -> Option<(usize, usize)> {
         self.agent_term
             .get_untracked()
-            .map(|t| t.borrow().cursor())
-            .unwrap_or((0, 0))
+            .and_then(|t| t.borrow().cursor())
     }
 
     pub fn resize_agent(&self, rows: usize, cols: usize) {

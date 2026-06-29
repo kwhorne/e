@@ -95,7 +95,7 @@ fn agent_body(state: AppState) -> impl IntoView {
             if li > 0 {
                 text.push('\n');
             }
-            for (seg, fg) in line {
+            for (seg, fg, _bg) in line {
                 let start = text.len();
                 text.push_str(seg);
                 if let Some((r, g, b)) = fg {
@@ -117,14 +117,17 @@ fn agent_body(state: AppState) -> impl IntoView {
 
     let cursor_block = empty().style(move |s| {
         state.term_tick.get();
-        let (row, col) = state.agent_cursor();
         let (cw, lh) = char_size();
-        s.absolute()
-            .inset_left(8.0 + col as f64 * cw)
-            .inset_top(8.0 + row as f64 * lh)
-            .width(cw)
-            .height(lh)
-            .background(Color::from_rgba8(0xe8, 0xee, 0xfc, 0x88))
+        match state.agent_cursor() {
+            Some((row, col)) => s
+                .absolute()
+                .inset_left(8.0 + col as f64 * cw)
+                .inset_top(8.0 + row as f64 * lh)
+                .width(cw)
+                .height(lh)
+                .background(Color::from_rgba8(0xe8, 0xee, 0xfc, 0x88)),
+            None => s.absolute().hide(),
+        }
     });
 
     let body = stack((content, cursor_block)).style(|s| s.size_full());

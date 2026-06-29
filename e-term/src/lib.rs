@@ -13,28 +13,71 @@ use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use vte::{Params, Parser, Perform};
 
-/// One screen cell: a character and an optional foreground colour.
-#[derive(Clone, Copy)]
+/// One screen cell: a character with optional foreground / background colours.
+#[derive(Clone, Copy, PartialEq)]
 pub struct Cell {
     pub ch: char,
     pub fg: Option<(u8, u8, u8)>,
+    pub bg: Option<(u8, u8, u8)>,
 }
 
 impl Cell {
-    const BLANK: Cell = Cell { ch: ' ', fg: None };
+    const BLANK: Cell = Cell {
+        ch: ' ',
+        fg: None,
+        bg: None,
+    };
 }
 
-/// A foreground-coloured run of text within a line.
-pub type Run = (String, Option<(u8, u8, u8)>);
+/// A coloured run of text within a line: `(text, fg, bg)`.
+pub type Run = (String, Option<(u8, u8, u8)>, Option<(u8, u8, u8)>);
+
+/// Maximum number of scrolled-off lines kept for scrollback.
+const SCROLLBACK_MAX: usize = 5000;
+
+/// Group a row of cells into coloured runs by `(fg, bg)`. Trailing blank cells
+/// are dropped unless they carry a background colour (so highlighted regions,
+/// e.g. selected/diff lines, still render).
+fn line_runs(row: &[Cell]) -> Vec<Run> {
+    let last = row
+        .iter()
+        .rposition(|c| c.ch != ' ' || c.bg.is_some())
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let mut runs: Vec<Run> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_fg = None;
+    let mut cur_bg = None;
+    for (i, cell) in row[..last].iter().enumerate() {
+        if i == 0 {
+            cur_fg = cell.fg;
+            cur_bg = cell.bg;
+        } else if cell.fg != cur_fg || cell.bg != cur_bg {
+            runs.push((std::mem::take(&mut cur), cur_fg, cur_bg));
+            cur_fg = cell.fg;
+            cur_bg = cell.bg;
+        }
+        cur.push(cell.ch);
+    }
+    if !cur.is_empty() {
+        runs.push((cur, cur_fg, cur_bg));
+    }
+    runs
+}
 
 /// A character grid with a cursor.
 pub struct Screen {
     pub rows: usize,
     pub cols: usize,
     grid: Vec<Vec<Cell>>,
+    /// Lines that scrolled off the top, oldest first (capped).
+    scrollback: std::collections::VecDeque<Vec<Cell>>,
+    /// How many lines the view is scrolled up from the live bottom (0 = bottom).
+    scroll: usize,
     cx: usize,
     cy: usize,
     fg: Option<(u8, u8, u8)>,
+    bg: Option<(u8, u8, u8)>,
 }
 
 impl Screen {
@@ -43,10 +86,27 @@ impl Screen {
             rows,
             cols,
             grid: vec![vec![Cell::BLANK; cols]; rows],
+            scrollback: std::collections::VecDeque::new(),
+            scroll: 0,
             cx: 0,
             cy: 0,
             fg: None,
+            bg: None,
         }
+    }
+
+    /// Scroll the view up (into history) by `n` lines.
+    pub fn scroll_up(&mut self, n: usize) {
+        self.scroll = (self.scroll + n).min(self.scrollback.len());
+    }
+
+    /// Scroll the view down (towards the live bottom) by `n` lines.
+    pub fn scroll_down(&mut self, n: usize) {
+        self.scroll = self.scroll.saturating_sub(n);
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll = 0;
     }
 
     pub fn resize(&mut self, rows: usize, cols: usize) {
@@ -58,47 +118,53 @@ impl Screen {
         self.cols = cols;
         self.cy = self.cy.min(rows.saturating_sub(1));
         self.cx = self.cx.min(cols.saturating_sub(1));
+        self.scroll = self.scroll.min(self.scrollback.len());
     }
 
-    /// Snapshot each line as foreground-coloured runs (trailing blanks dropped).
+    /// The `rows` visible lines (respecting the scroll position), each as a
+    /// list of coloured runs. Trailing blank cells are dropped unless they
+    /// carry a background colour.
     pub fn runs(&self) -> Vec<Vec<Run>> {
-        self.grid
-            .iter()
-            .map(|row| {
-                let last = row
-                    .iter()
-                    .rposition(|c| c.ch != ' ')
-                    .map(|i| i + 1)
-                    .unwrap_or(0);
-                let mut runs: Vec<Run> = Vec::new();
-                let mut cur = String::new();
-                let mut cur_fg = None;
-                for (i, cell) in row[..last].iter().enumerate() {
-                    if i == 0 {
-                        cur_fg = cell.fg;
-                    } else if cell.fg != cur_fg {
-                        runs.push((std::mem::take(&mut cur), cur_fg));
-                        cur_fg = cell.fg;
-                    }
-                    cur.push(cell.ch);
-                }
-                if !cur.is_empty() {
-                    runs.push((cur, cur_fg));
-                }
-                runs
+        let s = self.scrollback.len();
+        // Window of `rows` lines ending `scroll` lines above the live bottom.
+        let start = (s + self.rows).saturating_sub(self.rows + self.scroll);
+        (0..self.rows)
+            .map(|vr| {
+                let idx = start + vr;
+                let row = if idx < s {
+                    &self.scrollback[idx]
+                } else {
+                    &self.grid[idx - s]
+                };
+                line_runs(row)
             })
             .collect()
     }
 
-    /// Current cursor position as `(row, col)`.
-    pub fn cursor(&self) -> (usize, usize) {
-        (self.cy, self.cx)
+    /// Cursor position in *visible* coordinates, or `None` when scrolled away.
+    pub fn visible_cursor(&self) -> Option<(usize, usize)> {
+        let row = self.cy + self.scroll;
+        if row < self.rows {
+            Some((row, self.cx))
+        } else {
+            None
+        }
     }
 
     fn newline(&mut self) {
         if self.cy + 1 >= self.rows {
-            self.grid.remove(0);
+            // The top line scrolls off into the scrollback buffer.
+            let line = self.grid.remove(0);
+            self.scrollback.push_back(line);
+            while self.scrollback.len() > SCROLLBACK_MAX {
+                self.scrollback.pop_front();
+            }
             self.grid.push(vec![Cell::BLANK; self.cols]);
+            // If the user is scrolled up, keep the view anchored on the same
+            // lines as new output arrives below.
+            if self.scroll > 0 {
+                self.scroll = (self.scroll + 1).min(self.scrollback.len());
+            }
         } else {
             self.cy += 1;
         }
@@ -110,9 +176,10 @@ impl Screen {
             self.newline();
         }
         let fg = self.fg;
+        let bg = self.bg;
         if let Some(row) = self.grid.get_mut(self.cy) {
             if let Some(cell) = row.get_mut(self.cx) {
-                *cell = Cell { ch: c, fg };
+                *cell = Cell { ch: c, fg, bg };
             }
         }
         self.cx += 1;
@@ -171,32 +238,52 @@ impl Screen {
             .collect();
         if codes.is_empty() {
             self.fg = None;
+            self.bg = None;
             return;
         }
         let mut i = 0;
         while i < codes.len() {
             match codes[i] {
-                0 => self.fg = None,
+                0 => {
+                    self.fg = None;
+                    self.bg = None;
+                }
                 39 => self.fg = None,
+                49 => self.bg = None,
                 30..=37 => self.fg = Some(ansi16(codes[i] - 30)),
                 90..=97 => self.fg = Some(ansi16_bright(codes[i] - 90)),
-                38 => match codes.get(i + 1) {
-                    Some(5) => {
-                        if let Some(&n) = codes.get(i + 2) {
-                            self.fg = Some(xterm256(n as u8));
+                40..=47 => self.bg = Some(ansi16(codes[i] - 40)),
+                100..=107 => self.bg = Some(ansi16_bright(codes[i] - 100)),
+                38 | 48 => {
+                    let is_fg = codes[i] == 38;
+                    match codes.get(i + 1) {
+                        Some(5) => {
+                            if let Some(&n) = codes.get(i + 2) {
+                                let c = xterm256(n as u8);
+                                if is_fg {
+                                    self.fg = Some(c);
+                                } else {
+                                    self.bg = Some(c);
+                                }
+                            }
+                            i += 2;
                         }
-                        i += 2;
-                    }
-                    Some(2) => {
-                        if let (Some(&r), Some(&g), Some(&b)) =
-                            (codes.get(i + 2), codes.get(i + 3), codes.get(i + 4))
-                        {
-                            self.fg = Some((r as u8, g as u8, b as u8));
+                        Some(2) => {
+                            if let (Some(&r), Some(&g), Some(&b)) =
+                                (codes.get(i + 2), codes.get(i + 3), codes.get(i + 4))
+                            {
+                                let c = (r as u8, g as u8, b as u8);
+                                if is_fg {
+                                    self.fg = Some(c);
+                                } else {
+                                    self.bg = Some(c);
+                                }
+                            }
+                            i += 4;
                         }
-                        i += 4;
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 _ => {}
             }
             i += 1;
@@ -356,9 +443,27 @@ impl Terminal {
         self.screen.lock().map(|s| s.runs()).unwrap_or_default()
     }
 
-    /// Current cursor position `(row, col)`.
-    pub fn cursor(&self) -> (usize, usize) {
-        self.screen.lock().map(|s| s.cursor()).unwrap_or((0, 0))
+    /// Current cursor position `(row, col)` in visible coordinates, or `None`
+    /// when the view is scrolled away from the cursor.
+    pub fn cursor(&self) -> Option<(usize, usize)> {
+        self.screen.lock().ok().and_then(|s| s.visible_cursor())
+    }
+
+    /// Scroll the view into / out of the scrollback history.
+    pub fn scroll_up(&self, n: usize) {
+        if let Ok(mut s) = self.screen.lock() {
+            s.scroll_up(n);
+        }
+    }
+    pub fn scroll_down(&self, n: usize) {
+        if let Ok(mut s) = self.screen.lock() {
+            s.scroll_down(n);
+        }
+    }
+    pub fn scroll_to_bottom(&self) {
+        if let Ok(mut s) = self.screen.lock() {
+            s.scroll_to_bottom();
+        }
     }
 
     pub fn resize(&self, rows: usize, cols: usize) {
@@ -424,5 +529,40 @@ fn xterm256(n: u8) -> (u8, u8, u8) {
             let v = 8 + (n - 232) * 10;
             (v, v, v)
         }
+    }
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::*;
+    use vte::Parser;
+
+    fn feed(s: &mut Screen, p: &mut Parser, bytes: &[u8]) {
+        p.advance(s, bytes);
+    }
+
+    #[test]
+    fn scrollback_and_bg() {
+        let mut s = Screen::new(3, 10);
+        let mut p = Parser::new();
+        // 6 lines -> 3 scroll off into scrollback.
+        for i in 0..6 {
+            feed(&mut s, &mut p, format!("line{i}\r\n").as_bytes());
+        }
+        assert!(s.scrollback.len() >= 3, "scrollback={}", s.scrollback.len());
+        // Scroll up reveals older lines.
+        s.scroll_up(2);
+        let runs = s.runs();
+        assert_eq!(runs.len(), 3);
+        // Background colour parsing (red bg = SGR 41).
+        let mut s2 = Screen::new(2, 10);
+        let mut p2 = Parser::new();
+        feed(&mut s2, &mut p2, b"\x1b[41mX\x1b[0m");
+        let r = s2.runs();
+        assert!(
+            r[0].iter().any(|(_, _, bg)| bg.is_some()),
+            "no bg run: {:?}",
+            r[0]
+        );
     }
 }

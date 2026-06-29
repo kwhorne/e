@@ -3676,19 +3676,46 @@ impl AppState {
     /// navigation history (used by back/forward themselves).
     fn goto_location(&self, path: PathBuf, line: usize, col: usize) {
         self.open_path(path);
-        let Some(buf) = self.active_buffer() else {
-            return;
-        };
-        if let Some(editor) = buf.editor.get_untracked() {
-            let offset = editor.offset_of_line_col(line, col);
-            editor.cursor.set(Cursor::new(
-                CursorMode::Insert(Selection::caret(offset)),
-                None,
-                None,
-            ));
-        } else {
-            buf.pending_goto.set(Some((line, col)));
+        // A freshly opened document's rope is populated on the next reactive
+        // flush, so apply now and retry until it's ready for cold opens.
+        if !self.apply_goto(line, col) {
+            self.retry_goto(line, col, 0);
         }
+    }
+
+    fn retry_goto(&self, line: usize, col: usize, attempt: usize) {
+        if attempt >= 6 {
+            return;
+        }
+        let state = *self;
+        floem::action::exec_after(std::time::Duration::from_millis(40), move |_| {
+            if !state.apply_goto(line, col) {
+                state.retry_goto(line, col, attempt + 1);
+            }
+        });
+    }
+
+    /// Place the caret at `(line, col)` in the active buffer. Returns false when
+    /// the editor/document isn't ready yet (so the caller can retry).
+    fn apply_goto(&self, line: usize, col: usize) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        // The document hasn't been populated yet — try again shortly.
+        if line > 0 && buf.doc.text().is_empty() {
+            return false;
+        }
+        let offset = editor.offset_of_line_col(line, col);
+        editor.cursor.set(Cursor::new(
+            CursorMode::Insert(Selection::caret(offset)),
+            None,
+            None,
+        ));
+        buf.pending_goto.set(None);
+        true
     }
 
     fn current_location(&self) -> Option<(PathBuf, usize, usize)> {

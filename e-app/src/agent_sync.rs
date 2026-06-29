@@ -201,8 +201,10 @@ fn context(state: AppState) -> Value {
     let mut selection = Value::Null;
     let mut language = Value::Null;
     let mut dirty = Value::Null;
+    let mut doc_len = Value::Null;
 
     if let Some(buf) = state.active_buffer() {
+        doc_len = json!(buf.doc.text().len());
         if let Some(p) = buf.file.path.as_ref() {
             file = json!(p.to_string_lossy());
         }
@@ -234,6 +236,7 @@ fn context(state: AppState) -> Value {
         "selection": selection,
         "language": language,
         "dirty": dirty,
+        "doc_len": doc_len,
         "open_files": open_files,
         "diagnostics": diagnostics(state),
     })

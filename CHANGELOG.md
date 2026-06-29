@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Source Control: a ✨ button suggests a Conventional Commits message
+  (type, scope and changed files) generated from your staged changes.
+
 ## [0.4.5] - 2026-06-28
 
 ### Added

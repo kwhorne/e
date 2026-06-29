@@ -275,9 +275,12 @@ impl Terminal {
         Self::spawn_builder(cmd, rows, cols, on_update)
     }
 
-    /// Run a command line through the user's login shell (`$SHELL -lc "..."`),
-    /// so PATH and the usual environment (nvm, etc.) are available. Used to
-    /// launch CLI agents (Elyra, Claude Code, Codex …).
+    /// Run a command line through the user's **interactive login** shell
+    /// (`$SHELL -ilc "..."`), so PATH and the usual environment are available.
+    /// The interactive flag is important: tools installed via nvm/rbenv/etc. are
+    /// commonly added to PATH in `.zshrc`/`.bashrc`, which non-interactive
+    /// shells skip — that's why a GUI-launched app sees "command not found".
+    /// Used to launch CLI agents (Elyra, Claude Code, Codex …).
     pub fn spawn_command(
         cmdline: &str,
         cwd: &Path,
@@ -286,7 +289,7 @@ impl Terminal {
         on_update: Box<dyn Fn() + Send>,
     ) -> Result<Self> {
         let mut cmd = CommandBuilder::new(default_shell());
-        cmd.arg("-lc");
+        cmd.arg("-ilc");
         cmd.arg(cmdline);
         cmd.cwd(cwd);
         Self::spawn_builder(cmd, rows, cols, on_update)

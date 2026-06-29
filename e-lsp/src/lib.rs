@@ -23,6 +23,9 @@ use lsp_types::{
     MarkedString, PublishDiagnosticsParams, TextEdit,
 };
 
+/// A flattened document symbol: `(name, kind, line, character, depth)`.
+pub type DocumentSymbol = (String, i64, u32, u32, usize);
+
 /// Active signature info for the signature-help popup.
 #[derive(Clone, Debug)]
 pub struct SignatureInfo {
@@ -63,12 +66,24 @@ impl LspClient {
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("spawning language server `{program}`"))?;
 
         let stdin = child.stdin.take().context("server stdin")?;
         let stdout = child.stdout.take().context("server stdout")?;
+
+        // Surface the server's stderr (crashes, config errors) instead of
+        // discarding it — invaluable when a language server misbehaves.
+        if let Some(stderr) = child.stderr.take() {
+            let name = program.to_string();
+            thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    eprintln!("[lsp:{name}] {line}");
+                }
+            });
+        }
 
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let stdin = Arc::new(Mutex::new(stdin));
@@ -340,7 +355,7 @@ impl LspClient {
     }
 
     /// Document symbols for `uri` as a flat list `(name, kind, line, char, depth)`.
-    pub fn document_symbols(&self, uri: &str) -> Result<Vec<(String, i64, u32, u32, usize)>> {
+    pub fn document_symbols(&self, uri: &str) -> Result<Vec<DocumentSymbol>> {
         let params = json!({ "textDocument": { "uri": uri } });
         let res = self.request(
             "textDocument/documentSymbol",
@@ -555,6 +570,12 @@ fn hover_to_string(contents: HoverContents) -> String {
 
 impl Drop for LspClient {
     fn drop(&mut self) {
+        // Graceful shutdown per the LSP spec (shutdown request → exit
+        // notification) with a short timeout so Drop never hangs, then ensure
+        // the process is gone as a safety net.
+        let _ = self.request("shutdown", Value::Null, Duration::from_millis(300));
+        self.notify("exit", Value::Null);
+        thread::sleep(Duration::from_millis(50));
         let _ = self.child.kill();
     }
 }

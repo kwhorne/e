@@ -1080,27 +1080,57 @@ impl AppState {
     /// Poll open files for on-disk changes (called on the idle tick). Clean
     /// buffers are reloaded silently; dirty ones are flagged for the user.
     pub fn check_external_changes(&self) {
+        // Snapshot (id, path, last-known mtime) cheaply on the UI thread, then
+        // do the actual `stat` calls on a worker thread — those can block on
+        // slow/network filesystems and must never stall the UI.
         let buffers = self.buffers.get_untracked();
+        let mut items: Vec<(u64, PathBuf, Option<std::time::SystemTime>)> = Vec::new();
         for b in &buffers {
-            let Some(path) = b.file.path.as_ref() else {
-                continue;
-            };
-            let Some(mtime) = std::fs::metadata(path).ok().and_then(|m| m.modified().ok()) else {
-                continue;
-            };
-            match b.disk_mtime.get_untracked() {
-                None => b.disk_mtime.set(Some(mtime)),
-                Some(prev) if prev != mtime => {
+            if let Some(path) = b.file.path.as_ref() {
+                items.push((b.id, path.clone(), b.disk_mtime.get_untracked()));
+            }
+        }
+        if items.is_empty() {
+            return;
+        }
+        let state = *self;
+        // (id, new mtime, is_first_observation)
+        let send = create_ext_action(
+            self.cx,
+            move |changed: Vec<(u64, std::time::SystemTime, bool)>| {
+                for (id, mtime, first) in changed {
+                    let Some(b) = state.buffer_by_id(id) else {
+                        continue;
+                    };
                     b.disk_mtime.set(Some(mtime));
+                    if first {
+                        continue;
+                    }
                     if b.dirty.get_untracked() {
                         b.disk_changed.set(true);
                     } else {
-                        self.reload_buffer(b);
+                        state.reload_buffer(&b);
                     }
                 }
-                _ => {}
+            },
+        );
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            for (id, path, prev) in items {
+                let Some(mtime) = std::fs::metadata(&path)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                else {
+                    continue;
+                };
+                match prev {
+                    None => out.push((id, mtime, true)),
+                    Some(p) if p != mtime => out.push((id, mtime, false)),
+                    _ => {}
+                }
             }
-        }
+            send(out);
+        });
     }
 
     /// Reload a buffer's contents from disk, discarding any unsaved edits.
@@ -1108,9 +1138,12 @@ impl AppState {
         let Some(path) = buf.file.path.as_ref() else {
             return;
         };
-        let Ok(content) = std::fs::read_to_string(path) else {
+        // Honour the file's detected encoding (a non-UTF-8 file must not be
+        // re-read as raw UTF-8 on external change).
+        let Ok((content, encoding)) = buffer::read_with_encoding(path) else {
             return;
         };
+        buf.encoding.set(encoding);
         if content == buf.doc.text().to_string() {
             buf.disk_changed.set(false);
             return;
@@ -1671,7 +1704,6 @@ impl AppState {
 
         {
             let app = *self;
-            let dirty = dirty;
             let doc2 = doc.clone();
             let highlights = highlights.clone();
             doc.clone().add_on_update(move |_| {
@@ -2943,7 +2975,7 @@ impl AppState {
                 (s, en, e.new_text)
             })
             .collect();
-        offs.sort_by(|a, b| b.0.cmp(&a.0));
+        offs.sort_by_key(|b| std::cmp::Reverse(b.0));
         for (s, en, text) in offs {
             buf.doc
                 .edit_single(Selection::region(s, en), &text, EditType::InsertChars);

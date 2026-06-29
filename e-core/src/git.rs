@@ -236,9 +236,7 @@ pub fn suggest_commit(root: &Path) -> String {
     let mut files: Vec<(String, char)> = Vec::new();
     let (mut added, mut modified, mut deleted) = (0u32, 0u32, 0u32);
     for e in &items {
-        let raw = if use_staged {
-            e.index
-        } else if e.index != ' ' && e.index != '?' {
+        let raw = if use_staged || (e.index != ' ' && e.index != '?') {
             e.index
         } else {
             e.worktree

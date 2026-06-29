@@ -31,7 +31,7 @@ pub fn breadcrumbs(state: AppState) -> impl IntoView {
         if let Some(editor) = buf.editor.get() {
             let line = editor.offset_to_line_col(editor.cursor.get().offset()).0;
             let outline = state.outline.get();
-            if let Some(sym) = outline.iter().filter(|s| (s.line as usize) <= line).last() {
+            if let Some(sym) = outline.iter().rfind(|s| (s.line as usize) <= line) {
                 return format!("{path}  ›  {}", sym.name);
             }
         }

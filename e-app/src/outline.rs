@@ -28,7 +28,7 @@ fn kind_icon(kind: i64) -> (&'static str, Color) {
         // Constant, EnumMember
         14 | 22 => ("π", Color::from_rgb8(0xd1, 0x9a, 0x66)),
         // Namespace, Module, Package
-        2 | 3 | 4 => ("{}", theme::fg_dim()),
+        2..=4 => ("{}", theme::fg_dim()),
         _ => ("•", theme::fg_dim()),
     }
 }

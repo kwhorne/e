@@ -167,12 +167,8 @@ pub fn expand(body: &str, line_indent: &str) -> (String, usize) {
 
 fn find_placeholder(s: &str) -> Option<usize> {
     let bytes = s.as_bytes();
-    for i in 0..bytes.len() {
-        if bytes[i] == b'$' && bytes.get(i + 1).is_some_and(|c| c.is_ascii_digit()) {
-            return Some(i);
-        }
-    }
-    None
+    (0..bytes.len())
+        .find(|&i| bytes[i] == b'$' && bytes.get(i + 1).is_some_and(|c| c.is_ascii_digit()))
 }
 
 #[cfg(test)]

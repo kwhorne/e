@@ -539,11 +539,12 @@ pub fn abbreviation_at(line_before: &str) -> Option<(usize, String)> {
                 }
             }
             c if c.is_whitespace() && brace == 0 && bracket == 0 => break,
-            '<' | '>' if brace == 0 && bracket == 0 => {
+            '<' | '>'
+                if brace == 0 && bracket == 0
                 // Allow '>' (child operator) but not a literal tag bracket pair.
-                if c == '<' {
-                    break;
-                }
+                && c == '<' =>
+            {
+                break;
             }
             _ => {}
         }

@@ -8,7 +8,9 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum Language {
+    #[default]
     PlainText,
     Rust,
     Toml,
@@ -105,12 +107,6 @@ impl Language {
             Language::Vue => "Vue",
             Language::Svelte => "Svelte",
         }
-    }
-}
-
-impl Default for Language {
-    fn default() -> Self {
-        Language::PlainText
     }
 }
 

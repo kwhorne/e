@@ -109,7 +109,7 @@ fn notice_body(state: AppState) -> impl IntoView {
             _ => {
                 let info = state.update_info.get();
                 let Some(info) = info else {
-                    return label(|| String::new()).into_any();
+                    return label(String::new).into_any();
                 };
                 let version = info.version.clone();
                 let notes = clean_notes(&info.notes);
@@ -140,7 +140,7 @@ fn notice_body(state: AppState) -> impl IntoView {
                             .style(|s| s.max_height(220.0).width(308.0).margin_top(8.0))
                             .into_any()
                         } else {
-                            label(|| String::new()).into_any()
+                            label(String::new).into_any()
                         }
                     },
                 );

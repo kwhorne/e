@@ -19,7 +19,7 @@ fn ci(label: String, insert: String, detail: &str) -> CompletionItem {
 }
 
 /// The trailing run of `line` whose characters all satisfy `allowed`.
-fn token<'a>(line: &'a str, allowed: impl Fn(char) -> bool) -> &'a str {
+fn token(line: &str, allowed: impl Fn(char) -> bool) -> &str {
     let mut start = line.len();
     for (i, c) in line.char_indices().rev() {
         if allowed(c) {
@@ -534,7 +534,7 @@ fn namespaced(
         if full.starts_with(tok)
             || (with_colon && full.starts_with(&format!("{ns}:")) && {
                 let rest = &full[ns.len() + 1..];
-                let typed = tok.splitn(2, ':').nth(1).unwrap_or("");
+                let typed = tok.split_once(':').map(|x| x.1).unwrap_or("");
                 rest.starts_with(typed)
             })
         {
@@ -552,7 +552,7 @@ fn directives(line: &str, names: &[&str], detail: &str) -> Option<(usize, Vec<Co
     let tok = token(line, |c| {
         c.is_ascii_alphanumeric() || matches!(c, '-' | ':' | '.' | '@' | '|')
     });
-    if tok.len() < 1 {
+    if tok.is_empty() {
         return None;
     }
     let items: Vec<CompletionItem> = names

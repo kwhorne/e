@@ -99,6 +99,7 @@ impl DbConfig {
 }
 
 /// The engine-specific transport behind a connection.
+#[allow(clippy::large_enum_variant)]
 enum Backend {
     Mysql(mysql::Pool),
     Sqlite(String),
@@ -364,9 +365,14 @@ fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
-/// Write a temporary SSH_ASKPASS helper (mode 0700) that echoes the secret.
+/// Environment variable carrying the SSH secret to the askpass helper. The
+/// secret only ever lives in process memory — never written to disk.
+const ASKPASS_ENV: &str = "E_SSH_ASKPASS_SECRET";
+
+/// Write a temporary SSH_ASKPASS helper (mode 0700) that echoes the secret read
+/// from an environment variable, so the secret itself is never written to disk.
 #[cfg(unix)]
-fn write_askpass(secret: &str) -> Result<PathBuf, String> {
+fn write_askpass() -> Result<PathBuf, String> {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     let nanos = std::time::SystemTime::now()
@@ -375,8 +381,7 @@ fn write_askpass(secret: &str) -> Result<PathBuf, String> {
         .unwrap_or(0);
     let mut path = std::env::temp_dir();
     path.push(format!("e-askpass-{}-{}.sh", std::process::id(), nanos));
-    let escaped = secret.replace('\'', "'\\''");
-    let script = format!("#!/bin/sh\nprintf '%s\\n' '{escaped}'\n");
+    let script = format!("#!/bin/sh\nprintf '%s\\n' \"${ASKPASS_ENV}\"\n");
     let mut f = std::fs::File::create(&path).map_err(|e| e.to_string())?;
     f.write_all(script.as_bytes()).map_err(|e| e.to_string())?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
@@ -470,10 +475,12 @@ fn start_tunnel(config: &DbConfig) -> Result<SshTunnel, String> {
     if secret.is_empty() {
         cmd.args(["-o", "BatchMode=yes"]);
     } else {
-        let p = write_askpass(&secret)?;
+        let p = write_askpass()?;
         cmd.env("SSH_ASKPASS", &p);
         cmd.env("SSH_ASKPASS_REQUIRE", "force");
         cmd.env("DISPLAY", "localhost:0");
+        // The secret travels via the environment, not the on-disk helper.
+        cmd.env(ASKPASS_ENV, &secret);
         askpass = Some(p);
     }
 

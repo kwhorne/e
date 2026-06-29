@@ -24,19 +24,19 @@ fn db_scroll(state: AppState, dx: f64, dy: f64) {
 /// Collapse a cell value to a single line for the grid (DB values often hold
 /// multi-line text, which would otherwise blow up the row height).
 fn sanitize_cell(s: &str) -> String {
-    let mut out = String::with_capacity(s.len().min(200));
-    let mut n = 0usize;
-    for c in s.chars() {
-        if n >= 200 {
-            out.push('…');
-            break;
-        }
-        out.push(if c == '\n' || c == '\r' || c == '\t' {
-            ' '
-        } else {
-            c
-        });
-        n += 1;
+    let mut out: String = s
+        .chars()
+        .take(200)
+        .map(|c| {
+            if matches!(c, '\n' | '\r' | '\t') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    if s.chars().nth(200).is_some() {
+        out.push('…');
     }
     out
 }

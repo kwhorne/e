@@ -376,15 +376,15 @@ fn blade_spans(text: &str) -> Vec<Span> {
         }
         let rest = &text[i..];
         // Blade comment: {{-- … --}}
-        if rest.starts_with("{{--") {
-            let end = rest[4..].find("--}}").map(|p| i + 4 + p + 4).unwrap_or(len);
+        if let Some(tail) = rest.strip_prefix("{{--") {
+            let end = tail.find("--}}").map(|p| i + 4 + p + 4).unwrap_or(len);
             over.push((i, end, HighlightKind::Comment));
             i = end;
             continue;
         }
         // Raw echo: {!! … !!}
-        if rest.starts_with("{!!") {
-            let close = rest[3..].find("!!}").map(|p| i + 3 + p).unwrap_or(len);
+        if let Some(tail) = rest.strip_prefix("{!!") {
+            let close = tail.find("!!}").map(|p| i + 3 + p).unwrap_or(len);
             over.push((i, (i + 3).min(len), HighlightKind::Operator));
             php_fragment_spans(
                 &text[(i + 3).min(close)..close],
@@ -399,8 +399,8 @@ fn blade_spans(text: &str) -> Vec<Span> {
             continue;
         }
         // Echo: {{ … }}
-        if rest.starts_with("{{") {
-            let close = rest[2..].find("}}").map(|p| i + 2 + p).unwrap_or(len);
+        if let Some(tail) = rest.strip_prefix("{{") {
+            let close = tail.find("}}").map(|p| i + 2 + p).unwrap_or(len);
             over.push((i, (i + 2).min(len), HighlightKind::Operator));
             php_fragment_spans(
                 &text[(i + 2).min(close)..close],

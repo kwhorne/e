@@ -72,7 +72,7 @@ impl AppState {
     }
 }
 
-fn display_for(path: &PathBuf, root: &std::path::Path) -> (String, String) {
+fn display_for(path: &std::path::Path, root: &std::path::Path) -> (String, String) {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())

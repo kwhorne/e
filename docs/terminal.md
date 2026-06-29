@@ -29,6 +29,13 @@ The tab strip at the top of the panel manages multiple sessions:
 Drag the handle along the **top edge** of the terminal panel to change its
 height. The terminal grid reflows automatically to fit.
 
+## Scrollback & colours
+
+Scroll up with the mouse wheel to review earlier output (5000 lines of
+scrollback). The view stays put while new output streams and snaps back to the
+bottom as soon as you type. ANSI **background colours** are rendered too, so
+`git diff`, coloured error output and search tools keep their highlighting.
+
 ## Notes
 
 This is a pragmatic terminal that handles shells and ordinary command output

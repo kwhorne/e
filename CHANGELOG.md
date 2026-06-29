@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Terminal scrollback (5000 lines): scroll up with the mouse wheel to review
+  earlier output; the view stays anchored while output streams and snaps back to
+  the bottom when you type.
+- Terminal background colours (SGR 40–47/100–107 and 256/true-colour) — `git
+  diff`, coloured errors and search tools keep their highlighting.
+
+### Changed
+
+- SSH passwords are no longer written to disk: the askpass helper reads the
+  secret from an environment variable that only lives in memory.
+- External-change file polling runs off the UI thread, so the editor never stalls
+  on slow or network filesystems.
+- External reloads honour the file's detected encoding (UTF-16/Windows-1252).
+
+### Fixed
+
+- Language servers now shut down gracefully (shutdown + exit) and their stderr is
+  logged instead of discarded, making LSP issues diagnosable.
+
 ## [0.4.7] - 2026-06-29
 
 ### Added

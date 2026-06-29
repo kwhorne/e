@@ -346,6 +346,8 @@ pub struct AppState {
     pub sidebar_width: RwSignal<f64>,
     pub agent_width: RwSignal<f64>,
     pub db_width: RwSignal<f64>,
+    /// Height of the bottom terminal panel (drag-resizable).
+    pub term_height: RwSignal<f64>,
 
     // ---- Database panel -------------------------------------------------
     /// Whether the Database panel is visible (toggled with ⌘3).
@@ -523,6 +525,7 @@ impl AppState {
             sidebar_width: RwSignal::new(240.0),
             agent_width: RwSignal::new(460.0),
             db_width: RwSignal::new(280.0),
+            term_height: RwSignal::new(320.0),
             db_open: RwSignal::new(false),
             db_conns: RwSignal::new(Vec::new()),
             db_adding: RwSignal::new(false),

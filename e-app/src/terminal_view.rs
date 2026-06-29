@@ -268,11 +268,11 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_grow(1.0).width_full());
 
-    stack((terminal_tabs(state), panes)).style(move |s| {
+    stack((term_resize_handle(state), terminal_tabs(state), panes)).style(move |s| {
         let s = s
             .flex_col()
             .width_full()
-            .height(320.0)
+            .height(state.term_height.get())
             .border_top(1.0)
             .border_color(theme::border());
         if state.terminal_open.get() {
@@ -280,6 +280,37 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
         } else {
             s.hide()
         }
+    })
+}
+
+/// A thin horizontal handle along the top edge of the terminal panel that
+/// drag-resizes its height. Mirrors the side-panel handle but on the Y axis.
+fn term_resize_handle(state: AppState) -> impl IntoView {
+    let drag_start: floem::reactive::RwSignal<Option<f64>> = floem::reactive::RwSignal::new(None);
+    let view = empty();
+    let id = floem::View::id(&view);
+    view.on_event_stop(EventListener::PointerDown, move |e| {
+        id.request_active();
+        if let Event::PointerDown(pe) = e {
+            drag_start.set(Some(pe.pos.y));
+        }
+    })
+    .on_event_stop(EventListener::PointerMove, move |e| {
+        if let Event::PointerMove(pe) = e {
+            if let Some(start) = drag_start.get_untracked() {
+                let delta = pe.pos.y - start;
+                let cur = state.term_height.get_untracked();
+                // Dragging up (negative delta) makes the panel taller.
+                state.term_height.set((cur - delta).clamp(120.0, 900.0));
+            }
+        }
+    })
+    .on_event_stop(EventListener::PointerUp, move |_| drag_start.set(None))
+    .style(|s| {
+        s.height(6.0)
+            .width_full()
+            .cursor(floem::style::CursorStyle::RowResize)
+            .hover(|s| s.background(theme::accent()))
     })
 }
 

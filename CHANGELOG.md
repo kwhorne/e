@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The terminal panel (⌘T) is now drag-resizable in height — drag the handle
+  along its top edge.
+
+### Fixed
+
+- The agent panel (⌘L) could not find CLI agents installed via nvm
+  (`command not found`) when the app was launched from Finder; agents now run
+  through an interactive login shell so `.zshrc`/`.bashrc` PATH is available.
+
 ## [0.4.6] - 2026-06-29
 
 ### Added

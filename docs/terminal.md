@@ -26,8 +26,8 @@ The tab strip at the top of the panel manages multiple sessions:
 
 ## Resizing
 
-The terminal grid resizes automatically to fit the panel; drag the panel border
-or the window to change its size.
+Drag the handle along the **top edge** of the terminal panel to change its
+height. The terminal grid reflows automatically to fit.
 
 ## Notes
 

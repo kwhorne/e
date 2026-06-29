@@ -188,6 +188,7 @@ fn app_view() -> impl IntoView {
     // Scrape Laravel project data (routes/views/config/env) in the background.
     state.load_laravel();
     state.load_databases();
+    crate::agent_sync::start(state);
 
     // Restore the previous session, then open any file passed on the CLI.
     state.restore_session();

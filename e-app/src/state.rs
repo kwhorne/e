@@ -1841,7 +1841,7 @@ impl AppState {
     }
 
     /// Show a native macOS notification banner.
-    fn notify(message: &str) {
+    pub(crate) fn notify(message: &str) {
         let script = format!(
             "display notification \"{}\" with title \"e\"",
             message.replace('"', "'")

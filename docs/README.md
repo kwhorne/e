@@ -22,6 +22,7 @@ native code editor written in Rust.
 - [Database](database.md) — browse & query MySQL, Postgres, SQLite
 - [Terminal](terminal.md) — the integrated terminal
 - [AI Agents](agents.md) — running coding agents in the editor
+- [Agent Workspace Sync](agent-sync.md) — let agents read & drive the editor
 
 ### Configuration & maintenance
 - [Configuration](configuration.md) · [Keybindings](keybindings.md) — `config.json`, themes, settings

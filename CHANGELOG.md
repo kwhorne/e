@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- AI Agent Workspace Sync: the editor exposes a local socket (`$E_EDITOR_SOCK`)
+  so a CLI agent can read editor context (current file, cursor, selection,
+  diagnostics) and drive the editor (open a file at a line, focus a panel,
+  notify). See docs/agent-sync.md.
+
 ## [0.4.8] - 2026-06-29
 
 ### Added

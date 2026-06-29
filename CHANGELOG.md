@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-06-29
+
 ### Added
 
 - Terminal scrollback (5000 lines): scroll up with the mouse wheel to review
@@ -296,7 +298,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/kwhorne/e/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/kwhorne/e/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/kwhorne/e/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/kwhorne/e/compare/v0.4.4...v0.4.5

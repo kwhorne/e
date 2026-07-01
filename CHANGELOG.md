@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Laravel Tinker scratchpad (⌘⌥T): run PHP against the app and see the output;
+  "Tinker: Run Selection" evaluates the current selection; agents can run Tinker
+  over the sync socket.
+- Laravel architecture map (⌘⌥M): an interactive route → controller → view flow
+  with clickable cards that jump to the code.
+
+### Added
+
 - Agent co-op over the sync socket: `lsp_definition`/`lsp_references`/`lsp_hover`/
   `lsp_symbols` (reuse the running language server), `db_schema` (read the
   connected database's schema without exposing credentials) and `run` (execute a

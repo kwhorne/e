@@ -46,6 +46,20 @@ HTML tags, attributes and Tailwind utility classes, Blade directives
 (`@php`, `@if`, `@foreach`, `@push`, …), `{{-- comments --}}`, and the embedded
 PHP inside `@php … @endphp` blocks, `{{ … }}` and `{!! … !!}` expressions.
 
+## Tinker scratchpad
+
+Press `⌘⌥T` for a Tinker scratchpad: write PHP and press `⌘↵` to run it against
+your app via `php artisan tinker`, with the output shown below. Select code in
+the editor and run **Tinker: Run Selection** to evaluate it. The AI agent can
+also write and run Tinker snippets over the sync socket.
+
+## Architecture map
+
+`⌘⌥M` opens an interactive map of your routes: each row shows
+route → controller → views as clickable cards. Click the controller to jump to
+its method, or a view to open the Blade file. Filter by route name, URI or
+action.
+
 ## Working on a Laravel project
 
 1. Open the project root: `e ~/code/my-laravel-app`.

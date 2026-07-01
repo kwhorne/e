@@ -17,6 +17,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("add-folder", "Add Folder to Workspace…"),
     ("laravel-refresh", "Laravel: Refresh Project Data"),
     ("toggle-database", "Toggle Database Panel"),
+    ("tinker", "Tinker: Toggle Scratchpad"),
+    ("tinker-selection", "Tinker: Run Selection"),
     ("emmet-expand", "Emmet: Expand Abbreviation"),
     ("save-as", "Save As…"),
     ("recent", "Recent Files"),

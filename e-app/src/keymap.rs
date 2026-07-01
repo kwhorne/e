@@ -24,6 +24,7 @@ const DEFAULT: &[(&str, &str)] = &[
     ("cmd+1", "toggle-sidebar"),
     ("cmd+2", "source-control"),
     ("cmd+3", "toggle-database"),
+    ("cmd+alt+t", "tinker"),
     ("cmd+\\", "split"),
     ("cmd+shift+o", "symbols"),
     ("cmd+shift+f", "search"),

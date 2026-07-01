@@ -46,6 +46,7 @@ mod task_palette;
 mod tasks;
 mod terminal_view;
 mod theme;
+mod tinker;
 mod update_view;
 mod updater;
 

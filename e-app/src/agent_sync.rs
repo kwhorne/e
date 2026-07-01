@@ -279,6 +279,30 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
 
+        // ---- Laravel Tinker (async) ---------------------------------------
+        "tinker" => {
+            let Some(code) = req.get("code").and_then(|c| c.as_str()).map(String::from) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing code"}));
+                return;
+            };
+            let root = state.root.get_untracked().to_string_lossy().into_owned();
+            std::thread::spawn(move || {
+                let tmp =
+                    std::env::temp_dir().join(format!("e-tinker-agent-{}.php", std::process::id()));
+                let _ = std::fs::write(&tmp, code);
+                let resp = run_command(
+                    &format!(
+                        "php -d error_reporting=0 -d display_errors=0 artisan tinker < {}",
+                        tmp.display()
+                    ),
+                    &root,
+                );
+                let _ = std::fs::remove_file(&tmp);
+                let _ = reply.send(resp);
+            });
+            return;
+        }
+
         // ---- Run a shell command (async) ----------------------------------
         "run" => {
             let Some(command) = req

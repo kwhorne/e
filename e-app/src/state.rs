@@ -396,6 +396,11 @@ pub struct AppState {
     pub db_scroll: RwSignal<(f64, f64, u64)>,
     /// An agent-proposed query awaiting the user's consent.
     pub db_consent: RwSignal<Option<DbConsent>>,
+
+    // ---- Tinker scratchpad ---------------------------------------------
+    pub tinker_open: RwSignal<bool>,
+    pub tinker_output: RwSignal<String>,
+    pub tinker_running: RwSignal<bool>,
     /// The cell currently being edited `(row, col, column_name)`.
     pub db_edit: RwSignal<Option<(usize, usize, String)>>,
     pub db_edit_value: RwSignal<String>,
@@ -557,6 +562,9 @@ impl AppState {
             db_editing_key: RwSignal::new(None),
             db_scroll: RwSignal::new((0.0, 0.0, 0)),
             db_consent: RwSignal::new(None),
+            tinker_open: RwSignal::new(false),
+            tinker_output: RwSignal::new(String::new()),
+            tinker_running: RwSignal::new(false),
             db_edit: RwSignal::new(None),
             db_edit_value: RwSignal::new(String::new()),
             db_edit_null: RwSignal::new(false),
@@ -2618,6 +2626,78 @@ impl AppState {
                 Err(e) => serde_json::json!({"ok": false, "error": e}),
             };
             let _ = c.reply.send(resp);
+        });
+    }
+
+    pub fn toggle_tinker(&self) {
+        self.tinker_open.update(|o| *o = !*o);
+    }
+
+    /// Run the current editor selection in Tinker (or just open the panel).
+    pub fn run_tinker_selection(&self) {
+        if let Some(buf) = self.active_buffer() {
+            if let Some(editor) = buf.editor.get_untracked() {
+                let cursor = editor.cursor.get_untracked();
+                if let CursorMode::Insert(sel) = &cursor.mode {
+                    if let Some(r) = sel.regions().iter().find(|r| r.min() != r.max()) {
+                        let text = buf.doc.text().to_string();
+                        let code =
+                            text[r.min().min(text.len())..r.max().min(text.len())].to_string();
+                        self.run_tinker(code);
+                        return;
+                    }
+                }
+            }
+        }
+        self.tinker_open.set(true);
+    }
+
+    /// Run PHP through `php artisan tinker` in the project root, capturing output.
+    pub fn run_tinker(&self, code: String) {
+        let root = self.root.get_untracked();
+        if !root.join("artisan").is_file() {
+            self.tinker_output
+                .set("Not a Laravel project (no artisan).".into());
+            return;
+        }
+        self.tinker_open.set(true);
+        self.tinker_running.set(true);
+        self.tinker_output.set("Running…".into());
+        let out_sig = self.tinker_output;
+        let running = self.tinker_running;
+        let send = create_ext_action(self.cx, move |text: String| {
+            out_sig.set(text);
+            running.set(false);
+        });
+        std::thread::spawn(move || {
+            let tmp = std::env::temp_dir().join(format!("e-tinker-{}.php", std::process::id()));
+            let _ = std::fs::write(&tmp, code);
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+            let cmd = format!(
+                "php -d error_reporting=0 -d display_errors=0 artisan tinker < {}",
+                tmp.display()
+            );
+            let text = match std::process::Command::new(shell)
+                .arg("-ilc")
+                .arg(&cmd)
+                .current_dir(&root)
+                .output()
+            {
+                Ok(o) => {
+                    let mut s = String::from_utf8_lossy(&o.stdout).to_string();
+                    let err = String::from_utf8_lossy(&o.stderr);
+                    if !err.trim().is_empty() {
+                        s.push_str(&err);
+                    }
+                    if s.trim().is_empty() {
+                        s = "(no output)".to_string();
+                    }
+                    s
+                }
+                Err(e) => format!("failed to run tinker: {e}"),
+            };
+            let _ = std::fs::remove_file(&tmp);
+            send(text);
         });
     }
 

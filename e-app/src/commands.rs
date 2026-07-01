@@ -68,6 +68,8 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "split-terminal" => state.split_terminal(),
         "agent" | "toggle-agent" => state.toggle_agent(),
         "toggle-database" => state.toggle_db_panel(),
+        "tinker" => state.toggle_tinker(),
+        "tinker-selection" => state.run_tinker_selection(),
         "emmet-expand" => {
             state.try_emmet_expand();
         }
@@ -122,6 +124,10 @@ fn close_focused(state: AppState) {
 fn close_overlays(state: AppState) {
     if state.db_edit.get().is_some() {
         state.db_cancel_edit();
+        return;
+    }
+    if state.tinker_open.get() {
+        state.tinker_open.set(false);
         return;
     }
     state.close_db_result();

@@ -1674,6 +1674,26 @@ impl AppState {
         }
     }
 
+    /// Send a prompt to the AI agent panel (opening/starting it if needed) and
+    /// focus it. Used by "Explain with agent" / "Fix with AI" affordances.
+    pub fn send_to_agent(&self, prompt: &str) {
+        let just_started = self.agent_term.get_untracked().is_none();
+        if !self.agent_open.get_untracked() {
+            self.agent_open.set(true);
+        }
+        if just_started {
+            self.start_agent();
+        }
+        let text = format!("{}\r", prompt.replace('\n', " "));
+        let state = *self;
+        // A freshly spawned agent needs a moment before it accepts input.
+        let delay = if just_started { 700 } else { 60 };
+        floem::action::exec_after(std::time::Duration::from_millis(delay), move |_| {
+            state.agent_input(text.as_bytes());
+            state.agent_focus_pulse.update(|x| *x += 1);
+        });
+    }
+
     pub fn agent_runs(&self) -> Vec<Vec<e_term::Run>> {
         self.agent_term
             .get_untracked()

@@ -708,6 +708,33 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         }
     });
 
+    // "Explain with agent" appears only when the query errored.
+    let explain = label(|| "✨ Explain with agent".to_string())
+        .style(move |s| {
+            let s = s
+                .font_size(11.0)
+                .padding_horiz(8.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .color(theme::accent())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()));
+            if state.db_result_error.get().is_some() {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| {
+            if let Some(err) = state.db_result_error.get_untracked() {
+                let sql = state.db_query_text.get_untracked();
+                state.send_to_agent(&format!(
+                    "This SQL failed with an error. Explain the error and give a corrected query.\nSQL:\n{sql}\nError:\n{err}"
+                ));
+            }
+        });
+    let status = stack((status, explain)).style(|s| s.flex_row().items_center().gap(8.0));
+
     // Toolbar: Data/Structure (table mode), pagination, export.
     let chip = move |id: &'static str, name: &'static str| {
         label(move || name.to_string())

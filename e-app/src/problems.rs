@@ -92,6 +92,9 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
                 severity,
             } => {
                 let color = severity_color(severity);
+                let uri_click = uri.clone();
+                let msg_text = msg.clone();
+                let uri_menu = uri.clone();
                 label(move || format!("{}:{}  {msg}", line + 1, col + 1))
                     .style(move |s| {
                         s.height(22.0)
@@ -104,7 +107,22 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
                             .cursor(floem::style::CursorStyle::Pointer)
                             .hover(|s| s.background(theme::bg_hover()))
                     })
-                    .on_click_stop(move |_| state.jump_to(&uri, line as usize, col as usize))
+                    .on_click_stop(move |_| state.jump_to(&uri_click, line as usize, col as usize))
+                    .context_menu(move || {
+                        let file = uri_menu
+                            .strip_prefix("file://")
+                            .unwrap_or(&uri_menu)
+                            .to_string();
+                        let msg = msg_text.clone();
+                        floem::menu::Menu::new("").entry(
+                            floem::menu::MenuItem::new("Fix with AI agent").action(move || {
+                                state.send_to_agent(&format!(
+                                    "Fix this problem in {file} at line {}: {msg}",
+                                    line + 1
+                                ));
+                            }),
+                        )
+                    })
                     .into_any()
             }
         },

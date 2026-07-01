@@ -9,22 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Agent co-op over the sync socket: `lsp_definition`/`lsp_references`/`lsp_hover`/
+  `lsp_symbols` (reuse the running language server), `db_schema` (read the
+  connected database's schema without exposing credentials), `db_query`
+  (agent-proposed queries run only after you approve them in a consent dialog),
+  `run` and `tinker` (execute commands/PHP and capture the output — the basis
+  for autonomous TDD).
+- "Explain with agent" on failed database queries, and a "Fix with AI agent"
+  action on problems, both prompt the agent panel directly.
 - Laravel Tinker scratchpad (⌘⌥T): run PHP against the app and see the output;
-  "Tinker: Run Selection" evaluates the current selection; agents can run Tinker
-  over the sync socket.
+  "Tinker: Run Selection" evaluates the current selection.
 - Laravel architecture map (⌘⌥M): an interactive route → controller → view flow
   with clickable cards that jump to the code.
 
-### Added
+### Changed
 
-- Agent co-op over the sync socket: `lsp_definition`/`lsp_references`/`lsp_hover`/
-  `lsp_symbols` (reuse the running language server), `db_schema` (read the
-  connected database's schema without exposing credentials) and `run` (execute a
-  command and capture stdout/stderr/exit code — the basis for autonomous TDD).
-- "Explain with agent" on failed database queries, and a "Fix with AI agent"
-  action on problems, both prompt the agent panel directly.
-- Agent-proposed database queries (`db_query`) run only after you approve them
-  in a consent dialog — the agent never gets direct database access.
+- The app icon now appears in the About dialog and the welcome screen, and the
+  bundle icon was refreshed.
 
 ## [0.4.9] - 2026-06-29
 

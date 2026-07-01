@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The welcome screen shows a minimalist, transparent app glyph instead of the
+  boxed icon.
+- The Settings dialog (⌘,) has consistent row spacing and a darker backdrop.
+- The macOS "About e" menu-bar panel now shows the app icon, version, tagline
+  and links (matching the ⌘⇧P About box's content).
+
 ## [0.5.0] - 2026-07-01
 
 ### Added

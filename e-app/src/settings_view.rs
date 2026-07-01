@@ -46,15 +46,30 @@ fn toggle_row(
         })
         .on_click_stop(move |_| on_set(!value()));
 
-    stack((
-        stack((
-            label(move || text.to_string()).style(|s| s.color(theme::fg()).font_size(13.0)),
-            label(move || note.to_string()).style(|s| s.color(theme::fg_dim()).font_size(11.0)),
-        ))
-        .style(|s| s.flex_col().flex_grow(1.0)),
-        switch,
-    ))
-    .style(|s| s.items_center().width_full().padding_vert(6.0))
+    let mut col: Vec<floem::AnyView> = vec![label(move || text.to_string())
+        .style(|s| s.color(theme::fg()).font_size(13.0))
+        .into_any()];
+    if !note.is_empty() {
+        col.push(
+            label(move || note.to_string())
+                .style(|s| {
+                    s.color(theme::fg_dim())
+                        .font_size(11.0)
+                        .margin_top(1.0)
+                        .margin_right(16.0)
+                })
+                .into_any(),
+        );
+    }
+    let text_col =
+        floem::views::stack_from_iter(col).style(|s| s.flex_col().flex_grow(1.0).min_width(0.0));
+
+    stack((text_col, switch)).style(row_style)
+}
+
+/// Shared row styling so every settings row has the same height and rhythm.
+fn row_style(s: floem::style::Style) -> floem::style::Style {
+    s.items_center().width_full().min_height(40.0).gap(8.0)
 }
 
 /// A labelled number row with − / + steppers.
@@ -97,7 +112,7 @@ fn number_row(
         }),
         btn("+").on_click_stop(step(1)),
     ))
-    .style(|s| s.items_center().gap(6.0).width_full().padding_vert(6.0))
+    .style(row_style)
 }
 
 /// A labelled segmented control (pick one of `options`).
@@ -140,7 +155,7 @@ fn segmented_row(
             .style(|s| s.color(theme::fg()).font_size(13.0).flex_grow(1.0)),
         seg_stack,
     ))
-    .style(|s| s.items_center().width_full().padding_vert(6.0))
+    .style(row_style)
 }
 
 pub fn settings_view(state: AppState) -> impl IntoView {
@@ -162,36 +177,75 @@ pub fn settings_view(state: AppState) -> impl IntoView {
 
     let editor = stack((
         section("EDITOR"),
-        number_row("Font size", move || s.settings.get().font_size, 8, 32, move |n| {
-            s.settings.update(|st| st.font_size = n);
-            s.font_size.set(n);
-            config::set_usize("font_size", n);
-        }),
-        number_row("Tab width", move || s.settings.get().tab_width, 1, 16, move |n| {
-            s.settings.update(|st| st.tab_width = n);
-            config::set_usize("tab_width", n);
-        }),
-        toggle_row("Indent guides", "", move || s.settings.get().indent_guides, move |v| {
-            s.settings.update(|st| st.indent_guides = v);
-            config::set_bool("indent_guides", v);
-        }),
-        toggle_row("Auto-close brackets & quotes", "", move || s.settings.get().auto_close, move |v| {
-            s.settings.update(|st| st.auto_close = v);
-            config::set_bool("auto_close", v);
-        }),
-        toggle_row("Inlay hints", "Inline type & parameter hints", move || s.settings.get().inlay_hints, move |v| {
-            s.settings.update(|st| st.inlay_hints = v);
-            config::set_bool("inlay_hints", v);
-        }),
-        toggle_row("Sticky scroll", "", move || s.settings.get().sticky_scroll, move |v| {
-            s.settings.update(|st| st.sticky_scroll = v);
-            config::set_bool("sticky_scroll", v);
-        }),
-        toggle_row("Laravel features", "Completion, hover & navigation for routes, views, config, env, translations & components", move || s.settings.get().laravel, move |v| {
-            s.settings.update(|st| st.laravel = v);
-            config::set_bool("laravel", v);
-            if v { s.load_laravel(); }
-        }),
+        number_row(
+            "Font size",
+            move || s.settings.get().font_size,
+            8,
+            32,
+            move |n| {
+                s.settings.update(|st| st.font_size = n);
+                s.font_size.set(n);
+                config::set_usize("font_size", n);
+            },
+        ),
+        number_row(
+            "Tab width",
+            move || s.settings.get().tab_width,
+            1,
+            16,
+            move |n| {
+                s.settings.update(|st| st.tab_width = n);
+                config::set_usize("tab_width", n);
+            },
+        ),
+        toggle_row(
+            "Indent guides",
+            "",
+            move || s.settings.get().indent_guides,
+            move |v| {
+                s.settings.update(|st| st.indent_guides = v);
+                config::set_bool("indent_guides", v);
+            },
+        ),
+        toggle_row(
+            "Auto-close brackets & quotes",
+            "",
+            move || s.settings.get().auto_close,
+            move |v| {
+                s.settings.update(|st| st.auto_close = v);
+                config::set_bool("auto_close", v);
+            },
+        ),
+        toggle_row(
+            "Inlay hints",
+            "Inline type & parameter hints",
+            move || s.settings.get().inlay_hints,
+            move |v| {
+                s.settings.update(|st| st.inlay_hints = v);
+                config::set_bool("inlay_hints", v);
+            },
+        ),
+        toggle_row(
+            "Sticky scroll",
+            "",
+            move || s.settings.get().sticky_scroll,
+            move |v| {
+                s.settings.update(|st| st.sticky_scroll = v);
+                config::set_bool("sticky_scroll", v);
+            },
+        ),
+        toggle_row(
+            "Laravel features",
+            "Completion, hover & go-to-definition for Laravel",
+            move || s.settings.get().laravel,
+            move |v| {
+                s.settings.update(|st| st.laravel = v);
+                config::set_bool("laravel", v);
+                if v {
+                    s.load_laravel();
+                }
+            },
+        ),
     ))
     .style(|s| s.flex_col().width_full());
 
@@ -321,7 +375,7 @@ pub fn settings_view(state: AppState) -> impl IntoView {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .background(Color::from_rgba8(0, 0, 0, 0x99));
+                .background(Color::from_rgba8(0, 0, 0, 0xCC));
             if state.settings_open.get() {
                 s
             } else {

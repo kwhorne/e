@@ -39,6 +39,48 @@ fn cheat(key: &'static str, desc: &'static str) -> impl IntoView {
 }
 
 /// The empty-state welcome screen with the key shortcuts.
+/// A minimalist, transparent rendition of the app glyph (three "lines of code"
+/// with a cursor) built from shapes, so it sits cleanly on the welcome canvas
+/// without an icon background and adapts to the theme.
+fn welcome_glyph() -> impl IntoView {
+    use floem::views::empty;
+    let cursor_blue = floem::peniko::Color::from_rgb8(0x38, 0xbd, 0xf8);
+    let dot = || {
+        empty().style(|s| {
+            s.width(7.0)
+                .height(7.0)
+                .border_radius(4.0)
+                .background(theme::fg_dim())
+        })
+    };
+    let bar = |w: f64| {
+        empty().style(move |s| {
+            s.width(w)
+                .height(8.0)
+                .border_radius(4.0)
+                .background(theme::fg())
+        })
+    };
+    let row = |w: f64, cursor: bool| {
+        let mut items = vec![dot().into_any(), bar(w).into_any()];
+        if cursor {
+            items.push(
+                empty()
+                    .style(move |s| {
+                        s.width(5.0)
+                            .height(16.0)
+                            .border_radius(2.5)
+                            .background(cursor_blue)
+                    })
+                    .into_any(),
+            );
+        }
+        floem::views::stack_from_iter(items).style(|s| s.flex_row().items_center().gap(10.0))
+    };
+    stack((row(64.0, false), row(38.0, true), row(52.0, false)))
+        .style(|s| s.flex_col().gap(11.0).margin_bottom(16.0).items_start())
+}
+
 fn welcome() -> impl IntoView {
     // The shortcut rows form a left-aligned block...
     let col1 = stack((
@@ -70,8 +112,7 @@ fn welcome() -> impl IntoView {
 
     // ...which is centred as a whole, with the title centred above it.
     stack((
-        floem::views::img(|| crate::about::ICON_PNG.to_vec())
-            .style(|s| s.width(96.0).height(96.0).margin_bottom(10.0)),
+        welcome_glyph(),
         label(|| "The editor for the rest of us".to_string())
             .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(22.0)),
         cheats,

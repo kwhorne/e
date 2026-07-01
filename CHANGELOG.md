@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agent co-op over the sync socket: `lsp_definition`/`lsp_references`/`lsp_hover`/
+  `lsp_symbols` (reuse the running language server), `db_schema` (read the
+  connected database's schema without exposing credentials) and `run` (execute a
+  command and capture stdout/stderr/exit code — the basis for autonomous TDD).
+
 ## [0.4.9] - 2026-06-29
 
 ### Added

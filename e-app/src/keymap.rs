@@ -25,6 +25,7 @@ const DEFAULT: &[(&str, &str)] = &[
     ("cmd+2", "source-control"),
     ("cmd+3", "toggle-database"),
     ("cmd+alt+t", "tinker"),
+    ("cmd+alt+m", "laravel-map"),
     ("cmd+\\", "split"),
     ("cmd+shift+o", "symbols"),
     ("cmd+shift+f", "search"),

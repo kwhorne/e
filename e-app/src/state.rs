@@ -401,6 +401,10 @@ pub struct AppState {
     pub tinker_open: RwSignal<bool>,
     pub tinker_output: RwSignal<String>,
     pub tinker_running: RwSignal<bool>,
+
+    // ---- Laravel architecture map --------------------------------------
+    pub map_open: RwSignal<bool>,
+    pub map_query: RwSignal<String>,
     /// The cell currently being edited `(row, col, column_name)`.
     pub db_edit: RwSignal<Option<(usize, usize, String)>>,
     pub db_edit_value: RwSignal<String>,
@@ -565,6 +569,8 @@ impl AppState {
             tinker_open: RwSignal::new(false),
             tinker_output: RwSignal::new(String::new()),
             tinker_running: RwSignal::new(false),
+            map_open: RwSignal::new(false),
+            map_query: RwSignal::new(String::new()),
             db_edit: RwSignal::new(None),
             db_edit_value: RwSignal::new(String::new()),
             db_edit_null: RwSignal::new(false),
@@ -2631,6 +2637,13 @@ impl AppState {
 
     pub fn toggle_tinker(&self) {
         self.tinker_open.update(|o| *o = !*o);
+    }
+
+    pub fn toggle_laravel_map(&self) {
+        if !self.map_open.get_untracked() && self.laravel.get_untracked().is_none() {
+            self.load_laravel();
+        }
+        self.map_open.update(|o| *o = !*o);
     }
 
     /// Run the current editor selection in Tinker (or just open the panel).

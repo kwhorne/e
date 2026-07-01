@@ -70,6 +70,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "toggle-database" => state.toggle_db_panel(),
         "tinker" => state.toggle_tinker(),
         "tinker-selection" => state.run_tinker_selection(),
+        "laravel-map" => state.toggle_laravel_map(),
         "emmet-expand" => {
             state.try_emmet_expand();
         }
@@ -128,6 +129,10 @@ fn close_overlays(state: AppState) {
     }
     if state.tinker_open.get() {
         state.tinker_open.set(false);
+        return;
+    }
+    if state.map_open.get() {
+        state.map_open.set(false);
         return;
     }
     state.close_db_result();

@@ -753,6 +753,40 @@ pub fn navigate(
     }
 }
 
+/// View names referenced by a route's controller action (best-effort: scans the
+/// controller file for `view('…')` and `Inertia::render('…')`). Used by the
+/// architecture map.
+pub fn route_views(data: &LaravelData, action: &str) -> Vec<String> {
+    let Some((path, _, _)) = controller_location(&data.root, action) else {
+        return Vec::new();
+    };
+    let Ok(src) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for needle in ["view(", "Inertia::render(", "inertia("] {
+        let mut from = 0;
+        while let Some(rel) = src[from..].find(needle) {
+            let start = from + rel + needle.len();
+            from = start;
+            let rest = src[start..].trim_start();
+            let Some(q) = rest.chars().next() else {
+                continue;
+            };
+            if q != '\'' && q != '"' {
+                continue;
+            }
+            if let Some(end) = rest[1..].find(q) {
+                let name = &rest[1..1 + end];
+                if !name.is_empty() && !out.contains(&name.to_string()) {
+                    out.push(name.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Turn `App\Http\Controllers\UserController@index` into a file + method line.
 fn controller_location(root: &Path, action: &str) -> Option<(PathBuf, usize, usize)> {
     let (class, method) = match action.split_once('@') {

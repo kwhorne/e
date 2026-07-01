@@ -3,8 +3,7 @@
 
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate};
-use floem::views::editor::text::Document;
-use floem::views::{container, empty, label, scroll, stack, text_editor, Decorators};
+use floem::views::{container, label, scroll, stack, text_editor, Decorators};
 use floem::IntoView;
 
 use crate::state::AppState;

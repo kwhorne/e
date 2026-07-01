@@ -421,6 +421,7 @@ fn app_view() -> impl IntoView {
             crate::db_view::db_result_overlay(state),
             crate::db_view::db_consent_dialog(state),
             crate::tinker::tinker_panel(state),
+            crate::map::laravel_map(state),
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),

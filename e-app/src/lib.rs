@@ -28,6 +28,7 @@ mod git_view;
 mod hints_doc;
 mod keymap;
 mod laravel;
+mod map;
 mod markdown_view;
 mod outline;
 mod palette;

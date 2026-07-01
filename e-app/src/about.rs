@@ -35,8 +35,7 @@ fn line(text: &'static str, accent: bool, url: Option<&'static str>) -> impl Int
 
 pub fn about_dialog(state: AppState) -> impl IntoView {
     let content = stack((
-        img(|| ICON_PNG.to_vec())
-            .style(|s| s.width(84.0).height(84.0).margin_bottom(10.0)),
+        img(|| ICON_PNG.to_vec()).style(|s| s.width(84.0).height(84.0).margin_bottom(10.0)),
         label(|| format!("Version {}", env!("CARGO_PKG_VERSION"))).style(|s| {
             s.font_family("monospace".to_string())
                 .font_size(13.0)

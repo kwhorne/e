@@ -76,6 +76,17 @@ Returns the tables and columns of a connected database (optionally
 `"connection":"<name>"`), using the editor's existing, credential-safe
 connection — the agent never sees the password.
 
+The agent can also **propose a query**:
+
+```sh
+printf '{"method":"db_query","sql":"SELECT count(*) FROM users"}\n' | nc -U "$E_EDITOR_SOCK"
+```
+
+The editor shows a consent dialog with the SQL and the target connection. If you
+**Allow**, the query runs and the response contains `{columns, rows,
+rows_affected, elapsed_ms}`; if you **Deny**, it returns an error. The agent
+never gets direct database access.
+
 ## Running commands
 
 ```sh

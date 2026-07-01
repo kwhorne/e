@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use floem::ext_event::create_signal_from_channel;
-use floem::reactive::{create_effect, SignalGet, SignalWith};
+use floem::reactive::{create_effect, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::text::Document;
 use serde_json::{json, Value};
 
@@ -248,6 +248,34 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             std::thread::spawn(move || {
                 let _ = reply.send(db_schema(&conn));
             });
+            return;
+        }
+
+        // ---- Database query (async, user-consented) -----------------------
+        "db_query" => {
+            let Some(sql) = req.get("sql").and_then(|s| s.as_str()).map(String::from) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing sql"}));
+                return;
+            };
+            let name = req.get("connection").and_then(|c| c.as_str());
+            let picked = state.db_conns.with_untracked(|conns| {
+                conns
+                    .iter()
+                    .filter(|e| e.conn.get_untracked().is_some())
+                    .find(|e| name.is_none_or(|n| e.config.display_name() == n))
+                    .map(|e| (e.config.display_name(), e.conn.get_untracked()))
+            });
+            let Some((db_name, Some(conn))) = picked else {
+                let _ = reply.send(json!({"ok": false, "error": "no connected database"}));
+                return;
+            };
+            // Ask the user before touching their database.
+            state.db_consent.set(Some(crate::state::DbConsent {
+                sql,
+                db_name,
+                conn,
+                reply,
+            }));
             return;
         }
 

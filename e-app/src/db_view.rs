@@ -954,6 +954,80 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     })
 }
 
+/// The consent dialog shown when the AI agent proposes a query to run.
+pub fn db_consent_dialog(state: AppState) -> impl IntoView {
+    let title = label(|| "Agent wants to run a query".to_string())
+        .style(|s| s.font_size(14.0).font_bold().color(theme::fg()));
+    let subtitle = label(move || match state.db_consent.get() {
+        Some(c) => format!("on “{}” — allow?", c.db_name),
+        None => String::new(),
+    })
+    .style(|s| s.font_size(12.0).color(theme::fg_dim()).margin_bottom(8.0));
+
+    let sql = label(move || state.db_consent.get().map(|c| c.sql).unwrap_or_default()).style(|s| {
+        theme::input_colors(s)
+            .width_full()
+            .font_family("monospace".to_string())
+            .font_size(12.0)
+            .padding(10.0)
+            .margin_bottom(12.0)
+    });
+
+    let deny = label(|| "Deny".to_string())
+        .style(|s| {
+            s.padding_horiz(16.0)
+                .height(30.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_consent_deny());
+    let allow = label(|| "Allow & run".to_string())
+        .style(|s| {
+            s.padding_horiz(16.0)
+                .height(30.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .background(theme::accent())
+                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .cursor(floem::style::CursorStyle::Pointer)
+        })
+        .on_click_stop(move |_| state.db_consent_allow());
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), deny, allow))
+        .style(|s| s.flex_row().gap(8.0).items_center().width_full());
+
+    let card = stack((title, subtitle, sql, buttons)).style(|s| {
+        s.flex_col()
+            .width(520.0)
+            .padding(18.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg())
+    });
+
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 140));
+        if state.db_consent.get().is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 /// The inline cell-edit popup (double-click a cell in a browsed table).
 fn db_edit_popup(state: AppState) -> impl IntoView {
     let title = label(move || match state.db_edit.get() {

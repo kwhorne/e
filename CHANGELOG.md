@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command and capture stdout/stderr/exit code — the basis for autonomous TDD).
 - "Explain with agent" on failed database queries, and a "Fix with AI agent"
   action on problems, both prompt the agent panel directly.
+- Agent-proposed database queries (`db_query`) run only after you approve them
+  in a consent dialog — the agent never gets direct database access.
 
 ## [0.4.9] - 2026-06-29
 

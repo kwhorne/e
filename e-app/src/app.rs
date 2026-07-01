@@ -416,7 +416,12 @@ fn app_view() -> impl IntoView {
     let main_row = floem::views::stack_from_iter(cols).style(|s| s.flex_row().size_full());
 
     stack((
-        stack((main_row, crate::db_view::db_result_overlay(state))).style(|s| s.size_full()),
+        stack((
+            main_row,
+            crate::db_view::db_result_overlay(state),
+            crate::db_view::db_consent_dialog(state),
+        ))
+        .style(|s| s.size_full()),
         markdown_preview(state),
         diff_view(state),
         find_bar(state),

@@ -145,6 +145,15 @@ impl DbForm {
     }
 }
 
+/// A pending, agent-proposed SQL query awaiting the user's consent.
+#[derive(Clone)]
+pub struct DbConsent {
+    pub sql: String,
+    pub db_name: String,
+    pub conn: Arc<e_db::Conn>,
+    pub reply: std::sync::mpsc::Sender<serde_json::Value>,
+}
+
 #[derive(Clone)]
 pub struct Buffer {
     pub id: u64,
@@ -385,6 +394,8 @@ pub struct AppState {
     /// Pending scroll delta for the results grid `(dx, dy, tick)`; the tick
     /// makes every key press a distinct value so the scroll effect re-fires.
     pub db_scroll: RwSignal<(f64, f64, u64)>,
+    /// An agent-proposed query awaiting the user's consent.
+    pub db_consent: RwSignal<Option<DbConsent>>,
     /// The cell currently being edited `(row, col, column_name)`.
     pub db_edit: RwSignal<Option<(usize, usize, String)>>,
     pub db_edit_value: RwSignal<String>,
@@ -545,6 +556,7 @@ impl AppState {
             db_test_state: RwSignal::new(String::new()),
             db_editing_key: RwSignal::new(None),
             db_scroll: RwSignal::new((0.0, 0.0, 0)),
+            db_consent: RwSignal::new(None),
             db_edit: RwSignal::new(None),
             db_edit_value: RwSignal::new(String::new()),
             db_edit_null: RwSignal::new(false),
@@ -2585,6 +2597,38 @@ impl AppState {
     pub fn close_db_result(&self) {
         self.db_result_open.set(false);
         self.db_edit.set(None);
+    }
+
+    /// The user approved an agent-proposed query: run it and reply.
+    pub fn db_consent_allow(&self) {
+        let Some(c) = self.db_consent.get_untracked() else {
+            return;
+        };
+        self.db_consent.set(None);
+        std::thread::spawn(move || {
+            let resp = match e_db::query(&c.conn, &c.sql, e_db::MAX_ROWS) {
+                Ok(r) => serde_json::json!({
+                    "ok": true,
+                    "columns": r.columns,
+                    "rows": r.rows,
+                    "rows_affected": r.rows_affected,
+                    "elapsed_ms": r.elapsed_ms,
+                    "truncated": r.truncated,
+                }),
+                Err(e) => serde_json::json!({"ok": false, "error": e}),
+            };
+            let _ = c.reply.send(resp);
+        });
+    }
+
+    /// The user rejected an agent-proposed query.
+    pub fn db_consent_deny(&self) {
+        if let Some(c) = self.db_consent.get_untracked() {
+            self.db_consent.set(None);
+            let _ = c
+                .reply
+                .send(serde_json::json!({"ok": false, "error": "denied by user"}));
+        }
     }
 
     /// Whether the current results grid supports inline editing (a browsed table

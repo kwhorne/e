@@ -41,5 +41,10 @@ sed -i '' "s/__VERSION__/$VERSION/g" "$APP/Contents/Info.plist"
 pkill -f "e.app/Contents/MacOS/e" 2>/dev/null || true
 sleep 0.3
 
+# Nudge macOS to pick up the (possibly changed) bundle icon instead of a stale
+# cached one.
+touch "$APP"
+/usr/bin/touch "$APP/Contents/Info.plist" 2>/dev/null || true
+
 echo "==> opening e on: $TARGET"
 open -n "$APP" --args "$TARGET"

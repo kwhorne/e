@@ -1,7 +1,10 @@
 //! The About dialog.
 
 use floem::reactive::{SignalGet, SignalUpdate};
-use floem::views::{container, label, stack, Decorators};
+use floem::views::{container, img, label, stack, Decorators};
+
+/// The app icon, embedded so it renders identically everywhere.
+pub const ICON_PNG: &[u8] = include_bytes!("../../icons/e-512.png");
 use floem::IntoView;
 
 use crate::state::AppState;
@@ -32,8 +35,8 @@ fn line(text: &'static str, accent: bool, url: Option<&'static str>) -> impl Int
 
 pub fn about_dialog(state: AppState) -> impl IntoView {
     let content = stack((
-        label(|| "e".to_string())
-            .style(|s| s.font_size(40.0).color(theme::fg()).margin_bottom(2.0)),
+        img(|| ICON_PNG.to_vec())
+            .style(|s| s.width(84.0).height(84.0).margin_bottom(10.0)),
         label(|| format!("Version {}", env!("CARGO_PKG_VERSION"))).style(|s| {
             s.font_family("monospace".to_string())
                 .font_size(13.0)

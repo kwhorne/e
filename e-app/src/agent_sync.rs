@@ -91,8 +91,7 @@ pub fn start(state: AppState) {
         loop {
             let item = pending.lock().ok().and_then(|mut q| q.pop_front());
             let Some((req, reply)) = item else { break };
-            let resp = dispatch(state, &req);
-            let _ = reply.send(resp);
+            dispatch(state, &req, reply);
         }
     });
 }
@@ -124,8 +123,10 @@ fn handle_conn(
             q.push_back((value, tx));
         }
         let _ = wake_tx.send(counter.fetch_add(1, Ordering::Relaxed));
+        // Generous timeout: some methods (running tests, LSP, DB schema) take a
+        // while. Interactive queries reply near-instantly.
         let resp = rx
-            .recv_timeout(Duration::from_secs(3))
+            .recv_timeout(Duration::from_secs(300))
             .unwrap_or_else(|_| json!({"ok": false, "error": "editor did not respond"}));
         if writeln!(writer, "{resp}").is_err() {
             break;
@@ -134,19 +135,20 @@ fn handle_conn(
 }
 
 /// Execute one request against the editor (runs on the UI thread).
-fn dispatch(state: AppState, req: &Value) -> Value {
+fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
     let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
-    match method {
+    let line = || req.get("line").and_then(|l| l.as_u64()).unwrap_or(1).max(1) as u32 - 1;
+    let col = || req.get("col").and_then(|c| c.as_u64()).unwrap_or(1).max(1) as u32 - 1;
+
+    let sync: Value = match method {
         "context" => context(state),
         "diagnostics" => json!({ "ok": true, "diagnostics": diagnostics(state) }),
         "open" => {
             let Some(path) = req.get("path").and_then(|p| p.as_str()) else {
-                return json!({"ok": false, "error": "missing path"});
+                let _ = reply.send(json!({"ok": false, "error": "missing path"}));
+                return;
             };
-            let line = req.get("line").and_then(|l| l.as_u64()).unwrap_or(1).max(1) as usize - 1;
-            let col = req.get("col").and_then(|c| c.as_u64()).unwrap_or(1).max(1) as usize - 1;
-            let uri = path_to_uri(path);
-            state.jump_to(&uri, line, col);
+            state.jump_to(&path_to_uri(path), line() as usize, col() as usize);
             json!({"ok": true})
         }
         "focus" => {
@@ -155,33 +157,180 @@ fn dispatch(state: AppState, req: &Value) -> Value {
                 .and_then(|t| t.as_str())
                 .unwrap_or("editor")
             {
-                "terminal" => {
-                    if !state.terminal_open.get_untracked() {
-                        state.toggle_terminal();
-                    }
-                }
-                "agent" => {
-                    if !state.agent_open.get_untracked() {
-                        state.toggle_agent();
-                    }
-                }
-                _ => {
+                "terminal" if !state.terminal_open.get_untracked() => state.toggle_terminal(),
+                "agent" if !state.agent_open.get_untracked() => state.toggle_agent(),
+                "editor" => {
                     if let Some(id) = state.focused_active_id() {
                         state.focus_buffer(id);
                     }
                 }
+                _ => {}
             }
             json!({"ok": true})
         }
         "notify" => {
-            let msg = req.get("message").and_then(|m| m.as_str()).unwrap_or("");
-            AppState::notify(msg);
+            AppState::notify(req.get("message").and_then(|m| m.as_str()).unwrap_or(""));
             json!({"ok": true})
         }
+
+        // ---- LSP co-op (async) --------------------------------------------
+        "lsp_definition" | "lsp_references" | "lsp_hover" => {
+            let Some(path) = req.get("path").and_then(|p| p.as_str()) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing path"}));
+                return;
+            };
+            let (client, uri) = resolve_lsp(state, path);
+            let Some(client) = client else {
+                let _ = reply.send(json!({"ok": false, "error": "no language server for file"}));
+                return;
+            };
+            let (m, l, c) = (method.to_string(), line(), col());
+            std::thread::spawn(move || {
+                let resp = match m.as_str() {
+                    "lsp_definition" => match client.definition(&uri, l, c) {
+                        Ok(Some((u, ln, ch))) => {
+                            json!({"ok": true, "uri": u, "line": ln + 1, "col": ch + 1})
+                        }
+                        Ok(None) => json!({"ok": true, "result": null}),
+                        Err(e) => json!({"ok": false, "error": e.to_string()}),
+                    },
+                    "lsp_references" => match client.references(&uri, l, c) {
+                        Ok(refs) => json!({"ok": true, "references": refs.into_iter()
+                            .map(|(u, ln, ch)| json!({"uri": u, "line": ln + 1, "col": ch + 1}))
+                            .collect::<Vec<_>>()}),
+                        Err(e) => json!({"ok": false, "error": e.to_string()}),
+                    },
+                    _ => match client.hover(&uri, l, c) {
+                        Ok(h) => json!({"ok": true, "hover": h}),
+                        Err(e) => json!({"ok": false, "error": e.to_string()}),
+                    },
+                };
+                let _ = reply.send(resp);
+            });
+            return;
+        }
+        "lsp_symbols" => {
+            let query = req
+                .get("query")
+                .and_then(|q| q.as_str())
+                .unwrap_or("")
+                .to_string();
+            let Some(client) = state.lsp_for_active() else {
+                let _ = reply.send(json!({"ok": false, "error": "no active language server"}));
+                return;
+            };
+            std::thread::spawn(move || {
+                let resp = match client.workspace_symbol(&query) {
+                    Ok(syms) => json!({"ok": true, "symbols": syms.into_iter()
+                        .map(|(name, uri, ln, ch)| json!({"name": name, "uri": uri, "line": ln + 1, "col": ch + 1}))
+                        .collect::<Vec<_>>()}),
+                    Err(e) => json!({"ok": false, "error": e.to_string()}),
+                };
+                let _ = reply.send(resp);
+            });
+            return;
+        }
+
+        // ---- Database schema (async, read-only) ---------------------------
+        "db_schema" => {
+            let name = req.get("connection").and_then(|c| c.as_str());
+            let picked = state.db_conns.with_untracked(|conns| {
+                conns
+                    .iter()
+                    .filter(|e| e.conn.get_untracked().is_some())
+                    .find(|e| name.is_none_or(|n| e.config.display_name() == n))
+                    .and_then(|e| e.conn.get_untracked())
+            });
+            let Some(conn) = picked else {
+                let _ = reply.send(json!({"ok": false, "error": "no connected database"}));
+                return;
+            };
+            std::thread::spawn(move || {
+                let _ = reply.send(db_schema(&conn));
+            });
+            return;
+        }
+
+        // ---- Run a shell command (async) ----------------------------------
+        "run" => {
+            let Some(command) = req
+                .get("command")
+                .and_then(|c| c.as_str())
+                .map(String::from)
+            else {
+                let _ = reply.send(json!({"ok": false, "error": "missing command"}));
+                return;
+            };
+            let cwd = req
+                .get("cwd")
+                .and_then(|c| c.as_str())
+                .map(String::from)
+                .unwrap_or_else(|| state.root.get_untracked().to_string_lossy().into_owned());
+            std::thread::spawn(move || {
+                let _ = reply.send(run_command(&command, &cwd));
+            });
+            return;
+        }
+
         other => json!({"ok": false, "error": format!("unknown method: {other}")}),
-    }
+    };
+    let _ = reply.send(sync);
 }
 
+/// Resolve the language server + document URI for a path.
+fn resolve_lsp(state: AppState, path: &str) -> (Option<std::sync::Arc<e_lsp::LspClient>>, String) {
+    let pb = std::path::PathBuf::from(path);
+    let open = state.buffers.with_untracked(|bs| {
+        bs.iter()
+            .find(|b| b.file.path.as_deref() == Some(pb.as_path()))
+            .map(|b| (b.file.language, b.uri.clone()))
+    });
+    let (lang, uri) = match open {
+        Some((l, Some(u))) => (l, u),
+        Some((l, None)) => (l, path_to_uri(path)),
+        None => (
+            e_core::buffer::FileInfo::for_path(pb).language,
+            path_to_uri(path),
+        ),
+    };
+    (state.lsp_for_language(lang), uri)
+}
+
+fn db_schema(conn: &e_db::Conn) -> Value {
+    let tables = match e_db::tables(conn) {
+        Ok(t) => t,
+        Err(e) => return json!({"ok": false, "error": e}),
+    };
+    let mut out = Vec::new();
+    for t in tables.iter().take(300) {
+        let cols = e_db::columns(conn, t).unwrap_or_default();
+        out.push(json!({
+            "table": t,
+            "columns": cols.iter().map(|c| json!({
+                "name": c.name, "type": c.data_type, "nullable": c.nullable, "key": c.key
+            })).collect::<Vec<_>>(),
+        }));
+    }
+    json!({"ok": true, "tables": out})
+}
+
+fn run_command(command: &str, cwd: &str) -> Value {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    match std::process::Command::new(shell)
+        .arg("-ilc")
+        .arg(command)
+        .current_dir(cwd)
+        .output()
+    {
+        Ok(o) => json!({
+            "ok": true,
+            "code": o.status.code(),
+            "stdout": String::from_utf8_lossy(&o.stdout),
+            "stderr": String::from_utf8_lossy(&o.stderr),
+        }),
+        Err(e) => json!({"ok": false, "error": e.to_string()}),
+    }
+}
 fn context(state: AppState) -> Value {
     let root = state.root.get_untracked().to_string_lossy().into_owned();
     let open_files: Vec<String> = state.buffers.with_untracked(|bs| {

@@ -52,6 +52,40 @@ printf '{"method":"open","path":"app/Models/User.php","line":58}\n' \
   | nc -U "$E_EDITOR_SOCK"
 ```
 
+## Language-server co-op
+
+The agent can reuse the editor's already-running language server — no
+re-indexing, exact type info:
+
+| Request | Returns |
+| ------- | ------- |
+| `{"method":"lsp_definition","path":"…","line":12,"col":5}` | `{uri, line, col}` |
+| `{"method":"lsp_references","path":"…","line":12,"col":5}` | `{references:[…]}` |
+| `{"method":"lsp_hover","path":"…","line":12,"col":5}` | `{hover}` |
+| `{"method":"lsp_symbols","query":"User"}` | workspace symbols with locations |
+
+(The file should be open in the editor so its server is running.)
+
+## Database schema
+
+```sh
+printf '{"method":"db_schema"}\n' | nc -U "$E_EDITOR_SOCK"
+```
+
+Returns the tables and columns of a connected database (optionally
+`"connection":"<name>"`), using the editor's existing, credential-safe
+connection — the agent never sees the password.
+
+## Running commands
+
+```sh
+printf '{"method":"run","command":"php artisan test"}\n' | nc -U "$E_EDITOR_SOCK"
+```
+
+Runs a command in the workspace (or `"cwd":"…"`) through the login shell and
+returns `{code, stdout, stderr}`. This is the basis for an autonomous
+test-fix-rerun loop.
+
 ## Notes
 
 - The socket is local to your machine and per editor process; nothing is exposed

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lsp_symbols` (reuse the running language server), `db_schema` (read the
   connected database's schema without exposing credentials) and `run` (execute a
   command and capture stdout/stderr/exit code — the basis for autonomous TDD).
+- "Explain with agent" on failed database queries, and a "Fix with AI agent"
+  action on problems, both prompt the agent panel directly.
 
 ## [0.4.9] - 2026-06-29
 

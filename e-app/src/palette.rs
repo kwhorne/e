@@ -71,7 +71,7 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
 
 /// Subsequence fuzzy score; higher is better. `None` if `q` is not a
 /// subsequence of `text`. Rewards consecutive matches and word boundaries.
-fn fuzzy_score(q: &str, text: &str) -> Option<i64> {
+pub(crate) fn fuzzy_score(q: &str, text: &str) -> Option<i64> {
     if q.is_empty() {
         return Some(0);
     }

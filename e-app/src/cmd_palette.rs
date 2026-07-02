@@ -92,6 +92,23 @@ pub fn run_command(state: AppState, id: &str) {
     crate::commands::dispatch(state, id);
 }
 
+/// Fuzzy-rank the command list for a query (empty query → all, in order).
+fn rank_commands(query: &str) -> Vec<(&'static str, &'static str)> {
+    let q = query.to_lowercase();
+    if q.trim().is_empty() {
+        return COMMANDS.to_vec();
+    }
+    let mut scored: Vec<(i64, usize, (&'static str, &'static str))> = COMMANDS
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (id, label))| {
+            crate::palette::fuzzy_score(&q, &label.to_lowercase()).map(|sc| (sc, i, (*id, *label)))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|(_, _, c)| c).collect()
+}
+
 pub fn command_palette(state: AppState) -> impl IntoView {
     let cmd = state.cmd;
 
@@ -102,14 +119,15 @@ pub fn command_palette(state: AppState) -> impl IntoView {
         }
     });
 
-    let filtered = move || -> Vec<(&'static str, &'static str)> {
-        let q = cmd.query.get().to_lowercase();
-        COMMANDS
-            .iter()
-            .filter(|(_, label)| q.is_empty() || label.to_lowercase().contains(&q))
-            .copied()
-            .collect()
-    };
+    // Reset the highlight to the top result whenever the query changes.
+    create_effect(move |_| {
+        cmd.query.get();
+        cmd.selected.set(0);
+    });
+
+    // Fuzzy subsequence match on the label, ranked by score (word-boundary and
+    // consecutive-character bonuses), ties broken by original order.
+    let filtered = move || -> Vec<(&'static str, &'static str)> { rank_commands(&cmd.query.get()) };
 
     let run_selected = move || {
         let results = filtered();
@@ -227,4 +245,50 @@ pub fn command_palette(state: AppState) -> impl IntoView {
             }
         })
         .on_click_stop(move |_| cmd.open.set(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn up_ranks_relevant_commands() {
+        let ids: Vec<&str> = rank_commands("up").iter().map(|(id, _)| *id).collect();
+        let pos = |id: &str| ids.iter().position(|x| *x == id);
+        // Strong word-boundary matches must be found and rank at the very top.
+        assert!(
+            ids.contains(&"check-updates"),
+            "check-updates missing: {ids:?}"
+        );
+        assert!(
+            ids.contains(&"move-line-up"),
+            "move-line-up missing: {ids:?}"
+        );
+        let top2 = &ids[..2.min(ids.len())];
+        assert!(
+            top2.contains(&"check-updates") && top2.contains(&"move-line-up"),
+            "top: {top2:?}"
+        );
+        // A weak subsequence like "Architecture Map" (u…p) may match but must
+        // rank *below* the strong ones (this was the reported bug).
+        if let Some(weak) = pos("laravel-map") {
+            assert!(weak > pos("check-updates").unwrap());
+            assert!(weak > pos("move-line-up").unwrap());
+        }
+        // Labels with no "u…p" subsequence are excluded entirely.
+        assert!(!ids.contains(&"tinker-selection"), "{ids:?}");
+        assert!(!ids.contains(&"agent-log"), "{ids:?}");
+    }
+
+    #[test]
+    fn empty_query_returns_all() {
+        assert_eq!(rank_commands("").len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn abbreviations_match() {
+        // "tcs" → "Toggle Source Control"? subsequence t-c-s? no. Use "tsc".
+        let ids: Vec<&str> = rank_commands("sched").iter().map(|(id, _)| *id).collect();
+        assert!(ids.contains(&"schema-diff"), "{ids:?}");
+    }
 }

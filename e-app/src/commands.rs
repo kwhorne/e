@@ -71,6 +71,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "tinker" => state.toggle_tinker(),
         "tinker-selection" => state.run_tinker_selection(),
         "laravel-map" => state.toggle_laravel_map(),
+        "agent-log" => state.toggle_agent_log(),
         "emmet-expand" => {
             state.try_emmet_expand();
         }
@@ -123,6 +124,14 @@ fn close_focused(state: AppState) {
 
 /// Dismiss every open overlay (Escape).
 fn close_overlays(state: AppState) {
+    if state.agent_edit.get().is_some() {
+        state.agent_edit_cancel();
+        return;
+    }
+    if state.agent_log_open.get() {
+        state.agent_log_open.set(false);
+        return;
+    }
     if state.db_edit.get().is_some() {
         state.db_cancel_edit();
         return;

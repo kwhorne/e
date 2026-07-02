@@ -87,7 +87,32 @@ pub fn status_bar(state: AppState) -> impl IntoView {
     ))
     .style(|s| s.items_center().gap(14.0));
 
-    let left = stack((left, blame)).style(|s| s.items_center().gap(14.0).min_width(0.0));
+    let agent_mark = label(move || match state.agent_mark.get() {
+        Some((p, line)) => format!(
+            "🤖 {}:{}",
+            p.file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            line + 1
+        ),
+        None => String::new(),
+    })
+    .style(move |s| {
+        let s = s
+            .color(theme::accent())
+            .text_ellipsis()
+            .max_width(240.0)
+            .cursor(floem::style::CursorStyle::Pointer);
+        if state.agent_mark.get().is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+    .on_click_stop(move |_| state.jump_to_agent_mark());
+
+    let left =
+        stack((left, blame, agent_mark)).style(|s| s.items_center().gap(14.0).min_width(0.0));
 
     stack((left, right)).style(|s| {
         s.height(24.0)

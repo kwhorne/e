@@ -6,6 +6,7 @@
 
 mod about;
 mod agent_sync;
+mod agent_ui;
 mod agent_view;
 mod app;
 mod breadcrumbs;

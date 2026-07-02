@@ -140,6 +140,9 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
     let line = || req.get("line").and_then(|l| l.as_u64()).unwrap_or(1).max(1) as u32 - 1;
     let col = || req.get("col").and_then(|c| c.as_u64()).unwrap_or(1).max(1) as u32 - 1;
 
+    // Audit everything the agent does.
+    state.agent_log_push(method, log_summary(req));
+
     let sync: Value = match method {
         "context" => context(state),
         "diagnostics" => json!({ "ok": true, "diagnostics": diagnostics(state) }),
@@ -149,7 +152,35 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 return;
             };
             state.jump_to(&path_to_uri(path), line() as usize, col() as usize);
+            state.set_agent_mark(std::path::PathBuf::from(path), line() as usize);
             json!({"ok": true})
+        }
+        // Ghost marker: show where the agent is looking.
+        "mark" => {
+            let Some(path) = req.get("path").and_then(|p| p.as_str()) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing path"}));
+                return;
+            };
+            state.set_agent_mark(std::path::PathBuf::from(path), line() as usize);
+            json!({"ok": true})
+        }
+        // Propose replacing a file's contents; the user reviews hunks and the
+        // reply is answered on apply/cancel.
+        "propose_edit" => {
+            let Some(path) = req.get("path").and_then(|p| p.as_str()).map(String::from) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing path"}));
+                return;
+            };
+            let Some(content) = req
+                .get("content")
+                .and_then(|c| c.as_str())
+                .map(String::from)
+            else {
+                let _ = reply.send(json!({"ok": false, "error": "missing content"}));
+                return;
+            };
+            state.agent_propose_edit(std::path::PathBuf::from(path), content, reply);
+            return;
         }
         "focus" => {
             match req
@@ -184,6 +215,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 let _ = reply.send(json!({"ok": false, "error": "no language server for file"}));
                 return;
             };
+            state.set_agent_mark(std::path::PathBuf::from(path), line() as usize);
             let (m, l, c) = (method.to_string(), line(), col());
             std::thread::spawn(move || {
                 let resp = match m.as_str() {
@@ -327,6 +359,25 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
         other => json!({"ok": false, "error": format!("unknown method: {other}")}),
     };
     let _ = reply.send(sync);
+}
+
+/// A short human summary of a request for the audit timeline.
+fn log_summary(req: &Value) -> String {
+    let s = |k: &str| req.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    let path = s("path");
+    let short = path.rsplit('/').next().unwrap_or(path);
+    match req.get("method").and_then(|m| m.as_str()).unwrap_or("") {
+        "open" | "mark" | "lsp_definition" | "lsp_references" | "lsp_hover" => {
+            let line = req.get("line").and_then(|l| l.as_u64()).unwrap_or(0);
+            format!("{short}:{line}")
+        }
+        "propose_edit" => short.to_string(),
+        "run" => s("command").chars().take(60).collect(),
+        "tinker" => s("code").chars().take(60).collect(),
+        "db_query" => s("sql").chars().take(60).collect(),
+        "lsp_symbols" => s("query").to_string(),
+        _ => String::new(),
+    }
 }
 
 /// Resolve the language server + document URI for a path.

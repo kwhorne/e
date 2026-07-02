@@ -154,6 +154,25 @@ pub struct DbConsent {
     pub reply: std::sync::mpsc::Sender<serde_json::Value>,
 }
 
+/// One segment of a proposed edit: unchanged context, or a reviewable change.
+#[derive(Clone)]
+pub enum EditSeg {
+    Equal(String),
+    Change {
+        old: String,
+        new: String,
+        accepted: RwSignal<bool>,
+    },
+}
+
+/// An agent-proposed edit to a file, reviewed hunk-by-hunk before applying.
+#[derive(Clone)]
+pub struct AgentEdit {
+    pub path: PathBuf,
+    pub segs: Vec<EditSeg>,
+    pub reply: std::sync::mpsc::Sender<serde_json::Value>,
+}
+
 #[derive(Clone)]
 pub struct Buffer {
     pub id: u64,
@@ -405,6 +424,15 @@ pub struct AppState {
     // ---- Laravel architecture map --------------------------------------
     pub map_open: RwSignal<bool>,
     pub map_query: RwSignal<String>,
+
+    // ---- Agent socket: audit log, live marker, edit proposals ----------
+    /// Timeline of everything the agent did over the socket `(time, method, summary)`.
+    pub agent_log: RwSignal<Vec<(String, String, String)>>,
+    pub agent_log_open: RwSignal<bool>,
+    /// Where the agent is currently "looking" `(path, line0)` — a ghost marker.
+    pub agent_mark: RwSignal<Option<(PathBuf, usize)>>,
+    /// A pending edit the agent proposed, awaiting per-hunk review.
+    pub agent_edit: RwSignal<Option<AgentEdit>>,
     /// The cell currently being edited `(row, col, column_name)`.
     pub db_edit: RwSignal<Option<(usize, usize, String)>>,
     pub db_edit_value: RwSignal<String>,
@@ -477,6 +505,21 @@ fn csv_escape(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// Wall-clock `HH:MM:SS` (UTC) for the agent audit log.
+fn now_hms() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        % 86400;
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 fn now_ms() -> u128 {
@@ -571,6 +614,10 @@ impl AppState {
             tinker_running: RwSignal::new(false),
             map_open: RwSignal::new(false),
             map_query: RwSignal::new(String::new()),
+            agent_log: RwSignal::new(Vec::new()),
+            agent_log_open: RwSignal::new(false),
+            agent_mark: RwSignal::new(None),
+            agent_edit: RwSignal::new(None),
             db_edit: RwSignal::new(None),
             db_edit_value: RwSignal::new(String::new()),
             db_edit_null: RwSignal::new(false),
@@ -2712,6 +2759,126 @@ impl AppState {
             let _ = std::fs::remove_file(&tmp);
             send(text);
         });
+    }
+
+    // ---- Agent socket: audit log, marker, edit review -----------------
+
+    /// Append an entry to the agent audit timeline (capped).
+    pub fn agent_log_push(&self, method: &str, summary: String) {
+        let entry = (now_hms(), method.to_string(), summary);
+        self.agent_log.update(|v| {
+            v.push(entry);
+            let len = v.len();
+            if len > 500 {
+                v.drain(0..len - 500);
+            }
+        });
+    }
+
+    pub fn toggle_agent_log(&self) {
+        self.agent_log_open.update(|o| *o = !*o);
+    }
+
+    /// Record where the agent is currently looking (a ghost marker).
+    pub fn set_agent_mark(&self, path: PathBuf, line: usize) {
+        self.agent_mark.set(Some((path, line)));
+    }
+
+    pub fn jump_to_agent_mark(&self) {
+        if let Some((path, line)) = self.agent_mark.get_untracked() {
+            self.jump_to(&path_to_uri(&path), line, 0);
+        }
+    }
+
+    /// The agent proposed replacing a file's contents; diff it and open a
+    /// hunk-by-hunk review. `reply` is answered when the user applies/cancels.
+    pub fn agent_propose_edit(
+        &self,
+        path: PathBuf,
+        new_content: String,
+        reply: std::sync::mpsc::Sender<serde_json::Value>,
+    ) {
+        let old = self
+            .buffers
+            .with_untracked(|bs| {
+                bs.iter()
+                    .find(|b| b.file.path.as_deref() == Some(path.as_path()))
+                    .map(|b| b.doc.text().to_string())
+            })
+            .or_else(|| buffer::read_with_encoding(&path).map(|(s, _)| s).ok())
+            .unwrap_or_default();
+        let segs: Vec<EditSeg> = e_core::diff::edit_segments(&old, &new_content)
+            .into_iter()
+            .map(|d| {
+                if d.equal {
+                    EditSeg::Equal(d.old)
+                } else {
+                    EditSeg::Change {
+                        old: d.old,
+                        new: d.new,
+                        accepted: self.cx.create_rw_signal(true),
+                    }
+                }
+            })
+            .collect();
+        if !segs.iter().any(|s| matches!(s, EditSeg::Change { .. })) {
+            let _ = reply.send(serde_json::json!({"ok": true, "applied": 0, "note": "no changes"}));
+            return;
+        }
+        self.agent_edit.set(Some(AgentEdit { path, segs, reply }));
+    }
+
+    /// Apply the accepted hunks of the current proposal.
+    pub fn agent_edit_apply(&self) {
+        let Some(edit) = self.agent_edit.get_untracked() else {
+            return;
+        };
+        self.agent_edit.set(None);
+        let mut out = String::new();
+        let mut applied = 0u32;
+        for seg in &edit.segs {
+            match seg {
+                EditSeg::Equal(t) => out.push_str(t),
+                EditSeg::Change { old, new, accepted } => {
+                    if accepted.get_untracked() {
+                        out.push_str(new);
+                        applied += 1;
+                    } else {
+                        out.push_str(old);
+                    }
+                }
+            }
+        }
+        // Apply to the open buffer (so undo works) or write to disk.
+        let open = self.buffers.with_untracked(|bs| {
+            bs.iter()
+                .find(|b| b.file.path.as_deref() == Some(edit.path.as_path()))
+                .map(|b| (b.doc.clone(), b.dirty))
+        });
+        if let Some((doc, dirty)) = open {
+            let len = doc.text().len();
+            let mut it = std::iter::once((Selection::region(0, len), out.as_str()));
+            doc.edit(&mut it, EditType::InsertChars);
+            dirty.set(true);
+        } else {
+            let _ = buffer::write(&edit.path, &out);
+        }
+        let _ = edit
+            .reply
+            .send(serde_json::json!({"ok": true, "applied": applied}));
+        self.agent_log_push(
+            "propose_edit",
+            format!("applied {applied} hunk(s) to {}", edit.path.display()),
+        );
+    }
+
+    pub fn agent_edit_cancel(&self) {
+        if let Some(edit) = self.agent_edit.get_untracked() {
+            self.agent_edit.set(None);
+            let _ = edit
+                .reply
+                .send(serde_json::json!({"ok": true, "applied": 0, "cancelled": true}));
+        }
     }
 
     /// The user rejected an agent-proposed query.

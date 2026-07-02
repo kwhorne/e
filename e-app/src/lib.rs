@@ -41,6 +41,7 @@ mod outline;
 mod palette;
 mod picker;
 mod problems;
+mod querycomplete;
 mod recent;
 mod relations;
 mod relations_view;

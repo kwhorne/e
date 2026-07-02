@@ -45,7 +45,7 @@ fn member_access(text: &str, offset: usize) -> Option<(String, String, usize)> {
 }
 
 /// Infer the model class for `$var` from assignments and type hints above.
-fn resolve_model(text: &str, var: &str) -> Option<String> {
+pub(crate) fn resolve_model(text: &str, var: &str) -> Option<String> {
     let needle = format!("${var}");
     let mut found: Option<String> = None;
     let mut from = 0;
@@ -99,7 +99,7 @@ fn starts_upper(s: &str) -> bool {
 
 /// Map a model class to its table: honour `protected $table`, else the Laravel
 /// snake_case + pluralise convention.
-fn model_table(root: &Path, class: &str) -> String {
+pub(crate) fn model_table(root: &Path, class: &str) -> String {
     for cand in [
         root.join(format!("app/Models/{class}.php")),
         root.join(format!("app/{class}.php")),

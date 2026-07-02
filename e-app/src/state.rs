@@ -4933,6 +4933,73 @@ impl AppState {
             }
         }
 
+        // Laravel query builder: column names inside `where('…')`, `orderBy()`,
+        // `select()`, … and relationship names inside `with()`, `whereHas()`.
+        if matches!(buf.file.language, Language::Php | Language::Blade) {
+            if let Some(ctx) = crate::querycomplete::context(line_before) {
+                let root = self.root.get_untracked();
+                if let Some(target) = crate::querycomplete::resolve_target(&text, offset, &root) {
+                    let lower = ctx.partial.to_lowercase();
+                    let items: Vec<lsp_types::CompletionItem> = if ctx.relation {
+                        target
+                            .model
+                            .as_ref()
+                            .map(|m| crate::relations::relation_names(&root, m))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|r| lower.is_empty() || r.to_lowercase().starts_with(&lower))
+                            .map(|r| lsp_types::CompletionItem {
+                                label: r.clone(),
+                                insert_text: Some(r),
+                                kind: Some(lsp_types::CompletionItemKind::REFERENCE),
+                                detail: Some("relation".to_string()),
+                                ..Default::default()
+                            })
+                            .collect()
+                    } else {
+                        self.db_schema_cache.with_untracked(|schema| {
+                            schema
+                                .get(&target.table)
+                                .map(|cols| {
+                                    cols.iter()
+                                        .filter(|c| {
+                                            lower.is_empty()
+                                                || c.name.to_lowercase().starts_with(&lower)
+                                        })
+                                        .map(|c| lsp_types::CompletionItem {
+                                            label: c.name.clone(),
+                                            insert_text: Some(c.name.clone()),
+                                            kind: Some(lsp_types::CompletionItemKind::FIELD),
+                                            detail: Some(format!(
+                                                "{} · {}",
+                                                c.data_type, target.table
+                                            )),
+                                            ..Default::default()
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        })
+                    };
+                    if !items.is_empty() {
+                        let comp = self.completion;
+                        let fstart = offset.saturating_sub(ctx.partial.len());
+                        let (_, below) = editor.points_of_offset(fstart, cursor.affinity);
+                        let vp = editor.viewport.get_untracked();
+                        let win = buf.win_origin.get_untracked();
+                        let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+                        comp.buffer_id.set(Some(buffer_id));
+                        comp.start_offset.set(fstart);
+                        comp.anchor.set(anchor);
+                        comp.items.set(items);
+                        comp.selected.set(0);
+                        comp.open.set(true);
+                        return;
+                    }
+                }
+            }
+        }
+
         if let Some((rep, items)) =
             framework_completion::completions(buf.file.language, line_before)
         {

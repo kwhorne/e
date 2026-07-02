@@ -258,6 +258,30 @@ pub fn build_graph(root: &Path, fks: &[ForeignKey]) -> Vec<ModelNode> {
         .collect()
 }
 
+/// Relationship method names declared on a single model class (for query
+/// completion in `with()`, `whereHas()`, …).
+pub fn relation_names(root: &Path, class: &str) -> Vec<String> {
+    for cand in [
+        root.join(format!("app/Models/{class}.php")),
+        root.join(format!("app/{class}.php")),
+    ] {
+        if let Ok(src) = std::fs::read_to_string(&cand) {
+            if let Some(pm) = parse_model(&src, &cand) {
+                let mut out: Vec<String> = pm
+                    .rels
+                    .into_iter()
+                    .map(|r| r.method)
+                    .filter(|m| !m.is_empty())
+                    .collect();
+                out.sort();
+                out.dedup();
+                return out;
+            }
+        }
+    }
+    Vec::new()
+}
+
 fn looks_like_model(file: &Path) -> bool {
     file.components().any(|c| c.as_os_str() == "Models")
 }

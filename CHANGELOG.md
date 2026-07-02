@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The file explorer and editor were unclickable: an overlay group wrapper
+  introduced in 0.6.5 covered the whole window and swallowed every click. It now
+  only covers the window when one of its panels is open.
+- `⌘P` now finds hidden files (`.env`, `.gitignore`, …); they were excluded from
+  the file index.
+
 ## [0.6.5] - 2026-07-02
 
 ### Added

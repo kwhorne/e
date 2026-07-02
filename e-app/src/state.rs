@@ -217,6 +217,8 @@ pub struct Buffer {
     pub large: bool,
     /// Text encoding label (e.g. `UTF-8`, `windows-1252`).
     pub encoding: RwSignal<String>,
+    /// Laravel query-builder lint diagnostics (unknown columns), merged with LSP.
+    pub lint: Rc<RefCell<Vec<Diagnostic>>>,
     /// Branching undo history (see [`e_core::undotree`]).
     pub undo: Rc<RefCell<e_core::undotree::UndoTree>>,
     /// When set, a text change is caused by undo-tree navigation, so it must
@@ -667,6 +669,18 @@ fn undo_store_path(file: &std::path::Path) -> PathBuf {
         .join("e")
         .join("undo")
         .join(name)
+}
+
+/// Byte offset → (line, character) both 0-based, for LSP-style ranges.
+fn offset_to_lc(text: &str, off: usize) -> (u32, u32) {
+    let up = &text[..off.min(text.len())];
+    let line = up.bytes().filter(|b| *b == b'\n').count() as u32;
+    let col = up
+        .rsplit('\n')
+        .next()
+        .map(|s| s.chars().count())
+        .unwrap_or(0) as u32;
+    (line, col)
 }
 
 /// Locate the active Laravel log file (single or the newest daily file).
@@ -2509,6 +2523,7 @@ impl AppState {
             inlay_hints: RwSignal::new(Vec::new()),
             large: false,
             encoding: RwSignal::new("UTF-8".to_string()),
+            lint: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
         };
@@ -4623,6 +4638,8 @@ impl AppState {
                 }
                 // Trigger completion (LSP + snippets + Laravel helpers).
                 app.autocomplete_after_edit(id);
+                // Laravel query-builder lint (unknown columns).
+                app.refresh_lint(id);
             });
         }
 
@@ -4652,6 +4669,7 @@ impl AppState {
             inlay_hints: RwSignal::new(Vec::new()),
             large,
             encoding: RwSignal::new(encoding),
+            lint: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
         };
@@ -4844,8 +4862,70 @@ impl AppState {
             return;
         };
         let text = buf.doc.text().to_string();
-        *buf.diag_lines.borrow_mut() = build_diag_lines(diags, &text);
+        // Merge the LSP diagnostics with our Laravel query lint.
+        let mut all = diags.to_vec();
+        all.extend(buf.lint.borrow().iter().cloned());
+        *buf.diag_lines.borrow_mut() = build_diag_lines(&all, &text);
         buf.doc.cache_rev().update(|r| *r += 1);
+    }
+
+    /// Recompute Laravel query-builder lint (unknown columns) for a buffer and
+    /// re-render its diagnostics. Cheap no-op without a live schema.
+    pub fn refresh_lint(&self, buffer_id: u64) {
+        let Some(buf) = self.buffer_by_id(buffer_id) else {
+            return;
+        };
+        if buf.large || !matches!(buf.file.language, Language::Php | Language::Blade) {
+            return;
+        }
+        let root = self.root.get_untracked();
+        let text = buf.doc.text().to_string();
+        let mut diags: Vec<Diagnostic> = Vec::new();
+        self.db_schema_cache.with_untracked(|schema| {
+            if schema.is_empty() {
+                return;
+            }
+            for (start, end, col) in crate::querycomplete::column_args(&text) {
+                let Some(target) = crate::querycomplete::resolve_target(&text, start, &root) else {
+                    continue;
+                };
+                if let Some(cols) = schema.get(&target.table) {
+                    if !cols.iter().any(|c| c.name == col) {
+                        let (sl, sc) = offset_to_lc(&text, start);
+                        let (el, ec) = offset_to_lc(&text, end);
+                        diags.push(Diagnostic {
+                            range: lsp_types::Range {
+                                start: lsp_types::Position {
+                                    line: sl,
+                                    character: sc,
+                                },
+                                end: lsp_types::Position {
+                                    line: el,
+                                    character: ec,
+                                },
+                            },
+                            severity: Some(lsp_types::DiagnosticSeverity::WARNING),
+                            source: Some("laravel".to_string()),
+                            message: format!(
+                                "Column `{col}` not found in table `{}`",
+                                target.table
+                            ),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+        });
+        let changed = *buf.lint.borrow() != diags;
+        *buf.lint.borrow_mut() = diags;
+        if changed {
+            if let Some(uri) = buf.uri.clone() {
+                let lsp = self
+                    .diagnostics
+                    .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
+                self.apply_diagnostics_to_buffer(&uri, &lsp);
+            }
+        }
     }
 
     /// `(line, col, selection_len)` of the active editor's cursor (1-based).

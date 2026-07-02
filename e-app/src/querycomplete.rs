@@ -229,9 +229,59 @@ fn first_var(stmt: &str) -> Option<String> {
     }
 }
 
+/// Find the first column string argument of every column method call in the
+/// file, as `(start, end, column)` byte ranges — for linting unknown columns.
+pub fn column_args(text: &str) -> Vec<(usize, usize, String)> {
+    let mut out = Vec::new();
+    for (i, c) in text.char_indices() {
+        if c != '(' {
+            continue;
+        }
+        // Method identifier immediately before the `(` (case-insensitive).
+        let ident: String = text[..i]
+            .chars()
+            .rev()
+            .take_while(|c| is_ident(*c))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let m = ident.to_lowercase();
+        if !COL_FIRST.contains(&m.as_str()) && !COL_ANY.contains(&m.as_str()) {
+            continue;
+        }
+        let after = &text[i + 1..];
+        let a = after.trim_start();
+        let ws = after.len() - a.len();
+        let Some(q) = a.chars().next() else { continue };
+        if q != '\'' && q != '"' {
+            continue;
+        }
+        let vstart = i + 1 + ws + 1;
+        let Some(er) = text[vstart..].find(q) else {
+            continue;
+        };
+        let vend = vstart + er;
+        let col = text[vstart..vend].to_string();
+        // Only simple identifiers (skip `*`, `table.col`, expressions, aliases).
+        if !col.is_empty() && col.chars().all(is_ident) {
+            out.push((vstart, vend, col));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scans_column_args() {
+        let src = "User::where('email', 1)->orderBy('created_at'); DB::raw('*');";
+        let cols: Vec<String> = column_args(src).into_iter().map(|(_, _, c)| c).collect();
+        assert!(cols.contains(&"email".to_string()));
+        assert!(cols.contains(&"created_at".to_string()));
+    }
 
     #[test]
     fn detects_column_context() {

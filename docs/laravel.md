@@ -46,6 +46,44 @@ HTML tags, attributes and Tailwind utility classes, Blade directives
 (`@php`, `@if`, `@foreach`, `@push`, …), `{{-- comments --}}`, and the embedded
 PHP inside `@php … @endphp` blocks, `{{ … }}` and `{!! … !!}` expressions.
 
+## Query-builder completion
+
+Inside a query builder, column names complete from the model's table and the
+live schema — `where('…')`, `orderBy()`, `select()`, `pluck()`, `value()`,
+`groupBy()`, `having()` — and relationship names complete inside `with('…')`,
+`load()`, `whereHas()`. The table is resolved from `Model::`, `$model`, or
+`DB::table('…')`. Columns that don't exist in the schema are underlined with a
+warning — a check PhpStorm can't do without the database.
+
+## Validation rules
+
+Rule names complete inside `validate([…])` and FormRequest `rules()`. The
+command **Laravel: Generate Validation Rules from Table** writes
+`'field' => 'rules'` lines from the live schema (nullable → `nullable`,
+`varchar(255)` → `max:255`, and so on) at the cursor.
+
+## Gates & policies
+
+`can()`, `authorize()`, `@can`, and `Gate::allows()` complete ability names and
+jump (F12) to the policy method or `Gate::define()` that declares them.
+
+## Generate model from table
+
+With a table open in the database panel, **Laravel: Generate Model from Table**
+creates an Eloquent model from the live schema — `$fillable`, `$casts`, and
+`belongsTo`/`hasMany` relationships inferred from the real foreign keys.
+
+## Event dispatch graph
+
+`⌘⌥G` opens the event → listener graph, built from `$listen`, `Event::listen()`,
+and auto-discovered `handle(EventType $event)` listeners. `F12` on a dispatched
+event class jumps to a listener.
+
+## Related files
+
+`⌘⌥E` shows every file for the current resource — model, migration(s), factory,
+seeder, controller, policy, request, resource, and test — in a quick picker.
+
 ## Livewire
 
 `e` treats a Livewire component's class and Blade view as one unit:

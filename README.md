@@ -59,6 +59,8 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Inertia awareness** — `Inertia::render()` resolves to the page component (goto, completion, and in the map); Ziggy `route()` and shared props complete on the JS side
 - **Props contract** (`⌘⌥C`) — reconciles controller props with the page component, infers TypeScript types from the render call + live schema, flags mismatches both ways, and generates TypeScript interfaces
 - **Livewire refactoring** — `wire:model` completion, `⌘⌥J` view↔class, and `F2` renames a property across the class *and* the view
+- **Query-builder completion** — column names in `where()`/`orderBy()`/`select()` and relations in `with()`/`whereHas()` from the live schema, with unknown columns flagged
+- **Code intelligence** — validation-rule completion, gate/policy go-to, "generate model from table" and "generate validation rules from table" from the live schema, event dispatch graph (`⌘⌥G`), and related-files hopping (`⌘⌥E`)
 - **Runtime insight** (`⌘⌥I`) — a Telescope-style panel capturing every dev request via Clockwork: queries with N+1 warnings, cache, mails, events
 - **Architecture map** (`⌘⌥M`) — route → controller → view flow; **request-replay** hits your running app (Grove or custom URL) and shows the response plus the SQL it ran, with N+1 detection
 - **Laravel log tail** (`⌘⌥L`) with clickable stack frames, **schema diff** (migrations vs live DB), and a **Tinker scratchpad** (`⌘⌥T`)
@@ -145,6 +147,7 @@ A selection — see [the full list](docs/keyboard-shortcuts.md).
 | `⌘⌥M`      | Laravel architecture map     | `⌘⌥L`    | Laravel log tail |
 | `⌘⌥R`      | Eloquent relationship graph  | `⌘⇧L`    | Select all occurrences |
 | `⌘⌥C`      | Inertia props contract       | `⌘⌥J`    | Livewire view ↔ class |
+| `⌘⌥G`      | Event dispatch graph         | `⌘⌥E`    | Related files |
 | `⌘⌥I`      | Runtime insight (Clockwork)  | `⌘⌥A`    | Agent timeline |
 | `⌘⌥T`      | Tinker scratchpad            | `⌘⇧T`    | Autonomous TDD |
 | `⌘=` / `⌘-`| Zoom in / out                | `⌥Z`     | Toggle word wrap |

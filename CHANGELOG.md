@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Query-builder completion**: column names inside `where()`, `orderBy()`,
+  `select()`, `pluck()`, `value()`, `groupBy()`, … and relationship names inside
+  `with()`, `load()`, `whereHas()`, resolved from the model/table and the live
+  schema. Unknown columns are flagged inline (`Column emial not found in table
+  users`) — something PhpStorm can't do without the database.
+- **Related files** (`⌘⌥E`): jump between the model, migration(s), factory,
+  seeder, controller, policy, request, resource, and test for the same resource.
+- **Validation intelligence**: completion for rule names in `validate([…])` /
+  FormRequest `rules()`, plus a command to generate rules from a table's live
+  schema (nullability, string lengths, types).
+- **Gates & policies**: completion and go-to-definition for abilities in
+  `can()`, `authorize()`, `@can`, and `Gate::allows()` → the policy method.
+- **Generate model from table**: builds an Eloquent model from the live schema —
+  fillable, casts, and relationships inferred from the actual foreign keys.
+- **Event dispatch graph** (`⌘⌥G`): events → listeners (from `$listen`,
+  `Event::listen`, and auto-discovered `handle()` types), with `F12` on a
+  dispatched event jumping to a listener.
+
+### Changed
+
+- The file explorer now shows hidden files (`.env`, `.gitignore`, `.github`, …).
+  Only `.git`, `node_modules`, and `target` are hidden.
+
 ## [0.6.4] - 2026-07-02
 
 ### Added

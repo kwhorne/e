@@ -81,6 +81,8 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | `⌘⌥K`    | Semantic search ("describe what you're looking for") |
 | `⌘⌥M`    | Laravel architecture map (route → controller → view/page, request-replay) |
 | `⌘⌥R`    | Eloquent relationship graph |
+| `⌘⌥G`    | Event dispatch graph |
+| `⌘⌥E`    | Related files (model / migration / …) |
 | `⌘⌥C`    | Inertia props contract / generate TypeScript |
 | `⌘⌥J`    | Livewire: switch between view and class |
 | `⌘⌥I`    | Runtime insight (Telescope-style capture) |

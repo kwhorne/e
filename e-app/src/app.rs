@@ -188,6 +188,7 @@ fn app_view() -> impl IntoView {
     // Scrape Laravel project data (routes/views/config/env) in the background.
     state.load_laravel();
     state.load_databases();
+    state.load_db_schema_cache();
     crate::agent_sync::start(state);
 
     // Restore the previous session, then open any file passed on the CLI.
@@ -237,6 +238,9 @@ fn app_view() -> impl IntoView {
             if ticks.get().is_some() {
                 state.maybe_autosave();
                 state.check_external_changes();
+                if state.log_open.get_untracked() {
+                    state.refresh_laravel_log();
+                }
             }
         });
     }
@@ -426,6 +430,7 @@ fn app_view() -> impl IntoView {
             crate::agent_ui::agent_log_panel(state),
             crate::tdd::tdd_panel(state),
             crate::request::request_view(state),
+            crate::log::laravel_log_panel(state),
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),

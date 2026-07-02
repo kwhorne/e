@@ -73,6 +73,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "laravel-map" => state.toggle_laravel_map(),
         "agent-log" => state.toggle_agent_log(),
         "run-tests" => state.toggle_tdd(),
+        "laravel-log" => state.toggle_laravel_log(),
         "emmet-expand" => {
             state.try_emmet_expand();
         }
@@ -139,6 +140,10 @@ fn close_overlays(state: AppState) {
     }
     if state.req_open.get() {
         state.close_request();
+        return;
+    }
+    if state.log_open.get() {
+        state.log_open.set(false);
         return;
     }
     if state.db_edit.get().is_some() {

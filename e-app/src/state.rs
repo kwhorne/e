@@ -443,6 +443,12 @@ pub struct AppState {
     /// A pending edit the agent proposed, awaiting per-hunk review.
     pub agent_edit: RwSignal<Option<AgentEdit>>,
 
+    // ---- Laravel log tail ----------------------------------------------
+    pub log_open: RwSignal<bool>,
+    pub log_lines: RwSignal<Vec<String>>,
+    /// Cached live DB schema `table -> columns`, for Eloquent completion.
+    pub db_schema_cache: RwSignal<std::collections::HashMap<String, Vec<e_db::ColumnInfo>>>,
+
     // ---- Request replay (from the architecture map) --------------------
     pub req_open: RwSignal<bool>,
     pub req_url: RwSignal<String>,
@@ -533,6 +539,49 @@ fn csv_escape(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// Locate the active Laravel log file (single or the newest daily file).
+fn find_laravel_log(root: &std::path::Path) -> Option<PathBuf> {
+    let dir = root.join("storage").join("logs");
+    let single = dir.join("laravel.log");
+    if single.is_file() {
+        return Some(single);
+    }
+    // Newest *.log by modified time (daily logs).
+    std::fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .fold(None::<(std::time::SystemTime, PathBuf)>, |best, e| {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("log") {
+                return best;
+            }
+            let m = e.metadata().and_then(|m| m.modified()).ok();
+            match (best, m) {
+                (Some((bt, _bp)), Some(mt)) if mt > bt => Some((mt, p)),
+                (None, Some(mt)) => Some((mt, p)),
+                (b, _) => b,
+            }
+        })
+        .map(|(_, p)| p)
+}
+
+/// Read the last `max` lines from the final `bytes` of a (possibly huge) file.
+fn tail_lines(path: &std::path::Path, bytes: u64, max: usize) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(bytes);
+    let _ = f.seek(SeekFrom::Start(start));
+    let mut buf = Vec::new();
+    let _ = f.read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    let all: Vec<&str> = text.lines().collect();
+    let from = all.len().saturating_sub(max);
+    all[from..].iter().map(|s| s.to_string()).collect()
 }
 
 struct RequestResult {
@@ -756,6 +805,9 @@ impl AppState {
             agent_log_open: RwSignal::new(false),
             agent_mark: RwSignal::new(None),
             agent_edit: RwSignal::new(None),
+            log_open: RwSignal::new(false),
+            log_lines: RwSignal::new(Vec::new()),
+            db_schema_cache: RwSignal::new(std::collections::HashMap::new()),
             req_open: RwSignal::new(false),
             req_url: RwSignal::new(String::new()),
             req_status: RwSignal::new(None),
@@ -2419,6 +2471,33 @@ impl AppState {
         self.db_queries.set(e_db::load_queries(&root));
     }
 
+    /// Fetch the project's DB schema (from `.env`) into an in-memory cache for
+    /// Eloquent attribute completion. Runs in the background.
+    pub fn load_db_schema_cache(&self) {
+        let root = self.root.get_untracked();
+        let Some(cfg) = e_db::from_env(&root) else {
+            return;
+        };
+        let sig = self.db_schema_cache;
+        let send = create_ext_action(
+            self.cx,
+            move |m: std::collections::HashMap<String, Vec<e_db::ColumnInfo>>| sig.set(m),
+        );
+        std::thread::spawn(move || {
+            let mut map = std::collections::HashMap::new();
+            if let Ok(conn) = e_db::connect(&cfg) {
+                if let Ok(tables) = e_db::tables(&conn) {
+                    for t in tables {
+                        if let Ok(cols) = e_db::columns(&conn, &t) {
+                            map.insert(t, cols);
+                        }
+                    }
+                }
+            }
+            send(map);
+        });
+    }
+
     /// Save the current query editor text under the typed name.
     pub fn db_save_query(&self) {
         let name = self.db_query_name.get_untracked().trim().to_string();
@@ -3024,6 +3103,47 @@ impl AppState {
         // In the autonomous TDD loop, a fix triggers another test run.
         if self.tdd_loop.get_untracked() && applied > 0 {
             self.run_tests();
+        }
+    }
+
+    // ---- Laravel log tail ----------------------------------------------
+
+    pub fn toggle_laravel_log(&self) {
+        let open = !self.log_open.get_untracked();
+        self.log_open.set(open);
+        if open {
+            self.refresh_laravel_log();
+        }
+    }
+
+    /// Read the tail of the project's Laravel log (off the UI thread).
+    pub fn refresh_laravel_log(&self) {
+        let root = self.root.get_untracked();
+        let sig = self.log_lines;
+        let send = create_ext_action(self.cx, move |lines: Vec<String>| sig.set(lines));
+        std::thread::spawn(move || {
+            let lines = find_laravel_log(&root)
+                .map(|p| tail_lines(&p, 64 * 1024, 600))
+                .unwrap_or_default();
+            send(lines);
+        });
+    }
+
+    /// Send the recent log tail to the agent for diagnosis.
+    pub fn log_fix_with_agent(&self) {
+        let tail: String = self.log_lines.with_untracked(|l| {
+            l.iter()
+                .rev()
+                .take(60)
+                .rev()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        if !tail.trim().is_empty() {
+            self.send_to_agent(&format!(
+                "Diagnose and fix this from the Laravel log. Use propose_edit for changes.\n{tail}"
+            ));
         }
     }
 
@@ -3844,7 +3964,17 @@ impl AppState {
         // Snippets and built-ins (keywords / buffer words / Laravel) are
         // computed synchronously; LSP results are merged in when available.
         let snippet_items = snippets::completion_items(buf.file.language, &word);
-        let builtin_items = builtin_completion::items(buf.file.language, &word, &text);
+        let mut builtin_items = builtin_completion::items(buf.file.language, &word, &text);
+        // Eloquent columns from the live DB schema merge in alongside LSP results.
+        if let Some((_, cols)) = crate::eloquent::complete(
+            buf.file.language,
+            &text,
+            offset,
+            &self.root.get_untracked(),
+            &self.db_schema_cache.get_untracked(),
+        ) {
+            builtin_items.extend(cols);
+        }
 
         let show = move |items: Vec<lsp_types::CompletionItem>| {
             let items = dedup_by_label(items);

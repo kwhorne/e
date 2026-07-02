@@ -74,6 +74,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "agent-log" => state.toggle_agent_log(),
         "run-tests" => state.toggle_tdd(),
         "laravel-log" => state.toggle_laravel_log(),
+        "runtime" => state.toggle_runtime(),
         "schema-diff" => state.compute_schema_diff(),
         "relations" => state.toggle_relations(),
         "livewire-companion" => state.livewire_companion(),
@@ -149,6 +150,10 @@ fn close_overlays(state: AppState) {
     }
     if state.log_open.get() {
         state.log_open.set(false);
+        return;
+    }
+    if state.runtime_open.get() {
+        state.runtime_open.set(false);
         return;
     }
     if state.schema_diff_open.get() {

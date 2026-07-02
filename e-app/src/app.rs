@@ -241,6 +241,9 @@ fn app_view() -> impl IntoView {
                 if state.log_open.get_untracked() {
                     state.refresh_laravel_log();
                 }
+                if state.runtime_open.get_untracked() {
+                    state.poll_runtime();
+                }
             }
         });
     }
@@ -431,6 +434,7 @@ fn app_view() -> impl IntoView {
             crate::tdd::tdd_panel(state),
             crate::request::request_view(state),
             crate::log::laravel_log_panel(state),
+            crate::runtime_view::runtime_panel(state),
             crate::schema_diff::schema_diff_panel(state),
             crate::relations_view::relation_graph_panel(state),
             crate::undo_view::undo_tree_panel(state),

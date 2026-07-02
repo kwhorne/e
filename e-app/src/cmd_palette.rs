@@ -23,6 +23,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("agent-log", "Agent: Timeline / Audit Log"),
     ("run-tests", "Tests: Runner / Autonomous TDD"),
     ("laravel-log", "Laravel: Log Tail"),
+    ("runtime", "Laravel: Runtime Insight (Telescope)"),
     ("schema-diff", "Laravel: Schema Diff (migrations vs DB)"),
     ("relations", "Laravel: Eloquent Relationship Graph"),
     ("livewire-companion", "Livewire: Switch View / Class"),

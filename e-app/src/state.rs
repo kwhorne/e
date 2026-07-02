@@ -4803,6 +4803,43 @@ impl AppState {
             }
         }
 
+        // Inertia shared props: `$page.props.…` from HandleInertiaRequests::share().
+        if matches!(
+            buf.file.language,
+            Language::TypeScript | Language::JavaScript | Language::Vue | Language::Svelte
+        ) {
+            if let Some(partial) = crate::inertia::props_partial(line_before) {
+                let lower = partial.to_lowercase();
+                let items: Vec<lsp_types::CompletionItem> =
+                    crate::inertia::shared_props(&self.root.get_untracked())
+                        .into_iter()
+                        .filter(|p| p.to_lowercase().starts_with(&lower))
+                        .map(|p| lsp_types::CompletionItem {
+                            label: p.clone(),
+                            insert_text: Some(p.clone()),
+                            kind: Some(lsp_types::CompletionItemKind::FIELD),
+                            detail: Some("Inertia shared prop".to_string()),
+                            ..Default::default()
+                        })
+                        .collect();
+                if !items.is_empty() {
+                    let comp = self.completion;
+                    let fstart = offset.saturating_sub(partial.len());
+                    let (_, below) = editor.points_of_offset(fstart, cursor.affinity);
+                    let vp = editor.viewport.get_untracked();
+                    let win = buf.win_origin.get_untracked();
+                    let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+                    comp.buffer_id.set(Some(buffer_id));
+                    comp.start_offset.set(fstart);
+                    comp.anchor.set(anchor);
+                    comp.items.set(items);
+                    comp.selected.set(0);
+                    comp.open.set(true);
+                    return;
+                }
+            }
+        }
+
         if let Some((rep, items)) =
             framework_completion::completions(buf.file.language, line_before)
         {

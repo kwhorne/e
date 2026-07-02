@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Inertia awareness.** `Inertia::render('Users/Index')` now resolves like
+  `view()`: go-to-definition and completion reach the page component under
+  `resources/js/Pages`, and the architecture map goes route → controller → page
+  component instead of stopping at the controller.
+- **Props contract** (`⌘⌥C`): reconciles a page component with the controller
+  that renders it — infers TypeScript types from the render call (`User::paginate()`
+  → `User[]`, fields from the live schema), flags props sent but unused and props
+  used but never sent, and generates TypeScript interfaces expanded from the
+  real database schema. Also reconciles `useForm` fields against the matching
+  FormRequest's validation rules.
+- **Ziggy route intelligence on the JS side**: `route('name')` in
+  JS/TS/Vue/Svelte gets completion, hover, and go-to-definition from the same
+  Laravel route table the PHP side uses.
+- **Shared props**: `HandleInertiaRequests::share()` is parsed so
+  `$page.props.auth.user` and friends complete everywhere.
+- **Inertia-aware request replay**: the replay renders an Inertia response as an
+  explorable props tree (with the component name, click to open) instead of raw
+  HTML.
+- **Livewire refactoring**: `wire:model` completes from the component class's
+  public properties, `⌘⌥J` switches between the view and class, `F12` on a
+  property jumps to its declaration, and renaming a property (`F2`) updates both
+  the class and every `wire:` reference in the view.
+- **Runtime insight** (`⌘⌥I`): a continuous Telescope-style panel that captures
+  every request against the dev app via Clockwork — queries with N+1 warnings,
+  cache hits/misses, mails, and events — with "Explain with agent" one click
+  away. No Telescope or Debugbar needed.
+
 ## [0.6.3] - 2026-07-02
 
 ### Added

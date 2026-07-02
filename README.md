@@ -56,6 +56,10 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Laravel intelligence** — completion, hover and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()` and `<x-…>` components, sourced from your project
 - **Eloquent completion** — `$model->` suggests real table columns from the live database schema, merged with the language server
 - **Eloquent relationship graph** (`⌘⌥R`) — models vs. live foreign keys, flagging relations with no backing FK
+- **Inertia awareness** — `Inertia::render()` resolves to the page component (goto, completion, and in the map); Ziggy `route()` and shared props complete on the JS side
+- **Props contract** (`⌘⌥C`) — reconciles controller props with the page component, infers TypeScript types from the render call + live schema, flags mismatches both ways, and generates TypeScript interfaces
+- **Livewire refactoring** — `wire:model` completion, `⌘⌥J` view↔class, and `F2` renames a property across the class *and* the view
+- **Runtime insight** (`⌘⌥I`) — a Telescope-style panel capturing every dev request via Clockwork: queries with N+1 warnings, cache, mails, events
 - **Architecture map** (`⌘⌥M`) — route → controller → view flow; **request-replay** hits your running app (Grove or custom URL) and shows the response plus the SQL it ran, with N+1 detection
 - **Laravel log tail** (`⌘⌥L`) with clickable stack frames, **schema diff** (migrations vs live DB), and a **Tinker scratchpad** (`⌘⌥T`)
 - **Semantic search** (`⌘⌥K`) — "describe what you're looking for", ranked locally (Ollama when available, lexical fallback otherwise — nothing leaves your machine)
@@ -140,8 +144,9 @@ A selection — see [the full list](docs/keyboard-shortcuts.md).
 | `⌘⌥K`      | Semantic search              | `⌘⌥U`    | Undo tree |
 | `⌘⌥M`      | Laravel architecture map     | `⌘⌥L`    | Laravel log tail |
 | `⌘⌥R`      | Eloquent relationship graph  | `⌘⇧L`    | Select all occurrences |
+| `⌘⌥C`      | Inertia props contract       | `⌘⌥J`    | Livewire view ↔ class |
+| `⌘⌥I`      | Runtime insight (Clockwork)  | `⌘⌥A`    | Agent timeline |
 | `⌘⌥T`      | Tinker scratchpad            | `⌘⇧T`    | Autonomous TDD |
-| `⌘⌥A`      | Agent timeline               | `⌘⇧D`    | Add cursor at next match |
 | `⌘=` / `⌘-`| Zoom in / out                | `⌥Z`     | Toggle word wrap |
 | `⌃-` / `⌃⇧-` | Go back / forward          | `⌘⇧M`    | Markdown preview |
 | `F12`      | Go to definition             | `⇧F12`   | Find references |
@@ -155,7 +160,7 @@ Full user documentation also lives in [`docs/`](docs/README.md):
 
 - [Installation](docs/installation.md) · [Getting started](docs/getting-started.md) · [Keyboard shortcuts](docs/keyboard-shortcuts.md)
 - [Editing](docs/editing.md) · [Find & Replace](docs/find-and-replace.md) · [Navigation](docs/navigation.md)
-- [Languages & LSP](docs/languages-and-lsp.md) · [Laravel](docs/laravel.md)
+- [Languages & LSP](docs/languages-and-lsp.md) · [Laravel](docs/laravel.md) · [Inertia / VILT](docs/inertia.md)
 - [Source Control](docs/source-control.md) · [Database](docs/database.md) · [Terminal](docs/terminal.md)
 - [AI Agents](docs/agents.md) · [Agent Workspace Sync](docs/agent-sync.md)
 - [Configuration](docs/configuration.md) · [Updating](docs/updating.md) · [Troubleshooting](docs/troubleshooting.md)

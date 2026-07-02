@@ -46,6 +46,26 @@ HTML tags, attributes and Tailwind utility classes, Blade directives
 (`@php`, `@if`, `@foreach`, `@push`, …), `{{-- comments --}}`, and the embedded
 PHP inside `@php … @endphp` blocks, `{{ … }}` and `{!! … !!}` expressions.
 
+## Livewire
+
+`e` treats a Livewire component's class and Blade view as one unit:
+
+- `wire:model="…"` completes from the component class's public properties.
+- `F12` on a property in the view jumps to its declaration in the class;
+  `⌘⌥J` switches between the view and the class.
+- Renaming a property with `F2` updates **both** the class (`$prop`,
+  `$this->prop`) and every `wire:` reference in the view.
+
+## Runtime insight
+
+`⌘⌥I` opens a continuous, Telescope-style panel that captures every request
+against your dev app via [Clockwork](https://underground.works/clockwork):
+method, URI, status and duration, plus SQL queries with N+1 warnings, cache
+hits/misses, sent mails, and events. Click a request to expand its queries; ✨
+hands it to the agent. No Telescope or Debugbar install required.
+
+For Inertia/VILT projects, see [Inertia & the VILT stack](inertia.md).
+
 ## Tinker scratchpad
 
 Press `⌘⌥T` for a Tinker scratchpad: write PHP and press `⌘↵` to run it against

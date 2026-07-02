@@ -79,8 +79,11 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | Shortcut | Action |
 | -------- | ------ |
 | `⌘⌥K`    | Semantic search ("describe what you're looking for") |
-| `⌘⌥M`    | Laravel architecture map (route → controller → view, request-replay) |
+| `⌘⌥M`    | Laravel architecture map (route → controller → view/page, request-replay) |
 | `⌘⌥R`    | Eloquent relationship graph |
+| `⌘⌥C`    | Inertia props contract / generate TypeScript |
+| `⌘⌥J`    | Livewire: switch between view and class |
+| `⌘⌥I`    | Runtime insight (Telescope-style capture) |
 | `⌘⌥L`    | Laravel log tail |
 | `⌘⌥T`    | Tinker scratchpad |
 | `⌘⇧T`    | Autonomous TDD panel |

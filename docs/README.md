@@ -16,6 +16,7 @@ native code editor written in Rust.
 - [Navigation](navigation.md) — palettes, recent files, go-to-line, history
 - [Languages & LSP](languages-and-lsp.md) — syntax, completion, diagnostics
 - [Laravel](laravel.md) — PHP/Laravel-aware features
+- [Inertia / VILT](inertia.md) — Inertia page resolution, props & form contracts
 
 ### Panels & tools
 - [Source Control](source-control.md) — staging, commits, blame, conflicts

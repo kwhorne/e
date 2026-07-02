@@ -97,6 +97,26 @@ pub fn request_view(state: AppState) -> impl IntoView {
             ));
         });
 
+    // Generate a Pest test from this replay (status + response assertions).
+    let gen_test = label(|| "🧪 Test".to_string())
+        .style(move |s| {
+            let s = s
+                .font_size(11.0)
+                .padding_horiz(8.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()));
+            // Only meaningful once we have a response.
+            if state.req_status.get().is_some() {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.generate_pest_test());
+
     let close = label(|| "✕".to_string())
         .style(|s| {
             s.padding_horiz(8.0)
@@ -106,7 +126,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
         })
         .on_click_stop(move |_| state.close_request());
 
-    let header = stack((title, status, time, explain, close)).style(|s| {
+    let header = stack((title, status, time, explain, gen_test, close)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(10.0)

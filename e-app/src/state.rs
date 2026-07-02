@@ -562,6 +562,75 @@ fn csv_escape(s: &str) -> String {
     }
 }
 
+/// Extract the request path (`/foo/bar`) from a full replay URL.
+fn url_path(url: &str) -> String {
+    let after_scheme = url.split("://").nth(1).unwrap_or(url);
+    match after_scheme.find('/') {
+        Some(i) => {
+            let p = &after_scheme[i..];
+            p.split(['?', '#']).next().unwrap_or(p).to_string()
+        }
+        None => "/".to_string(),
+    }
+}
+
+/// PascalCase test name from a path (`/users/1/edit` → `UsersEdit`).
+fn pest_test_name(path: &str) -> String {
+    let mut name = String::new();
+    for seg in path.split('/') {
+        let seg = seg.trim();
+        // Skip empty and route parameters / numeric ids.
+        if seg.is_empty() || seg.starts_with('{') || seg.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let clean: String = seg.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        if let Some(first) = clean.chars().next() {
+            name.push(first.to_ascii_uppercase());
+            name.extend(clean.chars().skip(1));
+        }
+    }
+    if name.is_empty() {
+        "Home".to_string()
+    } else {
+        name
+    }
+}
+
+/// Build Pest assertions from the response: status plus JSON structure or an
+/// HTML `<title>` match where we can infer one.
+fn pest_assertions(status: u16, body: &str) -> String {
+    let mut out = format!("    $response->assertStatus({status});\n");
+    let trimmed = body.trim_start();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(body)
+        {
+            let keys: Vec<String> = map.keys().take(8).map(|k| format!("'{k}'")).collect();
+            if !keys.is_empty() {
+                out.push_str(&format!(
+                    "    $response->assertJsonStructure([{}]);\n",
+                    keys.join(", ")
+                ));
+            }
+        }
+    } else if let Some(title) = html_title(body) {
+        let esc = title.replace('\'', "\\'");
+        out.push_str(&format!("    $response->assertSee('{esc}');\n"));
+    }
+    out
+}
+
+fn html_title(body: &str) -> Option<String> {
+    let lower = body.to_lowercase();
+    let start = lower.find("<title>")? + 7;
+    let end = lower[start..].find("</title>")? + start;
+    let t = body[start..end].trim();
+    if t.is_empty() || t.len() > 80 {
+        None
+    } else {
+        Some(t.to_string())
+    }
+}
+
 /// Per-file location for the persisted undo tree (`~/.config/e/undo/<hash>.json`).
 fn undo_store_path(file: &std::path::Path) -> PathBuf {
     use std::hash::{Hash, Hasher};
@@ -3396,6 +3465,30 @@ impl AppState {
         self.req_open.set(false);
     }
 
+    /// Generate a Pest feature test from the last replayed request (URL, status,
+    /// and key assertions derived from the actual response), open it, and hook
+    /// it into the test-runner / TDD loop.
+    pub fn generate_pest_test(&self) {
+        let url = self.req_url.get_untracked();
+        let status = self.req_status.get_untracked().unwrap_or(200);
+        let body = self.req_body.get_untracked();
+        let root = self.root.get_untracked();
+        let path = url_path(&url);
+        let name = pest_test_name(&path);
+        let assertions = pest_assertions(status, &body);
+        let content = format!(
+            "<?php\n\nit('GET {path} responds {status}', function () {{\n    $response = $this->get('{path}');\n\n{assertions}}});\n"
+        );
+        let dir = root.join("tests").join("Feature");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join(format!("{name}ReplayTest.php"));
+        if std::fs::write(&file, &content).is_ok() {
+            self.close_request();
+            self.open_path(file.clone());
+            self.agent_log_push("pest", format!("generated {}", file.display()));
+        }
+    }
+
     /// Replay an HTTP request against the app for a route `uri`, showing the
     /// response and (via Clockwork, if installed) the SQL queries it ran.
     pub fn send_request(&self, uri: &str) {
@@ -5280,6 +5373,32 @@ mod rename_tests {
         let t = "$user->name";
         assert_eq!(word_at(t, 2), "$user"); // cursor inside $user
         assert_eq!(word_at(t, 8), "name"); // cursor inside name
+    }
+}
+
+#[cfg(test)]
+mod pest_tests {
+    use super::{html_title, pest_assertions, pest_test_name, url_path};
+
+    #[test]
+    fn path_and_name() {
+        assert_eq!(
+            url_path("https://app.test/users/1/edit?x=1"),
+            "/users/1/edit"
+        );
+        assert_eq!(url_path("http://127.0.0.1:8000/"), "/");
+        assert_eq!(pest_test_name("/users/1/edit"), "UsersEdit");
+        assert_eq!(pest_test_name("/"), "Home");
+    }
+
+    #[test]
+    fn assertions_from_response() {
+        let json = pest_assertions(200, r#"{"data":[],"meta":{}}"#);
+        assert!(json.contains("assertStatus(200)"));
+        assert!(json.contains("assertJsonStructure(['data', 'meta'])"));
+        let html = pest_assertions(200, "<html><head><title>Dashboard</title></head></html>");
+        assert!(html.contains("assertSee('Dashboard')"));
+        assert_eq!(html_title("<TITLE>Hi</TITLE>").as_deref(), Some("Hi"));
     }
 }
 

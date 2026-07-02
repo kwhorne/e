@@ -167,7 +167,10 @@ fn walk(dir: &PathBuf, depth: usize, expanded: &HashSet<PathBuf>, out: &mut Vec<
         .filter_map(|e| {
             let path = e.path();
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || name == "target" || name == "node_modules" {
+            // Show every project file, including dotfiles like `.env` and
+            // `.gitignore`. Only heavy VCS/build/dependency directories are
+            // skipped to keep the tree usable.
+            if name == ".git" || name == "target" || name == "node_modules" {
                 return None;
             }
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);

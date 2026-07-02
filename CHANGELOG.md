@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-02
+
+### Added
+
+- Semantic search (⌘⇧K): a "describe what you're looking for" mode that ranks
+  project locations by meaning. Runs locally — uses a local Ollama embedding
+  model when available, with a lexical fallback otherwise.
+- Visual undo tree (⌘⌥U): a branching history that preserves edits a linear undo
+  would discard, with click-to-jump time travel persisted across sessions.
+
+### Changed
+
+- Release builds are now signed with a Developer ID and notarized by Apple, so
+  the DMG opens without Gatekeeper warnings. CI signs automatically when the
+  signing secrets are configured (see docs/installation.md).
+- Added the missing ⌘3 (Toggle database) shortcut to the welcome screen.
+
 ## [0.6.0] - 2026-07-02
 
 ### Added
@@ -363,7 +380,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/kwhorne/e/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/kwhorne/e/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/kwhorne/e/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/kwhorne/e/compare/v0.4.9...v0.5.0

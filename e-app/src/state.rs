@@ -3720,6 +3720,52 @@ impl AppState {
         }
     }
 
+    // ---- Code generation -----------------------------------------------
+
+    /// Generate an Eloquent model from the table currently open in the database
+    /// panel — fillable, casts, and relationships from the live schema + FKs.
+    pub fn generate_model_from_table(&self) {
+        let Some(table) = self.db_result_table.get_untracked() else {
+            Self::notify("Open a table in the database panel first");
+            return;
+        };
+        if !crate::codegen::valid_table(&table) {
+            return;
+        }
+        let root = self.root.get_untracked();
+        let name = crate::codegen::model_name(&table);
+        let file = root.join(format!("app/Models/{name}.php"));
+        if file.is_file() {
+            Self::notify(&format!("{name} already exists — opening it"));
+            self.open_path(file);
+            return;
+        }
+        let state = *self;
+        let file2 = file.clone();
+        let send = create_ext_action(self.cx, move |content: Option<String>| match content {
+            Some(c) => {
+                if let Some(dir) = file2.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                if std::fs::write(&file2, c).is_ok() {
+                    state.open_path(file2.clone());
+                    Self::notify(&format!("Generated {}", file2.display()));
+                }
+            }
+            None => Self::notify("Could not read the table schema"),
+        });
+        std::thread::spawn(move || {
+            let content = e_db::from_env(&root)
+                .and_then(|cfg| e_db::connect(&cfg).ok())
+                .and_then(|conn| {
+                    let cols = e_db::columns(&conn, &table).ok()?;
+                    let fks = e_db::foreign_keys(&conn).unwrap_or_default();
+                    Some(crate::codegen::generate_model(&table, &cols, &fks))
+                });
+            send(content);
+        });
+    }
+
     // ---- Validation ----------------------------------------------------
 
     /// Generate `'field' => 'rules'` from the live schema and insert them at the

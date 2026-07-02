@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Eloquent relationship graph (`⌘⌥R`): parses `hasMany`/`belongsTo`/
+  `belongsToMany`/`morph*` from your models and cross-checks them against the
+  live database's foreign keys — flagging relations that exist in code but have
+  no backing FK. Together with the schema diff it shows code, migrations, and the
+  actual database in one picture.
+- Security lens on the architecture map (`⌘⌥M`): each route shows its middleware
+  and a 🔒 / ⚠ badge; state-changing routes with no authentication are flagged,
+  and one click asks the agent to suggest protection.
+- Generate a Pest test from a request replay: the 🧪 button writes a feature test
+  with the path, status, and assertions derived from the actual response, ready
+  for the `⌘⇧T` "fix to green" loop.
+
 ## [0.6.2] - 2026-07-02
 
 ### Changed

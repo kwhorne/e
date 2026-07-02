@@ -68,6 +68,29 @@ the model from `$var = Model::…` or a type hint, maps it to its table
 (`protected $table` or the snake_case + plural convention), and merges the
 columns alongside Intelephense — something Intelephense can't do on its own.
 
+## Relationship graph
+
+`⌘⌥R` parses the relationships from your models (`hasMany`, `belongsTo`,
+`belongsToMany`, `morph*`) and cross-checks them against the **live database's
+foreign keys**. Each model is a node; click a relationship to jump to the related
+model or method. Relations that exist in code but have no backing foreign key are
+flagged ⚠ — so alongside the schema diff you see code, migrations, and the actual
+database in one place.
+
+## Security lens
+
+In the architecture map (`⌘⌥M`) every route shows its middleware stack and a
+badge: 🔒 when it's authenticated, ⚠ when a state-changing route (POST/PUT/PATCH/
+DELETE) has no authentication. The header counts unprotected routes, and clicking
+a ⚠ asks the agent to suggest the right middleware/policy.
+
+## Generate a test from a replay
+
+After replaying a route (▶ in the map), the **🧪 Test** button writes a Pest
+feature test to `tests/Feature/` using the request path, the response status, and
+assertions inferred from the response (JSON structure or an HTML `<title>`). It
+opens the file, ready for the `⌘⇧T` "fix to green" loop.
+
 ## Schema diff
 
 **Laravel: Schema Diff** (command palette) compares your migrations against the

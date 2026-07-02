@@ -55,6 +55,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Database panel** (`⌘3`) — browse & query MySQL, PostgreSQL, SQLite and ClickHouse; connect from `.env` or manually (with SSH tunnels), sortable columns, structure view, inline cell editing, saved queries, CSV export
 - **Laravel intelligence** — completion, hover and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()` and `<x-…>` components, sourced from your project
 - **Eloquent completion** — `$model->` suggests real table columns from the live database schema, merged with the language server
+- **Eloquent relationship graph** (`⌘⌥R`) — models vs. live foreign keys, flagging relations with no backing FK
 - **Architecture map** (`⌘⌥M`) — route → controller → view flow; **request-replay** hits your running app (Grove or custom URL) and shows the response plus the SQL it ran, with N+1 detection
 - **Laravel log tail** (`⌘⌥L`) with clickable stack frames, **schema diff** (migrations vs live DB), and a **Tinker scratchpad** (`⌘⌥T`)
 - **Semantic search** (`⌘⌥K`) — "describe what you're looking for", ranked locally (Ollama when available, lexical fallback otherwise — nothing leaves your machine)
@@ -138,6 +139,7 @@ A selection — see [the full list](docs/keyboard-shortcuts.md).
 | `⌘T`       | Toggle terminal              | `⌘L`     | Toggle agent panel |
 | `⌘⌥K`      | Semantic search              | `⌘⌥U`    | Undo tree |
 | `⌘⌥M`      | Laravel architecture map     | `⌘⌥L`    | Laravel log tail |
+| `⌘⌥R`      | Eloquent relationship graph  | `⌘⇧L`    | Select all occurrences |
 | `⌘⌥T`      | Tinker scratchpad            | `⌘⇧T`    | Autonomous TDD |
 | `⌘⌥A`      | Agent timeline               | `⌘⇧D`    | Add cursor at next match |
 | `⌘=` / `⌘-`| Zoom in / out                | `⌥Z`     | Toggle word wrap |

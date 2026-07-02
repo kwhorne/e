@@ -229,14 +229,8 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                 |(i, _)| *i,
                 move |(_, v)| {
                     let vname = v.clone();
-                    card(v.clone(), false, true).on_click_stop(move |_| {
-                        if let Some(data) = state.laravel.get_untracked() {
-                            if let Some((p, l, c)) = laravel::navigate(&data, Helper::View, &vname)
-                            {
-                                state.jump_to(&format!("file://{}", p.display()), l, c);
-                            }
-                        }
-                    })
+                    card(v.clone(), false, true)
+                        .on_click_stop(move |_| state.open_page_or_view(&vname))
                 },
             )
             .style(|s| s.flex_row().gap(4.0).items_center());

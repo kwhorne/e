@@ -28,6 +28,7 @@ mod find;
 mod framework_completion;
 mod git_view;
 mod hints_doc;
+mod inertia;
 mod keymap;
 mod laravel;
 mod livewire;

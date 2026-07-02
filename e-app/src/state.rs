@@ -1435,6 +1435,45 @@ impl AppState {
         }
     }
 
+    /// Caret on an `Inertia::render('Page')` string jumps to the page component.
+    fn goto_inertia_page(&self) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        if buf.file.language != Language::Php {
+            return false;
+        }
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let text = buf.doc.text().to_string();
+        let offset = editor.cursor.get_untracked().offset();
+        let Some(name) = crate::inertia::render_at(&text, offset) else {
+            return false;
+        };
+        if let Some(p) = crate::inertia::resolve_page(&self.root.get_untracked(), &name) {
+            self.jump_to(&path_to_uri(&p), 0, 0);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Open an Inertia page component if `name` resolves to one, else fall back
+    /// to Blade view resolution. Used by the architecture map.
+    pub fn open_page_or_view(&self, name: &str) {
+        let root = self.root.get_untracked();
+        if let Some(p) = crate::inertia::resolve_page(&root, name) {
+            self.jump_to(&path_to_uri(&p), 0, 0);
+            return;
+        }
+        if let Some(data) = self.laravel.get_untracked() {
+            if let Some((p, l, c)) = laravel::navigate(&data, laravel::Helper::View, name) {
+                self.jump_to(&path_to_uri(&p), l, c);
+            }
+        }
+    }
+
     /// Jump between a Livewire component's Blade view and its class file.
     pub fn livewire_companion(&self) {
         let Some(buf) = self.active_buffer() else {
@@ -4690,6 +4729,38 @@ impl AppState {
             }
         }
 
+        // Inertia: `Inertia::render('…')` completes from existing page components.
+        if let Some(partial) = crate::inertia::render_partial(line_before) {
+            let pages = crate::inertia::list_pages(&self.root.get_untracked());
+            let lower = partial.to_lowercase();
+            let items: Vec<lsp_types::CompletionItem> = pages
+                .into_iter()
+                .filter(|p| lower.is_empty() || p.to_lowercase().contains(&lower))
+                .map(|p| lsp_types::CompletionItem {
+                    label: p.clone(),
+                    insert_text: Some(p.clone()),
+                    kind: Some(lsp_types::CompletionItemKind::FILE),
+                    detail: Some("Inertia page".to_string()),
+                    ..Default::default()
+                })
+                .collect();
+            if !items.is_empty() {
+                let comp = self.completion;
+                let fstart = offset.saturating_sub(partial.len());
+                let (_, below) = editor.points_of_offset(fstart, cursor.affinity);
+                let vp = editor.viewport.get_untracked();
+                let win = buf.win_origin.get_untracked();
+                let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+                comp.buffer_id.set(Some(buffer_id));
+                comp.start_offset.set(fstart);
+                comp.anchor.set(anchor);
+                comp.items.set(items);
+                comp.selected.set(0);
+                comp.open.set(true);
+                return;
+            }
+        }
+
         if let Some((rep, items)) =
             framework_completion::completions(buf.file.language, line_before)
         {
@@ -4978,6 +5049,10 @@ impl AppState {
     pub fn goto_definition(&self) {
         // Livewire: caret on a `wire:model` property jumps to its declaration.
         if self.livewire_goto() {
+            return;
+        }
+        // Inertia: caret on `Inertia::render('Page')` jumps to the component.
+        if self.goto_inertia_page() {
             return;
         }
         // Laravel navigation first: route -> controller, view -> blade, etc.

@@ -137,6 +137,10 @@ fn close_overlays(state: AppState) {
         state.tdd_open.set(false);
         return;
     }
+    if state.req_open.get() {
+        state.close_request();
+        return;
+    }
     if state.db_edit.get().is_some() {
         state.db_cancel_edit();
         return;

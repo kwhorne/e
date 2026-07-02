@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 /// User settings, loaded once at startup.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Settings {
     pub dark: bool,
     pub font_size: usize,
@@ -20,6 +20,8 @@ pub struct Settings {
     /// Laravel-aware completion, hover and navigation (auto-enabled in Laravel
     /// projects; set to false to turn off).
     pub laravel: bool,
+    /// Base URL for request-replay (empty = derive https://<folder>.test, Grove).
+    pub app_url: String,
     /// Explorer/Git sidebar on the right instead of the left.
     pub sidebar_right: bool,
     /// Agent panel on the left instead of the right.
@@ -42,6 +44,7 @@ impl Default for Settings {
             inlay_hints: true,
             sticky_scroll: true,
             laravel: true,
+            app_url: String::new(),
             sidebar_right: false,
             agent_left: false,
             database_left: false,
@@ -88,6 +91,11 @@ pub fn load_settings() -> Settings {
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         laravel: bool_of("laravel", d.laravel),
+        app_url: v
+            .get("app_url")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         sidebar_right: v.get("sidebar_side").and_then(|x| x.as_str()) == Some("right"),
         agent_left: v.get("agent_side").and_then(|x| x.as_str()) == Some("left"),
         database_left: v.get("database_side").and_then(|x| x.as_str()) == Some("left"),

@@ -443,6 +443,17 @@ pub struct AppState {
     /// A pending edit the agent proposed, awaiting per-hunk review.
     pub agent_edit: RwSignal<Option<AgentEdit>>,
 
+    // ---- Request replay (from the architecture map) --------------------
+    pub req_open: RwSignal<bool>,
+    pub req_url: RwSignal<String>,
+    pub req_status: RwSignal<Option<u16>>,
+    pub req_time: RwSignal<String>,
+    pub req_body: RwSignal<String>,
+    /// Captured SQL queries `(sql, duration)` (via Clockwork if available).
+    pub req_queries: RwSignal<Vec<(String, String)>>,
+    pub req_error: RwSignal<Option<String>>,
+    pub req_running: RwSignal<bool>,
+
     // ---- Autonomous TDD loop -------------------------------------------
     pub tdd_open: RwSignal<bool>,
     pub tdd_status: RwSignal<TddStatus>,
@@ -521,6 +532,116 @@ fn csv_escape(s: &str) -> String {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
+    }
+}
+
+struct RequestResult {
+    status: Option<u16>,
+    time: String,
+    body: String,
+    queries: Vec<(String, String)>,
+    error: Option<String>,
+}
+
+/// Replace Laravel route params (`{id}`, `{id?}`) with a placeholder value.
+fn substitute_route_params(uri: &str) -> String {
+    let mut out = String::new();
+    let mut chars = uri.chars();
+    while let Some(c) = chars.next() {
+        if c == '{' {
+            for x in chars.by_ref() {
+                if x == '}' {
+                    break;
+                }
+            }
+            out.push('1');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Perform the request via the system `curl` (`-k` so Grove's private-CA HTTPS
+/// works), then fetch Clockwork query data if the app exposes it.
+fn do_http_request(base: &str, url: &str) -> RequestResult {
+    let hdr = std::env::temp_dir().join(format!("e-req-{}.hdr", std::process::id()));
+    let out = std::process::Command::new("curl")
+        .args([
+            "-sk",
+            "--max-time",
+            "25",
+            "-H",
+            "X-Requested-With: XMLHttpRequest",
+            "-H",
+            "Accept: application/json, text/html",
+            "-D",
+        ])
+        .arg(&hdr)
+        .arg("-w")
+        .arg("\n__E_META__%{http_code}__%{time_total}")
+        .arg(url)
+        .output();
+    let raw = match out {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+        Err(e) => {
+            return RequestResult {
+                status: None,
+                time: String::new(),
+                body: String::new(),
+                queries: Vec::new(),
+                error: Some(format!("curl failed: {e} (is curl installed?)")),
+            }
+        }
+    };
+    let (body, status, time) = match raw.rsplit_once("\n__E_META__") {
+        Some((b, meta)) => {
+            let mut parts = meta.splitn(2, "__");
+            let status = parts.next().and_then(|s| s.trim().parse::<u16>().ok());
+            let time = parts.next().unwrap_or("").trim().to_string();
+            (b.to_string(), status, time)
+        }
+        None => (raw, None, String::new()),
+    };
+
+    // Clockwork query capture, if the app has laravel/clockwork.
+    let mut queries = Vec::new();
+    if let Ok(headers) = std::fs::read_to_string(&hdr) {
+        let id = headers.lines().find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            if k.trim().eq_ignore_ascii_case("x-clockwork-id") {
+                Some(v.trim().to_string())
+            } else {
+                None
+            }
+        });
+        if let Some(id) = id {
+            let cw = std::process::Command::new("curl")
+                .args(["-sk", "--max-time", "10"])
+                .arg(format!("{base}/__clockwork/{id}"))
+                .output();
+            if let Ok(o) = cw {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+                    if let Some(arr) = v.get("databaseQueries").and_then(|q| q.as_array()) {
+                        for q in arr {
+                            let sql = q.get("query").and_then(|s| s.as_str()).unwrap_or("");
+                            let dur = q.get("duration").map(|d| d.to_string()).unwrap_or_default();
+                            if !sql.is_empty() {
+                                queries.push((sql.to_string(), dur));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&hdr);
+    RequestResult {
+        status,
+        time,
+        body,
+        queries,
+        error: None,
     }
 }
 
@@ -635,6 +756,14 @@ impl AppState {
             agent_log_open: RwSignal::new(false),
             agent_mark: RwSignal::new(None),
             agent_edit: RwSignal::new(None),
+            req_open: RwSignal::new(false),
+            req_url: RwSignal::new(String::new()),
+            req_status: RwSignal::new(None),
+            req_time: RwSignal::new(String::new()),
+            req_body: RwSignal::new(String::new()),
+            req_queries: RwSignal::new(Vec::new()),
+            req_error: RwSignal::new(None),
+            req_running: RwSignal::new(false),
             tdd_open: RwSignal::new(false),
             tdd_status: RwSignal::new(TddStatus::Idle),
             tdd_output: RwSignal::new(String::new()),
@@ -2896,6 +3025,53 @@ impl AppState {
         if self.tdd_loop.get_untracked() && applied > 0 {
             self.run_tests();
         }
+    }
+
+    // ---- Request replay ------------------------------------------------
+
+    pub fn close_request(&self) {
+        self.req_open.set(false);
+    }
+
+    /// Replay an HTTP request against the app for a route `uri`, showing the
+    /// response and (via Clockwork, if installed) the SQL queries it ran.
+    pub fn send_request(&self, uri: &str) {
+        let root = self.root.get_untracked();
+        let base = {
+            let s = self.settings.get_untracked().app_url;
+            if s.trim().is_empty() {
+                let name = root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "app".into());
+                format!("https://{name}.test")
+            } else {
+                s.trim().trim_end_matches('/').to_string()
+            }
+        };
+        let path = substitute_route_params(uri);
+        let url = format!("{}/{}", base, path.trim_start_matches('/'));
+
+        self.req_open.set(true);
+        self.req_running.set(true);
+        self.req_error.set(None);
+        self.req_url.set(url.clone());
+        self.req_status.set(None);
+        self.req_body.set(String::new());
+        self.req_queries.set(Vec::new());
+
+        let state = *self;
+        let send = create_ext_action(self.cx, move |r: RequestResult| {
+            state.req_running.set(false);
+            state.req_status.set(r.status);
+            state.req_time.set(r.time);
+            state.req_body.set(r.body);
+            state.req_queries.set(r.queries);
+            state.req_error.set(r.error);
+        });
+        std::thread::spawn(move || {
+            send(do_http_request(&base, &url));
+        });
     }
 
     // ---- Autonomous TDD loop ------------------------------------------

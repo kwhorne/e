@@ -37,6 +37,7 @@ mod picker;
 mod problems;
 mod recent;
 mod rename;
+mod request;
 mod session;
 mod settings_view;
 mod snippets;

@@ -107,6 +107,26 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
         },
         |r| r.0.clone(),
         move |(name, methods, uri, action, views)| {
+            // "Send" replays the request against the app (GET routes only).
+            let uri_for_send = uri.clone();
+            let sendable = methods.split('|').any(|m| m.trim() == "GET");
+            let send = label(|| "▶".to_string())
+                .style(move |s| {
+                    let s = s
+                        .padding_horiz(6.0)
+                        .border_radius(4.0)
+                        .font_size(11.0)
+                        .color(theme::accent())
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.background(theme::bg_hover()));
+                    if sendable {
+                        s
+                    } else {
+                        s.hide()
+                    }
+                })
+                .on_click_stop(move |_| state.send_request(&uri_for_send));
+
             // URI card (non-clickable).
             let uri_card = card(format!("{methods}  /{uri}"), false, false);
 
@@ -146,6 +166,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                 .style(|s| s.font_size(10.0).color(theme::fg_dim()).min_width(120.0));
 
             stack((
+                send.into_any(),
                 name_lbl,
                 uri_card.into_any(),
                 arrow().into_any(),

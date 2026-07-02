@@ -2,8 +2,8 @@
 //! persisted to `config.json`.
 
 use floem::peniko::Color;
-use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
-use floem::views::{container, empty, label, scroll, stack, Decorators};
+use floem::reactive::{create_effect, create_rw_signal, SignalGet, SignalUpdate, SignalWith};
+use floem::views::{container, empty, label, scroll, stack, text_input, Decorators};
 use floem::IntoView;
 
 use crate::config;
@@ -70,6 +70,36 @@ fn toggle_row(
 /// Shared row styling so every settings row has the same height and rhythm.
 fn row_style(s: floem::style::Style) -> floem::style::Style {
     s.items_center().width_full().min_height(40.0).gap(8.0)
+}
+
+/// A labelled text-input row for the app base URL (persisted live).
+fn app_url_row(state: AppState) -> impl IntoView {
+    let sig = create_rw_signal(state.settings.get_untracked().app_url.clone());
+    create_effect(move |prev: Option<()>| {
+        let v = sig.get();
+        if prev.is_some() {
+            state.settings.update(|s| s.app_url = v.clone());
+            config::set_str("app_url", &v);
+        }
+    });
+    stack((
+        stack((
+            label(|| "App URL".to_string()).style(|s| s.color(theme::fg()).font_size(13.0)),
+            label(|| "For request-replay. Empty = https://<folder>.test (Grove).".to_string())
+                .style(|s| s.color(theme::fg_dim()).font_size(11.0)),
+        ))
+        .style(|s| s.flex_col().flex_grow(1.0).min_width(0.0)),
+        text_input(sig)
+            .placeholder("https://myapp.test")
+            .style(|s| {
+                theme::input_colors(s)
+                    .width(260.0)
+                    .font_size(12.0)
+                    .padding_horiz(8.0)
+                    .padding_vert(4.0)
+            }),
+    ))
+    .style(row_style)
 }
 
 /// A labelled number row with − / + steppers.
@@ -328,6 +358,8 @@ pub fn settings_view(state: AppState) -> impl IntoView {
                 config::set_str("database_side", v);
             },
         ),
+        section("LARAVEL"),
+        app_url_row(state),
         section("AGENT"),
         default_agent_row(state),
     ))

@@ -444,7 +444,25 @@ fn app_view() -> impl IntoView {
                 crate::undo_view::undo_tree_panel(state),
                 crate::semantic_view::semantic_panel(state),
             ))
-            .style(|s| s.absolute().inset(0.0).size_full()),
+            .style(move |s| {
+                let s = s.absolute().inset(0.0).size_full();
+                // Only cover the window (and intercept clicks) when one of these
+                // overlays is actually open — otherwise let clicks through to the
+                // editor and file explorer.
+                let any = state.runtime_open.get()
+                    || state.schema_diff_open.get()
+                    || state.rel_open.get()
+                    || state.event_open.get()
+                    || state.contract_open.get()
+                    || state.related_open.get()
+                    || state.undo_open.get()
+                    || state.sem_open.get();
+                if any {
+                    s
+                } else {
+                    s.hide()
+                }
+            }),
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),

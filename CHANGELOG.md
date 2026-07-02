@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Redesigned the settings dialog (`⌘,`) into a two-pane layout: a category
+  sidebar plus a search box that filters settings across every category, with
+  hairline row dividers, per-row "restart" badges, and an "Open config.json"
+  footer link. Close with `Esc` or the ✕.
+- The command palette (`⌘⇧P`) now uses fuzzy, ranked matching instead of a plain
+  substring filter — typing `up` surfaces "Check for Updates" and "Move Line Up"
+  first, and the selection resets to the best match as you type.
+
 ## [0.6.1] - 2026-07-02
 
 ### Added

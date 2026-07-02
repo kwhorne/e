@@ -6,10 +6,12 @@ All settings live in a single global JSON file:
 ~/.config/e/config.json
 ```
 
-Press **`⌘,`** for a graphical settings page covering the common options. The
-raw file (with advanced sections like `agents`, `snippets`, `keybindings`) can be
-opened from the command palette via **Open Settings (config.json)** — it is
-created on first use.
+Press **`⌘,`** for a graphical settings page covering the common options. It's a
+two-pane dialog: pick a category (Appearance, Editor, On Save, Panels, Laravel,
+Agents) in the sidebar, or type in the search box to filter settings across every
+category. Changes are saved automatically; the **Open config.json** link in the
+footer jumps to the raw file (with advanced sections like `agents`, `snippets`
+and `keybindings`), which is created on first use.
 
 ## Settings reference
 

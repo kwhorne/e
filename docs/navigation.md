@@ -18,7 +18,8 @@ toggles back to it. Type to filter the list.
 
 Run any command by name — every shortcut in `e` is listed here, including
 zoom, theme, terminal, source control, "Open File…", "Check for Updates", and
-more.
+more. Matching is fuzzy and ranked: type `up` and "Check for Updates" and "Move
+Line Up" rise to the top. `↑`/`↓` move the selection and `Enter` runs it.
 
 ## Go to line (`⌃G`)
 

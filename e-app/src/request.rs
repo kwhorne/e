@@ -22,7 +22,7 @@ fn normalize(sql: &str) -> String {
             }
             out.push('?');
         } else if c == '\'' {
-            while let Some(x) = chars.next() {
+            for x in chars.by_ref() {
                 if x == '\'' {
                     break;
                 }

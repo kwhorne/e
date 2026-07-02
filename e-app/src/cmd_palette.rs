@@ -24,6 +24,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("run-tests", "Tests: Runner / Autonomous TDD"),
     ("laravel-log", "Laravel: Log Tail"),
     ("schema-diff", "Laravel: Schema Diff (migrations vs DB)"),
+    ("relations", "Laravel: Eloquent Relationship Graph"),
     ("undo-tree", "Undo Tree: Show / Time Travel"),
     ("semantic-search", "Search: Semantic (describe it)"),
     ("emmet-expand", "Emmet: Expand Abbreviation"),

@@ -127,7 +127,7 @@ fn find_table_property(src: &str) -> Option<String> {
     Some(inner[..end].to_string())
 }
 
-fn snake_case(s: &str) -> String {
+pub(crate) fn snake_case(s: &str) -> String {
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
         if c.is_uppercase() {
@@ -142,7 +142,7 @@ fn snake_case(s: &str) -> String {
     out
 }
 
-fn pluralize(s: &str) -> String {
+pub(crate) fn pluralize(s: &str) -> String {
     if s.ends_with('y')
         && !s.ends_with("ay")
         && !s.ends_with("ey")

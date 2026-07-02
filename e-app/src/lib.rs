@@ -38,6 +38,8 @@ mod palette;
 mod picker;
 mod problems;
 mod recent;
+mod relations;
+mod relations_view;
 mod rename;
 mod request;
 mod schema_diff;

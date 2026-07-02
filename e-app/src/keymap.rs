@@ -30,6 +30,7 @@ const DEFAULT: &[(&str, &str)] = &[
     ("cmd+shift+t", "run-tests"),
     ("cmd+alt+l", "laravel-log"),
     ("cmd+alt+u", "undo-tree"),
+    ("cmd+alt+r", "relations"),
     ("cmd+alt+k", "semantic-search"),
     ("cmd+\\", "split"),
     ("cmd+shift+o", "symbols"),

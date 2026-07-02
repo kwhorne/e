@@ -464,6 +464,10 @@ pub struct AppState {
     pub schema_diff_open: RwSignal<bool>,
     pub schema_diff: RwSignal<Vec<crate::schema_diff::DiffRow>>,
 
+    // ---- Eloquent relationship graph -----------------------------------
+    pub rel_open: RwSignal<bool>,
+    pub rel_graph: RwSignal<Vec<crate::relations::ModelNode>>,
+
     // ---- Laravel log tail ----------------------------------------------
     pub log_open: RwSignal<bool>,
     pub log_lines: RwSignal<Vec<String>>,
@@ -923,6 +927,8 @@ impl AppState {
             undo_rev: RwSignal::new(0),
             schema_diff_open: RwSignal::new(false),
             schema_diff: RwSignal::new(Vec::new()),
+            rel_open: RwSignal::new(false),
+            rel_graph: RwSignal::new(Vec::new()),
             log_open: RwSignal::new(false),
             log_lines: RwSignal::new(Vec::new()),
             db_schema_cache: RwSignal::new(std::collections::HashMap::new()),
@@ -3387,6 +3393,33 @@ impl AppState {
                 self.undo_apply(&buf, &text);
             }
         }
+    }
+
+    // ---- Eloquent relationship graph -----------------------------------
+
+    pub fn toggle_relations(&self) {
+        let open = !self.rel_open.get_untracked();
+        self.rel_open.set(open);
+        if open {
+            self.compute_relations();
+        }
+    }
+
+    /// Parse model relationships and cross-check them against the live schema's
+    /// foreign keys, in the background.
+    pub fn compute_relations(&self) {
+        let root = self.root.get_untracked();
+        let sig = self.rel_graph;
+        let send = create_ext_action(self.cx, move |g: Vec<crate::relations::ModelNode>| {
+            sig.set(g)
+        });
+        std::thread::spawn(move || {
+            let fks = e_db::from_env(&root)
+                .and_then(|cfg| e_db::connect(&cfg).ok())
+                .and_then(|conn| e_db::foreign_keys(&conn).ok())
+                .unwrap_or_default();
+            send(crate::relations::build_graph(&root, &fks));
+        });
     }
 
     // ---- Schema diff ---------------------------------------------------

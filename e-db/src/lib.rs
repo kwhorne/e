@@ -674,6 +674,97 @@ pub struct ColumnInfo {
     pub key: String,
 }
 
+/// A foreign-key relationship discovered in the live schema.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForeignKey {
+    pub table: String,
+    pub column: String,
+    pub ref_table: String,
+    pub ref_column: String,
+}
+
+/// All foreign keys in the database (empty for engines without them).
+pub fn foreign_keys(conn: &Conn) -> Result<Vec<ForeignKey>, String> {
+    match &conn.backend {
+        Backend::Mysql(pool) => {
+            use mysql::prelude::Queryable;
+            let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            let q =
+                "SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
+                     FROM information_schema.KEY_COLUMN_USAGE \
+                     WHERE REFERENCED_TABLE_NAME IS NOT NULL AND TABLE_SCHEMA = DATABASE()";
+            let rows: Vec<(String, String, String, String)> =
+                c.query(q).map_err(|e| e.to_string())?;
+            Ok(rows
+                .into_iter()
+                .map(|(table, column, ref_table, ref_column)| ForeignKey {
+                    table,
+                    column,
+                    ref_table,
+                    ref_column,
+                })
+                .collect())
+        }
+        Backend::Sqlite(path) => {
+            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let tables: Vec<String> = {
+                let mut stmt = c
+                    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .map_err(|e| e.to_string())?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            let mut out = Vec::new();
+            for t in tables {
+                let q = format!("PRAGMA foreign_key_list(\"{}\")", t.replace('"', "\"\""));
+                let Ok(mut stmt) = c.prepare(&q) else {
+                    continue;
+                };
+                // Columns: id, seq, table(ref), from(col), to(ref col), …
+                let rows = stmt.query_map([], |r| {
+                    Ok(ForeignKey {
+                        table: t.clone(),
+                        ref_table: r.get::<_, String>(2)?,
+                        column: r.get::<_, String>(3)?,
+                        ref_column: r.get::<_, String>(4).unwrap_or_default(),
+                    })
+                });
+                if let Ok(rows) = rows {
+                    out.extend(rows.filter_map(|r| r.ok()));
+                }
+            }
+            Ok(out)
+        }
+        Backend::Postgres(m) => {
+            let mut client = m.lock().unwrap();
+            let res = pg_query(
+                &mut client,
+                "SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name \
+                 FROM information_schema.table_constraints tc \
+                 JOIN information_schema.key_column_usage kcu \
+                   ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema \
+                 JOIN information_schema.constraint_column_usage ccu \
+                   ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema \
+                 WHERE tc.constraint_type = 'FOREIGN KEY'",
+                MAX_ROWS,
+            )?;
+            Ok(res
+                .rows
+                .into_iter()
+                .map(|r| ForeignKey {
+                    table: r.first().cloned().flatten().unwrap_or_default(),
+                    column: r.get(1).cloned().flatten().unwrap_or_default(),
+                    ref_table: r.get(2).cloned().flatten().unwrap_or_default(),
+                    ref_column: r.get(3).cloned().flatten().unwrap_or_default(),
+                })
+                .collect())
+        }
+        Backend::Clickhouse { .. } => Ok(Vec::new()),
+    }
+}
+
 pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
     match &conn.backend {
         Backend::Mysql(pool) => {

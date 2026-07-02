@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-02
+
 ### Changed
 
 - Redesigned the settings dialog (`⌘,`) into a two-pane layout: a category
@@ -390,7 +392,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/kwhorne/e/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/kwhorne/e/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/kwhorne/e/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/kwhorne/e/compare/v0.5.0...v0.5.1

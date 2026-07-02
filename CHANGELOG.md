@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agent `propose_edit`: agents propose a new file version and you review it
+  hunk-by-hunk (accept/reject each change) before applying — no blind writes.
+- Agent timeline (⌘⌥A): an audit log of everything the agent does over the
+  socket, and a 🤖 marker in the status bar showing where the agent is looking.
+
 ## [0.5.1] - 2026-07-01
 
 ### Changed

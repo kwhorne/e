@@ -97,6 +97,29 @@ Runs a command in the workspace (or `"cwd":"…"`) through the login shell and
 returns `{code, stdout, stderr}`. This is the basis for an autonomous
 test-fix-rerun loop.
 
+## Proposing edits (reviewed)
+
+Instead of writing files blindly, an agent can propose a new version and let you
+review it hunk-by-hunk:
+
+```sh
+printf '{"method":"propose_edit","path":"app/Models/User.php","content":"<full new file>"}\n' \
+  | nc -U "$E_EDITOR_SOCK"
+```
+
+The editor diffs it against the current file and opens a review overlay where
+you **Accept/Reject each hunk**, then **Apply** (or **Cancel**). The reply
+reports how many hunks were applied. Accepted changes go into the open buffer
+(so they're undoable) or are written to disk.
+
+## Ghost marker & audit timeline
+
+- `{"method":"mark","path":"…","line":42}` (and `open`/`lsp_*`) show where the
+  agent is looking as a **🤖 marker** in the status bar — click it to jump there.
+- Everything the agent does over the socket is recorded in the **Agent Timeline**
+  (⌘⌥A): time, method and a short summary — so you can always answer "what did
+  the agent just do?".
+
 ## Notes
 
 - The socket is local to your machine and per editor process; nothing is exposed

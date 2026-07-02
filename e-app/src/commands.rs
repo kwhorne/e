@@ -79,6 +79,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "relations" => state.toggle_relations(),
         "props-contract" => state.compute_contract(),
         "related-files" => state.show_related_files(),
+        "generate-rules" => state.generate_validation_rules(),
         "livewire-companion" => state.livewire_companion(),
         "undo-tree" => state.toggle_undo_tree(),
         "semantic-search" => state.toggle_semantic_search(),

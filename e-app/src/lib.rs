@@ -69,5 +69,6 @@ mod tinker;
 mod undo_view;
 mod update_view;
 mod updater;
+mod validation;
 
 pub use app::launch;

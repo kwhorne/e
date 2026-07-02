@@ -3720,6 +3720,40 @@ impl AppState {
         }
     }
 
+    // ---- Validation ----------------------------------------------------
+
+    /// Generate `'field' => 'rules'` from the live schema and insert them at the
+    /// cursor (table inferred from the active file's resource name).
+    pub fn generate_validation_rules(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return;
+        };
+        let root = self.root.get_untracked();
+        let Some(name) = crate::relatedfiles::resource_name(&path) else {
+            return;
+        };
+        let table = crate::eloquent::model_table(&root, &name);
+        let cols = self
+            .db_schema_cache
+            .with_untracked(|m| m.get(&table).cloned());
+        let Some(cols) = cols.filter(|c| !c.is_empty()) else {
+            Self::notify(&format!("No live schema for table `{table}`"));
+            return;
+        };
+        let text = crate::validation::generate_rules(&table, &cols);
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let offset = editor.cursor.get_untracked().offset();
+        let mut it = std::iter::once((Selection::region(offset, offset), text.as_str()));
+        buf.doc.edit(&mut it, EditType::InsertChars);
+        buf.dirty.set(true);
+        Self::notify(&format!("Inserted validation rules for `{table}`"));
+    }
+
     // ---- Related files -------------------------------------------------
 
     /// Show the files related to the active file's resource (model, migration,
@@ -5032,6 +5066,37 @@ impl AppState {
                         comp.open.set(true);
                         return;
                     }
+                }
+            }
+        }
+
+        // Validation rule names inside `validate([…])` / FormRequest `rules()`.
+        if matches!(buf.file.language, Language::Php | Language::Blade) {
+            if let Some(partial) = crate::validation::rule_partial(line_before) {
+                let items: Vec<lsp_types::CompletionItem> = crate::validation::rule_names(&partial)
+                    .into_iter()
+                    .map(|r| lsp_types::CompletionItem {
+                        label: r.to_string(),
+                        insert_text: Some(r.to_string()),
+                        kind: Some(lsp_types::CompletionItemKind::KEYWORD),
+                        detail: Some("validation rule".to_string()),
+                        ..Default::default()
+                    })
+                    .collect();
+                if !items.is_empty() {
+                    let comp = self.completion;
+                    let fstart = offset.saturating_sub(partial.len());
+                    let (_, below) = editor.points_of_offset(fstart, cursor.affinity);
+                    let vp = editor.viewport.get_untracked();
+                    let win = buf.win_origin.get_untracked();
+                    let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+                    comp.buffer_id.set(Some(buffer_id));
+                    comp.start_offset.set(fstart);
+                    comp.anchor.set(anchor);
+                    comp.items.set(items);
+                    comp.selected.set(0);
+                    comp.open.set(true);
+                    return;
                 }
             }
         }

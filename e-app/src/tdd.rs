@@ -3,7 +3,7 @@
 
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate};
-use floem::views::{container, label, scroll, stack, Decorators};
+use floem::views::{container, empty, label, scroll, stack, Decorators};
 use floem::IntoView;
 
 use crate::state::{AppState, TddStatus};
@@ -79,7 +79,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
         title,
         status,
         iter,
-        label(|| String::new()).style(|s| s.flex_grow(1.0)),
+        empty().style(|s| s.flex_grow(1.0)),
         close,
     ))
     .style(|s| {

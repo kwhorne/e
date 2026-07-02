@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Autonomous TDD panel (⌘⇧T): run the test suite with pass/fail status, and a
+  "Fix to green" loop where failures are sent to the agent, its proposed edits
+  are reviewed, and tests re-run automatically until green (with an iteration
+  cap and Stop).
 - Agent `propose_edit`: agents propose a new file version and you review it
   hunk-by-hunk (accept/reject each change) before applying — no blind writes.
 - Agent timeline (⌘⌥A): an audit log of everything the agent does over the

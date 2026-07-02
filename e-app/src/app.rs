@@ -431,6 +431,7 @@ fn app_view() -> impl IntoView {
             crate::tdd::tdd_panel(state),
             crate::request::request_view(state),
             crate::log::laravel_log_panel(state),
+            crate::schema_diff::schema_diff_panel(state),
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),

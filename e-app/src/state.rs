@@ -443,6 +443,10 @@ pub struct AppState {
     /// A pending edit the agent proposed, awaiting per-hunk review.
     pub agent_edit: RwSignal<Option<AgentEdit>>,
 
+    // ---- Schema diff (migrations vs live DB) ---------------------------
+    pub schema_diff_open: RwSignal<bool>,
+    pub schema_diff: RwSignal<Vec<crate::schema_diff::DiffRow>>,
+
     // ---- Laravel log tail ----------------------------------------------
     pub log_open: RwSignal<bool>,
     pub log_lines: RwSignal<Vec<String>>,
@@ -805,6 +809,8 @@ impl AppState {
             agent_log_open: RwSignal::new(false),
             agent_mark: RwSignal::new(None),
             agent_edit: RwSignal::new(None),
+            schema_diff_open: RwSignal::new(false),
+            schema_diff: RwSignal::new(Vec::new()),
             log_open: RwSignal::new(false),
             log_lines: RwSignal::new(Vec::new()),
             db_schema_cache: RwSignal::new(std::collections::HashMap::new()),
@@ -3104,6 +3110,35 @@ impl AppState {
         if self.tdd_loop.get_untracked() && applied > 0 {
             self.run_tests();
         }
+    }
+
+    // ---- Schema diff ---------------------------------------------------
+
+    /// Diff the project's migrations against the live database schema.
+    pub fn compute_schema_diff(&self) {
+        let root = self.root.get_untracked();
+        self.schema_diff_open.set(true);
+        let sig = self.schema_diff;
+        let send = create_ext_action(self.cx, move |rows: Vec<crate::schema_diff::DiffRow>| {
+            sig.set(rows)
+        });
+        std::thread::spawn(move || {
+            let expected = crate::schema_diff::parse_migrations(&root.join("database/migrations"));
+            let mut actual: std::collections::HashMap<String, std::collections::HashSet<String>> =
+                std::collections::HashMap::new();
+            if let Some(cfg) = e_db::from_env(&root) {
+                if let Ok(conn) = e_db::connect(&cfg) {
+                    if let Ok(tables) = e_db::tables(&conn) {
+                        for t in tables {
+                            if let Ok(cols) = e_db::columns(&conn, &t) {
+                                actual.insert(t, cols.into_iter().map(|c| c.name).collect());
+                            }
+                        }
+                    }
+                }
+            }
+            send(crate::schema_diff::diff(&expected, &actual));
+        });
     }
 
     // ---- Laravel log tail ----------------------------------------------

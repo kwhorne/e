@@ -68,6 +68,12 @@ the model from `$var = Model::…` or a type hint, maps it to its table
 (`protected $table` or the snake_case + plural convention), and merges the
 columns alongside Intelephense — something Intelephense can't do on its own.
 
+## Schema diff
+
+**Laravel: Schema Diff** (command palette) compares your migrations against the
+live database and lists discrepancies — columns that exist in the DB but no
+migration creates, and columns a migration adds that aren't in the DB yet.
+
 ## Log tail
 
 `⌘⌥L` opens a live tail of `storage/logs/laravel.log`: levels are coloured,

@@ -40,6 +40,7 @@ mod problems;
 mod recent;
 mod rename;
 mod request;
+mod schema_diff;
 mod session;
 mod settings_view;
 mod snippets;

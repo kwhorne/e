@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Schema diff (command palette): compares migrations against the live database
+  and flags columns present in one but not the other.
 - Eloquent completion from the live database schema: typing `$model->` suggests
   the real table columns (inferred model → table), merged with the language
   server.

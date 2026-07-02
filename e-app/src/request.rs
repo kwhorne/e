@@ -19,7 +19,7 @@ fn flatten(key: &str, value: &serde_json::Value, depth: usize, out: &mut Vec<(us
     }
     match value {
         Value::Object(map) => {
-            out.push((depth, format!("{key}"))); // section
+            out.push((depth, key.to_string())); // section
             for (k, v) in map.iter().take(40) {
                 flatten(k, v, depth + 1, out);
             }

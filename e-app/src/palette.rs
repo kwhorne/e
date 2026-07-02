@@ -50,17 +50,19 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
         for entry in read.filter_map(|e| e.ok()) {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            // Only apply the heavyweight system-dir skips near the filesystem
-            // root; inside a project, those names are unlikely and harmless.
-            if name.starts_with('.')
-                || matches!(name.as_ref(), "target" | "node_modules" | "vendor")
-                || (is_root && skip_dir(&name))
-            {
-                continue;
-            }
             let path = entry.path();
             match entry.file_type() {
-                Ok(t) if t.is_dir() => queue.push_back(path),
+                Ok(t) if t.is_dir() => {
+                    // Skip heavy/VCS directories, and system dirs near the root.
+                    // Other dot-directories (e.g. `.github`) are still searched.
+                    if matches!(name.as_ref(), ".git" | "target" | "node_modules" | "vendor")
+                        || (is_root && skip_dir(&name))
+                    {
+                        continue;
+                    }
+                    queue.push_back(path);
+                }
+                // Files, including dotfiles like `.env` and `.gitignore`.
                 Ok(_) => out.push(path),
                 Err(_) => {}
             }

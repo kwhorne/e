@@ -46,6 +46,7 @@ mod styling;
 mod tabs;
 mod task_palette;
 mod tasks;
+mod tdd;
 mod terminal_view;
 mod theme;
 mod tinker;

@@ -424,6 +424,7 @@ fn app_view() -> impl IntoView {
             crate::map::laravel_map(state),
             crate::agent_ui::agent_edit_review(state),
             crate::agent_ui::agent_log_panel(state),
+            crate::tdd::tdd_panel(state),
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),

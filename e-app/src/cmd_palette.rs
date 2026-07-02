@@ -21,6 +21,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("tinker-selection", "Tinker: Run Selection"),
     ("laravel-map", "Laravel: Architecture Map"),
     ("agent-log", "Agent: Timeline / Audit Log"),
+    ("run-tests", "Tests: Runner / Autonomous TDD"),
     ("emmet-expand", "Emmet: Expand Abbreviation"),
     ("save-as", "Save As…"),
     ("recent", "Recent Files"),

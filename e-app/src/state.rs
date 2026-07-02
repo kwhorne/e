@@ -468,6 +468,10 @@ pub struct AppState {
     pub rel_open: RwSignal<bool>,
     pub rel_graph: RwSignal<Vec<crate::relations::ModelNode>>,
 
+    // ---- Inertia props contract ----------------------------------------
+    pub contract_open: RwSignal<bool>,
+    pub contract: RwSignal<Option<crate::contract::Contract>>,
+
     // ---- Runtime insight (continuous Clockwork capture) ----------------
     pub runtime_open: RwSignal<bool>,
     pub runtime_reqs: RwSignal<Vec<RuntimeReq>>,
@@ -1030,6 +1034,8 @@ impl AppState {
             schema_diff: RwSignal::new(Vec::new()),
             rel_open: RwSignal::new(false),
             rel_graph: RwSignal::new(Vec::new()),
+            contract_open: RwSignal::new(false),
+            contract: RwSignal::new(None),
             runtime_open: RwSignal::new(false),
             runtime_reqs: RwSignal::new(Vec::new()),
             runtime_expanded: RwSignal::new(None),
@@ -3678,6 +3684,52 @@ impl AppState {
             if let Some(text) = t {
                 self.undo_apply(&buf, &text);
             }
+        }
+    }
+
+    // ---- Inertia props contract ----------------------------------------
+
+    /// Reconcile the active page component with the controller that renders it.
+    pub fn compute_contract(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return;
+        };
+        let root = self.root.get_untracked();
+        let Some(page) = crate::contract::page_name_of(&root, &path) else {
+            Self::notify("Open an Inertia page component first");
+            return;
+        };
+        let src = buf.doc.text().to_string();
+        let schema = self.db_schema_cache.get_untracked();
+        let shared = crate::inertia::shared_props(&root);
+        self.contract_open.set(true);
+        self.contract.set(None);
+        let sig = self.contract;
+        let send = create_ext_action(self.cx, move |c: Option<crate::contract::Contract>| {
+            sig.set(c)
+        });
+        std::thread::spawn(move || {
+            send(crate::contract::build(&root, &page, &src, &schema, &shared));
+        });
+    }
+
+    /// Write TypeScript interfaces for the current contract and open them.
+    pub fn generate_contract_ts(&self) {
+        let Some(c) = self.contract.get_untracked() else {
+            return;
+        };
+        let schema = self.db_schema_cache.get_untracked();
+        let ts = crate::contract::generate_ts(&c, &schema);
+        let root = self.root.get_untracked();
+        let dir = root.join("resources/js/types");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join(format!("{}.d.ts", c.page.replace('/', "")));
+        if std::fs::write(&file, ts).is_ok() {
+            self.contract_open.set(false);
+            self.open_path(file);
         }
     }
 

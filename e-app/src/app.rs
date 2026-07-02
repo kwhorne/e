@@ -437,6 +437,7 @@ fn app_view() -> impl IntoView {
             crate::runtime_view::runtime_panel(state),
             crate::schema_diff::schema_diff_panel(state),
             crate::relations_view::relation_graph_panel(state),
+            crate::contract_view::contract_panel(state),
             crate::undo_view::undo_tree_panel(state),
             crate::semantic_view::semantic_panel(state),
         ))

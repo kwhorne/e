@@ -77,6 +77,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "runtime" => state.toggle_runtime(),
         "schema-diff" => state.compute_schema_diff(),
         "relations" => state.toggle_relations(),
+        "props-contract" => state.compute_contract(),
         "livewire-companion" => state.livewire_companion(),
         "undo-tree" => state.toggle_undo_tree(),
         "semantic-search" => state.toggle_semantic_search(),
@@ -162,6 +163,10 @@ fn close_overlays(state: AppState) {
     }
     if state.rel_open.get() {
         state.rel_open.set(false);
+        return;
+    }
+    if state.contract_open.get() {
+        state.contract_open.set(false);
         return;
     }
     if state.undo_open.get() {

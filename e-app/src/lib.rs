@@ -15,6 +15,8 @@ mod cmd_palette;
 mod commands;
 mod completion;
 mod config;
+mod contract;
+mod contract_view;
 mod db_view;
 mod dialogs;
 mod diff_view;

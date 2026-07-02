@@ -32,6 +32,19 @@ pub struct Contract {
     pub props: Vec<Prop>,
     /// Props the component uses/declares that the controller never sends.
     pub missing: Vec<String>,
+    /// `useForm` ↔ FormRequest reconciliations found in the component.
+    pub forms: Vec<FormContract>,
+}
+
+/// A form's fields checked against the validation rules of its FormRequest.
+#[derive(Clone)]
+pub struct FormContract {
+    pub route: String,
+    pub request_class: Option<String>,
+    /// Form fields that no validation rule covers.
+    pub unvalidated: Vec<String>,
+    /// Validation rules with no matching form field.
+    pub missing_field: Vec<String>,
 }
 
 fn is_ident(c: char) -> bool {
@@ -252,6 +265,148 @@ pub fn component_props(src: &str) -> (Vec<String>, std::collections::HashSet<Str
     (declared, used)
 }
 
+/// Field names in a `useForm({ … })` initialiser.
+pub fn use_form_fields(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut search = 0;
+    while let Some(rel) = src[search..].find("useForm") {
+        let at = search + rel + "useForm".len();
+        search = at;
+        // `useForm<T>({…})` or `useForm({…})` — take the first object literal.
+        if let Some(paren) = src[at..].find('(') {
+            if let Some(inner) = brace_inner(&src[at + paren..]) {
+                for part in inner.split([',', '\n']) {
+                    let key: String = part.trim().chars().take_while(|c| is_ident(*c)).collect();
+                    if !key.is_empty() && !out.contains(&key) {
+                        out.push(key);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The route name of the first `route('…')` used by a form in the component.
+fn form_route(src: &str) -> Option<String> {
+    let after = src.find("useForm").map(|i| &src[i..]).unwrap_or(src);
+    let at = after.find("route(")? + "route(".len();
+    let rest = after[at..].trim_start();
+    let q = rest.chars().next()?;
+    if q != '\'' && q != '"' {
+        return None;
+    }
+    let inner = &rest[1..];
+    let end = inner.find(q)?;
+    Some(inner[..end].to_string())
+}
+
+/// The FormRequest class type-hinted in a controller `method`.
+fn method_request_class(ctrl_src: &str, method: &str) -> Option<String> {
+    let needle = format!("function {method}(");
+    let at = ctrl_src.find(&needle)? + needle.len();
+    let end = ctrl_src[at..].find(')')? + at;
+    for param in ctrl_src[at..end].split(',') {
+        let ty: String = param
+            .trim()
+            .trim_start_matches('\\')
+            .chars()
+            .take_while(|c| is_ident(*c) || *c == '\\')
+            .collect();
+        let base = ty.rsplit('\\').next().unwrap_or(&ty);
+        if base.ends_with("Request") && base != "Request" {
+            return Some(base.to_string());
+        }
+    }
+    None
+}
+
+/// Validation rule keys declared in a FormRequest's `rules()` method.
+fn form_request_rules(root: &Path, class: &str) -> Vec<String> {
+    let mut dirs = vec![root.join("app/Http/Requests")];
+    let mut found = None;
+    while let Some(dir) = dirs.pop() {
+        if let Ok(read) = std::fs::read_dir(&dir) {
+            for e in read.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.file_stem().and_then(|s| s.to_str()) == Some(class) {
+                    found = Some(p);
+                }
+            }
+        }
+    }
+    let Some(file) = found else {
+        return Vec::new();
+    };
+    let Ok(src) = std::fs::read_to_string(&file) else {
+        return Vec::new();
+    };
+    let Some(at) = src.find("function rules") else {
+        return Vec::new();
+    };
+    array_inner_after(&src[at..], 0)
+        .map(|inner| top_entries(&inner).into_iter().map(|(k, _)| k).collect())
+        .unwrap_or_default()
+}
+
+/// Reconcile the component's `useForm` fields with the FormRequest rules.
+fn build_forms(root: &Path, component_src: &str, routes: &[(String, String)]) -> Vec<FormContract> {
+    let fields = use_form_fields(component_src);
+    if fields.is_empty() {
+        return Vec::new();
+    }
+    let Some(route) = form_route(component_src) else {
+        return Vec::new();
+    };
+    let action = routes
+        .iter()
+        .find(|(n, _)| *n == route)
+        .map(|(_, a)| a.clone());
+    let (request_class, rules) = action
+        .and_then(|a| {
+            let (ctrl, method) = a.rsplit_once('@')?;
+            let class = ctrl.rsplit('\\').next().unwrap_or(ctrl);
+            let file = find_controller_file(root, class)?;
+            let src = std::fs::read_to_string(&file).ok()?;
+            let req = method_request_class(&src, method)?;
+            let rules = form_request_rules(root, &req);
+            Some((Some(req), rules))
+        })
+        .unwrap_or((None, Vec::new()));
+
+    let rule_set: std::collections::HashSet<&str> = rules.iter().map(|s| s.as_str()).collect();
+    let field_set: std::collections::HashSet<&str> = fields.iter().map(|s| s.as_str()).collect();
+    let unvalidated = if rules.is_empty() {
+        Vec::new()
+    } else {
+        fields
+            .iter()
+            .filter(|f| !rule_set.contains(f.as_str()))
+            .cloned()
+            .collect()
+    };
+    let missing_field = rules
+        .iter()
+        .filter(|r| !field_set.contains(r.as_str()))
+        .cloned()
+        .collect();
+
+    vec![FormContract {
+        route,
+        request_class,
+        unvalidated,
+        missing_field,
+    }]
+}
+
+fn find_controller_file(root: &Path, class: &str) -> Option<PathBuf> {
+    collect_controllers(root)
+        .into_iter()
+        .find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(class))
+}
+
 fn brace_inner(s: &str) -> Option<String> {
     let (open_ch, close_ch) = ('{', '}');
     let open = s.find(open_ch)?;
@@ -299,6 +454,7 @@ pub fn build(
     component_src: &str,
     schema: &HashMap<String, Vec<ColumnInfo>>,
     shared: &[String],
+    routes: &[(String, String)],
 ) -> Option<Contract> {
     // Find the controller that renders this page.
     let controllers = collect_controllers(root);
@@ -339,12 +495,14 @@ pub fn build(
     missing.dedup();
 
     // Note the schema so TS generation can expand model fields.
-    let _ = (schema, root);
+    let _ = schema;
+    let forms = build_forms(root, component_src, routes);
     Some(Contract {
         page: page.to_string(),
         controller,
         props,
         missing,
+        forms,
     })
 }
 
@@ -460,6 +618,7 @@ mod tests {
                 },
             ],
             missing: vec![],
+            forms: vec![],
         };
         let mut schema = HashMap::new();
         schema.insert(
@@ -492,6 +651,25 @@ mod tests {
         assert!(ts.contains("export interface User {"));
         assert!(ts.contains("id: number;"));
         assert!(ts.contains("bio?: string;")); // nullable → optional
+    }
+
+    #[test]
+    fn reads_form_pieces() {
+        let vue = r#"<script setup>
+        const form = useForm({ name: '', email: '', role: 'user' });
+        function submit() { form.post(route('users.store')); }
+        </script>"#;
+        assert_eq!(use_form_fields(vue), vec!["name", "email", "role"]);
+        assert_eq!(form_route(vue).as_deref(), Some("users.store"));
+
+        let ctrl = "public function store(StoreUserRequest $request) { }";
+        assert_eq!(
+            method_request_class(ctrl, "store").as_deref(),
+            Some("StoreUserRequest")
+        );
+        // The base Request must not be picked up.
+        let ctrl2 = "public function index(Request $request) { }";
+        assert!(method_request_class(ctrl2, "index").is_none());
     }
 
     #[test]

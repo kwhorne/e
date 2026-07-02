@@ -146,6 +146,73 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
+    // Form contracts: useForm fields vs FormRequest validation rules.
+    let forms = dyn_stack(
+        move || {
+            state
+                .contract
+                .with(|c| c.as_ref().map(|c| c.forms.clone()).unwrap_or_default())
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, f)| {
+            let header = format!(
+                "form → {}  ({})",
+                f.route,
+                f.request_class
+                    .clone()
+                    .unwrap_or_else(|| "no FormRequest".into())
+            );
+            let mut lines: Vec<floem::AnyView> = vec![label(move || header.clone())
+                .style(|s| {
+                    s.font_size(12.0)
+                        .font_bold()
+                        .color(theme::fg())
+                        .padding_horiz(12.0)
+                        .padding_vert(4.0)
+                })
+                .into_any()];
+            for field in &f.unvalidated {
+                let t = format!("{field}  ⚠ not validated");
+                lines.push(
+                    label(move || t.clone())
+                        .style(|s| {
+                            s.font_size(12.0)
+                                .font_family("monospace".to_string())
+                                .padding_horiz(16.0)
+                                .padding_vert(1.0)
+                                .color(AMBER)
+                        })
+                        .into_any(),
+                );
+            }
+            for rule in &f.missing_field {
+                let t = format!("{rule}  ⚠ validated but not in the form");
+                lines.push(
+                    label(move || t.clone())
+                        .style(|s| {
+                            s.font_size(12.0)
+                                .font_family("monospace".to_string())
+                                .padding_horiz(16.0)
+                                .padding_vert(1.0)
+                                .color(RED)
+                        })
+                        .into_any(),
+                );
+            }
+            floem::views::stack_from_iter(lines).style(|s| {
+                s.flex_col()
+                    .width_full()
+                    .margin_top(6.0)
+                    .border_top(1.0)
+                    .border_color(theme::border())
+            })
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+
     let not_found = label(|| "No controller renders this page (or props are dynamic).".to_string())
         .style(move |s| {
             let s = s.padding(16.0).font_size(12.0).color(theme::fg_dim());
@@ -157,7 +224,8 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
             }
         });
 
-    let body = stack((controller, sent, missing, not_found)).style(|s| s.flex_col().width_full());
+    let body =
+        stack((controller, sent, missing, forms, not_found)).style(|s| s.flex_col().width_full());
 
     let card = stack((
         header,

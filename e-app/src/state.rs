@@ -3732,6 +3732,16 @@ impl AppState {
         let src = buf.doc.text().to_string();
         let schema = self.db_schema_cache.get_untracked();
         let shared = crate::inertia::shared_props(&root);
+        let routes: Vec<(String, String)> = self
+            .laravel
+            .get_untracked()
+            .map(|d| {
+                d.routes
+                    .iter()
+                    .map(|r| (r.name.clone(), r.action.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         self.contract_open.set(true);
         self.contract.set(None);
         let sig = self.contract;
@@ -3739,7 +3749,9 @@ impl AppState {
             sig.set(c)
         });
         std::thread::spawn(move || {
-            send(crate::contract::build(&root, &page, &src, &schema, &shared));
+            send(crate::contract::build(
+                &root, &page, &src, &schema, &shared, &routes,
+            ));
         });
     }
 

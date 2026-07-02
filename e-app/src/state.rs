@@ -494,6 +494,8 @@ pub struct AppState {
     pub req_queries: RwSignal<Vec<(String, String)>>,
     pub req_error: RwSignal<Option<String>>,
     pub req_running: RwSignal<bool>,
+    /// For an Inertia response: `(component, props)` shown as a tree.
+    pub req_inertia: RwSignal<Option<(String, serde_json::Value)>>,
 
     // ---- Autonomous TDD loop -------------------------------------------
     pub tdd_open: RwSignal<bool>,
@@ -803,6 +805,27 @@ struct RequestResult {
     body: String,
     queries: Vec<(String, String)>,
     error: Option<String>,
+    /// For an Inertia response: `(component name, props JSON)`.
+    inertia: Option<(String, serde_json::Value)>,
+}
+
+/// Extract the Inertia page object embedded in the initial HTML response's
+/// `data-page="…"` attribute (HTML-escaped JSON).
+fn extract_inertia(body: &str) -> Option<(String, serde_json::Value)> {
+    let at = body.find("data-page=\"")? + "data-page=\"".len();
+    let end = body[at..].find('"')? + at;
+    let escaped = &body[at..end];
+    let decoded = escaped
+        .replace("&quot;", "\"")
+        .replace("&#039;", "'")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    let v: serde_json::Value = serde_json::from_str(&decoded).ok()?;
+    let component = v.get("component")?.as_str()?.to_string();
+    let props = v.get("props").cloned().unwrap_or(serde_json::Value::Null);
+    Some((component, props))
 }
 
 /// Replace Laravel route params (`{id}`, `{id?}`) with a placeholder value.
@@ -853,6 +876,7 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
                 body: String::new(),
                 queries: Vec::new(),
                 error: Some(format!("curl failed: {e} (is curl installed?)")),
+                inertia: None,
             }
         }
     };
@@ -898,12 +922,14 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
         }
     }
     let _ = std::fs::remove_file(&hdr);
+    let inertia = extract_inertia(&body);
     RequestResult {
         status,
         time,
         body,
         queries,
         error: None,
+        inertia,
     }
 }
 
@@ -1051,6 +1077,7 @@ impl AppState {
             req_queries: RwSignal::new(Vec::new()),
             req_error: RwSignal::new(None),
             req_running: RwSignal::new(false),
+            req_inertia: RwSignal::new(None),
             tdd_open: RwSignal::new(false),
             tdd_status: RwSignal::new(TddStatus::Idle),
             tdd_output: RwSignal::new(String::new()),
@@ -3974,6 +4001,7 @@ impl AppState {
         self.req_status.set(None);
         self.req_body.set(String::new());
         self.req_queries.set(Vec::new());
+        self.req_inertia.set(None);
 
         let state = *self;
         let send = create_ext_action(self.cx, move |r: RequestResult| {
@@ -3983,6 +4011,7 @@ impl AppState {
             state.req_body.set(r.body);
             state.req_queries.set(r.queries);
             state.req_error.set(r.error);
+            state.req_inertia.set(r.inertia);
         });
         std::thread::spawn(move || {
             send(do_http_request(&base, &url));
@@ -6004,6 +6033,20 @@ mod rename_tests {
         let t = "$user->name";
         assert_eq!(word_at(t, 2), "$user"); // cursor inside $user
         assert_eq!(word_at(t, 8), "name"); // cursor inside name
+    }
+}
+
+#[cfg(test)]
+mod inertia_replay_tests {
+    use super::extract_inertia;
+
+    #[test]
+    fn extracts_page_object_from_html() {
+        let body = r#"<div id="app" data-page="{&quot;component&quot;:&quot;Users/Index&quot;,&quot;props&quot;:{&quot;users&quot;:[{&quot;id&quot;:1}]}}"></div>"#;
+        let (component, props) = extract_inertia(body).unwrap();
+        assert_eq!(component, "Users/Index");
+        assert!(props.get("users").unwrap().is_array());
+        assert!(extract_inertia("<html>no inertia</html>").is_none());
     }
 }
 

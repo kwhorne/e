@@ -11,6 +11,34 @@ use floem::IntoView;
 use crate::state::AppState;
 use crate::theme;
 
+/// Flatten a JSON value into indented `(depth, label)` rows for the props tree.
+fn flatten(key: &str, value: &serde_json::Value, depth: usize, out: &mut Vec<(usize, String)>) {
+    use serde_json::Value;
+    if depth > 5 || out.len() > 300 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            out.push((depth, format!("{key}"))); // section
+            for (k, v) in map.iter().take(40) {
+                flatten(k, v, depth + 1, out);
+            }
+        }
+        Value::Array(arr) => {
+            out.push((depth, format!("{key}  [{} items]", arr.len())));
+            if let Some(first) = arr.first() {
+                flatten("[0]", first, depth + 1, out);
+            }
+        }
+        Value::String(s) => {
+            let v: String = s.chars().take(80).collect();
+            out.push((depth, format!("{key}: \"{v}\"")));
+        }
+        Value::Null => out.push((depth, format!("{key}: null"))),
+        other => out.push((depth, format!("{key}: {other}"))),
+    }
+}
+
 /// Normalise a query so repeated queries with different literals group together.
 fn normalize(sql: &str) -> String {
     let mut out = String::with_capacity(sql.len());
@@ -213,12 +241,99 @@ pub fn request_view(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full().max_height(180.0));
 
-    let body = scroll(label(move || state.req_body.get()).style(|s| {
-        s.font_family("monospace".to_string())
+    // Inertia component header (click to open the page component).
+    let inertia_head = label(move || {
+        state
+            .req_inertia
+            .with(|i| i.as_ref().map(|(c, _)| format!("⚛ {c}")))
+            .unwrap_or_default()
+    })
+    .style(move |s| {
+        let s = s
+            .padding_horiz(12.0)
+            .padding_vert(5.0)
             .font_size(12.0)
-            .padding(10.0)
-            .color(theme::fg())
-    }))
+            .font_bold()
+            .color(Color::from_rgb8(0x61, 0xaf, 0xef))
+            .cursor(floem::style::CursorStyle::Pointer)
+            .border_top(1.0)
+            .border_color(theme::border())
+            .hover(|s| s.background(theme::bg_hover()));
+        if state.req_inertia.with(|i| i.is_some()) {
+            s
+        } else {
+            s.hide()
+        }
+    })
+    .on_click_stop(move |_| {
+        if let Some(c) = state
+            .req_inertia
+            .with_untracked(|i| i.as_ref().map(|(c, _)| c.clone()))
+        {
+            state.open_page_or_view(&c);
+        }
+    });
+
+    // Inertia props tree (replaces the raw body when present).
+    let inertia_tree = dyn_stack(
+        move || {
+            state
+                .req_inertia
+                .with(|i| {
+                    i.as_ref().map(|(_, props)| {
+                        let mut out = Vec::new();
+                        flatten("props", props, 0, &mut out);
+                        out
+                    })
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, (depth, text))| {
+            let indent = 10.0 + depth as f64 * 14.0;
+            label(move || text.clone()).style(move |s| {
+                s.font_family("monospace".to_string())
+                    .font_size(11.5)
+                    .padding_left(indent)
+                    .padding_right(12.0)
+                    .padding_vert(1.0)
+                    .width_full()
+                    .color(theme::fg())
+                    .text_ellipsis()
+            })
+        },
+    )
+    .style(move |s| {
+        let s = s.flex_col().width_full();
+        if state.req_inertia.with(|i| i.is_some()) {
+            s
+        } else {
+            s.hide()
+        }
+    });
+
+    let body = scroll(
+        stack((
+            inertia_tree,
+            label(move || state.req_body.get()).style(move |s| {
+                let s = s
+                    .font_family("monospace".to_string())
+                    .font_size(12.0)
+                    .padding(10.0)
+                    .color(theme::fg());
+                // Hide the raw HTML body once we have a parsed Inertia tree.
+                if state.req_inertia.with(|i| i.is_some()) {
+                    s.hide()
+                } else {
+                    s
+                }
+            }),
+        ))
+        .style(|s| s.flex_col().width_full()),
+    )
     .style(|s| {
         s.flex_grow(1.0)
             .width_full()
@@ -244,6 +359,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
         err,
         qsummary,
         scroll(queries).style(|s| s.max_height(180.0).width_full()),
+        inertia_head,
         body,
     ))
     .style(|s| {

@@ -53,6 +53,17 @@ Disable this behaviour with `"auto_close": false` in your
 Pressing **Enter** keeps the indentation of the current line, so new lines line
 up with the code above.
 
+## Undo tree
+
+Beyond the usual undo/redo (`⌘Z` / `⌘⇧Z`), `e` records every edit into a
+**branching undo tree**. When you undo and then type something new, the old
+branch isn't thrown away — it becomes a sibling you can return to.
+
+Press **`⌘⌥U`** to open the tree. Each node shows how long ago it was and how
+many characters changed; a `⑂` marks a branch point. Click any node to jump the
+buffer to that state ("time travel"). The tree is saved per file under
+`~/.config/e/undo/`, so history survives across sessions.
+
 ## Rename
 
 Press **`F2`** to rename every whole-word occurrence of the identifier under the

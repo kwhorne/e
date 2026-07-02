@@ -51,6 +51,26 @@ Because the command runs through your login shell, your full environment
 (`PATH`, nvm, etc.) is available. Your selection is saved automatically when you
 switch agents from the menu.
 
+## Editor co-op
+
+The agent isn't just a terminal — it gets a local Unix socket
+(`$E_EDITOR_SOCK`) to collaborate with the editor directly:
+
+- **Read context** — the current file, cursor, selection, open files, and
+  diagnostics.
+- **Reuse the language server** — definitions, references, hover and symbols
+  from the same server the editor runs.
+- **Query the database** through the editor's connection (consent-gated — you
+  approve each query; the agent never sees your credentials).
+- **Propose edits you review** — the agent sends a new version of a file and you
+  accept or reject each hunk before anything is written. No blind writes.
+- **Autonomous TDD** (`⌘⇧T`) — run the test suite and let the agent iterate on
+  failures (proposing edits you review) until the tests pass.
+- **Timeline** (`⌘⌥A`) — an audit log of everything the agent did over the
+  socket, with a 🤖 marker showing where it's looking.
+
+See [Agent Workspace Sync](agent-sync.md) for the full protocol.
+
 ## Tips
 
 - Leave `cwd` empty so the agent operates on whatever project you have open.

@@ -54,11 +54,16 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch switcher, commit history, stash, blame, merge-conflict resolution
 - **Database panel** (`⌘3`) — browse & query MySQL, PostgreSQL, SQLite and ClickHouse; connect from `.env` or manually (with SSH tunnels), sortable columns, structure view, inline cell editing, saved queries, CSV export
 - **Laravel intelligence** — completion, hover and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()` and `<x-…>` components, sourced from your project
+- **Eloquent completion** — `$model->` suggests real table columns from the live database schema, merged with the language server
+- **Architecture map** (`⌘⌥M`) — route → controller → view flow; **request-replay** hits your running app (Grove or custom URL) and shows the response plus the SQL it ran, with N+1 detection
+- **Laravel log tail** (`⌘⌥L`) with clickable stack frames, **schema diff** (migrations vs live DB), and a **Tinker scratchpad** (`⌘⌥T`)
+- **Semantic search** (`⌘⌥K`) — "describe what you're looking for", ranked locally (Ollama when available, lexical fallback otherwise — nothing leaves your machine)
+- **Visual undo tree** (`⌘⌥U`) — branching history that keeps edits a linear undo would discard, with click-to-jump time travel persisted across sessions
 - **Sticky scroll**, **drag-to-reorder & pinnable tabs**, **user-defined snippets**
 - **Task runner** (`⌘⇧B`) — npm/Composer/Cargo/Go/artisan/Make tasks and tests
 - **Graphical settings** (`⌘,`) and **customizable keybindings**
 - **Integrated terminal** (`⌘T`) — PTY-backed with ANSI colour, multiple tabs, rename and split
-- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent beside your code
+- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent beside your code, with deep editor co-op: reviewable `propose_edit` diffs, an autonomous TDD loop (`⌘⇧T`), and an activity timeline (`⌘⌥A`)
 - **Editing essentials** — comment toggle (`⌘/`), line move/duplicate/delete, indent, multi-cursor (`⌘⇧D`), auto-closing brackets
 - **Split editor** (`⌘\`), **resizable & swappable panels**, **zoom** (`⌘±`), **word wrap** (`⌥Z`)
 - **Navigation history** (`⌃-` / `⌃⇧-`), **breadcrumbs**, **outline**, **inline diagnostics**, **bracket matching**
@@ -106,6 +111,12 @@ header, and configure them in your global settings (`⌘,`):
 - `cwd` defaults to the current workspace root when left empty.
 - The default agent is **Elyra**; your selection is saved automatically.
 
+The agent also gets a local Unix socket (`$E_EDITOR_SOCK`) for genuine editor
+co-op: it can read your context and diagnostics, reuse the running language
+server, query the database through the editor's connection (consent-gated), and
+**propose edits you review hunk-by-hunk** before anything is written. See
+[AI Agents](docs/agents.md).
+
 ## Keyboard shortcuts
 
 > On macOS the modifier is `⌘`; on Linux/Windows use `Ctrl`.
@@ -123,7 +134,12 @@ A selection — see [the full list](docs/keyboard-shortcuts.md).
 | `⌘/`       | Toggle comment               | `⌘D`     | Duplicate line |
 | `⌘⇧D`      | Add cursor at next match     | `⌘\`     | Split editor |
 | `⌘1`       | Toggle sidebar               | `⌘2`     | Source Control |
+| `⌘3`       | Toggle database              | `⌘⇧B`    | Task runner |
 | `⌘T`       | Toggle terminal              | `⌘L`     | Toggle agent panel |
+| `⌘⌥K`      | Semantic search              | `⌘⌥U`    | Undo tree |
+| `⌘⌥M`      | Laravel architecture map     | `⌘⌥L`    | Laravel log tail |
+| `⌘⌥T`      | Tinker scratchpad            | `⌘⇧T`    | Autonomous TDD |
+| `⌘⌥A`      | Agent timeline               | `⌘⇧D`    | Add cursor at next match |
 | `⌘=` / `⌘-`| Zoom in / out                | `⌥Z`     | Toggle word wrap |
 | `⌃-` / `⌃⇧-` | Go back / forward          | `⌘⇧M`    | Markdown preview |
 | `F12`      | Go to definition             | `⇧F12`   | Find references |
@@ -138,7 +154,8 @@ Full user documentation also lives in [`docs/`](docs/README.md):
 - [Installation](docs/installation.md) · [Getting started](docs/getting-started.md) · [Keyboard shortcuts](docs/keyboard-shortcuts.md)
 - [Editing](docs/editing.md) · [Find & Replace](docs/find-and-replace.md) · [Navigation](docs/navigation.md)
 - [Languages & LSP](docs/languages-and-lsp.md) · [Laravel](docs/laravel.md)
-- [Source Control](docs/source-control.md) · [Terminal](docs/terminal.md) · [AI Agents](docs/agents.md)
+- [Source Control](docs/source-control.md) · [Database](docs/database.md) · [Terminal](docs/terminal.md)
+- [AI Agents](docs/agents.md) · [Agent Workspace Sync](docs/agent-sync.md)
 - [Configuration](docs/configuration.md) · [Updating](docs/updating.md) · [Troubleshooting](docs/troubleshooting.md)
 
 ## Getting started

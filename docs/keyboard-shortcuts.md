@@ -35,8 +35,11 @@ Every shortcut below is also available by name from the command palette (`⌘⇧
 | `⌘⇧K`    | Delete line |
 | `⌘]` / `⌘[` | Indent / outdent |
 | `⌘/`     | Toggle line comment |
+| `⌘⇧L`    | Select all occurrences |
+| `⌘⌥U`    | Toggle the visual undo tree |
 | `F2`     | Rename symbol |
 | `⌘Space` | Trigger completion |
+| `Tab`    | Expand Emmet abbreviation (HTML/Blade/Vue/Svelte) |
 
 Brackets and quotes auto-close as you type; typing the closing character types
 over it, and backspace deletes an empty pair.
@@ -59,6 +62,7 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | -------- | ------ |
 | `⌘1`     | Toggle sidebar |
 | `⌘2`     | Toggle Source Control panel |
+| `⌘3`     | Toggle database panel |
 | `⌘T`     | Toggle terminal |
 | `⌘⇧B`    | Run task |
 | `⌘L`     | Toggle agent panel |
@@ -69,6 +73,21 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | `⌥Z`     | Toggle word wrap |
 | `F8`     | Toggle light / dark theme |
 | `⌘,`     | Open settings |
+
+## AI & Laravel
+
+| Shortcut | Action |
+| -------- | ------ |
+| `⌘⌥K`    | Semantic search ("describe what you're looking for") |
+| `⌘⌥M`    | Laravel architecture map (route → controller → view, request-replay) |
+| `⌘⌥L`    | Laravel log tail |
+| `⌘⌥T`    | Tinker scratchpad |
+| `⌘⇧T`    | Autonomous TDD panel |
+| `⌘⌥A`    | Agent activity timeline |
+
+**Schema diff** (migrations vs live DB) and **Laravel: refresh** are available
+from the command palette (`⌘⇧P`). See [Laravel](laravel.md) and
+[AI Agents](agents.md).
 
 ## Source Control
 

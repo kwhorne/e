@@ -59,7 +59,7 @@ The document outline in the sidebar lists the symbols in the current file
 
 ## Semantic search
 
-`⌘⇧K` opens **"describe what you're looking for"** search. Type a question like
+`⌘⌥K` opens **"describe what you're looking for"** search. Type a question like
 *"where is the invoice email sent"* and `e` ranks project locations by meaning.
 
 It runs **entirely locally**. If a local [Ollama](https://ollama.com) server is

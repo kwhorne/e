@@ -80,21 +80,45 @@ To produce a distributable `.app` bundle:
 This produces `dist/e-<version>.dmg` containing `e.app` and an `Applications`
 symlink — open it and drag the app into Applications.
 
-By default the app is **ad-hoc signed**, so on first launch macOS shows an
-"unidentified developer" prompt; right-click the app → **Open** to allow it.
+If no Developer ID certificate is available the app is **ad-hoc signed**, so on
+first launch macOS shows an "unidentified developer" prompt; right-click the app
+→ **Open** to allow it.
 
-For distribution without that prompt you need an Apple Developer account:
+### Signed & notarized builds
 
-1. Sign with a Developer ID certificate:
-   ```sh
-   CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./scripts/bundle-dmg.sh --universal
-   ```
-2. Notarize the DMG with Apple and staple the ticket:
-   ```sh
-   xcrun notarytool submit dist/e-<version>-universal.dmg \
-     --apple-id you@example.com --team-id TEAMID --password <app-specific-password> --wait
-   xcrun stapler staple dist/e-<version>-universal.dmg
-   ```
+`bundle-dmg.sh` and `bundle-macos.sh` sign automatically when a
+`Developer ID Application` identity is in your keychain (auto-detected, or set
+`CODESIGN_IDENTITY`). The DMG is then signed, notarized, and stapled.
+
+Notarization needs credentials. Store them once in the keychain (the app-specific
+password never touches disk):
+
+```sh
+xcrun notarytool store-credentials e-notary \
+  --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
+```
+
+Then just build — it signs, notarizes with the `e-notary` profile, and staples:
+
+```sh
+./scripts/bundle-dmg.sh --universal
+```
+
+### Signing in CI
+
+The release workflow signs and notarizes the universal DMG when these repository
+secrets are set (otherwise it falls back to an ad-hoc DMG):
+
+| Secret | Value |
+| ------ | ----- |
+| `MACOS_CERTIFICATE` | base64 of your Developer ID `.p12`: `base64 -i cert.p12 \| pbcopy` |
+| `MACOS_CERTIFICATE_PASSWORD` | password you set when exporting the `.p12` |
+| `NOTARY_APPLE_ID` | your Apple ID email |
+| `NOTARY_PASSWORD` | an app-specific password |
+| `NOTARY_TEAM_ID` | your team ID (e.g. `7G383N3VY7`) |
+
+Export the certificate from **Keychain Access → your Developer ID Application →
+right-click → Export** as a `.p12`, then base64-encode it for the secret.
 
 ## Language servers
 

@@ -16,6 +16,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Shared signing/notarization helpers. Default to the local keychain profile.
+source "$(dirname "$0")/sign.sh"
+: "${NOTARY_PROFILE:=e-notary}"
+
 VERSION="$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' Cargo.toml | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')"
 UNIVERSAL=0
 [[ "${1:-}" == "--universal" ]] && UNIVERSAL=1
@@ -78,10 +82,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 # --- 3. sign ---------------------------------------------------------------
-IDENTITY="${CODESIGN_IDENTITY:--}"
-echo "==> signing with identity: $IDENTITY"
-codesign --force --deep --options runtime --sign "$IDENTITY" "$APP" 2>/dev/null \
-  || codesign --force --deep --sign - "$APP" 2>/dev/null || true
+IDENTITY="$(detect_identity)"; IDENTITY="${IDENTITY:--}"
+sign_app "$APP" "$IDENTITY"
 
 # --- 4. build the DMG ------------------------------------------------------
 DMG="dist/e-${VERSION}${ARCH_SUFFIX}.dmg"
@@ -105,6 +107,14 @@ else
   hdiutil create -volname "e $VERSION" -srcfolder "$STAGING" \
     -ov -format UDZO "$DMG" >/dev/null
   rm -rf "$STAGING"
+fi
+
+# --- 5. sign + notarize + staple the DMG -----------------------------------
+if [[ "$IDENTITY" != "-" ]]; then
+  sign_dmg "$DMG" "$IDENTITY"
+  if notarize_staple "$DMG"; then
+    echo "  ✓ notarized + stapled"
+  fi
 fi
 
 echo

@@ -3,6 +3,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source "$(dirname "$0")/sign.sh"
 
 VERSION="$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' Cargo.toml | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')"
 
@@ -51,9 +52,9 @@ PLIST
 # Substitute the version read from Cargo.toml.
 sed -i '' "s/__VERSION__/$VERSION/g" "$APP/Contents/Info.plist"
 
-# Ad-hoc sign so macOS treats it as a stable, consistent app (no Developer ID).
-if command -v codesign >/dev/null 2>&1; then
-  codesign --force --deep --sign - "$APP" 2>/dev/null || true
-fi
+# Sign with a Developer ID if one is available, otherwise ad-hoc so macOS
+# still treats it as a stable, consistent app.
+IDENTITY="$(detect_identity)"; IDENTITY="${IDENTITY:--}"
+sign_app "$APP" "$IDENTITY"
 
 echo "==> built $APP (e $VERSION)"

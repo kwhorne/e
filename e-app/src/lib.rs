@@ -40,6 +40,7 @@ mod markdown_view;
 mod outline;
 mod palette;
 mod picker;
+mod policies;
 mod problems;
 mod querycomplete;
 mod recent;

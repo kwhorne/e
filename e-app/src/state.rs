@@ -5070,6 +5070,42 @@ impl AppState {
             }
         }
 
+        // Gate/policy abilities inside `can()`/`authorize()`/`@can`/`Gate::allows()`.
+        if matches!(buf.file.language, Language::Php | Language::Blade) {
+            if let Some(partial) =
+                crate::inertia::call_string_partial(line_before, crate::policies::CALLS)
+            {
+                let root = self.root.get_untracked();
+                let lower = partial.to_lowercase();
+                let items: Vec<lsp_types::CompletionItem> = crate::policies::abilities(&root)
+                    .into_iter()
+                    .filter(|(n, _, _)| lower.is_empty() || n.to_lowercase().starts_with(&lower))
+                    .map(|(n, _, _)| lsp_types::CompletionItem {
+                        label: n.clone(),
+                        insert_text: Some(n),
+                        kind: Some(lsp_types::CompletionItemKind::VALUE),
+                        detail: Some("ability".to_string()),
+                        ..Default::default()
+                    })
+                    .collect();
+                if !items.is_empty() {
+                    let comp = self.completion;
+                    let fstart = offset.saturating_sub(partial.len());
+                    let (_, below) = editor.points_of_offset(fstart, cursor.affinity);
+                    let vp = editor.viewport.get_untracked();
+                    let win = buf.win_origin.get_untracked();
+                    let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+                    comp.buffer_id.set(Some(buffer_id));
+                    comp.start_offset.set(fstart);
+                    comp.anchor.set(anchor);
+                    comp.items.set(items);
+                    comp.selected.set(0);
+                    comp.open.set(true);
+                    return;
+                }
+            }
+        }
+
         // Validation rule names inside `validate([…])` / FormRequest `rules()`.
         if matches!(buf.file.language, Language::Php | Language::Blade) {
             if let Some(partial) = crate::validation::rule_partial(line_before) {
@@ -5288,6 +5324,36 @@ impl AppState {
         Some((helper, token, data))
     }
 
+    /// Caret on an ability string in `can()`/`authorize()`/`@can`/`Gate::allows()`
+    /// jumps to the policy method or `Gate::define()` that declares it.
+    fn goto_policy(&self) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        if !matches!(buf.file.language, Language::Php | Language::Blade) {
+            return false;
+        }
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let text = buf.doc.text().to_string();
+        let offset = editor.cursor.get_untracked().offset();
+        let Some(name) = crate::inertia::call_string_at(&text, offset, crate::policies::CALLS)
+        else {
+            return false;
+        };
+        let root = self.root.get_untracked();
+        if let Some((_, file, line)) = crate::policies::abilities(&root)
+            .into_iter()
+            .find(|(n, _, _)| *n == name)
+        {
+            self.jump_to(&path_to_uri(&file), line, 0);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Ziggy `route('name')` under the cursor in a JS-family file, plus the
     /// Laravel data — the same route table the PHP side uses.
     fn active_ziggy_route(&self) -> Option<(String, Rc<LaravelData>)> {
@@ -5427,6 +5493,10 @@ impl AppState {
                 self.jump_to(&path_to_uri(&p), l, c);
                 return;
             }
+        }
+        // Gates/policies: caret on an ability jumps to the policy method.
+        if self.goto_policy() {
+            return;
         }
         // Laravel navigation first: route -> controller, view -> blade, etc.
         if let Some((helper, token, data)) = self.laravel_token() {

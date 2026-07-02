@@ -30,6 +30,7 @@ mod git_view;
 mod hints_doc;
 mod keymap;
 mod laravel;
+mod livewire;
 mod log;
 mod map;
 mod markdown_view;

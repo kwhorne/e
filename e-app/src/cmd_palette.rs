@@ -25,6 +25,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("laravel-log", "Laravel: Log Tail"),
     ("schema-diff", "Laravel: Schema Diff (migrations vs DB)"),
     ("relations", "Laravel: Eloquent Relationship Graph"),
+    ("livewire-companion", "Livewire: Switch View / Class"),
     ("undo-tree", "Undo Tree: Show / Time Travel"),
     ("semantic-search", "Search: Semantic (describe it)"),
     ("emmet-expand", "Emmet: Expand Abbreviation"),

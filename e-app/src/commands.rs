@@ -76,6 +76,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "laravel-log" => state.toggle_laravel_log(),
         "schema-diff" => state.compute_schema_diff(),
         "relations" => state.toggle_relations(),
+        "livewire-companion" => state.livewire_companion(),
         "undo-tree" => state.toggle_undo_tree(),
         "semantic-search" => state.toggle_semantic_search(),
         "emmet-expand" => {

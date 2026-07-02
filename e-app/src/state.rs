@@ -1300,7 +1300,144 @@ impl AppState {
             .set(Cursor::new(CursorMode::Insert(s), None, None));
     }
 
-    /// Replace every whole-word occurrence of the original identifier.
+    // ---- Livewire ------------------------------------------------------
+
+    /// Completion items for a `wire:model` value, from the component's class.
+    fn livewire_property_items(
+        &self,
+        buf: &Buffer,
+        partial: &str,
+    ) -> Option<Vec<lsp_types::CompletionItem>> {
+        let path = buf.file.path.as_ref()?;
+        let comp = crate::livewire::resolve(&self.root.get_untracked(), path)?;
+        let src = std::fs::read_to_string(&comp.class_file).ok()?;
+        let lower = partial.to_lowercase();
+        let items: Vec<lsp_types::CompletionItem> = crate::livewire::properties(&src)
+            .into_iter()
+            .filter(|p| lower.is_empty() || p.to_lowercase().starts_with(&lower))
+            .map(|p| lsp_types::CompletionItem {
+                label: p.clone(),
+                insert_text: Some(p.clone()),
+                kind: Some(lsp_types::CompletionItemKind::FIELD),
+                detail: Some("Livewire property".to_string()),
+                ..Default::default()
+            })
+            .collect();
+        if items.is_empty() {
+            None
+        } else {
+            Some(items)
+        }
+    }
+
+    /// Jump between a Livewire component's Blade view and its class file.
+    pub fn livewire_companion(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return;
+        };
+        let Some(comp) = crate::livewire::resolve(&self.root.get_untracked(), &path) else {
+            Self::notify("Not a Livewire component");
+            return;
+        };
+        let target = if path == comp.class_file {
+            comp.view_file
+        } else {
+            comp.class_file
+        };
+        self.open_path(target);
+    }
+
+    /// If the caret sits on a Livewire property in the view, jump to its
+    /// declaration in the class. Returns `true` if it handled the jump.
+    fn livewire_goto(&self) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return false;
+        };
+        let Some(comp) = crate::livewire::resolve(&self.root.get_untracked(), &path) else {
+            return false;
+        };
+        // Only jump view → class here (class → view is the companion command).
+        if path != comp.view_file {
+            return false;
+        }
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let text = buf.doc.text().to_string();
+        let offset = editor.cursor.get_untracked().offset();
+        let word = word_at(&text, offset);
+        let word = word.trim_start_matches('$');
+        if word.is_empty() {
+            return false;
+        }
+        let Ok(src) = std::fs::read_to_string(&comp.class_file) else {
+            return false;
+        };
+        if !crate::livewire::properties(&src).iter().any(|p| p == word) {
+            return false;
+        }
+        let line = crate::livewire::property_line(&src, word).unwrap_or(0);
+        self.jump_to(&path_to_uri(&comp.class_file), line, 0);
+        true
+    }
+
+    /// Rename a Livewire property across both the class and the view. Returns
+    /// `true` if it handled the rename.
+    fn livewire_rename(&self, old: &str, new: &str) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return false;
+        };
+        let Some(comp) = crate::livewire::resolve(&self.root.get_untracked(), &path) else {
+            return false;
+        };
+        let Ok(class_src) = std::fs::read_to_string(&comp.class_file) else {
+            return false;
+        };
+        if !crate::livewire::properties(&class_src)
+            .iter()
+            .any(|p| p == old)
+        {
+            return false;
+        }
+        // Rewrite both files (targeted so unrelated tokens are left alone).
+        let new_class = crate::livewire::class_rename(&class_src, old, new);
+        self.rewrite_file(&comp.class_file, new_class);
+        if let Ok(view_src) = std::fs::read_to_string(&comp.view_file) {
+            let new_view = crate::livewire::view_rename(&view_src, old, new);
+            self.rewrite_file(&comp.view_file, new_view);
+        }
+        Self::notify(&format!("Renamed Livewire property `{old}` → `{new}`"));
+        true
+    }
+
+    /// Replace a file's contents, editing the open buffer (undoable) if it is
+    /// open, otherwise writing to disk.
+    fn rewrite_file(&self, path: &std::path::Path, content: String) {
+        let open = self.buffers.with_untracked(|bs| {
+            bs.iter()
+                .find(|b| b.file.path.as_deref() == Some(path))
+                .map(|b| (b.doc.clone(), b.dirty))
+        });
+        if let Some((doc, dirty)) = open {
+            let len = doc.text().len();
+            let mut it = std::iter::once((Selection::region(0, len), content.as_str()));
+            doc.edit(&mut it, EditType::InsertChars);
+            dirty.set(true);
+        } else {
+            let _ = buffer::write(path, &content);
+            self.fs_rev.update(|r| *r += 1);
+        }
+    }
+
     pub fn apply_rename(&self) {
         let r = self.rename;
         if !r.open.get_untracked() {
@@ -1310,6 +1447,11 @@ impl AppState {
         let new_name = r.new_name.get_untracked();
         r.open.set(false);
         if new_name.is_empty() || new_name == word {
+            return;
+        }
+        // Livewire property rename spans the class *and* the view.
+        let prop = word.trim_start_matches('$');
+        if self.livewire_rename(prop, new_name.trim_start_matches('$')) {
             return;
         }
         let Some(buf) = self.active_buffer() else {
@@ -4335,6 +4477,26 @@ impl AppState {
         let upto = offset.min(text.len());
         let line_start = text[..upto].rfind('\n').map(|i| i + 1).unwrap_or(0);
         let line_before = &text[line_start..upto];
+
+        // Livewire: `wire:model="…"` completes from the component's public props.
+        if let Some(partial) = crate::livewire::wire_model_partial(line_before) {
+            if let Some(items) = self.livewire_property_items(&buf, &partial) {
+                let comp = self.completion;
+                let fstart = offset.saturating_sub(partial.len());
+                let (_, below) = editor.points_of_offset(fstart, cursor.affinity);
+                let vp = editor.viewport.get_untracked();
+                let win = buf.win_origin.get_untracked();
+                let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+                comp.buffer_id.set(Some(buffer_id));
+                comp.start_offset.set(fstart);
+                comp.anchor.set(anchor);
+                comp.items.set(items);
+                comp.selected.set(0);
+                comp.open.set(true);
+                return;
+            }
+        }
+
         if let Some((rep, items)) =
             framework_completion::completions(buf.file.language, line_before)
         {
@@ -4621,6 +4783,10 @@ impl AppState {
 
     /// Jump to the definition of the symbol under the cursor (LSP).
     pub fn goto_definition(&self) {
+        // Livewire: caret on a `wire:model` property jumps to its declaration.
+        if self.livewire_goto() {
+            return;
+        }
         // Laravel navigation first: route -> controller, view -> blade, etc.
         if let Some((helper, token, data)) = self.laravel_token() {
             if let Some((path, line, col)) = laravel::navigate(&data, helper, &token) {

@@ -102,6 +102,7 @@ fn welcome() -> impl IntoView {
         cheat("⌘L", "Toggle agent panel"),
         cheat("⌘1", "Toggle sidebar"),
         cheat("⌘2", "Source control"),
+        cheat("⌘3", "Toggle database"),
         cheat("⌘\\", "Split editor"),
         cheat("F12", "Go to definition"),
         cheat("F8", "Light / dark theme"),

@@ -60,6 +60,15 @@ route → controller → views as clickable cards. Click the controller to jump 
 its method, or a view to open the Blade file. Filter by route name, URI or
 action.
 
+## Request replay
+
+In the architecture map (`⌘⌥M`), click ▶ on a GET route to replay the request
+against your running app and see the response — plus the SQL queries it ran
+(if the app has `laravel/clockwork`), with N+1 duplicates flagged. The base URL
+defaults to `https://<folder>.test` (Grove); override it under
+**Settings → Laravel → App URL**. "Explain with agent" hands the analysis to the
+AI panel.
+
 ## Working on a Laravel project
 
 1. Open the project root: `e ~/code/my-laravel-app`.

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Request-replay from the architecture map (⌘⌥M): a ▶ button on GET routes hits
+  the running app (Grove `https://<folder>.test` by default, configurable via the
+  App URL setting) and shows the response plus the SQL queries it ran (via
+  Clockwork) with N+1 detection and "Explain with agent".
 - Autonomous TDD panel (⌘⇧T): run the test suite with pass/fail status, and a
   "Fix to green" loop where failures are sent to the agent, its proposed edits
   are reviewed, and tests re-run automatically until green (with an iteration

@@ -546,14 +546,14 @@ struct RequestResult {
 /// Replace Laravel route params (`{id}`, `{id?}`) with a placeholder value.
 fn substitute_route_params(uri: &str) -> String {
     let mut out = String::new();
-    let mut chars = uri.chars();
-    while let Some(c) = chars.next() {
-        if c == '{' {
-            for x in chars.by_ref() {
-                if x == '}' {
-                    break;
-                }
+    let mut in_brace = false;
+    for c in uri.chars() {
+        if in_brace {
+            if c == '}' {
+                in_brace = false;
             }
+        } else if c == '{' {
+            in_brace = true;
             out.push('1');
         } else {
             out.push(c);

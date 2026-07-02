@@ -4761,6 +4761,48 @@ impl AppState {
             }
         }
 
+        // Ziggy: `route('…')` in JS completes from the Laravel route table.
+        if matches!(
+            buf.file.language,
+            Language::TypeScript | Language::JavaScript | Language::Vue | Language::Svelte
+        ) {
+            if let Some(partial) = crate::inertia::route_partial(line_before) {
+                if let Some(data) = self.laravel.get_untracked() {
+                    let lower = partial.to_lowercase();
+                    let items: Vec<lsp_types::CompletionItem> = data
+                        .routes
+                        .iter()
+                        .filter(|r| {
+                            !r.name.is_empty()
+                                && (lower.is_empty() || r.name.to_lowercase().contains(&lower))
+                        })
+                        .map(|r| lsp_types::CompletionItem {
+                            label: r.name.clone(),
+                            insert_text: Some(r.name.clone()),
+                            kind: Some(lsp_types::CompletionItemKind::FUNCTION),
+                            detail: Some(format!("{} {}", r.methods, r.uri)),
+                            ..Default::default()
+                        })
+                        .collect();
+                    if !items.is_empty() {
+                        let comp = self.completion;
+                        let fstart = offset.saturating_sub(partial.len());
+                        let (_, below) = editor.points_of_offset(fstart, cursor.affinity);
+                        let vp = editor.viewport.get_untracked();
+                        let win = buf.win_origin.get_untracked();
+                        let anchor = Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0);
+                        comp.buffer_id.set(Some(buffer_id));
+                        comp.start_offset.set(fstart);
+                        comp.anchor.set(anchor);
+                        comp.items.set(items);
+                        comp.selected.set(0);
+                        comp.open.set(true);
+                        return;
+                    }
+                }
+            }
+        }
+
         if let Some((rep, items)) =
             framework_completion::completions(buf.file.language, line_before)
         {
@@ -4948,6 +4990,24 @@ impl AppState {
         Some((helper, token, data))
     }
 
+    /// Ziggy `route('name')` under the cursor in a JS-family file, plus the
+    /// Laravel data — the same route table the PHP side uses.
+    fn active_ziggy_route(&self) -> Option<(String, Rc<LaravelData>)> {
+        let buf = self.active_buffer()?;
+        if !matches!(
+            buf.file.language,
+            Language::TypeScript | Language::JavaScript | Language::Vue | Language::Svelte
+        ) {
+            return None;
+        }
+        let editor = buf.editor.get_untracked()?;
+        let text = buf.doc.text().to_string();
+        let offset = editor.cursor.get_untracked().offset();
+        let name = crate::inertia::route_at(&text, offset)?;
+        let data = self.laravel.get()?;
+        Some((name, data))
+    }
+
     pub fn request_hover(&self) {
         let Some(buf) = self.active_buffer() else {
             return;
@@ -4970,6 +5030,14 @@ impl AppState {
         // Laravel hover takes precedence inside helper strings.
         if let Some((helper, token, data)) = self.laravel_token() {
             if let Some(text) = laravel::hover_text(&data, helper, &token) {
+                hover.text.set(text);
+                hover.open.set(true);
+                return;
+            }
+        }
+        // Ziggy `route('…')` hover on the JS side.
+        if let Some((name, data)) = self.active_ziggy_route() {
+            if let Some(text) = laravel::hover_text(&data, laravel::Helper::Route, &name) {
                 hover.text.set(text);
                 hover.open.set(true);
                 return;
@@ -5054,6 +5122,13 @@ impl AppState {
         // Inertia: caret on `Inertia::render('Page')` jumps to the component.
         if self.goto_inertia_page() {
             return;
+        }
+        // Ziggy: caret on `route('name')` in JS jumps to the controller.
+        if let Some((name, data)) = self.active_ziggy_route() {
+            if let Some((p, l, c)) = laravel::navigate(&data, laravel::Helper::Route, &name) {
+                self.jump_to(&path_to_uri(&p), l, c);
+                return;
+            }
         }
         // Laravel navigation first: route -> controller, view -> blade, etc.
         if let Some((helper, token, data)) = self.laravel_token() {

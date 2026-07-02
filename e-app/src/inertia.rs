@@ -69,10 +69,10 @@ fn collect(base: &Path, dir: &Path, out: &mut Vec<String>) {
     }
 }
 
-/// If `offset` sits inside an `Inertia::render('NAME')` / `inertia('NAME')`
-/// string literal, return the page name.
-pub fn render_at(text: &str, offset: usize) -> Option<String> {
-    for needle in ["Inertia::render(", "inertia("] {
+/// If `offset` sits inside the first string argument of any `needle(` call,
+/// return that string.
+pub fn call_string_at(text: &str, offset: usize, needles: &[&str]) -> Option<String> {
+    for needle in needles {
         let mut search = 0;
         while let Some(rel) = text[search..].find(needle) {
             let open = search + rel + needle.len();
@@ -98,10 +98,10 @@ pub fn render_at(text: &str, offset: usize) -> Option<String> {
     None
 }
 
-/// If the cursor line is inside an unclosed `Inertia::render('…` value, return
-/// the partial typed so far (for completion).
-pub fn render_partial(line_before: &str) -> Option<String> {
-    for needle in ["Inertia::render(", "inertia("] {
+/// If the cursor line ends inside an unclosed `needle('…` value, return the
+/// partial typed so far.
+pub fn call_string_partial(line_before: &str, needles: &[&str]) -> Option<String> {
+    for needle in needles {
         if let Some(at) = line_before.rfind(needle) {
             let after = line_before[at + needle.len()..].trim_start();
             let mut chars = after.chars();
@@ -113,6 +113,29 @@ pub fn render_partial(line_before: &str) -> Option<String> {
         }
     }
     None
+}
+
+const RENDER: &[&str] = &["Inertia::render(", "inertia("];
+const ROUTE: &[&str] = &["route("];
+
+/// Page name at `offset` inside `Inertia::render('…')`.
+pub fn render_at(text: &str, offset: usize) -> Option<String> {
+    call_string_at(text, offset, RENDER)
+}
+
+/// Partial page name for completion inside `Inertia::render('…`.
+pub fn render_partial(line_before: &str) -> Option<String> {
+    call_string_partial(line_before, RENDER)
+}
+
+/// Ziggy route name at `offset` inside `route('…')` (for goto/hover in JS).
+pub fn route_at(text: &str, offset: usize) -> Option<String> {
+    call_string_at(text, offset, ROUTE)
+}
+
+/// Partial route name for completion inside `route('…`.
+pub fn route_partial(line_before: &str) -> Option<String> {
+    call_string_partial(line_before, ROUTE)
 }
 
 #[cfg(test)]

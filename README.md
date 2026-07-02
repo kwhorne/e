@@ -1,6 +1,6 @@
 <div align="center">
 
-# e
+<img src="icons/e-512.png" alt="e" width="120" height="120">
 
 **The editor for the rest of us**
 

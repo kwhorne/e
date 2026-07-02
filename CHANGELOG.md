@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Eloquent completion from the live database schema: typing `$model->` suggests
+  the real table columns (inferred model → table), merged with the language
+  server.
+- Live `laravel.log` panel (⌘⌥L): tails the log with coloured levels, clickable
+  stack frames, and a "Fix with AI" action.
 - Request-replay from the architecture map (⌘⌥M): a ▶ button on GET routes hits
   the running app (Grove `https://<folder>.test` by default, configurable via the
   App URL setting) and shows the response plus the SQL queries it ran (via

@@ -60,6 +60,20 @@ route → controller → views as clickable cards. Click the controller to jump 
 its method, or a view to open the Blade file. Filter by route name, URI or
 action.
 
+## Eloquent completion (live schema)
+
+When you type `$user->` on a model instance, `e` suggests the model's real
+database columns — read from the live schema (via `.env`) at startup. It infers
+the model from `$var = Model::…` or a type hint, maps it to its table
+(`protected $table` or the snake_case + plural convention), and merges the
+columns alongside Intelephense — something Intelephense can't do on its own.
+
+## Log tail
+
+`⌘⌥L` opens a live tail of `storage/logs/laravel.log`: levels are coloured,
+stack-trace frames are clickable (jump to file:line), and **Fix with AI** hands
+the latest error to the agent.
+
 ## Request replay
 
 In the architecture map (`⌘⌥M`), click ▶ on a GET route to replay the request

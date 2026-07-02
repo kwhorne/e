@@ -77,6 +77,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "runtime" => state.toggle_runtime(),
         "schema-diff" => state.compute_schema_diff(),
         "relations" => state.toggle_relations(),
+        "event-graph" => state.toggle_event_graph(),
         "props-contract" => state.compute_contract(),
         "related-files" => state.show_related_files(),
         "generate-rules" => state.generate_validation_rules(),
@@ -166,6 +167,10 @@ fn close_overlays(state: AppState) {
     }
     if state.rel_open.get() {
         state.rel_open.set(false);
+        return;
+    }
+    if state.event_open.get() {
+        state.event_open.set(false);
         return;
     }
     if state.contract_open.get() {

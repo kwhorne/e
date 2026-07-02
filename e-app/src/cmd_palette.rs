@@ -26,6 +26,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("runtime", "Laravel: Runtime Insight (Telescope)"),
     ("schema-diff", "Laravel: Schema Diff (migrations vs DB)"),
     ("relations", "Laravel: Eloquent Relationship Graph"),
+    ("event-graph", "Laravel: Event Dispatch Graph"),
     ("props-contract", "Inertia: Props Contract / Generate TS"),
     (
         "related-files",

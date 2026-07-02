@@ -468,6 +468,10 @@ pub struct AppState {
     pub rel_open: RwSignal<bool>,
     pub rel_graph: RwSignal<Vec<crate::relations::ModelNode>>,
 
+    // ---- Event dispatch graph ------------------------------------------
+    pub event_open: RwSignal<bool>,
+    pub event_graph: RwSignal<Vec<crate::events::EventNode>>,
+
     // ---- Inertia props contract ----------------------------------------
     pub contract_open: RwSignal<bool>,
     pub contract: RwSignal<Option<crate::contract::Contract>>,
@@ -1064,6 +1068,8 @@ impl AppState {
             schema_diff: RwSignal::new(Vec::new()),
             rel_open: RwSignal::new(false),
             rel_graph: RwSignal::new(Vec::new()),
+            event_open: RwSignal::new(false),
+            event_graph: RwSignal::new(Vec::new()),
             contract_open: RwSignal::new(false),
             contract: RwSignal::new(None),
             related_open: RwSignal::new(false),
@@ -3720,6 +3726,60 @@ impl AppState {
         }
     }
 
+    // ---- Event dispatch graph ------------------------------------------
+
+    pub fn toggle_event_graph(&self) {
+        let open = !self.event_open.get_untracked();
+        self.event_open.set(open);
+        if open {
+            let root = self.root.get_untracked();
+            let sig = self.event_graph;
+            let send =
+                create_ext_action(self.cx, move |g: Vec<crate::events::EventNode>| sig.set(g));
+            std::thread::spawn(move || send(crate::events::dispatch_map(&root)));
+        }
+    }
+
+    /// Caret on a dispatched event class jumps to a listener.
+    fn goto_event(&self) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        if buf.file.language != Language::Php {
+            return false;
+        }
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let text = buf.doc.text().to_string();
+        let offset = editor.cursor.get_untracked().offset();
+        let word = word_at(&text, offset);
+        if word.is_empty()
+            || !word
+                .chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false)
+        {
+            return false;
+        }
+        let root = self.root.get_untracked();
+        if let Some(node) = crate::events::dispatch_map(&root)
+            .into_iter()
+            .find(|n| n.event == word)
+        {
+            if let Some((_, Some(file))) = node.listeners.into_iter().find(|(_, f)| f.is_some()) {
+                self.jump_to(&path_to_uri(&file), 0, 0);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn open_event_file(&self, path: PathBuf) {
+        self.jump_to(&path_to_uri(&path), 0, 0);
+    }
+
     // ---- Code generation -----------------------------------------------
 
     /// Generate an Eloquent model from the table currently open in the database
@@ -5542,6 +5602,10 @@ impl AppState {
         }
         // Gates/policies: caret on an ability jumps to the policy method.
         if self.goto_policy() {
+            return;
+        }
+        // Events: caret on a dispatched event class jumps to a listener.
+        if self.goto_event() {
             return;
         }
         // Laravel navigation first: route -> controller, view -> blade, etc.

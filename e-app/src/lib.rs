@@ -25,6 +25,8 @@ mod editing;
 mod editor_area;
 mod eloquent;
 mod emmet;
+mod events;
+mod events_view;
 mod file_ops;
 mod file_tree;
 mod find;

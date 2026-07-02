@@ -27,6 +27,10 @@ const COMMANDS: &[(&str, &str)] = &[
     ("schema-diff", "Laravel: Schema Diff (migrations vs DB)"),
     ("relations", "Laravel: Eloquent Relationship Graph"),
     ("props-contract", "Inertia: Props Contract / Generate TS"),
+    (
+        "related-files",
+        "Laravel: Related Files (model / migration / …)",
+    ),
     ("livewire-companion", "Livewire: Switch View / Class"),
     ("undo-tree", "Undo Tree: Show / Time Travel"),
     ("semantic-search", "Search: Semantic (describe it)"),

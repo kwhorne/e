@@ -434,12 +434,16 @@ fn app_view() -> impl IntoView {
             crate::tdd::tdd_panel(state),
             crate::request::request_view(state),
             crate::log::laravel_log_panel(state),
-            crate::runtime_view::runtime_panel(state),
-            crate::schema_diff::schema_diff_panel(state),
-            crate::relations_view::relation_graph_panel(state),
-            crate::contract_view::contract_panel(state),
-            crate::undo_view::undo_tree_panel(state),
-            crate::semantic_view::semantic_panel(state),
+            stack((
+                crate::runtime_view::runtime_panel(state),
+                crate::schema_diff::schema_diff_panel(state),
+                crate::relations_view::relation_graph_panel(state),
+                crate::contract_view::contract_panel(state),
+                crate::related_view::related_panel(state),
+                crate::undo_view::undo_tree_panel(state),
+                crate::semantic_view::semantic_panel(state),
+            ))
+            .style(|s| s.absolute().inset(0.0).size_full()),
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),

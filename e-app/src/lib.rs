@@ -43,6 +43,8 @@ mod picker;
 mod problems;
 mod querycomplete;
 mod recent;
+mod related_view;
+mod relatedfiles;
 mod relations;
 mod relations_view;
 mod rename;

@@ -33,6 +33,7 @@ const DEFAULT: &[(&str, &str)] = &[
     ("cmd+alt+u", "undo-tree"),
     ("cmd+alt+r", "relations"),
     ("cmd+alt+c", "props-contract"),
+    ("cmd+alt+e", "related-files"),
     ("cmd+alt+j", "livewire-companion"),
     ("cmd+alt+k", "semantic-search"),
     ("cmd+\\", "split"),

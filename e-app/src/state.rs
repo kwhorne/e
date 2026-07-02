@@ -472,6 +472,10 @@ pub struct AppState {
     pub contract_open: RwSignal<bool>,
     pub contract: RwSignal<Option<crate::contract::Contract>>,
 
+    // ---- Related files (model ↔ migration ↔ factory ↔ …) ---------------
+    pub related_open: RwSignal<bool>,
+    pub related_items: RwSignal<Vec<(String, PathBuf)>>,
+
     // ---- Runtime insight (continuous Clockwork capture) ----------------
     pub runtime_open: RwSignal<bool>,
     pub runtime_reqs: RwSignal<Vec<RuntimeReq>>,
@@ -1062,6 +1066,8 @@ impl AppState {
             rel_graph: RwSignal::new(Vec::new()),
             contract_open: RwSignal::new(false),
             contract: RwSignal::new(None),
+            related_open: RwSignal::new(false),
+            related_items: RwSignal::new(Vec::new()),
             runtime_open: RwSignal::new(false),
             runtime_reqs: RwSignal::new(Vec::new()),
             runtime_expanded: RwSignal::new(None),
@@ -3712,6 +3718,36 @@ impl AppState {
                 self.undo_apply(&buf, &text);
             }
         }
+    }
+
+    // ---- Related files -------------------------------------------------
+
+    /// Show the files related to the active file's resource (model, migration,
+    /// factory, controller, test, …).
+    pub fn show_related_files(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return;
+        };
+        let root = self.root.get_untracked();
+        let Some(name) = crate::relatedfiles::resource_name(&path) else {
+            return;
+        };
+        let mut items = crate::relatedfiles::related(&root, &name);
+        items.retain(|(_, p)| *p != path);
+        if items.is_empty() {
+            Self::notify("No related files found");
+            return;
+        }
+        self.related_items.set(items);
+        self.related_open.set(true);
+    }
+
+    pub fn open_related(&self, path: PathBuf) {
+        self.related_open.set(false);
+        self.open_path(path);
     }
 
     // ---- Inertia props contract ----------------------------------------

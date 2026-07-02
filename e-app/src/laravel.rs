@@ -20,6 +20,29 @@ pub struct RouteInfo {
     pub uri: String,
     pub methods: String,
     pub action: String,
+    /// Comma-separated middleware stack (e.g. `web,auth,throttle:api`).
+    pub middleware: String,
+}
+
+impl RouteInfo {
+    /// A route that mutates state (anything but GET/HEAD/OPTIONS).
+    pub fn is_write(&self) -> bool {
+        self.methods
+            .split('|')
+            .map(|m| m.trim().to_uppercase())
+            .any(|m| matches!(m.as_str(), "POST" | "PUT" | "PATCH" | "DELETE"))
+    }
+
+    /// Whether the middleware stack enforces authentication.
+    pub fn has_auth(&self) -> bool {
+        let m = self.middleware.to_lowercase();
+        m.contains("auth") || m.contains("can:") || m.contains("verified")
+    }
+
+    /// A write route with no authentication is the headline risk.
+    pub fn is_unprotected(&self) -> bool {
+        self.is_write() && !self.has_auth()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -94,6 +117,25 @@ fn parse_json(bytes: &[u8]) -> Option<serde_json::Value> {
     serde_json::from_str(&s[start..]).ok()
 }
 
+/// `route:list --json` renders middleware as either an array or a newline-joined
+/// string, depending on the Laravel version. Normalise both to `a,b,c`.
+fn parse_middleware(v: Option<&serde_json::Value>) -> String {
+    match v {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|x| x.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+        Some(serde_json::Value::String(s)) => s
+            .split([',', '\n'])
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join(","),
+        _ => String::new(),
+    }
+}
+
 fn load_routes(root: &Path) -> Vec<RouteInfo> {
     let output = Command::new("php")
         .args(PHP_QUIET)
@@ -132,6 +174,7 @@ fn load_routes(root: &Path) -> Vec<RouteInfo> {
                             .and_then(|a| a.as_str())
                             .unwrap_or("")
                             .to_string(),
+                        middleware: parse_middleware(r.get("middleware")),
                     })
                 })
                 .collect()

@@ -10,8 +10,10 @@ use crate::laravel::{self, Helper};
 use crate::state::AppState;
 use crate::theme;
 
-/// A single resolved route row: `(name, methods, uri, action, views)`.
-type MapRow = (String, String, String, String, Vec<String>);
+/// A resolved route row: `(name, methods, uri, action, views, middleware, unprotected)`.
+type MapRow = (String, String, String, String, Vec<String>, String, bool);
+
+const WARN: Color = Color::from_rgb8(0xf7, 0x76, 0x8e);
 
 fn card(text: String, accent: bool, pointer: bool) -> impl IntoView {
     label(move || text.clone()).style(move |s| {
@@ -49,6 +51,31 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
             .font_bold()
             .color(theme::fg())
     });
+    let warn_summary = label(move || {
+        let n = state
+            .laravel
+            .get()
+            .map(|d| d.routes.iter().filter(|r| r.is_unprotected()).count())
+            .unwrap_or(0);
+        if n > 0 {
+            format!("⚠ {n} unprotected")
+        } else {
+            String::new()
+        }
+    })
+    .style(move |s| {
+        let s = s.margin_right(10.0).font_size(12.0).color(WARN);
+        let n = state
+            .laravel
+            .get()
+            .map(|d| d.routes.iter().filter(|r| r.is_unprotected()).count())
+            .unwrap_or(0);
+        if n > 0 {
+            s
+        } else {
+            s.hide()
+        }
+    });
     let close = label(|| "✕".to_string())
         .style(|s| {
             s.padding_horiz(8.0)
@@ -57,7 +84,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.map_open.set(false));
-    let header = stack((title, close)).style(|s| {
+    let header = stack((title, warn_summary, close)).style(|s| {
         s.flex_row()
             .items_center()
             .padding_horiz(12.0)
@@ -101,12 +128,14 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                         r.uri.clone(),
                         r.action.clone(),
                         views,
+                        r.middleware.clone(),
+                        r.is_unprotected(),
                     )
                 })
                 .collect()
         },
         |r| r.0.clone(),
-        move |(name, methods, uri, action, views)| {
+        move |(name, methods, uri, action, views, middleware, unprotected)| {
             // "Send" replays the request against the app (GET routes only).
             let uri_for_send = uri.clone();
             let sendable = methods.split('|').any(|m| m.trim() == "GET");
@@ -126,6 +155,56 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                     }
                 })
                 .on_click_stop(move |_| state.send_request(&uri_for_send));
+
+            // Security chip: 🔒 authed, ⚠ open (write route with no auth).
+            let mw_lower = middleware.to_lowercase();
+            let has_auth = mw_lower.contains("auth")
+                || mw_lower.contains("can:")
+                || mw_lower.contains("verified");
+            let chip_text = if unprotected {
+                "⚠ open"
+            } else if has_auth {
+                "🔒"
+            } else {
+                ""
+            };
+            let sec_prompt = format!(
+                "Security review: the Laravel route `{methods} /{uri}` → `{action}` changes state but has no authentication middleware (current stack: {}). Suggest the right protection — auth middleware, an authorization Policy, and throttling — and show the route/controller change.",
+                if middleware.is_empty() { "none" } else { &middleware }
+            );
+            let sec = label(move || chip_text.to_string())
+                .style(move |s| {
+                    let s = s.padding_horiz(6.0).border_radius(4.0).font_size(11.0);
+                    if chip_text.is_empty() {
+                        s.hide()
+                    } else if unprotected {
+                        s.color(WARN)
+                            .cursor(floem::style::CursorStyle::Pointer)
+                            .hover(|s| s.background(theme::bg_hover()))
+                    } else {
+                        s.color(theme::fg_dim())
+                    }
+                })
+                .on_click_stop(move |_| {
+                    if unprotected {
+                        state.send_to_agent(&sec_prompt);
+                    }
+                });
+
+            // Middleware stack, shown faintly at the end of the row.
+            let mw_display = middleware.clone();
+            let mw_card = label(move || mw_display.clone()).style(move |s| {
+                let s = s
+                    .font_size(10.0)
+                    .color(theme::fg_dim())
+                    .text_ellipsis()
+                    .max_width(220.0);
+                if middleware.is_empty() {
+                    s.hide()
+                } else {
+                    s
+                }
+            });
 
             // URI card (non-clickable).
             let uri_card = card(format!("{methods}  /{uri}"), false, false);
@@ -167,12 +246,14 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
 
             stack((
                 send.into_any(),
+                sec.into_any(),
                 name_lbl,
                 uri_card.into_any(),
                 arrow().into_any(),
                 ctrl.into_any(),
                 arrow().into_any(),
                 view_cards.into_any(),
+                mw_card.into_any(),
             ))
             .style(|s| {
                 s.flex_row()

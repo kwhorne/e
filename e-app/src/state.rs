@@ -448,6 +448,13 @@ pub struct AppState {
     /// A pending edit the agent proposed, awaiting per-hunk review.
     pub agent_edit: RwSignal<Option<AgentEdit>>,
 
+    // ---- Semantic search -----------------------------------------------
+    pub sem_open: RwSignal<bool>,
+    pub sem_query: RwSignal<String>,
+    pub sem_status: RwSignal<String>,
+    pub sem_results: RwSignal<Vec<crate::semantic::SemHit>>,
+    pub sem_index: RwSignal<Rc<RefCell<crate::semantic::SemIndex>>>,
+
     // ---- Undo tree -----------------------------------------------------
     pub undo_open: RwSignal<bool>,
     /// Bumped whenever the active buffer's undo tree changes (drives the panel).
@@ -838,6 +845,11 @@ impl AppState {
             agent_log_open: RwSignal::new(false),
             agent_mark: RwSignal::new(None),
             agent_edit: RwSignal::new(None),
+            sem_open: RwSignal::new(false),
+            sem_query: RwSignal::new(String::new()),
+            sem_status: RwSignal::new(String::new()),
+            sem_results: RwSignal::new(Vec::new()),
+            sem_index: RwSignal::new(Rc::new(RefCell::new(crate::semantic::SemIndex::default()))),
             undo_open: RwSignal::new(false),
             undo_rev: RwSignal::new(0),
             schema_diff_open: RwSignal::new(false),
@@ -3150,6 +3162,113 @@ impl AppState {
         if self.tdd_loop.get_untracked() && applied > 0 {
             self.run_tests();
         }
+    }
+
+    // ---- Semantic search -----------------------------------------------
+
+    pub fn toggle_semantic_search(&self) {
+        let open = !self.sem_open.get_untracked();
+        self.sem_open.set(open);
+        if open && self.sem_index.get_untracked().borrow().is_empty() {
+            self.build_semantic_index();
+        }
+    }
+
+    /// Build the project index in the background (chunks + embeddings if Ollama
+    /// is available, otherwise a lexical index).
+    pub fn build_semantic_index(&self) {
+        let roots = self.roots.get_untracked();
+        let status = self.sem_status;
+        let idx_sig = self.sem_index;
+        status.set("Indexing project…".to_string());
+        let cx = self.cx;
+        let send = create_ext_action(cx, move |index: crate::semantic::SemIndex| {
+            let n = index.chunks.len();
+            let mode = if index.semantic() {
+                "semantic"
+            } else {
+                "lexical"
+            };
+            status.set(format!("Ready · {n} chunks · {mode}"));
+            idx_sig.set(Rc::new(RefCell::new(index)));
+        });
+        std::thread::spawn(move || {
+            let chunks = crate::semantic::build_chunks(&roots);
+            let mut embeds = Vec::new();
+            let mut model = String::new();
+            if crate::semantic::ollama_up() {
+                let m = crate::semantic::embed_model();
+                let mut ok = true;
+                for batch in chunks.chunks(64) {
+                    let texts: Vec<String> = batch.iter().map(|c| c.text.clone()).collect();
+                    match crate::semantic::embed_batch(&m, &texts) {
+                        Some(mut v) => embeds.append(&mut v),
+                        None => {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                if ok && embeds.len() == chunks.len() {
+                    model = m;
+                } else {
+                    embeds.clear();
+                }
+            }
+            send(crate::semantic::SemIndex {
+                chunks,
+                embeds,
+                model,
+            });
+        });
+    }
+
+    /// Run the current semantic query against the index.
+    pub fn run_semantic_search(&self) {
+        let query = self.sem_query.get_untracked();
+        if query.trim().is_empty() {
+            return;
+        }
+        let index_rc = self.sem_index.get_untracked();
+        if index_rc.borrow().is_empty() {
+            self.sem_status
+                .set("Building index — try again shortly…".to_string());
+            self.build_semantic_index();
+            return;
+        }
+        let results = self.sem_results;
+        if index_rc.borrow().semantic() {
+            // Embed the query off-thread, then rank on the UI thread.
+            let model = index_rc.borrow().model.clone();
+            let idx_sig = self.sem_index;
+            let q = query.clone();
+            let send = create_ext_action(self.cx, move |qvec: Option<Vec<f32>>| {
+                let Some(qvec) = qvec else {
+                    return;
+                };
+                let index = idx_sig.get_untracked();
+                let index = index.borrow();
+                let scores: Vec<f32> = index
+                    .embeds
+                    .iter()
+                    .map(|e| crate::semantic::cosine(&qvec, e))
+                    .collect();
+                results.set(crate::semantic::top_hits(&index, &scores, 40));
+            });
+            std::thread::spawn(move || {
+                send(crate::semantic::embed_one(&model, &q));
+            });
+        } else {
+            let index = index_rc.borrow();
+            let scores = crate::semantic::lexical_scores(&index.chunks, &query);
+            results.set(crate::semantic::top_hits(&index, &scores, 40));
+        }
+    }
+
+    pub fn open_semantic_hit(&self, hit: &crate::semantic::SemHit) {
+        let uri = format!("file://{}", hit.path.display());
+        self.jump_to(&uri, hit.line.saturating_sub(1), 0);
+        self.sem_open.set(false);
     }
 
     // ---- Undo tree -----------------------------------------------------

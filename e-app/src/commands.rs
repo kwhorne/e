@@ -76,6 +76,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "laravel-log" => state.toggle_laravel_log(),
         "schema-diff" => state.compute_schema_diff(),
         "undo-tree" => state.toggle_undo_tree(),
+        "semantic-search" => state.toggle_semantic_search(),
         "emmet-expand" => {
             state.try_emmet_expand();
         }
@@ -154,6 +155,10 @@ fn close_overlays(state: AppState) {
     }
     if state.undo_open.get() {
         state.undo_open.set(false);
+        return;
+    }
+    if state.sem_open.get() {
+        state.sem_open.set(false);
         return;
     }
     if state.db_edit.get().is_some() {

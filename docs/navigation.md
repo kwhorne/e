@@ -56,3 +56,14 @@ at the caret, giving you context within large files.
 
 The document outline in the sidebar lists the symbols in the current file
 (from the language server). Click an entry to jump to it.
+
+## Semantic search
+
+`⌘⇧K` opens **"describe what you're looking for"** search. Type a question like
+*"where is the invoice email sent"* and `e` ranks project locations by meaning.
+
+It runs **entirely locally**. If a local [Ollama](https://ollama.com) server is
+running it embeds your code and query with a real embedding model
+(`nomic-embed-text` by default, override with `E_EMBED_MODEL`) for genuine
+semantic matches. Otherwise it falls back to a fast lexical index — no cloud, no
+data leaves your machine either way.

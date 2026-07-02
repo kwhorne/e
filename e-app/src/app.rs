@@ -433,6 +433,7 @@ fn app_view() -> impl IntoView {
             crate::log::laravel_log_panel(state),
             crate::schema_diff::schema_diff_panel(state),
             crate::undo_view::undo_tree_panel(state),
+            crate::semantic_view::semantic_panel(state),
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),

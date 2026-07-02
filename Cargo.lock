@@ -1280,6 +1280,8 @@ dependencies = [
  "encoding_rs",
  "once_cell",
  "pulldown-cmark",
+ "serde",
+ "serde_json",
  "similar",
  "tree-sitter",
  "tree-sitter-c",

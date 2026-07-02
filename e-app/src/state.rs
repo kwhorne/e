@@ -217,6 +217,11 @@ pub struct Buffer {
     pub large: bool,
     /// Text encoding label (e.g. `UTF-8`, `windows-1252`).
     pub encoding: RwSignal<String>,
+    /// Branching undo history (see [`e_core::undotree`]).
+    pub undo: Rc<RefCell<e_core::undotree::UndoTree>>,
+    /// When set, a text change is caused by undo-tree navigation, so it must
+    /// not be recorded back into the tree.
+    pub undo_nav: Rc<std::cell::Cell<bool>>,
 }
 
 /// One terminal session (a running shell).
@@ -443,6 +448,11 @@ pub struct AppState {
     /// A pending edit the agent proposed, awaiting per-hunk review.
     pub agent_edit: RwSignal<Option<AgentEdit>>,
 
+    // ---- Undo tree -----------------------------------------------------
+    pub undo_open: RwSignal<bool>,
+    /// Bumped whenever the active buffer's undo tree changes (drives the panel).
+    pub undo_rev: RwSignal<u64>,
+
     // ---- Schema diff (migrations vs live DB) ---------------------------
     pub schema_diff_open: RwSignal<bool>,
     pub schema_diff: RwSignal<Vec<crate::schema_diff::DiffRow>>,
@@ -543,6 +553,20 @@ fn csv_escape(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// Per-file location for the persisted undo tree (`~/.config/e/undo/<hash>.json`).
+fn undo_store_path(file: &std::path::Path) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    file.hash(&mut h);
+    let name = format!("{:016x}.json", h.finish());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home)
+        .join(".config")
+        .join("e")
+        .join("undo")
+        .join(name)
 }
 
 /// Locate the active Laravel log file (single or the newest daily file).
@@ -713,6 +737,11 @@ fn now_hms() -> String {
     )
 }
 
+/// Epoch milliseconds as `u64` (for the undo tree and its panel).
+pub fn now_ms_epoch() -> u64 {
+    now_ms() as u64
+}
+
 fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -809,6 +838,8 @@ impl AppState {
             agent_log_open: RwSignal::new(false),
             agent_mark: RwSignal::new(None),
             agent_edit: RwSignal::new(None),
+            undo_open: RwSignal::new(false),
+            undo_rev: RwSignal::new(0),
             schema_diff_open: RwSignal::new(false),
             schema_diff: RwSignal::new(Vec::new()),
             log_open: RwSignal::new(false),
@@ -2019,17 +2050,24 @@ impl AppState {
         let doc = Rc::new(TextDocument::new(self.cx, String::new()));
         doc.auto_indent.set(true);
         let dirty = RwSignal::new(false);
+        let undo = Rc::new(RefCell::new(e_core::undotree::UndoTree::new("")));
+        let undo_nav = Rc::new(std::cell::Cell::new(false));
 
         {
             let app = *self;
             let doc2 = doc.clone();
             let highlights = highlights.clone();
+            let undo = undo.clone();
+            let undo_nav = undo_nav.clone();
             doc.clone().add_on_update(move |_| {
                 dirty.set(true);
                 app.last_edit.set(now_ms());
                 let text = doc2.text().to_string();
                 *highlights.borrow_mut() = highlight_lines(Language::PlainText, &text);
                 doc2.cache_rev().update(|r| *r += 1);
+                if !undo_nav.get() && undo.borrow_mut().record(&text, now_ms() as u64, 700) {
+                    app.undo_rev.update(|r| *r += 1);
+                }
             });
         }
 
@@ -2053,6 +2091,8 @@ impl AppState {
             inlay_hints: RwSignal::new(Vec::new()),
             large: false,
             encoding: RwSignal::new("UTF-8".to_string()),
+            undo,
+            undo_nav,
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
@@ -3112,6 +3152,55 @@ impl AppState {
         }
     }
 
+    // ---- Undo tree -----------------------------------------------------
+
+    pub fn toggle_undo_tree(&self) {
+        self.undo_open.update(|o| *o = !*o);
+    }
+
+    /// Replace the active buffer's whole text with `text` from the undo tree,
+    /// suppressing re-recording of our own edit.
+    fn undo_apply(&self, buf: &Buffer, text: &str) {
+        buf.undo_nav.set(true);
+        let len = buf.doc.text().len();
+        let mut it = std::iter::once((Selection::region(0, len), text));
+        buf.doc.edit(&mut it, EditType::InsertChars);
+        buf.undo_nav.set(false);
+        buf.dirty.set(true);
+        buf.doc.cache_rev().update(|r| *r += 1);
+        self.undo_rev.update(|r| *r += 1);
+        if let Some(p) = &buf.file.path {
+            buf.undo.borrow().save(&undo_store_path(p));
+        }
+    }
+
+    pub fn undo_tree_undo(&self) {
+        if let Some(buf) = self.active_buffer() {
+            let t = buf.undo.borrow_mut().undo();
+            if let Some(text) = t {
+                self.undo_apply(&buf, &text);
+            }
+        }
+    }
+
+    pub fn undo_tree_redo(&self) {
+        if let Some(buf) = self.active_buffer() {
+            let t = buf.undo.borrow_mut().redo();
+            if let Some(text) = t {
+                self.undo_apply(&buf, &text);
+            }
+        }
+    }
+
+    pub fn undo_tree_goto(&self, id: usize) {
+        if let Some(buf) = self.active_buffer() {
+            let t = buf.undo.borrow_mut().goto(id);
+            if let Some(text) = t {
+                self.undo_apply(&buf, &text);
+            }
+        }
+    }
+
     // ---- Schema diff ---------------------------------------------------
 
     /// Diff the project's migrations against the live database schema.
@@ -3573,6 +3662,28 @@ impl AppState {
         let dirty = RwSignal::new(false);
         let version = RwSignal::new(1i64);
 
+        // Branching undo tree, restored from disk when it still matches.
+        let undo_path = file.path.as_ref().map(|p| undo_store_path(p));
+        let undo = {
+            let loaded = undo_path
+                .as_ref()
+                .filter(|_| !large)
+                .and_then(|p| e_core::undotree::UndoTree::load(p));
+            let t = match loaded {
+                // Restore only if the tree still matches the file on disk.
+                Some(mut t) if !t.is_empty() => {
+                    if t.sync_to(&content) {
+                        t
+                    } else {
+                        e_core::undotree::UndoTree::new(content.clone())
+                    }
+                }
+                _ => e_core::undotree::UndoTree::new(content.clone()),
+            };
+            Rc::new(RefCell::new(t))
+        };
+        let undo_nav = Rc::new(std::cell::Cell::new(false));
+
         // Hand the document to the language server, if we have one.
         if let (Some(lang_id), Some(uri)) = (lsp_language_id(language), uri.as_ref()) {
             if let Some(client) = self.ensure_lsp(language) {
@@ -3589,10 +3700,23 @@ impl AppState {
             let head_text = head_text.clone();
             let app = *self;
             let uri = uri.clone();
+            let undo = undo.clone();
+            let undo_nav = undo_nav.clone();
+            let undo_path = undo_path.clone();
             doc.clone().add_on_update(move |_| {
                 dirty.set(true);
                 app.last_edit.set(now_ms());
                 let text = doc.text().to_string();
+                if !undo_nav.get() {
+                    let now = now_ms() as u64;
+                    let mut t = undo.borrow_mut();
+                    if t.record(&text, now, 700) {
+                        app.undo_rev.update(|r| *r += 1);
+                        if let Some(p) = &undo_path {
+                            t.maybe_save(p, now);
+                        }
+                    }
+                }
                 if !large {
                     *highlights.borrow_mut() = highlight_lines(language, &text);
                     if let Some(head) = &head_text {
@@ -3640,6 +3764,8 @@ impl AppState {
             inlay_hints: RwSignal::new(Vec::new()),
             large,
             encoding: RwSignal::new(encoding),
+            undo,
+            undo_nav,
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));

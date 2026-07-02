@@ -54,6 +54,7 @@ mod tdd;
 mod terminal_view;
 mod theme;
 mod tinker;
+mod undo_view;
 mod update_view;
 mod updater;
 

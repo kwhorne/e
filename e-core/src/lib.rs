@@ -10,3 +10,4 @@ pub mod git;
 pub mod language;
 pub mod markdown;
 pub mod syntax;
+pub mod undotree;

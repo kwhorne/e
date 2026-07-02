@@ -120,4 +120,7 @@ fi
 echo
 echo "✓ Built $DMG"
 echo "  Open it and drag e.app into Applications."
-[[ "$IDENTITY" == "-" ]] && echo "  (ad-hoc signed — see docs/installation.md for Developer ID + notarization)"
+if [[ "$IDENTITY" == "-" ]]; then
+  echo "  (ad-hoc signed — see docs/installation.md for Developer ID + notarization)"
+fi
+exit 0

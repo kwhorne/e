@@ -131,17 +131,13 @@ pub fn context(line_before: &str) -> Option<QueryCtx> {
         .collect();
     let m = method.to_lowercase();
 
-    if REL_ANY.contains(&m.as_str()) {
+    let m = m.as_str();
+    if REL_ANY.contains(&m) {
         Some(QueryCtx {
             partial,
             relation: true,
         })
-    } else if COL_ANY.contains(&m.as_str()) {
-        Some(QueryCtx {
-            partial,
-            relation: false,
-        })
-    } else if COL_FIRST.contains(&m.as_str()) && commas == 0 {
+    } else if COL_ANY.contains(&m) || (COL_FIRST.contains(&m) && commas == 0) {
         Some(QueryCtx {
             partial,
             relation: false,

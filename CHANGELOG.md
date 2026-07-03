@@ -9,12 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **SQL highlighting inside PHP.** Raw SQL in `DB::select("…")`, `->whereRaw('…')`,
-  migrations' `DB::statement("…")` and friends is now syntax-highlighted as SQL
-  instead of a dead string — keywords, functions and identifiers are coloured via
-  the tree-sitter SQL grammar. Detected from the PHP parse tree (double- and
-  single-quoted), so plain strings are untouched. (First step toward inline SQL
-  intelligence; schema-aware completion and “run this query” come next.)
+- **Inline SQL intelligence.** Raw SQL inside PHP (`DB::select("…")`,
+  `->whereRaw('…')`, migrations' `DB::statement("…")`, …) is no longer a dead
+  string:
+  - **Syntax highlighting** via the tree-sitter SQL grammar (detected from the
+    PHP parse tree; double- and single-quoted; plain strings untouched).
+  - **Schema-aware completion** — typing inside the SQL string suggests table
+    names after `FROM`/`JOIN`/`UPDATE`/`INTO` and column names elsewhere, from
+    the live database schema cache.
+  - **Run the query under the cursor** with `⌘⏎` (or “Database: Run SQL Under
+    Cursor”): executes it against a connected database and shows the results in
+    the DB result panel.
+
+  Highlighting + schema validation + one-key execution in the same editor —
+  without a separate database tool.
 
 ### Fixed
 

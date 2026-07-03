@@ -9,6 +9,9 @@ use std::sync::Arc;
 
 use floem::ext_event::create_ext_action;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::views::editor::text::Document;
+
+use e_core::language::Language;
 
 use crate::state::{AppState, DbEntry, DbForm};
 
@@ -445,6 +448,55 @@ impl AppState {
         std::thread::spawn(move || {
             send(e_db::query(&conn, &sql, e_db::MAX_ROWS));
         });
+    }
+
+    /// Run the raw SQL string under the cursor (`DB::select("…")`, `->whereRaw`,
+    /// migrations' `DB::statement`, …) against a connected database and show the
+    /// results in the DB result overlay. Bound to ⌘⏎.
+    pub fn run_sql_under_cursor(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        if buf.file.language != Language::Php {
+            Self::notify("Run SQL: not a PHP file");
+            return;
+        }
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let offset = editor.cursor.get_untracked().offset();
+        let text = buf.doc.text().to_string();
+        let Some((s, e)) = e_core::syntax::php_sql_range_at(&text, offset) else {
+            Self::notify(
+                "Run SQL: put the cursor inside a DB query string (DB::select, ->whereRaw, …)",
+            );
+            return;
+        };
+        let sql = text.get(s..e).unwrap_or("").trim().to_string();
+        if sql.is_empty() {
+            return;
+        }
+        // Use a currently-connected database (no auto-connect — avoids racing an
+        // async connect and reporting "not connected").
+        let entry = self.db_conns.with_untracked(|cs| {
+            cs.iter()
+                .find(|e| e.conn.get_untracked().is_some())
+                .cloned()
+        });
+        let Some(entry) = entry else {
+            Self::notify("Run SQL: no connected database — connect one in the Database panel (⌘3)");
+            return;
+        };
+        self.db_result_key.set(Some(entry.key()));
+        self.db_result_title.set(format!(
+            "{} · query under cursor",
+            entry.config.display_name()
+        ));
+        self.db_query_text.set(sql);
+        self.db_result.set(None);
+        self.db_result_error.set(None);
+        self.db_result_open.set(true);
+        self.db_run_query();
     }
 
     fn db_apply_result(&self, res: Result<e_db::QueryResult, String>) {

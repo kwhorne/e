@@ -447,6 +447,22 @@ fn php_sql_spans(text: &str) -> Vec<Span> {
     out
 }
 
+/// The byte range of the raw-SQL string containing `offset`, if the cursor sits
+/// inside a recognised PHP DB call (`DB::select("…")`, `->whereRaw('…')`, …).
+/// Used by the editor to run / complete the SQL under the cursor.
+pub fn php_sql_range_at(text: &str, offset: usize) -> Option<(usize, usize)> {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_php::LANGUAGE_PHP.into())
+        .ok()?;
+    let tree = parser.parse(text, None)?;
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    collect_sql_ranges(tree.root_node(), text.as_bytes(), &mut ranges);
+    ranges
+        .into_iter()
+        .find(|&(s, e)| offset >= s && offset <= e)
+}
+
 /// Walk the PHP tree, collecting the byte range of the SQL string argument of
 /// each recognised DB call.
 fn collect_sql_ranges(node: tree_sitter::Node, src: &[u8], out: &mut Vec<(usize, usize)>) {

@@ -47,6 +47,7 @@ mod livewire;
 mod log;
 mod map;
 mod markdown_view;
+mod navigation;
 mod outline;
 mod palette;
 mod picker;

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **EXPLAIN + agent index suggestions.** With the cursor in a SQL string,
+  **Explain SQL Under Cursor** (`⌥⌘⏎`) runs the engine's EXPLAIN, shows the plan
+  in the result panel, and flags full table scans / missing indexes. **Suggest
+  Index for SQL Under Cursor** then hands the query + findings to the AI agent,
+  which proposes a Laravel migration adding the index — EXPLAIN → diagnosis →
+  ready-made migration in one flow (MySQL, PostgreSQL, SQLite).
 - **Index view.** The Structure tab now lists a table's indexes (name, unique vs
   plain, and the columns each covers) below its columns — for MySQL, PostgreSQL
   and SQLite. Useful for spotting missing indexes behind slow queries.

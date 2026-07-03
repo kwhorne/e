@@ -69,6 +69,8 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "agent" | "toggle-agent" => state.toggle_agent(),
         "toggle-database" => state.toggle_db_panel(),
         "run-sql" => state.run_sql_under_cursor(),
+        "explain-sql" => state.explain_sql_under_cursor(),
+        "suggest-index" => state.suggest_index_under_cursor(),
         "tinker" => state.toggle_tinker(),
         "tinker-selection" => state.run_tinker_selection(),
         "laravel-map" => state.toggle_laravel_map(),

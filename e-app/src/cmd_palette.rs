@@ -18,6 +18,11 @@ const COMMANDS: &[(&str, &str)] = &[
     ("laravel-refresh", "Laravel: Refresh Project Data"),
     ("toggle-database", "Toggle Database Panel"),
     ("run-sql", "Database: Run SQL Under Cursor (⌘⏎)"),
+    ("explain-sql", "Database: Explain SQL Under Cursor (⌥⌘⏎)"),
+    (
+        "suggest-index",
+        "Database: Suggest Index for SQL Under Cursor (agent)",
+    ),
     ("tinker", "Tinker: Toggle Scratchpad"),
     ("tinker-selection", "Tinker: Run Selection"),
     ("laravel-map", "Laravel: Architecture Map"),

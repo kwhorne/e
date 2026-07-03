@@ -1217,6 +1217,77 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
     }
 }
 
+/// The engine identifier for a live connection.
+fn backend_engine(conn: &Conn) -> &'static str {
+    match &conn.backend {
+        Backend::Mysql(_) => "mysql",
+        Backend::Sqlite(_) => "sqlite",
+        Backend::Postgres(_) => "postgres",
+        Backend::Clickhouse { .. } => "clickhouse",
+    }
+}
+
+/// Run the engine's EXPLAIN on `sql` and return the plan as a result grid.
+pub fn explain(conn: &Conn, sql: &str) -> Result<QueryResult, String> {
+    let sql = sql.trim().trim_end_matches(';');
+    let prefixed = match backend_engine(conn) {
+        "sqlite" => format!("EXPLAIN QUERY PLAN {sql}"),
+        _ => format!("EXPLAIN {sql}"),
+    };
+    query(conn, &prefixed, MAX_ROWS)
+}
+
+/// Inspect an EXPLAIN result for performance red flags (full table scans /
+/// unused indexes), returning human-readable issues. Pure — unit-tested.
+pub fn analyze_explain(engine: &str, plan: &QueryResult) -> Vec<String> {
+    let col = |name: &str| {
+        plan.columns
+            .iter()
+            .position(|c| c.eq_ignore_ascii_case(name))
+    };
+    let mut issues = Vec::new();
+    match engine {
+        "sqlite" => {
+            // EXPLAIN QUERY PLAN: the `detail` column starts with "SCAN" for a
+            // full scan, "SEARCH … USING INDEX" when an index is used.
+            for row in &plan.rows {
+                if let Some(detail) = row.last().and_then(|c| c.as_deref()) {
+                    let d = detail.trim();
+                    if d.starts_with("SCAN") && !d.contains("USING") {
+                        issues.push(format!("Full scan: {d}"));
+                    }
+                }
+            }
+        }
+        "mysql" => {
+            let (ti, tyi, ki) = (col("table"), col("type"), col("key"));
+            for row in &plan.rows {
+                let get = |i: Option<usize>| i.and_then(|i| row.get(i)).and_then(|c| c.as_deref());
+                let table = get(ti).unwrap_or("?");
+                let scan_type = get(tyi).unwrap_or("");
+                let key = get(ki);
+                if scan_type.eq_ignore_ascii_case("ALL") {
+                    issues.push(format!("Full table scan on `{table}` (type=ALL, no index)"));
+                } else if key.is_none() || key == Some("") {
+                    issues.push(format!("No index used on `{table}`"));
+                }
+            }
+        }
+        "postgres" => {
+            for row in &plan.rows {
+                if let Some(line) = row.first().and_then(|c| c.as_deref()) {
+                    if let Some(rest) = line.trim_start().strip_prefix("Seq Scan on ") {
+                        let table = rest.split_whitespace().next().unwrap_or("?");
+                        issues.push(format!("Sequential scan on {table} (no index)"));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    issues
+}
+
 struct PgRows {
     columns: Vec<String>,
     rows: Vec<Vec<Option<String>>>,
@@ -1474,6 +1545,36 @@ mod tests {
             .unwrap();
         assert!(!plain.unique);
         assert_eq!(plain.columns, vec!["user_id".to_string()]);
+        let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn sqlite_explain_flags_full_scan() {
+        let dir = std::env::temp_dir().join("e_db_explain_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("explain.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, email TEXT);\
+                 INSERT INTO t (email) VALUES ('a@x'), ('b@x');",
+            )
+            .unwrap();
+        }
+        let cfg = DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let conn = connect(&cfg).unwrap();
+        // No index on email → full scan.
+        let plan = explain(&conn, "SELECT * FROM t WHERE email = 'a@x'").unwrap();
+        let issues = analyze_explain("sqlite", &plan);
+        assert!(
+            issues.iter().any(|i| i.contains("Full scan")),
+            "expected a full-scan issue, got {issues:?}"
+        );
         let _ = std::fs::remove_file(&dbfile);
     }
 

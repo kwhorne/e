@@ -458,38 +458,40 @@ impl AppState {
     /// Run the raw SQL string under the cursor (`DB::select("…")`, `->whereRaw`,
     /// migrations' `DB::statement`, …) against a connected database and show the
     /// results in the DB result overlay. Bound to ⌘⏎.
-    pub fn run_sql_under_cursor(&self) {
-        let Some(buf) = self.active_buffer() else {
-            return;
-        };
+    /// Locate the SQL string under the cursor and a connected database to run it
+    /// against. Notifies (and returns `None`) when the pieces aren't in place.
+    fn sql_and_conn_under_cursor(&self) -> Option<(DbEntry, String)> {
+        let buf = self.active_buffer()?;
         if buf.file.language != Language::Php {
             Self::notify("Run SQL: not a PHP file");
-            return;
+            return None;
         }
-        let Some(editor) = buf.editor.get_untracked() else {
-            return;
-        };
+        let editor = buf.editor.get_untracked()?;
         let offset = editor.cursor.get_untracked().offset();
         let text = buf.doc.text().to_string();
         let Some((s, e)) = e_core::syntax::php_sql_range_at(&text, offset) else {
             Self::notify(
                 "Run SQL: put the cursor inside a DB query string (DB::select, ->whereRaw, …)",
             );
-            return;
+            return None;
         };
         let sql = text.get(s..e).unwrap_or("").trim().to_string();
         if sql.is_empty() {
-            return;
+            return None;
         }
-        // Use a currently-connected database (no auto-connect — avoids racing an
-        // async connect and reporting "not connected").
-        let entry = self.db_conns.with_untracked(|cs| {
+        let Some(entry) = self.db_conns.with_untracked(|cs| {
             cs.iter()
                 .find(|e| e.conn.get_untracked().is_some())
                 .cloned()
-        });
-        let Some(entry) = entry else {
+        }) else {
             Self::notify("Run SQL: no connected database — connect one in the Database panel (⌘3)");
+            return None;
+        };
+        Some((entry, sql))
+    }
+
+    pub fn run_sql_under_cursor(&self) {
+        let Some((entry, sql)) = self.sql_and_conn_under_cursor() else {
             return;
         };
         self.db_result_key.set(Some(entry.key()));
@@ -502,6 +504,71 @@ impl AppState {
         self.db_result_error.set(None);
         self.db_result_open.set(true);
         self.db_run_query();
+    }
+
+    /// Run EXPLAIN on the SQL under the cursor, show the plan in the result
+    /// overlay, and flag full scans / missing indexes.
+    pub fn explain_sql_under_cursor(&self) {
+        let Some((entry, sql)) = self.sql_and_conn_under_cursor() else {
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let engine = entry.config.engine.clone();
+        self.db_result_key.set(Some(entry.key()));
+        self.db_result_title
+            .set(format!("{} · EXPLAIN", entry.config.display_name()));
+        self.db_result.set(None);
+        self.db_result_error.set(None);
+        self.db_result_loading.set(true);
+        self.db_result_open.set(true);
+        let state = *self;
+        let send = create_ext_action(self.cx, move |res: Result<e_db::QueryResult, String>| {
+            if let Ok(plan) = &res {
+                let issues = e_db::analyze_explain(&engine, plan);
+                if !issues.is_empty() {
+                    Self::notify(&format!(
+                        "EXPLAIN: {} — run “Suggest Index” to ask the agent for a migration",
+                        issues.join("; ")
+                    ));
+                }
+            }
+            state.db_apply_result(res);
+        });
+        std::thread::spawn(move || send(e_db::explain(&conn, &sql)));
+    }
+
+    /// Run EXPLAIN on the SQL under the cursor and, if it has performance red
+    /// flags, ask the agent to propose an index migration.
+    pub fn suggest_index_under_cursor(&self) {
+        let Some((entry, sql)) = self.sql_and_conn_under_cursor() else {
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let engine = entry.config.engine.clone();
+        let sql_for_explain = sql.clone();
+        let state = *self;
+        let ask = create_ext_action(self.cx, move |issues: Vec<String>| {
+            if issues.is_empty() {
+                Self::notify("EXPLAIN found no full scans — no index needed");
+                return;
+            }
+            state.send_to_agent(&format!(
+                "This SQL query has a performance problem. Propose a Laravel migration that adds \
+                 the missing index(es), then briefly explain why.\n\nQuery:\n{sql}\n\nEXPLAIN \
+                 findings:\n- {}",
+                issues.join("\n- ")
+            ));
+        });
+        std::thread::spawn(move || {
+            let issues = e_db::explain(&conn, &sql_for_explain)
+                .map(|plan| e_db::analyze_explain(&engine, &plan))
+                .unwrap_or_default();
+            ask(issues);
+        });
     }
 
     fn db_apply_result(&self, res: Result<e_db::QueryResult, String>) {

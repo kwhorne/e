@@ -1568,6 +1568,18 @@ impl AppState {
         }
     }
 
+    /// Run `work` on a background thread and deliver its result to `on_done` on
+    /// the UI thread. Replaces the `create_ext_action` + `thread::spawn`
+    /// boilerplate repeated across the app.
+    pub(crate) fn spawn_bg<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+        on_done: impl FnOnce(T) + 'static,
+    ) {
+        let send = create_ext_action(self.cx, on_done);
+        std::thread::spawn(move || send(work()));
+    }
+
     /// Write user data to disk, surfacing failures as a notification instead of
     /// swallowing them. Returns whether the write succeeded.
     pub(crate) fn write_or_notify(path: &std::path::Path, content: &str) -> bool {
@@ -2066,21 +2078,23 @@ impl AppState {
             outline.set(Vec::new());
             return;
         }
-        let send = create_ext_action(self.cx, move |items: Vec<OutlineItem>| outline.set(items));
-        std::thread::spawn(move || {
-            let syms = client.document_symbols(&uri).unwrap_or_default();
-            let items = syms
-                .into_iter()
-                .map(|(name, kind, line, ch, depth)| OutlineItem {
-                    name,
-                    kind,
-                    line,
-                    char: ch,
-                    depth,
-                })
-                .collect();
-            send(items);
-        });
+        self.spawn_bg(
+            move || {
+                client
+                    .document_symbols(&uri)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(name, kind, line, ch, depth)| OutlineItem {
+                        name,
+                        kind,
+                        line,
+                        char: ch,
+                        depth,
+                    })
+                    .collect::<Vec<_>>()
+            },
+            move |items| outline.set(items),
+        );
     }
 
     // ---- Task runner ---------------------------------------------------

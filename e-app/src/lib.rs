@@ -18,6 +18,8 @@ mod completion;
 mod config;
 mod contract;
 mod contract_view;
+#[cfg(test)]
+mod corpus;
 mod db_state;
 mod db_view;
 mod debug;

@@ -36,3 +36,26 @@ jobs:
         run: cargo build --workspace
       - name: Test
         run: cargo test --workspace
+
+  corpus:
+    name: Parser corpus (real Laravel projects)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Clone a handful of real projects so the heuristic parsers (props
+      # contract, query diagnostics, relationship + event graphs, Livewire) meet
+      # wild PHP/Vue — not just the happy-path unit tests. We only assert "no
+      # panic, sane counts".
+      - name: Fetch corpus
+        run: |
+          mkdir -p corpus
+          git clone --depth 1 https://github.com/laravel/laravel.git           corpus/laravel
+          git clone --depth 1 https://github.com/inertiajs/pingcrm.git          corpus/pingcrm
+          git clone --depth 1 https://github.com/livewire/livewire.git          corpus/livewire
+          git clone --depth 1 https://github.com/spatie/laravel-permission.git  corpus/laravel-permission
+      - name: Run parsers over the corpus
+        env:
+          E_CORPUS_DIR: ${{ github.workspace }}/corpus
+        run: cargo test -p e-app corpus -- --ignored --nocapture

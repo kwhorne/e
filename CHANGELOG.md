@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Command palette (`⌘⇧P`) felt unresponsive.** It didn't clear the previous
+  query on open, so new keystrokes appended to a stale search (e.g. `che`
+  became `<old>che`) and matched nothing. It now starts fresh every time —
+  typing filters immediately.
+
+### Changed
+
+- **Reopen the last project.** Launching `e` with no path (double-click, Dock,
+  bare `e`) now reopens the project you last had open instead of the current
+  directory.
+
 ### Added
 
 - **Inline AI completion (“ghost text”).** After a short idle in a code file, `e`

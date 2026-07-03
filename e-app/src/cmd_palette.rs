@@ -131,6 +131,11 @@ pub fn command_palette(state: AppState) -> impl IntoView {
     let focus_pulse: RwSignal<u64> = RwSignal::new(0);
     create_effect(move |_| {
         if cmd.open.get() {
+            // Start fresh every time: a stale query from a previous invocation
+            // would make new keystrokes append (e.g. "che" → "<old>che") and match
+            // nothing — which read as an unresponsive palette.
+            cmd.query.set(String::new());
+            cmd.selected.set(0);
             focus_pulse.update(|x| *x += 1);
         }
     });
@@ -299,6 +304,16 @@ mod tests {
     #[test]
     fn empty_query_returns_all() {
         assert_eq!(rank_commands("").len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn prefix_query_matches_check_updates() {
+        // "che" must surface "Check for Updates" (the palette felt unresponsive
+        // only because a stale query wasn't cleared on open, not because of the
+        // ranking).
+        let ids: Vec<&str> = rank_commands("che").iter().map(|(id, _)| *id).collect();
+        assert!(ids.contains(&"check-updates"), "che -> {ids:?}");
+        assert_eq!(ids.first(), Some(&"check-updates"), "che top: {ids:?}");
     }
 
     #[test]

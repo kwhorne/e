@@ -1,6 +1,6 @@
 //! Global (cross-workspace) editor configuration in `~/.config/e/config.json`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -254,6 +254,17 @@ pub fn set_usize(key: &str, n: usize) {
 }
 pub fn set_str(key: &str, s: &str) {
     set_value(key, json!(s));
+}
+
+/// Remember the last opened project so a bare launch reopens it.
+pub fn save_last_project(path: &Path) {
+    set_str("last_project", &path.to_string_lossy());
+}
+
+/// The last opened project directory, if one was recorded and still exists.
+pub fn load_last_project() -> Option<PathBuf> {
+    let p = PathBuf::from(read().get("last_project")?.as_str()?);
+    p.is_dir().then_some(p)
 }
 
 /// User-defined snippets, keyed by language id, from the `snippets` section:

@@ -69,7 +69,8 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
 fn resolve_args() -> (PathBuf, Option<PathBuf>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match std::env::args().nth(1) {
-        None => (cwd, None),
+        // Bare launch (double-click, `e` with no path): reopen the last project.
+        None => (crate::config::load_last_project().unwrap_or(cwd), None),
         Some(arg) => {
             let path = PathBuf::from(arg);
             let path = path.canonicalize().unwrap_or(path);
@@ -165,6 +166,8 @@ fn resize_handle(
 
 fn app_view() -> impl IntoView {
     let (root, file) = resolve_args();
+    // Remember this project so the next bare launch reopens it.
+    crate::config::save_last_project(&root);
     let state = AppState::new(Scope::current(), root);
     crate::snippets::set_user(crate::config::load_user_snippets());
     crate::keymap::load(crate::config::load_user_keybindings());

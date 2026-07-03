@@ -1376,5 +1376,76 @@ fn structure_grid(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col());
 
-    stack((header, rows)).style(|s| s.flex_col().width(520.0))
+    // Indexes section (below the columns grid).
+    let idx_title = label(|| "Indexes".to_string()).style(move |s| {
+        let s = s
+            .font_size(11.0)
+            .font_bold()
+            .color(theme::fg_dim())
+            .padding_horiz(8.0)
+            .padding_top(12.0)
+            .padding_bottom(4.0);
+        if state.db_indexes.with(|i| i.is_empty()) {
+            s.hide()
+        } else {
+            s
+        }
+    });
+    let idx_rows = dyn_stack(
+        move || {
+            state
+                .db_indexes
+                .get()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, ix)| {
+            let cols = ix.columns.join(", ");
+            let name = ix.name.clone();
+            let badge = if ix.unique { "UNIQUE" } else { "INDEX" };
+            stack((
+                label(move || badge.to_string()).style(move |s| {
+                    s.width(70.0)
+                        .flex_shrink(0.0)
+                        .padding_horiz(8.0)
+                        .padding_vert(4.0)
+                        .font_size(10.5)
+                        .color(if ix.unique {
+                            Color::from_rgb8(0xe5, 0xc0, 0x7b)
+                        } else {
+                            theme::fg_dim()
+                        })
+                }),
+                label(move || name.clone()).style(|s| {
+                    s.width(200.0)
+                        .flex_shrink(0.0)
+                        .padding_horiz(8.0)
+                        .padding_vert(4.0)
+                        .font_size(12.0)
+                        .color(theme::fg())
+                        .text_ellipsis()
+                }),
+                label(move || cols.clone()).style(|s| {
+                    s.flex_grow(1.0)
+                        .padding_horiz(8.0)
+                        .padding_vert(4.0)
+                        .font_size(12.0)
+                        .font_family("monospace".to_string())
+                        .color(theme::fg_dim())
+                        .text_ellipsis()
+                }),
+            ))
+            .style(|s| {
+                s.flex_row()
+                    .border_bottom(1.0)
+                    .border_color(theme::border())
+                    .hover(|s| s.background(theme::bg_hover()))
+            })
+        },
+    )
+    .style(|s| s.flex_col());
+
+    stack((header, rows, idx_title, idx_rows)).style(|s| s.flex_col().width(520.0))
 }

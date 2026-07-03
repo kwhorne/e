@@ -902,6 +902,113 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
     }
 }
 
+/// A table index (name, uniqueness, and the columns it covers, in order).
+#[derive(Clone, Debug, PartialEq)]
+pub struct IndexInfo {
+    pub name: String,
+    pub unique: bool,
+    pub columns: Vec<String>,
+}
+
+/// List the indexes on `table`. ClickHouse has no secondary indexes, so it
+/// returns an empty list.
+pub fn indexes(conn: &Conn, table: &str) -> Result<Vec<IndexInfo>, String> {
+    match &conn.backend {
+        Backend::Mysql(pool) => {
+            use mysql::prelude::Queryable;
+            let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            let q = format!("SHOW INDEX FROM `{}`", table.replace('`', "``"));
+            let rows: Vec<mysql::Row> = c.query(q).map_err(|e| e.to_string())?;
+            Ok(group_indexes(rows.into_iter().filter_map(|mut r| {
+                let name: String = r.take("Key_name")?;
+                let non_unique: i64 = r.take("Non_unique").unwrap_or(1);
+                let col: String = r.take("Column_name").unwrap_or_default();
+                Some((name, non_unique == 0, col))
+            })))
+        }
+        Backend::Sqlite(path) => {
+            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let list_q = format!("PRAGMA index_list(\"{}\")", table.replace('"', "\"\""));
+            // index_list columns: seq, name, unique, origin, partial.
+            let listed: Vec<(String, bool)> = {
+                let mut stmt = c.prepare(&list_q).map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map([], |r| {
+                        Ok((r.get::<_, String>(1)?, r.get::<_, i64>(2).unwrap_or(0) != 0))
+                    })
+                    .map_err(|e| e.to_string())?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            let mut out = Vec::new();
+            for (name, unique) in listed {
+                let info_q = format!("PRAGMA index_info(\"{}\")", name.replace('"', "\"\""));
+                let mut stmt = c.prepare(&info_q).map_err(|e| e.to_string())?;
+                // index_info columns: seqno, cid, name.
+                let cols: Vec<String> = stmt
+                    .query_map([], |r| r.get::<_, Option<String>>(2))
+                    .map_err(|e| e.to_string())?
+                    .filter_map(|r| r.ok().flatten())
+                    .collect();
+                out.push(IndexInfo {
+                    name,
+                    unique,
+                    columns: cols,
+                });
+            }
+            Ok(out)
+        }
+        Backend::Postgres(m) => {
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
+            let t = table.replace('\'', "''");
+            let res = pg_query(
+                &mut client,
+                &format!(
+                    "SELECT i.relname, ix.indisunique, a.attname \
+                     FROM pg_class t \
+                     JOIN pg_index ix ON t.oid = ix.indrelid \
+                     JOIN pg_class i ON i.oid = ix.indexrelid \
+                     JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) \
+                     WHERE t.relname = '{t}' \
+                     ORDER BY i.relname, array_position(ix.indkey, a.attnum)"
+                ),
+                MAX_ROWS,
+            )?;
+            Ok(group_indexes(res.rows.into_iter().map(|row| {
+                let name = row.first().cloned().flatten().unwrap_or_default();
+                let uniq = row.get(1).cloned().flatten().unwrap_or_default();
+                let unique = matches!(uniq.as_str(), "t" | "true" | "TRUE");
+                let col = row.get(2).cloned().flatten().unwrap_or_default();
+                (name, unique, col)
+            })))
+        }
+        Backend::Clickhouse { .. } => Ok(Vec::new()),
+    }
+}
+
+/// Fold `(index_name, unique, column)` rows (in column order) into per-index
+/// [`IndexInfo`], preserving first-seen index order.
+fn group_indexes(rows: impl Iterator<Item = (String, bool, String)>) -> Vec<IndexInfo> {
+    let mut order: Vec<String> = Vec::new();
+    let mut map: std::collections::HashMap<String, IndexInfo> = std::collections::HashMap::new();
+    for (name, unique, col) in rows {
+        if name.is_empty() {
+            continue;
+        }
+        let entry = map.entry(name.clone()).or_insert_with(|| {
+            order.push(name.clone());
+            IndexInfo {
+                name: name.clone(),
+                unique,
+                columns: Vec::new(),
+            }
+        });
+        if !col.is_empty() {
+            entry.columns.push(col);
+        }
+    }
+    order.into_iter().filter_map(|n| map.remove(&n)).collect()
+}
+
 /// Quote an identifier for the given engine.
 fn quote_ident(engine: &str, ident: &str) -> String {
     match engine {
@@ -1332,6 +1439,41 @@ mod tests {
         assert_eq!(res.columns, vec!["id".to_string(), "name".to_string()]);
         assert_eq!(res.rows.len(), 2);
         assert_eq!(res.rows[0][1], Some("Alice".to_string()));
+        let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn sqlite_indexes() {
+        let dir = std::env::temp_dir().join("e_db_idx_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("idx.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch(
+                "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, slug TEXT);\
+                 CREATE UNIQUE INDEX posts_slug_unique ON posts (slug);\
+                 CREATE INDEX posts_user_id_index ON posts (user_id);",
+            )
+            .unwrap();
+        }
+        let cfg = DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let conn = connect(&cfg).unwrap();
+        let mut idx = indexes(&conn, "posts").unwrap();
+        idx.sort_by(|a, b| a.name.cmp(&b.name));
+        let unique = idx.iter().find(|i| i.name == "posts_slug_unique").unwrap();
+        assert!(unique.unique);
+        assert_eq!(unique.columns, vec!["slug".to_string()]);
+        let plain = idx
+            .iter()
+            .find(|i| i.name == "posts_user_id_index")
+            .unwrap();
+        assert!(!plain.unique);
+        assert_eq!(plain.columns, vec!["user_id".to_string()]);
         let _ = std::fs::remove_file(&dbfile);
     }
 

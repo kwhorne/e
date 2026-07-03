@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Index view.** The Structure tab now lists a table's indexes (name, unique vs
+  plain, and the columns each covers) below its columns — for MySQL, PostgreSQL
+  and SQLite. Useful for spotting missing indexes behind slow queries.
 - **Database write protection.** Connections that look like production (SSH
   tunnels, non-local hosts, or names containing prod/production/live) default to
   **read-only**, and cell edits to a read-only connection are blocked with a

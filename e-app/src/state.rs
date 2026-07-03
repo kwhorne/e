@@ -427,6 +427,8 @@ pub struct AppState {
     pub db_subview: RwSignal<String>,
     /// Structure (column) metadata for the browsed table.
     pub db_columns: RwSignal<Vec<e_db::ColumnInfo>>,
+    /// Indexes of the currently-inspected table (Structure subview).
+    pub db_indexes: RwSignal<Vec<e_db::IndexInfo>>,
     /// Active sort: `(column, ascending)`.
     pub db_sort: RwSignal<Option<(String, bool)>>,
     /// Current page (0-based) when browsing a table.
@@ -930,6 +932,7 @@ impl AppState {
             db_result_table: RwSignal::new(None),
             db_subview: RwSignal::new("data".into()),
             db_columns: RwSignal::new(Vec::new()),
+            db_indexes: RwSignal::new(Vec::new()),
             db_sort: RwSignal::new(None),
             db_page: RwSignal::new(0),
             db_test_state: RwSignal::new(String::new()),

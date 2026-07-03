@@ -298,10 +298,15 @@ impl AppState {
         };
         let send = create_ext_action(self.cx, {
             let state = *self;
-            move |cols: Vec<e_db::ColumnInfo>| state.db_columns.set(cols)
+            move |(cols, idx): (Vec<e_db::ColumnInfo>, Vec<e_db::IndexInfo>)| {
+                state.db_columns.set(cols);
+                state.db_indexes.set(idx);
+            }
         });
         std::thread::spawn(move || {
-            send(e_db::columns(&conn, &table).unwrap_or_default());
+            let cols = e_db::columns(&conn, &table).unwrap_or_default();
+            let idx = e_db::indexes(&conn, &table).unwrap_or_default();
+            send((cols, idx));
         });
     }
 

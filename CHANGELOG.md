@@ -25,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line and can no longer desync the two lists — the bug class behind the
   0.6.5/0.6.6 unclickable-window regressions.
 
+### Internal
+
+- Began splitting the `state.rs` god-module: cohesive feature clusters now live
+  in their own files (`runtime.rs`, `db_state.rs`, `terminal_state.rs`,
+  `laravel_state.rs`), extending `AppState` from their own module. Pure moves,
+  no behaviour change; `state.rs` is down ~1,170 lines (6,599 → 5,426). A new
+  `AppState::spawn_bg` helper centralises the background-work + UI-marshal
+  boilerplate.
+- A CI “Parser corpus” job runs the heuristic parsers (routes/views, Eloquent
+  relationship + event graphs, Livewire/Inertia props) over real Laravel
+  projects (laravel, pingcrm, livewire, laravel-permission), asserting “no
+  panic, sane counts” — catching wild-PHP edge cases the happy-path unit tests
+  miss.
+
 - **macOS: "e cannot open files of this type".** Opening a file via Finder
   ("Open With → e", double-click, or the Dock) no longer fails — the app bundle
   now declares `e` as a text editor for *all* file types, so `.sql`, `.env`,

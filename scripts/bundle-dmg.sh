@@ -108,12 +108,14 @@ PLIST
 IDENTITY="$(detect_identity)"; IDENTITY="${IDENTITY:--}"
 sign_app "$APP" "$IDENTITY"
 
-# In CI the per-arch target dirs (several GB each) are dead weight once the
-# universal binary is in the app bundle; free them so hdiutil has room to build
-# the DMG (the runner was hitting "No space left on device").
+# In CI the whole target dir (10+ GB: per-arch builds plus the universal
+# release) is dead weight once the signed app is staged under dist/ — the
+# universal binary already lives inside the app bundle. Free all of it so
+# hdiutil has room to build the DMG (the runner kept hitting "No space left on
+# device", even after only the per-arch dirs were removed).
 if [[ -n "${CI:-}" ]]; then
-  echo "==> CI: freeing per-arch build dirs before building the DMG"
-  rm -rf target/aarch64-apple-darwin target/x86_64-apple-darwin || true
+  echo "==> CI: freeing the target dir before building the DMG"
+  rm -rf target || true
 fi
 
 # --- 4. build the DMG ------------------------------------------------------

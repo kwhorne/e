@@ -55,7 +55,8 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Open another project** (`⌘O`), **new file** (`⌘N`), **go to line** (`⌃G`)
 - **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search & replace** (`⌘⇧F`)
 - **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch switcher, commit history, stash, blame, merge-conflict resolution
-- **Database panel** (`⌘3`) — browse & query MySQL, PostgreSQL, SQLite and ClickHouse; connect from `.env` or manually (with SSH tunnels), sortable columns, structure view, inline cell editing, saved queries, CSV export
+- **Database panel** (`⌘3`) — browse & query MySQL, PostgreSQL, SQLite and ClickHouse; connect from `.env` or manually (with SSH tunnels), sortable columns, structure view with indexes, row editing (insert / update / delete), column filters, foreign-key hopping, read-only protection for production connections, saved queries, CSV export
+- **Inline SQL in PHP** — SQL strings are syntax-highlighted; **run under cursor** (`⌘↵`), **EXPLAIN** (`⌥⌘↵`) flags full scans / missing indexes, and *Suggest Index* asks the agent for a migration
 - **Laravel intelligence** — completion, hover and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()` and `<x-…>` components, sourced from your project
 - **Eloquent completion** — `$model->` suggests real table columns from the live database schema, merged with the language server
 - **Eloquent relationship graph** (`⌘⌥R`) — models vs. live foreign keys, flagging relations with no backing FK

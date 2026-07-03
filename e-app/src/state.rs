@@ -216,6 +216,8 @@ pub struct Buffer {
     pub blame: Rc<RefCell<Vec<(String, i64, String)>>>,
     /// LSP inlay hints: `(line, character, label)`, shown as phantom text.
     pub inlay_hints: RwSignal<Vec<(u32, u32, String)>>,
+    /// Pending inline AI suggestion ("ghost text"), if any.
+    pub ghost: RwSignal<Option<crate::ghost::GhostText>>,
     /// Very large file — expensive per-edit features are skipped for speed.
     pub large: bool,
     /// Text encoding label (e.g. `UTF-8`, `windows-1252`).
@@ -502,6 +504,9 @@ pub struct AppState {
     pub debug_breakpoints: RwSignal<std::collections::HashMap<String, Vec<u32>>>,
     /// The live adapter client, if a session is running.
     pub debug_client: RwSignal<Option<std::sync::Arc<e_dap::DapClient>>>,
+
+    /// Generation counter debouncing inline AI-completion requests.
+    pub ghost_gen: RwSignal<u64>,
 
     // ---- Laravel log tail ----------------------------------------------
     pub log_open: RwSignal<bool>,
@@ -965,6 +970,7 @@ impl AppState {
             debug_output: RwSignal::new(Vec::new()),
             debug_breakpoints: RwSignal::new(std::collections::HashMap::new()),
             debug_client: RwSignal::new(None),
+            ghost_gen: RwSignal::new(0),
             log_open: RwSignal::new(false),
             log_lines: RwSignal::new(Vec::new()),
             db_schema_cache: RwSignal::new(std::collections::HashMap::new()),
@@ -2249,6 +2255,7 @@ impl AppState {
             disk_changed: RwSignal::new(false),
             blame: Rc::new(RefCell::new(Vec::new())),
             inlay_hints: RwSignal::new(Vec::new()),
+            ghost: RwSignal::new(None),
             large: false,
             encoding: RwSignal::new("UTF-8".to_string()),
             lint: Rc::new(RefCell::new(Vec::new())),
@@ -3437,6 +3444,8 @@ impl AppState {
                 }
                 // Trigger completion (LSP + snippets + Laravel helpers).
                 app.autocomplete_after_edit(id);
+                // Request an inline AI suggestion (debounced; no-op if disabled).
+                app.request_ghost(id);
                 // Laravel query-builder lint (unknown columns).
                 app.refresh_lint(id);
             });
@@ -3468,6 +3477,7 @@ impl AppState {
             disk_changed: RwSignal::new(false),
             blame: Rc::new(RefCell::new(Vec::new())),
             inlay_hints: RwSignal::new(Vec::new()),
+            ghost: RwSignal::new(None),
             large,
             encoding: RwSignal::new(encoding),
             lint: Rc::new(RefCell::new(Vec::new())),

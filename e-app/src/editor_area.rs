@@ -269,6 +269,11 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                                 return CommandExecuted::Yes;
                             }
                             floem::keyboard::Key::Named(floem::keyboard::NamedKey::Tab)
+                                if state.accept_ghost() =>
+                            {
+                                return CommandExecuted::Yes;
+                            }
+                            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Tab)
                                 if state.try_emmet_expand() =>
                             {
                                 return CommandExecuted::Yes;
@@ -282,6 +287,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
             .use_doc(Rc::new(crate::hints_doc::HintsDoc::new(
                 b.doc.clone(),
                 b.inlay_hints,
+                b.ghost,
             )) as Rc<dyn Document>)
             .styling(SyntaxStyling::new(
                 b.highlights.clone(),

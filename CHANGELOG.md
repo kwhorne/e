@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Inline AI completion (“ghost text”).** After a short idle in a code file, `e`
+  asks a local [Ollama](https://ollama.com) code model (fill-in-the-middle) for
+  a one-line continuation and shows it as grey text at the cursor; `Tab` accepts
+  it, typing or `Esc` dismisses it. Entirely local and **opt-in** — enable it in
+  Settings → Editor (`ai_completion`), with the model set via `E_COMPLETION_MODEL`
+  (default `qwen2.5-coder`). Requests are debounced and never block the editor;
+  nothing runs unless it's enabled and Ollama is reachable.
+
 ## [0.6.9] - 2026-07-03
 
 ### Added

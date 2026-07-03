@@ -26,14 +26,27 @@ fn hint_color() -> Color {
     Color::from_rgb8(0x6b, 0x73, 0x80)
 }
 
+fn ghost_color() -> Color {
+    Color::from_rgb8(0x5c, 0x63, 0x70)
+}
+
 pub struct HintsDoc {
     inner: Rc<TextDocument>,
     hints: RwSignal<Vec<(u32, u32, String)>>,
+    ghost: RwSignal<Option<crate::ghost::GhostText>>,
 }
 
 impl HintsDoc {
-    pub fn new(inner: Rc<TextDocument>, hints: RwSignal<Vec<(u32, u32, String)>>) -> Self {
-        Self { inner, hints }
+    pub fn new(
+        inner: Rc<TextDocument>,
+        hints: RwSignal<Vec<(u32, u32, String)>>,
+        ghost: RwSignal<Option<crate::ghost::GhostText>>,
+    ) -> Self {
+        Self {
+            inner,
+            hints,
+            ghost,
+        }
     }
 }
 
@@ -63,6 +76,27 @@ impl DocumentPhantom for HintsDoc {
                 });
             }
             pl.text.sort_by_key(|p| p.col);
+        }
+
+        // Inline AI suggestion ("ghost text") at the cursor, rendered grey.
+        if let Some(ghost) = self.ghost.get_untracked() {
+            let rope = self.inner.rope_text();
+            let line_start = rope.offset_of_line(line);
+            let line_end = rope.offset_of_line(line + 1);
+            if ghost.offset >= line_start && ghost.offset < line_end {
+                let (_, col) = rope.offset_to_line_col(ghost.offset);
+                pl.text.push(PhantomText {
+                    kind: PhantomTextKind::Completion,
+                    col,
+                    affinity: None,
+                    text: ghost.text.clone(),
+                    font_size: None,
+                    fg: Some(ghost_color()),
+                    bg: None,
+                    under_line: None,
+                });
+                pl.text.sort_by_key(|p| p.col);
+            }
         }
         pl
     }

@@ -393,6 +393,21 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
         )
         .into_any(),
     );
+    push(
+        1,
+        "Inline AI completion",
+        "Ghost-text suggestions from a local Ollama code model (Tab to accept)",
+        toggle_row(
+            "Inline AI completion",
+            "Ghost-text suggestions from a local Ollama code model (Tab to accept)",
+            move || s.settings.get().ai_completion,
+            move |v| {
+                s.settings.update(|st| st.ai_completion = v);
+                config::set_bool("ai_completion", v);
+            },
+        )
+        .into_any(),
+    );
 
     // 2 — On Save
     push(

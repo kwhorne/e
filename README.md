@@ -49,6 +49,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
   Tailwind classes, Vue/Svelte directives, and Laravel helpers (`route()`,
   `view()`, `config()`, `env()`)
 - **Built-in completion** — keywords and buffer words, with or without a language server
+- **Inline AI completion** — optional grey "ghost text" from a local Ollama code model, `Tab` to accept (fully local, opt-in)
 - **Multi-root workspaces**, **drag & drop** files to open, **select all occurrences** (`⌘⇧L`)
 - **Fuzzy file finder** (`⌘P`), **command palette** (`⌘⇧P`), **recent files** (`⌘E`)
 - **Open another project** (`⌘O`), **new file** (`⌘N`), **go to line** (`⌃G`)

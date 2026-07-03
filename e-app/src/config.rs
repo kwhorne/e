@@ -17,6 +17,8 @@ pub struct Settings {
     pub auto_close: bool,
     pub inlay_hints: bool,
     pub sticky_scroll: bool,
+    /// Inline AI completion ("ghost text") via a local Ollama code model.
+    pub ai_completion: bool,
     /// Laravel-aware completion, hover and navigation (auto-enabled in Laravel
     /// projects; set to false to turn off).
     pub laravel: bool,
@@ -45,6 +47,7 @@ impl Default for Settings {
             auto_close: true,
             inlay_hints: true,
             sticky_scroll: true,
+            ai_completion: false,
             laravel: true,
             xdebug: false,
             app_url: String::new(),
@@ -93,6 +96,7 @@ pub fn load_settings() -> Settings {
         auto_close: bool_of("auto_close", d.auto_close),
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
+        ai_completion: bool_of("ai_completion", d.ai_completion),
         laravel: bool_of("laravel", d.laravel),
         xdebug: bool_of("xdebug", d.xdebug),
         app_url: v

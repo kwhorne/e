@@ -27,6 +27,7 @@ and `keybindings`), which is created on first use.
   "auto_close": true,      // auto-close brackets and quotes
   "inlay_hints": true,     // show LSP inlay hints (types, parameter names)
   "sticky_scroll": true,   // pin enclosing scope lines at the top while scrolling
+  "ai_completion": false,  // inline AI "ghost text" via a local Ollama code model
   "xdebug": false,         // enable Xdebug step-debugging via Grove (grove debug on)
   "sidebar_side": "left",  // explorer/Git panel side: "left" or "right"
   "agent_side": "right",   // agent panel side: "right" or "left"
@@ -47,6 +48,7 @@ and `keybindings`), which is created on first use.
 | `auto_close` | bool | `true` | Auto-close brackets/quotes |
 | `inlay_hints` | bool | `true` | Show LSP inlay hints |
 | `sticky_scroll` | bool | `true` | Pin enclosing scope at the top |
+| `ai_completion` | bool | `false` | Inline AI completion (ghost text) via a local Ollama code model; `Tab` accepts. Model via `E_COMPLETION_MODEL` (default `qwen2.5-coder`). Requires a running Ollama. |
 | `xdebug` | bool | `false` | Toggling this runs `grove debug on`/`off` to load Xdebug for step-debugging (see [Debugging](debugging.md)) |
 | `sidebar_side` | string | `"left"` | Side of the explorer/Git sidebar (`"left"` or `"right"`) |
 | `agent_side` | string | `"right"` | Side of the agent panel (`"right"` or `"left"`) |

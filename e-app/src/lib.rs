@@ -37,6 +37,7 @@ mod file_ops;
 mod file_tree;
 mod find;
 mod framework_completion;
+mod ghost;
 mod git_view;
 mod hints_doc;
 mod inertia;

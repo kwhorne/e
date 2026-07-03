@@ -214,6 +214,7 @@ fn close_overlays(state: AppState) {
     }
     state.close_db_result();
     state.close_completion();
+    state.clear_ghost();
     state.close_hover();
     state.close_signature();
     state.picker.open.set(false);

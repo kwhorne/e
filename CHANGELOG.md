@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **SQL highlighting inside PHP.** Raw SQL in `DB::select("…")`, `->whereRaw('…')`,
+  migrations' `DB::statement("…")` and friends is now syntax-highlighted as SQL
+  instead of a dead string — keywords, functions and identifiers are coloured via
+  the tree-sitter SQL grammar. Detected from the PHP parse tree (double- and
+  single-quoted), so plain strings are untouched. (First step toward inline SQL
+  intelligence; schema-aware completion and “run this query” come next.)
+
 ### Fixed
 
 - **Command palette (`⌘⇧P`) now actually filters as you type.** The real cause

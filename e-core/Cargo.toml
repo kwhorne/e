@@ -23,6 +23,7 @@ tree-sitter-json         = "0.24"
 tree-sitter-go           = "0.23"
 tree-sitter-c            = "0.23"
 tree-sitter-php          = "0.24"
+tree-sitter-sequel       = "0.3"   # SQL grammar, for SQL-in-PHP injection highlighting
 tree-sitter-html         = "0.23"
 tree-sitter-css          = "0.25"
 tree-sitter-svelte-ng    = "1.0"

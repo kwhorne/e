@@ -213,6 +213,8 @@ pub fn highlight_lines(language: Language, text: &str) -> Vec<Vec<LineSpan>> {
     let spans = match language {
         Language::Blade => blade_spans(text),
         Language::Html | Language::Vue => merge_spans(ts_spans(language, text), class_spans(text)),
+        // Overlay SQL highlighting on raw-SQL strings (DB::select("…"), …).
+        Language::Php => merge_spans(ts_spans(Language::Php, text), php_sql_spans(text)),
         _ => ts_spans(language, text),
     };
     for (start, end, kind) in spans {
@@ -320,35 +322,196 @@ type Span = (usize, usize, HighlightKind);
 
 /// Run a tree-sitter grammar and return flat (start, end, kind) byte spans.
 fn ts_spans(language: Language, text: &str) -> Vec<Span> {
-    with_config(language, |config| {
-        let Some(config) = config else {
-            return Vec::new();
-        };
-        let mut highlighter = Highlighter::new();
-        let events = match highlighter.highlight(config, text.as_bytes(), None, |_| None) {
-            Ok(ev) => ev,
-            Err(_) => return Vec::new(),
-        };
-        let mut stack: Vec<Highlight> = Vec::new();
-        let mut out = Vec::new();
-        for event in events {
-            match event {
-                Ok(HighlightEvent::HighlightStart(h)) => stack.push(h),
-                Ok(HighlightEvent::HighlightEnd) => {
-                    stack.pop();
+    with_config(language, |config| match config {
+        Some(config) => extract_spans(config, text),
+        None => Vec::new(),
+    })
+}
+
+/// Run a highlight config over `text` and flatten the events into byte spans.
+fn extract_spans(config: &HighlightConfiguration, text: &str) -> Vec<Span> {
+    let mut highlighter = Highlighter::new();
+    let events = match highlighter.highlight(config, text.as_bytes(), None, |_| None) {
+        Ok(ev) => ev,
+        Err(_) => return Vec::new(),
+    };
+    let mut stack: Vec<Highlight> = Vec::new();
+    let mut out = Vec::new();
+    for event in events {
+        match event {
+            Ok(HighlightEvent::HighlightStart(h)) => stack.push(h),
+            Ok(HighlightEvent::HighlightEnd) => {
+                stack.pop();
+            }
+            Ok(HighlightEvent::Source { start, end }) => {
+                if let Some(h) = stack.last() {
+                    if let Some(name) = NAMES.get(h.0) {
+                        out.push((start, end, name_to_kind(name)));
+                    }
                 }
-                Ok(HighlightEvent::Source { start, end }) => {
-                    if let Some(h) = stack.last() {
-                        if let Some(name) = NAMES.get(h.0) {
-                            out.push((start, end, name_to_kind(name)));
+            }
+            Err(_) => return Vec::new(),
+        }
+    }
+    out
+}
+
+// ---- Inline SQL (SQL strings inside PHP: DB::select("…"), ->whereRaw, …) -----
+
+/// `DB::<method>(...)` calls whose first string argument is raw SQL.
+const DB_SQL_METHODS: &[&str] = &[
+    "select",
+    "selectOne",
+    "scalar",
+    "statement",
+    "insert",
+    "update",
+    "delete",
+    "raw",
+    "unprepared",
+];
+
+/// Query-builder / connection `->method(...)` calls carrying raw SQL.
+const RAW_SQL_METHODS: &[&str] = &[
+    "selectRaw",
+    "whereRaw",
+    "orWhereRaw",
+    "havingRaw",
+    "orHavingRaw",
+    "orderByRaw",
+    "groupByRaw",
+    "fromRaw",
+    "statement",
+    "raw",
+    "unprepared",
+];
+
+/// The SQL grammar config for highlighting SQL fragments (built once per thread).
+fn build_sql_config() -> Option<HighlightConfiguration> {
+    let mut config = HighlightConfiguration::new(
+        tree_sitter_sequel::LANGUAGE.into(),
+        "sql",
+        tree_sitter_sequel::HIGHLIGHTS_QUERY,
+        "",
+        "",
+    )
+    .ok()?;
+    config.configure(NAMES);
+    Some(config)
+}
+
+thread_local! {
+    static SQL_CONFIG: RefCell<Option<Option<Rc<HighlightConfiguration>>>> =
+        const { RefCell::new(None) };
+}
+
+/// Highlight a bare SQL fragment into byte spans (relative to the fragment).
+fn sql_spans(sql: &str) -> Vec<Span> {
+    SQL_CONFIG.with(|cell| {
+        cell.borrow_mut()
+            .get_or_insert_with(|| build_sql_config().map(Rc::new))
+            .as_deref()
+            .map(|cfg| extract_spans(cfg, sql))
+            .unwrap_or_default()
+    })
+}
+
+/// Highlight the SQL strings inside PHP `DB::`/`->rawMethod` calls. Returns
+/// absolute byte spans, produced by highlighting each SQL string with the SQL
+/// grammar directly (which — unlike tree-sitter-highlight's injection layering
+/// against PHP's own string highlight — is exact). Merged over the PHP spans.
+fn php_sql_spans(text: &str) -> Vec<Span> {
+    let mut parser = tree_sitter::Parser::new();
+    if parser
+        .set_language(&tree_sitter_php::LANGUAGE_PHP.into())
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        return Vec::new();
+    };
+    let src = text.as_bytes();
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    collect_sql_ranges(tree.root_node(), src, &mut ranges);
+
+    let mut out = Vec::new();
+    for (s, e) in ranges {
+        if e <= s || e > text.len() {
+            continue;
+        }
+        for (rs, re, kind) in sql_spans(&text[s..e]) {
+            out.push((s + rs, s + re, kind));
+        }
+    }
+    out
+}
+
+/// Walk the PHP tree, collecting the byte range of the SQL string argument of
+/// each recognised DB call.
+fn collect_sql_ranges(node: tree_sitter::Node, src: &[u8], out: &mut Vec<(usize, usize)>) {
+    let kind = node.kind();
+    if kind == "scoped_call_expression" || kind == "member_call_expression" {
+        let method = node
+            .child_by_field_name("name")
+            .and_then(|n| n.utf8_text(src).ok())
+            .unwrap_or("");
+        let matched = if kind == "scoped_call_expression" {
+            let scope = node
+                .child_by_field_name("scope")
+                .and_then(|n| n.utf8_text(src).ok())
+                .unwrap_or("");
+            scope == "DB" && DB_SQL_METHODS.contains(&method)
+        } else {
+            RAW_SQL_METHODS.contains(&method)
+        };
+        if matched {
+            if let Some(args) = node.child_by_field_name("arguments") {
+                if let Some(range) = first_string_range(args) {
+                    out.push(range);
+                }
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_sql_ranges(child, src, out);
+    }
+}
+
+/// The inner content byte range of the first string argument in `arguments`
+/// (quotes excluded).
+fn first_string_range(arguments: tree_sitter::Node) -> Option<(usize, usize)> {
+    let mut cursor = arguments.walk();
+    for arg in arguments.children(&mut cursor) {
+        if arg.kind() != "argument" {
+            continue;
+        }
+        let mut ac = arg.walk();
+        for child in arg.children(&mut ac) {
+            match child.kind() {
+                // Double-quoted: use the inner `string_content` (no quotes,
+                // skips interpolations — those keep PHP highlighting).
+                "encapsed_string" => {
+                    let mut ec = child.walk();
+                    for part in child.children(&mut ec) {
+                        if part.kind() == "string_content" {
+                            return Some((part.start_byte(), part.end_byte()));
                         }
                     }
                 }
-                Err(_) => return Vec::new(),
+                // Single-quoted: strip the surrounding quote bytes.
+                "string" => {
+                    let (s, e) = (child.start_byte(), child.end_byte());
+                    if e >= s + 2 {
+                        return Some((s + 1, e - 1));
+                    }
+                }
+                _ => {}
             }
         }
-        out
-    })
+    }
+    None
 }
 
 /// Highlight a fragment of PHP (no `<?php` tag) by wrapping it, mapping the
@@ -555,6 +718,60 @@ mod tests {
         let kinds: Vec<_> = lines[0].iter().map(|s| s.kind).collect();
         assert!(kinds.contains(&HighlightKind::Keyword));
         assert!(kinds.contains(&HighlightKind::Function));
+    }
+
+    /// SQL inside a PHP `DB::select("…")` string is highlighted as SQL: every
+    /// clause keyword (incl. the leading SELECT) is a keyword, not a string.
+    #[test]
+    fn sql_highlighted_in_php_db_call() {
+        let src = "<?php\n$r = DB::select(\"SELECT id FROM users WHERE id = 1\");\n";
+        let line = src.lines().nth(1).unwrap();
+        let spans = &highlight_lines(Language::Php, src)[1];
+        let kind_at = |needle: &str| -> Option<HighlightKind> {
+            let at = line.find(needle)?;
+            spans
+                .iter()
+                .find(|s| s.start <= at && at < s.end)
+                .map(|s| s.kind)
+        };
+        assert_eq!(kind_at("SELECT"), Some(HighlightKind::Keyword), "{spans:?}");
+        assert_eq!(kind_at("FROM"), Some(HighlightKind::Keyword));
+        assert_eq!(kind_at("WHERE"), Some(HighlightKind::Keyword));
+    }
+
+    #[test]
+    fn sql_highlighted_in_single_quoted_where_raw() {
+        let src = "<?php\n$q->whereRaw('price > 100 AND active = 1');\n";
+        let line = src.lines().nth(1).unwrap();
+        let spans = &highlight_lines(Language::Php, src)[1];
+        let at = line.find("AND").unwrap();
+        let kind = spans
+            .iter()
+            .find(|s| s.start <= at && at < s.end)
+            .map(|s| s.kind);
+        assert_eq!(kind, Some(HighlightKind::Keyword), "{spans:?}");
+    }
+
+    #[test]
+    fn plain_php_string_stays_string_and_keywords_work() {
+        // A non-DB string isn't touched, and PHP keywords still highlight.
+        let src = "<?php\nfunction f() { $s = \"SELECT nope\"; return $s; }\n";
+        let spans = &highlight_lines(Language::Php, src)[1];
+        let line = src.lines().nth(1).unwrap();
+        let at = line.find("SELECT").unwrap();
+        let kind = spans
+            .iter()
+            .find(|s| s.start <= at && at < s.end)
+            .map(|s| s.kind);
+        assert_eq!(
+            kind,
+            Some(HighlightKind::String),
+            "plain string must stay String: {spans:?}"
+        );
+        assert!(
+            spans.iter().any(|s| s.kind == HighlightKind::Keyword),
+            "php keywords"
+        );
     }
 }
 

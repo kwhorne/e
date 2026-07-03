@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **macOS: "e cannot open files of this type".** Opening a file via Finder
+  ("Open With → e", double-click, or the Dock) no longer fails — the app bundle
+  now declares `e` as a text editor for *all* file types, so `.sql`, `.env`,
+  `.log` and anything else are accepted. Files already opened fine by dragging
+  onto the window, via `⌘O`, or `e <file>` from the CLI; this removes the OS
+  rejection for the Finder path. (Rebuild the app / install the next release;
+  macOS may take a moment to refresh its file associations.)
+
 ## [0.6.7] - 2026-07-03
 
 ### Added

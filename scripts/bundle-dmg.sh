@@ -77,6 +77,29 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key> <true/>
   <key>NSHumanReadableCopyright</key> <string>The editor for the rest of us · © 2026 Knut W. Horne</string>
   <key>LSMinimumSystemVersion</key>  <string>11.0</string>
+
+  <!-- `e` is a text editor that can open any file, so macOS offers "Open With
+       → e" for .sql, .env, .log, … instead of "e cannot open files of this
+       type". Rank Alternate so existing default associations are untouched. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>       <string>Text Document</string>
+      <key>CFBundleTypeRole</key>       <string>Editor</string>
+      <key>LSHandlerRank</key>          <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.text</string>
+        <string>public.plain-text</string>
+        <string>public.source-code</string>
+        <string>public.data</string>
+      </array>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>*</string></array>
+      <key>CFBundleTypeOSTypes</key>
+      <array><string>****</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST

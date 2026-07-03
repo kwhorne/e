@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Row write-path (internal).** `e-db` gained `insert_row`, `delete_row` (with
+  an empty-predicate guard so it can never wipe a table) and `fk_target` for
+  foreign-key hopping — the tested core behind upcoming data-grid editing.
+
 ## [0.7.1] - 2026-07-03
 
 ### Added

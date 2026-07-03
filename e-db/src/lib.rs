@@ -1058,6 +1058,75 @@ pub fn update_cell(
     Ok(r.rows_affected.unwrap_or(0))
 }
 
+/// Insert a row. `values` maps column name to optional value (`None` = NULL).
+/// Returns the number of rows inserted.
+pub fn insert_row(
+    conn: &Conn,
+    engine: &str,
+    table: &str,
+    values: &[(String, Option<String>)],
+) -> Result<u64, String> {
+    if values.is_empty() {
+        return Err("No columns to insert".into());
+    }
+    let cols: Vec<String> = values.iter().map(|(c, _)| quote_ident(engine, c)).collect();
+    let vals: Vec<String> = values
+        .iter()
+        .map(|(_, v)| match v {
+            Some(v) => format!("'{}'", esc(v)),
+            None => "NULL".to_string(),
+        })
+        .collect();
+    let sql = format!(
+        "INSERT INTO {} ({}) VALUES ({})",
+        quote_ident(engine, table),
+        cols.join(", "),
+        vals.join(", ")
+    );
+    let r = query(conn, &sql, 0)?;
+    Ok(r.rows_affected.unwrap_or(0))
+}
+
+/// Delete the row(s) matching the given primary-key columns. Refuses an empty
+/// predicate so it can never wipe a whole table.
+pub fn delete_row(
+    conn: &Conn,
+    engine: &str,
+    table: &str,
+    pk: &[(String, Option<String>)],
+) -> Result<u64, String> {
+    if pk.is_empty() {
+        return Err("Table has no primary key — cannot delete safely".into());
+    }
+    let conds: Vec<String> = pk
+        .iter()
+        .map(|(c, v)| match v {
+            Some(v) => format!("{} = '{}'", quote_ident(engine, c), esc(v)),
+            None => format!("{} IS NULL", quote_ident(engine, c)),
+        })
+        .collect();
+    let sql = format!(
+        "DELETE FROM {} WHERE {}",
+        quote_ident(engine, table),
+        conds.join(" AND ")
+    );
+    let r = query(conn, &sql, 0)?;
+    Ok(r.rows_affected.unwrap_or(0))
+}
+
+/// Find the foreign-key target `(ref_table, ref_column)` that `table`.`column`
+/// points at, if any — for FK-hopping in the data view.
+pub fn fk_target(
+    conn: &Conn,
+    table: &str,
+    column: &str,
+) -> Result<Option<(String, String)>, String> {
+    Ok(foreign_keys(conn)?
+        .into_iter()
+        .find(|fk| fk.table == table && fk.column == column)
+        .map(|fk| (fk.ref_table, fk.ref_column)))
+}
+
 /// `SELECT * FROM <table> LIMIT <max>` for browsing a table.
 pub fn table_data(
     conn: &Conn,
@@ -1545,6 +1614,73 @@ mod tests {
             .unwrap();
         assert!(!plain.unique);
         assert_eq!(plain.columns, vec!["user_id".to_string()]);
+        let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn sqlite_insert_delete_and_fk() {
+        let dir = std::env::temp_dir().join("e_db_rows_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("rows.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\
+                 CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER \
+                     REFERENCES users(id), title TEXT);\
+                 INSERT INTO users (id, name) VALUES (1, 'Alice');",
+            )
+            .unwrap();
+        }
+        let cfg = DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let conn = connect(&cfg).unwrap();
+
+        // insert
+        let n = insert_row(
+            &conn,
+            "sqlite",
+            "posts",
+            &[
+                ("id".into(), Some("10".into())),
+                ("user_id".into(), Some("1".into())),
+                ("title".into(), Some("O'Brien".into())), // exercises escaping
+            ],
+        )
+        .unwrap();
+        assert_eq!(n, 1);
+        let data = table_data(&conn, "sqlite", "posts", 100).unwrap();
+        assert_eq!(data.rows.len(), 1);
+        assert_eq!(data.rows[0][2], Some("O'Brien".to_string()));
+
+        // fk_target
+        let fk = fk_target(&conn, "posts", "user_id").unwrap();
+        assert_eq!(fk, Some(("users".to_string(), "id".to_string())));
+        assert_eq!(fk_target(&conn, "posts", "title").unwrap(), None);
+
+        // delete
+        let d = delete_row(
+            &conn,
+            "sqlite",
+            "posts",
+            &[("id".into(), Some("10".into()))],
+        )
+        .unwrap();
+        assert_eq!(d, 1);
+        assert_eq!(
+            table_data(&conn, "sqlite", "posts", 100)
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
+
+        // delete guard: empty predicate is refused
+        assert!(delete_row(&conn, "sqlite", "posts", &[]).is_err());
         let _ = std::fs::remove_file(&dbfile);
     }
 

@@ -2254,7 +2254,15 @@ impl AppState {
                 let text = doc2.text().to_string();
                 *highlights.borrow_mut() = highlight_lines(Language::PlainText, &text);
                 doc2.cache_rev().update(|r| *r += 1);
-                if !undo_nav.get() && undo.borrow_mut().record(&text, now_ms() as u64, 700) {
+                // Record into the undo tree, then release the borrow *before*
+                // bumping undo_rev: the signal update runs effects synchronously
+                // (e.g. the undo-tree view re-reads `undo.borrow()`), so holding
+                // the mutable borrow across it double-borrows and aborts. Note a
+                // `borrow_mut()` temporary in an `if` condition lives until the
+                // end of the whole `if`, hence the explicit `let`.
+                let recorded =
+                    !undo_nav.get() && undo.borrow_mut().record(&text, now_ms() as u64, 700);
+                if recorded {
                     app.undo_rev.update(|r| *r += 1);
                 }
             });
@@ -3443,12 +3451,21 @@ impl AppState {
                 let text = doc.text().to_string();
                 if !undo_nav.get() {
                     let now = now_ms() as u64;
-                    let mut t = undo.borrow_mut();
-                    if t.record(&text, now, 700) {
-                        app.undo_rev.update(|r| *r += 1);
-                        if let Some(p) = &undo_path {
-                            t.maybe_save(p, now);
+                    // Do the recording (and any save) inside a scope so the
+                    // mutable borrow is dropped before undo_rev.update runs the
+                    // undo-tree view's effect, which borrows `undo` again.
+                    let recorded = {
+                        let mut t = undo.borrow_mut();
+                        let rec = t.record(&text, now, 700);
+                        if rec {
+                            if let Some(p) = &undo_path {
+                                t.maybe_save(p, now);
+                            }
                         }
+                        rec
+                    };
+                    if recorded {
+                        app.undo_rev.update(|r| *r += 1);
                     }
                 }
                 if !large {

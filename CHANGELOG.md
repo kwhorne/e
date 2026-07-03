@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-03
+
+### Fixed
+
+- **Crash when editing (pressing Enter, etc.).** Recording an edit into the undo
+  tree held a mutable borrow while bumping the revision counter, whose effect
+  synchronously re-read the same undo tree — a double borrow that aborted the app
+  (“e quit unexpectedly”). The borrow is now released before the update.
+
 ## [0.7.2] - 2026-07-03
 
 ### Fixed

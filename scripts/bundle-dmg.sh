@@ -114,8 +114,15 @@ sign_app "$APP" "$IDENTITY"
 # hdiutil has room to build the DMG (the runner kept hitting "No space left on
 # device", even after only the per-arch dirs were removed).
 if [[ -n "${CI:-}" ]]; then
-  echo "==> CI: freeing the target dir before building the DMG"
+  echo "==> CI: freeing build caches before building the DMG"
+  # The signed app is already staged under dist/, and cargo/rustup aren't needed
+  # again in this script, so drop everything heavy: the target dir (10+ GB) plus
+  # the cargo registry/git checkouts and rustup toolchains. The runner kept
+  # hitting "No space left on device" on hdiutil even after only target/ went.
   rm -rf target || true
+  rm -rf "${CARGO_HOME:-$HOME/.cargo}/registry" "${CARGO_HOME:-$HOME/.cargo}/git" || true
+  rm -rf "${RUSTUP_HOME:-$HOME/.rustup}/toolchains" || true
+  df -h / || true
 fi
 
 # --- 4. build the DMG ------------------------------------------------------

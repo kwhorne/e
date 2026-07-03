@@ -1136,6 +1136,42 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
         })
         .on_click_stop(move |_| state.db_cancel_edit());
 
+    let delete_row = label(|| "Delete row".to_string())
+        .style(|s| {
+            s.padding_horiz(12.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(Color::from_rgb8(0x6b, 0x2b, 0x2b))
+                .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(Color::from_rgba8(0xe0, 0x6c, 0x75, 30)))
+        })
+        .on_click_stop(move |_| state.db_delete_row());
+    let follow_fk = label(|| "Follow FK →".to_string())
+        .style(|s| {
+            s.padding_horiz(12.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_hop_fk());
+    let row_actions = stack((delete_row, follow_fk)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .margin_top(10.0)
+    });
+
     let buttons = stack((
         null_toggle,
         empty().style(|s| s.flex_grow(1.0)),
@@ -1150,7 +1186,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             .margin_top(12.0)
     });
 
-    let card = stack((title, input, buttons)).style(|s| {
+    let card = stack((title, input, row_actions, buttons)).style(|s| {
         s.flex_col()
             .width(420.0)
             .padding(16.0)

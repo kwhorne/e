@@ -741,4 +741,142 @@ impl AppState {
             ));
         });
     }
+
+    /// Resolve the edit overlay's connection + table + entry, honouring the
+    /// read-only guard. Shared by row delete / FK-hop.
+    fn db_edit_target(&self) -> Option<(DbEntry, Arc<e_db::Conn>, String, String)> {
+        let (Some(key), Some(table)) = (
+            self.db_result_key.get_untracked(),
+            self.db_result_table.get_untracked(),
+        ) else {
+            return None;
+        };
+        let entry = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())?;
+        let conn = entry.conn.get_untracked()?;
+        let engine = entry.config.engine.clone();
+        Some((entry, conn, table, engine))
+    }
+
+    /// Primary-key `(name, value)` pairs for `row` in the current result grid.
+    fn db_row_pk(&self, row: usize) -> Vec<(String, Option<String>)> {
+        let Some(result) = self.db_result.get_untracked() else {
+            return Vec::new();
+        };
+        let pk_names: Vec<String> = self.db_columns.with_untracked(|cols| {
+            cols.iter()
+                .filter(|c| c.key == "PRI")
+                .map(|c| c.name.clone())
+                .collect()
+        });
+        let mut pk = Vec::new();
+        for name in &pk_names {
+            if let Some(idx) = result.columns.iter().position(|c| c == name) {
+                pk.push((name.clone(), result.rows[row].get(idx).cloned().flatten()));
+            }
+        }
+        pk
+    }
+
+    /// Delete the row currently open in the edit overlay.
+    pub fn db_delete_row(&self) {
+        let Some((row, _, _)) = self.db_edit.get_untracked() else {
+            return;
+        };
+        let Some((entry, conn, table, engine)) = self.db_edit_target() else {
+            return;
+        };
+        if entry.read_only.get_untracked() {
+            Self::notify(
+                "Read-only: this connection is protected from writes (looks like production). \
+                 Toggle read-only off in the Database panel to delete.",
+            );
+            self.db_edit.set(None);
+            return;
+        }
+        let pk = self.db_row_pk(row);
+        if pk.is_empty() {
+            Self::notify("Delete: table has no primary key — cannot delete safely");
+            return;
+        }
+        let state = *self;
+        let send = create_ext_action(self.cx, move |res: Result<u64, String>| match res {
+            Ok(_) => {
+                state.db_result.update(|r| {
+                    if let Some(r) = r {
+                        if row < r.rows.len() {
+                            r.rows.remove(row);
+                        }
+                    }
+                });
+                state.db_edit.set(None);
+                Self::notify("Row deleted");
+            }
+            Err(e) => state.db_result_error.set(Some(e)),
+        });
+        std::thread::spawn(move || {
+            send(e_db::delete_row(&conn, &engine, &table, &pk));
+        });
+    }
+
+    /// Hop to the foreign-key target of the column open in the edit overlay,
+    /// filtered to the current cell's value.
+    pub fn db_hop_fk(&self) {
+        let Some((row, col, column)) = self.db_edit.get_untracked() else {
+            return;
+        };
+        let Some((entry, conn, table, engine)) = self.db_edit_target() else {
+            return;
+        };
+        let value = self.db_result.with_untracked(|r| {
+            r.as_ref().and_then(|r| {
+                r.rows
+                    .get(row)
+                    .and_then(|row| row.get(col))
+                    .cloned()
+                    .flatten()
+            })
+        });
+        let disp = entry.config.display_name();
+        let key = entry.key();
+        let state = *self;
+        // `entry` holds non-Send signals, so it stays on the UI thread (in this
+        // closure); only the ref-table name + query result cross the channel.
+        let send = create_ext_action(
+            self.cx,
+            move |out: Option<(String, Result<e_db::QueryResult, String>)>| match out {
+                None => Self::notify("No foreign key on this column"),
+                Some((ref_table, res)) => {
+                    state.db_edit.set(None);
+                    state.db_result_key.set(Some(key.clone()));
+                    state.db_result_table.set(Some(ref_table.clone()));
+                    state.db_result_title.set(format!("{disp} · {ref_table}"));
+                    state.db_subview.set("data".into());
+                    state.db_sort.set(None);
+                    state.db_page.set(0);
+                    state.db_columns.set(Vec::new());
+                    state.db_load_columns(entry.clone(), ref_table);
+                    state.db_apply_result(res);
+                }
+            },
+        );
+        std::thread::spawn(move || {
+            let out = match e_db::fk_target(&conn, &table, &column) {
+                Ok(Some((ref_table, ref_col))) => {
+                    let res = e_db::rows_where(
+                        &conn,
+                        &engine,
+                        &ref_table,
+                        &ref_col,
+                        value.as_deref(),
+                        DB_PAGE,
+                    );
+                    Some((ref_table, res))
+                }
+                _ => None,
+            };
+            send(out);
+        });
+    }
 }

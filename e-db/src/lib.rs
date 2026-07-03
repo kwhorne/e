@@ -1127,6 +1127,29 @@ pub fn fk_target(
         .map(|fk| (fk.ref_table, fk.ref_column)))
 }
 
+/// Browse rows of `table` where `column` equals `value` (or IS NULL). Used for
+/// FK-hopping and column filters.
+pub fn rows_where(
+    conn: &Conn,
+    engine: &str,
+    table: &str,
+    column: &str,
+    value: Option<&str>,
+    max: usize,
+) -> Result<QueryResult, String> {
+    let cond = match value {
+        Some(v) => format!("{} = '{}'", quote_ident(engine, column), esc(v)),
+        None => format!("{} IS NULL", quote_ident(engine, column)),
+    };
+    let sql = format!(
+        "SELECT * FROM {} WHERE {} LIMIT {}",
+        quote_ident(engine, table),
+        cond,
+        max
+    );
+    query(conn, &sql, max)
+}
+
 /// `SELECT * FROM <table> LIMIT <max>` for browsing a table.
 pub fn table_data(
     conn: &Conn,
@@ -1661,6 +1684,18 @@ mod tests {
         let fk = fk_target(&conn, "posts", "user_id").unwrap();
         assert_eq!(fk, Some(("users".to_string(), "id".to_string())));
         assert_eq!(fk_target(&conn, "posts", "title").unwrap(), None);
+
+        // rows_where (FK-hop target)
+        let hop = rows_where(&conn, "sqlite", "users", "id", Some("1"), 100).unwrap();
+        assert_eq!(hop.rows.len(), 1);
+        assert_eq!(hop.rows[0][1], Some("Alice".to_string()));
+        assert_eq!(
+            rows_where(&conn, "sqlite", "users", "id", Some("999"), 100)
+                .unwrap()
+                .rows
+                .len(),
+            0
+        );
 
         // delete
         let d = delete_row(

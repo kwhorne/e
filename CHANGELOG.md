@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Row write-path (internal).** `e-db` gained `insert_row`, `delete_row` (with
-  an empty-predicate guard so it can never wipe a table) and `fk_target` for
-  foreign-key hopping — the tested core behind upcoming data-grid editing.
+- **Delete rows & foreign-key hopping.** The cell edit dialog now has a **Delete
+  row** action (honouring the read-only guard and requiring a primary key) and a
+  **Follow FK →** action that jumps to the referenced table filtered to the
+  linked value. Backed by new tested `e-db` primitives `insert_row`,
+  `delete_row` (with an empty-predicate guard so it can never wipe a table),
+  `fk_target` and `rows_where`.
 
 ## [0.7.1] - 2026-07-03
 

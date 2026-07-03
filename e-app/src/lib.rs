@@ -18,6 +18,7 @@ mod completion;
 mod config;
 mod contract;
 mod contract_view;
+mod db_state;
 mod db_view;
 mod debug;
 mod debug_view;

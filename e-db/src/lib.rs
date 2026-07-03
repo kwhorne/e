@@ -539,7 +539,7 @@ pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
             Ok(rows.filter_map(|r| r.ok()).collect())
         }
         Backend::Postgres(m) => {
-            let mut client = m.lock().unwrap();
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
             let res = pg_query(
                 &mut client,
                 "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY tablename",
@@ -738,7 +738,7 @@ pub fn foreign_keys(conn: &Conn) -> Result<Vec<ForeignKey>, String> {
             Ok(out)
         }
         Backend::Postgres(m) => {
-            let mut client = m.lock().unwrap();
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
             let res = pg_query(
                 &mut client,
                 "SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name \
@@ -804,7 +804,7 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
             Ok(rows.filter_map(|r| r.ok()).collect())
         }
         Backend::Postgres(m) => {
-            let mut client = m.lock().unwrap();
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
             let t = table.replace('\'', "''");
             let pk = pg_query(
                 &mut client,
@@ -1063,7 +1063,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
             }
         }
         Backend::Postgres(m) => {
-            let mut client = m.lock().unwrap();
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
             let res = pg_query(&mut client, sql, max)?;
             if select || !res.columns.is_empty() {
                 Ok(QueryResult {

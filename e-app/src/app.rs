@@ -6,7 +6,7 @@ use floem::event::{Event, EventListener, EventPropagation};
 use floem::ext_event::create_signal_from_channel;
 use floem::keyboard::{Key, Modifiers};
 use floem::kurbo::Size;
-use floem::reactive::{create_effect, Scope, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_container, stack, Decorators};
 use floem::window::WindowConfig;
 use floem::{Application, IntoView};
@@ -87,6 +87,24 @@ fn resolve_args() -> (PathBuf, Option<PathBuf>) {
 enum ResizeSide {
     Left,
     Right,
+}
+
+/// Bundle a set of modal overlays into one wrapper that only covers the window
+/// (and intercepts clicks) while at least one is open. Crucially, the guard is
+/// derived from the same `(open-signal, view)` list that builds the views, so a
+/// panel can't be added to the stack yet forgotten in the "is anything open?"
+/// check — the desync that caused the 0.6.5/0.6.6 unclickable-window regressions.
+fn overlay_group(panels: Vec<(RwSignal<bool>, floem::AnyView)>) -> impl IntoView {
+    let opens: Vec<RwSignal<bool>> = panels.iter().map(|(sig, _)| *sig).collect();
+    let views = panels.into_iter().map(|(_, view)| view);
+    floem::views::stack_from_iter(views).style(move |s| {
+        let s = s.absolute().inset(0.0).size_full();
+        if opens.iter().any(|sig| sig.get()) {
+            s
+        } else {
+            s.hide()
+        }
+    })
 }
 
 /// A thin, draggable vertical handle that resizes a panel by updating `width`.
@@ -436,37 +454,21 @@ fn app_view() -> impl IntoView {
             crate::tdd::tdd_panel(state),
             crate::request::request_view(state),
             crate::log::laravel_log_panel(state),
-            stack((
-                crate::runtime_view::runtime_panel(state),
-                crate::schema_diff::schema_diff_panel(state),
-                crate::relations_view::relation_graph_panel(state),
-                crate::events_view::event_graph_panel(state),
-                crate::contract_view::contract_panel(state),
-                crate::related_view::related_panel(state),
-                crate::undo_view::undo_tree_panel(state),
-                crate::semantic_view::semantic_panel(state),
-                crate::debug_view::debug_panel(state),
-            ))
-            .style(move |s| {
-                let s = s.absolute().inset(0.0).size_full();
-                // Only cover the window (and intercept clicks) when one of these
-                // overlays is actually open — otherwise let clicks through to the
-                // editor and file explorer.
-                let any = state.runtime_open.get()
-                    || state.schema_diff_open.get()
-                    || state.rel_open.get()
-                    || state.event_open.get()
-                    || state.contract_open.get()
-                    || state.related_open.get()
-                    || state.undo_open.get()
-                    || state.sem_open.get()
-                    || state.debug_open.get();
-                if any {
-                    s
-                } else {
-                    s.hide()
-                }
-            }),
+            // Registered as (open-signal, view) pairs so the "is anything open?"
+            // guard is derived from the same list — adding a panel is one line and
+            // can't desync the two (the class of bug behind the 0.6.x overlay
+            // regressions). New modal panels go here.
+            overlay_group(vec![
+                (state.runtime_open, crate::runtime_view::runtime_panel(state).into_any()),
+                (state.schema_diff_open, crate::schema_diff::schema_diff_panel(state).into_any()),
+                (state.rel_open, crate::relations_view::relation_graph_panel(state).into_any()),
+                (state.event_open, crate::events_view::event_graph_panel(state).into_any()),
+                (state.contract_open, crate::contract_view::contract_panel(state).into_any()),
+                (state.related_open, crate::related_view::related_panel(state).into_any()),
+                (state.undo_open, crate::undo_view::undo_tree_panel(state).into_any()),
+                (state.sem_open, crate::semantic_view::semantic_panel(state).into_any()),
+                (state.debug_open, crate::debug_view::debug_panel(state).into_any()),
+            ]),
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),

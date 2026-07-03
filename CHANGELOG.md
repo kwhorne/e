@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Silent write failures are now surfaced.** A failed disk write during a
+  Livewire property rename or an applied agent edit (full/read-only disk) used
+  to report success anyway — risking a class and its view drifting out of sync.
+  Writes now notify on failure and only report success when the change landed;
+  agent edits reply `ok: false` instead of claiming success.
+- **Database lock hardening.** A poisoned connection mutex in `e-db` (a thread
+  panicking while holding the lock) no longer crashes the whole editor — the
+  guard is recovered and the query returns normally or errors cleanly.
+
+### Changed
+
+- Modal overlay panels are registered as one `(open-signal, view)` list, so the
+  "is anything open?" guard is derived automatically. Adding a panel is a single
+  line and can no longer desync the two lists — the bug class behind the
+  0.6.5/0.6.6 unclickable-window regressions.
+
 - **macOS: "e cannot open files of this type".** Opening a file via Finder
   ("Open With → e", double-click, or the Dock) no longer fails — the app bundle
   now declares `e` as a text editor for *all* file types, so `.sql`, `.env`,

@@ -1638,18 +1638,24 @@ impl AppState {
         }
         // Rewrite both files (targeted so unrelated tokens are left alone).
         let new_class = crate::livewire::class_rename(&class_src, old, new);
-        self.rewrite_file(&comp.class_file, new_class);
+        let mut ok = self.rewrite_file(&comp.class_file, new_class);
         if let Ok(view_src) = std::fs::read_to_string(&comp.view_file) {
             let new_view = crate::livewire::view_rename(&view_src, old, new);
-            self.rewrite_file(&comp.view_file, new_view);
+            ok &= self.rewrite_file(&comp.view_file, new_view);
         }
-        Self::notify(&format!("Renamed Livewire property `{old}` → `{new}`"));
-        true
+        // Only claim success if every write actually landed; on failure
+        // `rewrite_file` has already told the user what went wrong.
+        if ok {
+            Self::notify(&format!("Renamed Livewire property `{old}` → `{new}`"));
+        }
+        ok
     }
 
     /// Replace a file's contents, editing the open buffer (undoable) if it is
-    /// open, otherwise writing to disk.
-    fn rewrite_file(&self, path: &std::path::Path, content: String) {
+    /// open, otherwise writing to disk. Returns whether the change landed — a
+    /// disk write can fail (full/read-only disk), and callers must not report
+    /// success when it did.
+    fn rewrite_file(&self, path: &std::path::Path, content: String) -> bool {
         let open = self.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(path))
@@ -1660,9 +1666,24 @@ impl AppState {
             let mut it = std::iter::once((Selection::region(0, len), content.as_str()));
             doc.edit(&mut it, EditType::InsertChars);
             dirty.set(true);
+            true
         } else {
-            let _ = buffer::write(path, &content);
+            let ok = Self::write_or_notify(path, &content);
             self.fs_rev.update(|r| *r += 1);
+            ok
+        }
+    }
+
+    /// Write user data to disk, surfacing failures as a notification instead of
+    /// swallowing them. Returns whether the write succeeded.
+    pub(crate) fn write_or_notify(path: &std::path::Path, content: &str) -> bool {
+        match buffer::write(path, content) {
+            Ok(()) => true,
+            Err(e) => {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                Self::notify(&format!("Could not write {name}: {e}"));
+                false
+            }
         }
     }
 
@@ -3596,8 +3617,12 @@ impl AppState {
             let mut it = std::iter::once((Selection::region(0, len), out.as_str()));
             doc.edit(&mut it, EditType::InsertChars);
             dirty.set(true);
-        } else {
-            let _ = buffer::write(&edit.path, &out);
+        } else if !Self::write_or_notify(&edit.path, &out) {
+            // Don't tell the agent it succeeded when the file wasn't written.
+            let _ = edit
+                .reply
+                .send(serde_json::json!({"ok": false, "error": "could not write file"}));
+            return;
         }
         let _ = edit
             .reply

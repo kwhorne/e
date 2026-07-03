@@ -40,6 +40,49 @@ jobs:
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz.sha256
 
+  linux:
+    name: Build & upload (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      # Floem (winit + wgpu/vello) + rfd + the DB drivers' TLS. Matches Floem's
+      # own CI set, plus libssl for the MySQL driver.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install \
+            clang pkg-config libssl-dev libwayland-dev libxkbcommon-x11-dev \
+            libvulkan-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Build release binary
+        run: cargo build --release --bin e --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf e-${{ matrix.target }}.tar.gz e
+          sha256sum e-${{ matrix.target }}.tar.gz > e-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz
+            target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz.sha256
+
   dmg:
     name: Universal DMG installer
     runs-on: macos-latest

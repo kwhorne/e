@@ -177,6 +177,13 @@ Full user documentation also lives in [`docs/`](docs/README.md):
 - [Rust](https://rustup.rs) 1.87 or newer
 - A language server on your `PATH` for any language you want LSP features for
   (e.g. `intelephense`, `rust-analyzer`, `clangd`)
+- **Linux:** the system libraries listed under
+  [Linux build dependencies](docs/installation.md#linux-build-dependencies)
+  (Wayland/X11 + Vulkan), and a Vulkan driver at runtime
+
+Pre-built releases are published for **macOS** (Apple Silicon + Intel) and
+**Linux** (x86_64 + arm64) on the
+[Releases page](https://github.com/kwhorne/e/releases).
 
 ### Build & run
 

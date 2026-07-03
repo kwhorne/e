@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Linux releases.** Each release now publishes Linux binaries
+  (`e-x86_64-unknown-linux-gnu.tar.gz` and `e-aarch64-unknown-linux-gnu.tar.gz`)
+  alongside the macOS builds, so the in-app auto-updater works on Linux too. A
+  Linux build+test job was added to CI to catch platform breakage early. See
+  [installation](docs/installation.md#linux-build-dependencies) for the system
+  libraries needed.
+
 ## [0.6.8] - 2026-07-03
 
 ### Fixed

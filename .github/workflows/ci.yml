@@ -37,6 +37,28 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  build-linux:
+    name: Build & Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install \
+            clang pkg-config libssl-dev libwayland-dev libxkbcommon-x11-dev \
+            libvulkan-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+      - name: Build
+        run: cargo build --workspace
+      - name: Test
+        run: cargo test --workspace
+
   corpus:
     name: Parser corpus (real Laravel projects)
     runs-on: macos-latest

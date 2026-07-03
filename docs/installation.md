@@ -17,14 +17,19 @@ Download **`e-<version>-universal.dmg`**, open it, and drag **e.app** into
 
 For a CLI install, download the archive for your platform:
 
-- **Apple Silicon (M1/M2/M3):** `e-aarch64-apple-darwin.tar.gz`
-- **Intel Mac:** `e-x86_64-apple-darwin.tar.gz`
+- **macOS — Apple Silicon (M1/M2/M3):** `e-aarch64-apple-darwin.tar.gz`
+- **macOS — Intel:** `e-x86_64-apple-darwin.tar.gz`
+- **Linux — x86_64:** `e-x86_64-unknown-linux-gnu.tar.gz`
+- **Linux — arm64:** `e-aarch64-unknown-linux-gnu.tar.gz`
 
 ```sh
 shasum -a 256 -c e-aarch64-apple-darwin.tar.gz.sha256   # optional
 tar xzf e-aarch64-apple-darwin.tar.gz
 mv e /usr/local/bin/e
 ```
+
+On Linux you'll also need the runtime libraries listed under
+[Linux build dependencies](#linux-build-dependencies) (Wayland/X11, Vulkan).
 
 Once installed, `e` keeps itself up to date — see [Updating](updating.md).
 
@@ -35,6 +40,19 @@ Once installed, `e` keeps itself up to date — see [Updating](updating.md).
 - [Rust](https://rustup.rs) 1.87 or newer
 - A C toolchain (for tree-sitter grammars)
 - Optional: language servers on your `PATH` (see [Languages & LSP](languages-and-lsp.md))
+
+#### Linux build dependencies
+
+On Debian/Ubuntu, install the system libraries Floem (winit + Vulkan/wgpu), the
+native file dialog and the MySQL driver need:
+
+```sh
+sudo apt-get install \
+  clang pkg-config libssl-dev libwayland-dev libxkbcommon-x11-dev \
+  libvulkan-dev libxcb-shape0-dev libxcb-xfixes0-dev
+```
+
+At runtime a working Vulkan driver is required (e.g. `mesa-vulkan-drivers`).
 
 ### Build
 

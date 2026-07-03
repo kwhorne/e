@@ -78,9 +78,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHumanReadableCopyright</key> <string>The editor for the rest of us · © 2026 Knut W. Horne</string>
   <key>LSMinimumSystemVersion</key>  <string>11.0</string>
 
-  <!-- `e` is a text editor that can open any file, so macOS offers "Open With
-       → e" for .sql, .env, .log, … instead of "e cannot open files of this
-       type". Rank Alternate so existing default associations are untouched. -->
+  <!-- e is a text editor that can open any file, so macOS offers Open With
+       for .sql, .env, .log and anything else instead of "e cannot open files
+       of this type". Rank Alternate so default associations are untouched. -->
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
@@ -107,6 +107,14 @@ PLIST
 # --- 3. sign ---------------------------------------------------------------
 IDENTITY="$(detect_identity)"; IDENTITY="${IDENTITY:--}"
 sign_app "$APP" "$IDENTITY"
+
+# In CI the per-arch target dirs (several GB each) are dead weight once the
+# universal binary is in the app bundle; free them so hdiutil has room to build
+# the DMG (the runner was hitting "No space left on device").
+if [[ -n "${CI:-}" ]]; then
+  echo "==> CI: freeing per-arch build dirs before building the DMG"
+  rm -rf target/aarch64-apple-darwin target/x86_64-apple-darwin || true
+fi
 
 # --- 4. build the DMG ------------------------------------------------------
 DMG="dist/e-${VERSION}${ARCH_SUFFIX}.dmg"

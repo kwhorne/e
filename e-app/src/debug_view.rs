@@ -56,8 +56,8 @@ fn section_title(text: &'static str) -> impl IntoView {
 }
 
 pub fn debug_panel(state: AppState) -> impl IntoView {
-    let title = label(|| "Debug".to_string())
-        .style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
+    let title =
+        label(|| "Debug".to_string()).style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
 
     let status = label(move || state.debug_status.get()).style(move |s| {
         s.flex_grow(1.0)
@@ -107,7 +107,14 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
 
     // Call stack — click a frame to jump to its source line.
     let frames = dyn_stack(
-        move || state.debug_frames.get().into_iter().enumerate().collect::<Vec<_>>(),
+        move || {
+            state
+                .debug_frames
+                .get()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
         |(i, _)| *i,
         move |(_, f)| {
             let path = f.path.clone();
@@ -145,7 +152,14 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
 
     // Variables in the current frame.
     let vars = dyn_stack(
-        move || state.debug_vars.get().into_iter().enumerate().collect::<Vec<_>>(),
+        move || {
+            state
+                .debug_vars
+                .get()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
         |(i, _)| *i,
         move |(_, v)| {
             let name = v.name.clone();

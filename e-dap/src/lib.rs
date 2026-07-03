@@ -126,7 +126,12 @@ impl DapClient {
     pub fn connect_tcp(addr: impl ToSocketAddrs, on_event: EventHandler) -> Result<Arc<Self>> {
         let stream = TcpStream::connect(addr).context("connecting to debug adapter")?;
         let reader = stream.try_clone().context("cloning adapter socket")?;
-        Ok(Self::from_transport(None, reader, Box::new(stream), on_event))
+        Ok(Self::from_transport(
+            None,
+            reader,
+            Box::new(stream),
+            on_event,
+        ))
     }
 
     /// Spawn an adapter that runs as a DAP *server*, then connect to it over TCP
@@ -321,22 +326,38 @@ impl DapClient {
     }
 
     pub fn next(&self, thread_id: i64) -> Result<()> {
-        self.request("next", json!({ "threadId": thread_id }), Duration::from_secs(10))?;
+        self.request(
+            "next",
+            json!({ "threadId": thread_id }),
+            Duration::from_secs(10),
+        )?;
         Ok(())
     }
 
     pub fn step_in(&self, thread_id: i64) -> Result<()> {
-        self.request("stepIn", json!({ "threadId": thread_id }), Duration::from_secs(10))?;
+        self.request(
+            "stepIn",
+            json!({ "threadId": thread_id }),
+            Duration::from_secs(10),
+        )?;
         Ok(())
     }
 
     pub fn step_out(&self, thread_id: i64) -> Result<()> {
-        self.request("stepOut", json!({ "threadId": thread_id }), Duration::from_secs(10))?;
+        self.request(
+            "stepOut",
+            json!({ "threadId": thread_id }),
+            Duration::from_secs(10),
+        )?;
         Ok(())
     }
 
     pub fn pause(&self, thread_id: i64) -> Result<()> {
-        self.request("pause", json!({ "threadId": thread_id }), Duration::from_secs(10))?;
+        self.request(
+            "pause",
+            json!({ "threadId": thread_id }),
+            Duration::from_secs(10),
+        )?;
         Ok(())
     }
 

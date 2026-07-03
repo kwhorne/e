@@ -122,7 +122,6 @@ impl AppState {
         self.sem_open.set(false);
     }
 
-
     // ---- Eloquent relationship graph -----------------------------------
 
     pub fn toggle_relations(&self) {
@@ -219,7 +218,6 @@ impl AppState {
             ));
         }
     }
-
 }
 
 /// Locate the active Laravel log file (single or the newest daily file).

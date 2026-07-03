@@ -305,8 +305,9 @@ impl AppState {
             return;
         };
         let state = *self;
-        let store =
-            create_ext_action(self.cx, move |(frames, vars): (Vec<DebugFrame>, Vec<DebugVar>)| {
+        let store = create_ext_action(
+            self.cx,
+            move |(frames, vars): (Vec<DebugFrame>, Vec<DebugVar>)| {
                 state.debug_vars.set(vars);
                 // Reveal + mark the stopped location.
                 if let Some(top) = frames.first() {
@@ -317,7 +318,8 @@ impl AppState {
                     }
                 }
                 state.debug_frames.set(frames);
-            });
+            },
+        );
         std::thread::spawn(move || {
             let frames = client.stack_trace(thread_id).unwrap_or_default();
             let mut vars = Vec::new();

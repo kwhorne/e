@@ -46,10 +46,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSHumanReadableCopyright</key> <string>The editor for the rest of us · © 2026 Knut W. Horne</string>
   <key>LSMinimumSystemVersion</key>  <string>11.0</string>
 
-  <!-- Declare that `e` is a text editor that can open any file (so macOS lets
-       you "Open With → e" for .sql, .env, .log, … instead of refusing with
-       "e cannot open files of this type"). Rank Alternate so we don't hijack
-       existing default associations. -->
+  <!-- Declare that e is a text editor that can open any file (so macOS lets
+       you Open With e for .sql, .env, .log and anything else instead of
+       refusing with "e cannot open files of this type"). Rank Alternate so we
+       don't hijack existing default associations. -->
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

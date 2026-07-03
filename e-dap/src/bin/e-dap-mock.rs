@@ -60,7 +60,10 @@ fn main() {
         // After initialize, emit the `initialized` event like a real adapter.
         if command == "initialize" {
             seq += 1;
-            send(seq, &json!({ "seq": seq, "type": "event", "event": "initialized" }));
+            send(
+                seq,
+                &json!({ "seq": seq, "type": "event", "event": "initialized" }),
+            );
         }
 
         if command == "disconnect" {

@@ -459,15 +459,42 @@ fn app_view() -> impl IntoView {
             // can't desync the two (the class of bug behind the 0.6.x overlay
             // regressions). New modal panels go here.
             overlay_group(vec![
-                (state.runtime_open, crate::runtime_view::runtime_panel(state).into_any()),
-                (state.schema_diff_open, crate::schema_diff::schema_diff_panel(state).into_any()),
-                (state.rel_open, crate::relations_view::relation_graph_panel(state).into_any()),
-                (state.event_open, crate::events_view::event_graph_panel(state).into_any()),
-                (state.contract_open, crate::contract_view::contract_panel(state).into_any()),
-                (state.related_open, crate::related_view::related_panel(state).into_any()),
-                (state.undo_open, crate::undo_view::undo_tree_panel(state).into_any()),
-                (state.sem_open, crate::semantic_view::semantic_panel(state).into_any()),
-                (state.debug_open, crate::debug_view::debug_panel(state).into_any()),
+                (
+                    state.runtime_open,
+                    crate::runtime_view::runtime_panel(state).into_any(),
+                ),
+                (
+                    state.schema_diff_open,
+                    crate::schema_diff::schema_diff_panel(state).into_any(),
+                ),
+                (
+                    state.rel_open,
+                    crate::relations_view::relation_graph_panel(state).into_any(),
+                ),
+                (
+                    state.event_open,
+                    crate::events_view::event_graph_panel(state).into_any(),
+                ),
+                (
+                    state.contract_open,
+                    crate::contract_view::contract_panel(state).into_any(),
+                ),
+                (
+                    state.related_open,
+                    crate::related_view::related_panel(state).into_any(),
+                ),
+                (
+                    state.undo_open,
+                    crate::undo_view::undo_tree_panel(state).into_any(),
+                ),
+                (
+                    state.sem_open,
+                    crate::semantic_view::semantic_panel(state).into_any(),
+                ),
+                (
+                    state.debug_open,
+                    crate::debug_view::debug_panel(state).into_any(),
+                ),
             ]),
         ))
         .style(|s| s.size_full()),

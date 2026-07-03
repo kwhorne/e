@@ -38,8 +38,8 @@ use crate::laravel::{self, LaravelData};
 use crate::outline::OutlineItem;
 use crate::picker::{Picker, PickerItem};
 use crate::rename::RenameState;
-use crate::session::{self, SessionData};
 use crate::runtime::RuntimeReq;
+use crate::session::{self, SessionData};
 use crate::styling::{
     build_diag_lines, BpMarks, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
     StopLine,
@@ -3796,7 +3796,6 @@ impl AppState {
     pub fn rel_path(&self, uri: &str) -> String {
         rel_uri(uri, &self.root.get())
     }
-
 }
 
 pub(crate) fn is_word_char(c: char) -> bool {
@@ -3897,7 +3896,9 @@ pub(crate) fn replace_in_dir(root: &std::path::Path, query: &str, replace: &str)
 }
 
 /// Remove duplicate completion items, keeping the first of each label.
-pub(crate) fn dedup_by_label(items: Vec<lsp_types::CompletionItem>) -> Vec<lsp_types::CompletionItem> {
+pub(crate) fn dedup_by_label(
+    items: Vec<lsp_types::CompletionItem>,
+) -> Vec<lsp_types::CompletionItem> {
     let mut seen = HashSet::new();
     items
         .into_iter()

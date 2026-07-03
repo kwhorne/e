@@ -76,6 +76,7 @@ mod tabs;
 mod task_palette;
 mod tasks;
 mod tdd;
+mod tdd_state;
 mod terminal_state;
 mod terminal_view;
 mod theme;

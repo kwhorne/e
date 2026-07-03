@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Database write protection.** Connections that look like production (SSH
+  tunnels, non-local hosts, or names containing prod/production/live) default to
+  **read-only**, and cell edits to a read-only connection are blocked with a
+  warning — guarding against accidental writes to a real server over an SSH
+  tunnel. A lock badge (🔒/🔓) on each connection shows and toggles the state.
+
+
 - **Inline SQL intelligence.** Raw SQL inside PHP (`DB::select("…")`,
   `->whereRaw('…')`, migrations' `DB::statement("…")`, …) is no longer a dead
   string:

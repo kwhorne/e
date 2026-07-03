@@ -57,10 +57,13 @@ pub struct DbEntry {
     pub tables: RwSignal<Vec<String>>,
     pub error: RwSignal<Option<String>>,
     pub filter: RwSignal<String>,
+    /// Block writes (cell edits, …). Defaults on for production-looking targets.
+    pub read_only: RwSignal<bool>,
 }
 
 impl DbEntry {
     pub fn new(cx: Scope, config: e_db::DbConfig) -> Self {
+        let config_read_only = config.looks_like_prod();
         DbEntry {
             config,
             conn: cx.create_rw_signal(None),
@@ -69,6 +72,7 @@ impl DbEntry {
             tables: cx.create_rw_signal(Vec::new()),
             error: cx.create_rw_signal(None),
             filter: cx.create_rw_signal(String::new()),
+            read_only: cx.create_rw_signal(config_read_only),
         }
     }
     pub fn key(&self) -> String {

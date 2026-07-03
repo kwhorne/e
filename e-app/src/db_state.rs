@@ -581,6 +581,17 @@ impl AppState {
         self.db_edit.set(None);
     }
 
+    /// Toggle write protection for a connection (production defaults to on).
+    pub fn db_toggle_read_only(&self, entry: DbEntry) {
+        let now = !entry.read_only.get_untracked();
+        entry.read_only.set(now);
+        Self::notify(if now {
+            "Database set to read-only"
+        } else {
+            "Database writes enabled"
+        });
+    }
+
     /// Write the edited cell back to the database.
     pub fn db_commit_edit(&self) {
         let Some((row, col, column)) = self.db_edit.get_untracked() else {
@@ -601,6 +612,15 @@ impl AppState {
         let Some(conn) = entry.conn.get_untracked() else {
             return;
         };
+        // Write guard: refuse edits to a read-only (e.g. production) connection.
+        if entry.read_only.get_untracked() {
+            Self::notify(
+                "Read-only: this connection is protected from writes (looks like production). \
+                 Toggle read-only off in the Database panel to edit.",
+            );
+            self.db_edit.set(None);
+            return;
+        }
         let Some(result) = self.db_result.get_untracked() else {
             return;
         };

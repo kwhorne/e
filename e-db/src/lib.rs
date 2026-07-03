@@ -59,6 +59,30 @@ pub struct DbConfig {
 }
 
 impl DbConfig {
+    /// Heuristic: does this look like a production database? Remote/SSH targets
+    /// and names containing prod/production/live are treated as production, so
+    /// the editor can default them to read-only and warn before writes.
+    pub fn looks_like_prod(&self) -> bool {
+        if self.engine == "sqlite" {
+            return name_hints_prod(&self.path) || name_hints_prod(&self.label);
+        }
+        // SSH tunnels almost always target a real (remote) server.
+        if self.use_ssh && !self.ssh_host.is_empty() {
+            return true;
+        }
+        let host = self.host.trim().to_ascii_lowercase();
+        let local = matches!(
+            host.as_str(),
+            "" | "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "host.docker.internal"
+        );
+        if !local {
+            return true;
+        }
+        name_hints_prod(&self.host)
+            || name_hints_prod(&self.database)
+            || name_hints_prod(&self.label)
+    }
+
     /// A stable key for this connection within a project.
     pub fn key(&self) -> String {
         match self.engine.as_str() {
@@ -1247,9 +1271,39 @@ pub fn save_queries(project: &Path, queries: &[SavedQuery]) -> Result<(), String
     .map_err(|e| e.to_string())
 }
 
+/// Whether a host/name/path string hints at production.
+fn name_hints_prod(s: &str) -> bool {
+    let s = s.to_ascii_lowercase();
+    ["prod", "production", "live"]
+        .iter()
+        .any(|needle| s.contains(needle))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cfg(engine: &str, host: &str) -> DbConfig {
+        let mut c = DbConfig::default();
+        c.engine = engine.to_string();
+        c.host = host.to_string();
+        c
+    }
+
+    #[test]
+    fn prod_detection() {
+        assert!(!cfg("mysql", "127.0.0.1").looks_like_prod());
+        assert!(!cfg("mysql", "localhost").looks_like_prod());
+        assert!(cfg("mysql", "db.example.com").looks_like_prod()); // remote
+        assert!(cfg("mysql", "prod-db.internal").looks_like_prod()); // name hint
+        let mut ssh = cfg("mysql", "127.0.0.1");
+        ssh.use_ssh = true;
+        ssh.ssh_host = "bastion.example.com".into();
+        assert!(ssh.looks_like_prod()); // SSH tunnel
+        let mut named = cfg("sqlite", "");
+        named.path = "/data/production.sqlite".into();
+        assert!(named.looks_like_prod());
+    }
 
     #[test]
     fn sqlite_roundtrip() {

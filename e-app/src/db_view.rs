@@ -86,7 +86,30 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
     })
     .style(|s| s.color(theme::fg_dim()).font_size(10.0));
 
-    let head = stack((caret, glyph, name, count))
+    // Read-only lock: amber 🔒 when protected (defaults on for prod), dim 🔓 when
+    // writes are enabled. Click to toggle.
+    let e_lock = entry.clone();
+    let e_lock2 = entry.clone();
+    let lock = label(move || {
+        if e_lock.read_only.get() {
+            "🔒".to_string()
+        } else {
+            "🔓".to_string()
+        }
+    })
+    .style(move |s| {
+        let ro = e_lock.read_only.get();
+        s.font_size(10.0)
+            .cursor(floem::style::CursorStyle::Pointer)
+            .color(if ro {
+                Color::from_rgb8(0xe5, 0xc0, 0x7b)
+            } else {
+                theme::fg_dim()
+            })
+    })
+    .on_click_stop(move |_| state.db_toggle_read_only(e_lock2.clone()));
+
+    let head = stack((caret, glyph, name, lock, count))
         .style(|s| {
             s.flex_row()
                 .items_center()

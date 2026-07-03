@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Command palette showed stale results.** The results list keyed its rows on
+  position alone, so as you typed, floem reused the view at each slot and left
+  the previous labels in place (e.g. typing “che” listed unrelated commands and
+  hid “Check for Updates”). Rows are now keyed on the command identity, so the
+  list rebuilds correctly as the filter narrows.
+
 ### Added
 
 - **Delete rows & foreign-key hopping.** The cell edit dialog now has a **Delete

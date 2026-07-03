@@ -215,7 +215,11 @@ pub fn command_palette(state: AppState) -> impl IntoView {
 
     let rows = dyn_stack(
         move || filtered().into_iter().enumerate().collect::<Vec<_>>(),
-        |(i, _)| *i,
+        // Key on (position, id): keying on the index alone made floem reuse the
+        // view at slot `i` when the filtered set changed, leaving stale labels
+        // (e.g. "che" showing unrelated commands). Including the id forces a
+        // rebuild whenever the command at a slot changes.
+        |(i, (id, _))| (*i, *id),
         move |(i, (id, lbl))| {
             label(move || lbl.to_string())
                 .style(move |s| {

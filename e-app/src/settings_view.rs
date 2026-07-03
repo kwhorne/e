@@ -530,6 +530,22 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
     );
     push(
         4,
+        "Enable Xdebug",
+        "Load Xdebug into Grove's PHP for step-debugging (grove debug on)",
+        toggle_row(
+            "Enable Xdebug",
+            "Load Xdebug into Grove's PHP for step-debugging (grove debug on)",
+            move || s.settings.get().xdebug,
+            move |v| {
+                s.settings.update(|st| st.xdebug = v);
+                config::set_bool("xdebug", v);
+                s.set_grove_xdebug(v);
+            },
+        )
+        .into_any(),
+    );
+    push(
+        4,
         "App URL",
         "For request-replay. Empty = https://<folder>.test (Grove).",
         app_url_row(s).into_any(),

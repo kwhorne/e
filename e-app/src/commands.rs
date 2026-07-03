@@ -83,6 +83,13 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "generate-rules" => state.generate_validation_rules(),
         "generate-model" => state.generate_model_from_table(),
         "livewire-companion" => state.livewire_companion(),
+        "debug" => state.debug_start(),
+        "debug-panel" => state.toggle_debug_panel(),
+        "debug-toggle-breakpoint" => state.debug_toggle_breakpoint(),
+        "debug-step-over" => state.debug_step_over(),
+        "debug-step-into" => state.debug_step_into(),
+        "debug-step-out" => state.debug_step_out(),
+        "debug-stop" => state.debug_stop(),
         "undo-tree" => state.toggle_undo_tree(),
         "semantic-search" => state.toggle_semantic_search(),
         "emmet-expand" => {
@@ -187,6 +194,10 @@ fn close_overlays(state: AppState) {
     }
     if state.sem_open.get() {
         state.sem_open.set(false);
+        return;
+    }
+    if state.debug_open.get() {
+        state.debug_open.set(false);
         return;
     }
     if state.db_edit.get().is_some() {

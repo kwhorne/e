@@ -61,6 +61,10 @@ Examples: `cmd+shift+p`, `ctrl+g`, `alt+up`, `cmd+/`, `f12`, `shift+f12`.
 | `completion` | `cmd+space` | Trigger completion |
 | `hover` | `f1` | Hover info |
 | `definition` / `references` | `f12` / `shift+f12` | Go to definition / references |
+| `debug` | `f5` | Start / continue debugging |
+| `debug-toggle-breakpoint` | `f9` | Toggle breakpoint on the caret line |
+| `debug-step-over` / `debug-step-into` / `debug-step-out` | `f10` / `f11` / `shift+f11` | Step |
+| `debug-panel` / `debug-stop` | — | Toggle Debug panel / stop session |
 | `run-task` / `run-test` | `cmd+shift+b` / — | Run task / tests |
 | `source-control` | `cmd+2` | Toggle Source Control |
 | `diff` | — | Git diff vs HEAD |

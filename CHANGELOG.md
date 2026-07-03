@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-07-03
+
+### Added
+
+- **`e-dap` crate** — a synchronous Debug Adapter Protocol client (sibling to
+  `e-lsp`, same architecture: protocol client in its own crate, background
+  reader thread, id-correlated blocking requests). Reuses the identical
+  `Content-Length` stdio framing but dispatches on DAP's `request`/`response`/
+  `event` shape, correlates responses by `request_seq`, delivers adapter events
+  to a handler, and answers reverse requests. Typed helpers cover the full
+  step-debugging flow: `initialize`, `launch`/`attach`, `setBreakpoints`,
+  `configurationDone`, step controls, `threads`/`stackTrace`/`scopes`/
+  `variables`, and `evaluate`. This is the editor half of native debugging;
+  paired with Grove's `grove debug on`, PHP/Xdebug works, and JS (`js-debug`) /
+  Rust (`codelldb`) come nearly free since the client is adapter-agnostic.
+- **Debug panel + step-debugging in the UI.** A new Debug overlay shows session
+  status, execution controls (start/continue, step over/into/out, stop), the
+  live call stack (click a frame to jump to source), current-frame variables,
+  and all breakpoints. Breakpoints show as a red dot in the editor margin, and
+  the line execution is paused on is highlighted; stopping auto-jumps to it.
+  Keybindings: F5 start/continue, F9 toggle breakpoint on
+  the caret line, F10 step over, F11 step into, ⇧F11 step out; all also in the
+  command palette (“Debug: …”). The adapter (`vscode-php-debug`) is launched over
+  Grove's bundled Node automatically (discovered from Grove's `node-builds.json`,
+  falling back to `node` on PATH); the adapter path is auto-detected from
+  installed VS Code/Cursor extensions or `E_PHP_DEBUG_ADAPTER`. Pair with
+  `grove debug on` and step-debugging PHP works end to end.
+- **Multi-language debugging.** `e-dap` now speaks DAP over TCP as well as stdio,
+  so beyond PHP (Xdebug) the debugger also drives JavaScript/TypeScript via
+  `vscode-js-debug` and Rust/C/C++ via `codelldb` (both DAP servers). The
+  adapter is chosen from the active file's language and auto-discovered from
+  installed VS Code/Cursor extensions (overridable via `E_JS_DEBUG_ADAPTER`,
+  `E_CODELLDB`, `E_DEBUG_PROGRAM`).
+- Alt-click in the editor toggles a breakpoint on the clicked line (Floem's
+  built-in gutter isn't clickable), and breakpoints set before a file is opened
+  now appear when it opens.
+- **Settings: Enable Xdebug** (Settings → Laravel, `xdebug` in `config.json`) —
+  toggling it runs `grove debug on`/`off` so you can start step-debugging without
+  the terminal. On startup the toggle is synced from Grove's real state
+  (`grove debug status`). Degrades gracefully when Grove isn't installed.
+
+### Fixed
+
+- Debugging is fully opt-in and never affects the editor when Grove/Xdebug or a
+  DAP adapter aren't installed: the adapter is now launched entirely off the UI
+  thread, so a missing or slow adapter (including the TCP connect for JS/Rust)
+  can't freeze the editor, and missing tools report a clear status instead.
+
 ## [0.6.6] - 2026-07-02
 
 ### Fixed

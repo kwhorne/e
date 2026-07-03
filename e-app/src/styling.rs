@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use floem::peniko::Color;
@@ -49,12 +50,20 @@ pub struct DiagSpan {
 /// Shared, mutable per-buffer diagnostic spans (one entry per line).
 pub type DiagLines = Rc<RefCell<Vec<Vec<DiagSpan>>>>;
 
+/// Shared, mutable set of 0-based lines carrying a debug breakpoint.
+pub type BpMarks = Rc<RefCell<HashSet<usize>>>;
+
+/// The 0-based line the debugger is currently stopped on, if any.
+pub type StopLine = Rc<RefCell<Option<usize>>>;
+
 pub struct SyntaxStyling {
     highlights: Highlights,
     diagnostics: DiagLines,
     git: GitMarks,
     find: FindMarks,
     brackets: BracketMarks,
+    breakpoints: BpMarks,
+    stop_line: StopLine,
     family: Vec<FamilyOwned>,
     font_size: floem::reactive::RwSignal<usize>,
     tab_width: usize,
@@ -68,6 +77,8 @@ impl SyntaxStyling {
         git: GitMarks,
         find: FindMarks,
         brackets: BracketMarks,
+        breakpoints: BpMarks,
+        stop_line: StopLine,
         font_size: floem::reactive::RwSignal<usize>,
         tab_width: usize,
     ) -> Self {
@@ -77,6 +88,8 @@ impl SyntaxStyling {
             git,
             find,
             brackets,
+            breakpoints,
+            stop_line,
             family: vec![FamilyOwned::Monospace],
             font_size,
             tab_width,
@@ -215,6 +228,24 @@ impl Styling for SyntaxStyling {
         line: usize,
         layout_line: &mut TextLayoutLine,
     ) {
+        // Debugger: highlight the line execution is stopped on (full-width
+        // translucent band behind the text).
+        if *self.stop_line.borrow() == Some(line) {
+            for run in layout_line.text.layout_runs() {
+                let height = (run.max_ascent + run.max_descent) as f64;
+                let y = run.line_y as f64 - run.max_ascent as f64;
+                layout_line.extra_style.push(LineExtraStyle {
+                    x: 0.0,
+                    y,
+                    width: None, // fills the viewport width
+                    height,
+                    bg_color: Some(Color::from_rgba8(0xe5, 0xc0, 0x7b, 0x33)),
+                    under_line: None,
+                    wave_line: None,
+                });
+            }
+        }
+
         // Matching-bracket highlight (subtle box behind the bracket chars).
         for (start, end) in self.brackets.borrow().get(line).into_iter().flatten() {
             let color = Color::from_rgba8(0x80, 0x90, 0xa0, 0x55);
@@ -231,6 +262,25 @@ impl Styling for SyntaxStyling {
             };
             let styles = range_styles(&layout_line.text, span.start, span.end, Some(color), None);
             layout_line.extra_style.extend(styles);
+        }
+
+        // Debugger breakpoint marker: a red dot at the left margin.
+        if self.breakpoints.borrow().contains(&line) {
+            for run in layout_line.text.layout_runs() {
+                let full = (run.max_ascent + run.max_descent) as f64;
+                let size = full.min(9.0);
+                let top = run.line_y as f64 - run.max_ascent as f64;
+                let y = top + (full - size) / 2.0;
+                layout_line.extra_style.push(LineExtraStyle {
+                    x: 2.0,
+                    y,
+                    width: Some(size),
+                    height: size,
+                    bg_color: Some(Color::from_rgb8(0xf7, 0x76, 0x8e)),
+                    under_line: None,
+                    wave_line: None,
+                });
+            }
         }
 
         // Git change bar at the left edge of the line.

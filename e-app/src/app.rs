@@ -189,6 +189,8 @@ fn app_view() -> impl IntoView {
     state.load_laravel();
     state.load_databases();
     state.load_db_schema_cache();
+    // Reflect Grove's real Xdebug state in the setting (no-op without Grove).
+    state.sync_grove_xdebug_state();
     crate::agent_sync::start(state);
 
     // Restore the previous session, then open any file passed on the CLI.
@@ -443,6 +445,7 @@ fn app_view() -> impl IntoView {
                 crate::related_view::related_panel(state),
                 crate::undo_view::undo_tree_panel(state),
                 crate::semantic_view::semantic_panel(state),
+                crate::debug_view::debug_panel(state),
             ))
             .style(move |s| {
                 let s = s.absolute().inset(0.0).size_full();
@@ -456,7 +459,8 @@ fn app_view() -> impl IntoView {
                     || state.contract_open.get()
                     || state.related_open.get()
                     || state.undo_open.get()
-                    || state.sem_open.get();
+                    || state.sem_open.get()
+                    || state.debug_open.get();
                 if any {
                     s
                 } else {

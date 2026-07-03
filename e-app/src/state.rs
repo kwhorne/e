@@ -43,7 +43,8 @@ use crate::rename::RenameState;
 use crate::session::{self, SessionData};
 use crate::snippets;
 use crate::styling::{
-    build_diag_lines, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
+    build_diag_lines, BpMarks, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
+    StopLine,
 };
 
 /// One open file/tab.
@@ -193,6 +194,10 @@ pub struct Buffer {
     pub diag_lines: DiagLines,
     /// Per-line git change markers.
     pub git_marks: GitMarks,
+    /// Lines carrying a debug breakpoint (0-based).
+    pub bp_marks: BpMarks,
+    /// The line the debugger is currently stopped on (0-based), if any.
+    pub stop_line: StopLine,
     /// Per-line find-match spans.
     pub find_marks: FindMarks,
     /// Matching-bracket highlight spans.
@@ -487,6 +492,18 @@ pub struct AppState {
     pub runtime_reqs: RwSignal<Vec<RuntimeReq>>,
     pub runtime_expanded: RwSignal<Option<String>>,
     pub runtime_polling: RwSignal<bool>,
+
+    // ---- Step-debugging (DAP session) ----------------------------------
+    pub debug_open: RwSignal<bool>,
+    pub debug_status: RwSignal<String>,
+    pub debug_thread: RwSignal<i64>,
+    pub debug_frames: RwSignal<Vec<crate::debug::DebugFrame>>,
+    pub debug_vars: RwSignal<Vec<crate::debug::DebugVar>>,
+    pub debug_output: RwSignal<Vec<String>>,
+    /// Breakpoints keyed by file path → 1-based line numbers.
+    pub debug_breakpoints: RwSignal<std::collections::HashMap<String, Vec<u32>>>,
+    /// The live adapter client, if a session is running.
+    pub debug_client: RwSignal<Option<std::sync::Arc<e_dap::DapClient>>>,
 
     // ---- Laravel log tail ----------------------------------------------
     pub log_open: RwSignal<bool>,
@@ -1092,6 +1109,14 @@ impl AppState {
             runtime_reqs: RwSignal::new(Vec::new()),
             runtime_expanded: RwSignal::new(None),
             runtime_polling: RwSignal::new(false),
+            debug_open: RwSignal::new(false),
+            debug_status: RwSignal::new("idle".to_string()),
+            debug_thread: RwSignal::new(1),
+            debug_frames: RwSignal::new(Vec::new()),
+            debug_vars: RwSignal::new(Vec::new()),
+            debug_output: RwSignal::new(Vec::new()),
+            debug_breakpoints: RwSignal::new(std::collections::HashMap::new()),
+            debug_client: RwSignal::new(None),
             log_open: RwSignal::new(false),
             log_lines: RwSignal::new(Vec::new()),
             db_schema_cache: RwSignal::new(std::collections::HashMap::new()),
@@ -2511,6 +2536,8 @@ impl AppState {
             highlights,
             diag_lines: Rc::new(RefCell::new(Vec::new())),
             git_marks: Rc::new(RefCell::new(Vec::new())),
+            bp_marks: Rc::new(RefCell::new(Default::default())),
+            stop_line: Rc::new(RefCell::new(None)),
             find_marks: Rc::new(RefCell::new(Vec::new())),
             bracket_marks: Rc::new(RefCell::new(Vec::new())),
             uri: None,
@@ -4657,6 +4684,8 @@ impl AppState {
             highlights,
             diag_lines: Rc::new(RefCell::new(Vec::new())),
             git_marks,
+            bp_marks: Rc::new(RefCell::new(Default::default())),
+            stop_line: Rc::new(RefCell::new(None)),
             find_marks: Rc::new(RefCell::new(Vec::new())),
             bracket_marks: Rc::new(RefCell::new(Vec::new())),
             uri,
@@ -4675,6 +4704,7 @@ impl AppState {
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
+        self.sync_bp_marks(&canon.to_string_lossy());
         self.load_blame(id);
         self.request_inlay_hints(id);
     }

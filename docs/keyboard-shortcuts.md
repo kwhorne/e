@@ -95,6 +95,20 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 from the command palette (`⌘⇧P`). See [Laravel](laravel.md) and
 [AI Agents](agents.md).
 
+## Debugging
+
+| Shortcut | Action |
+| -------- | ------ |
+| `F5`     | Start / continue |
+| `F9`     | Toggle breakpoint on the caret line |
+| `F10`    | Step over |
+| `F11`    | Step into |
+| `⇧F11`   | Step out |
+
+`⌥`-click in the editor also toggles a breakpoint on that line. The Debug panel
+and `Debug: Stop` are available from the command palette (`⌘⇧P`). See
+[Debugging](debugging.md).
+
 ## Source Control
 
 The Source Control panel (`⌘2`) provides stage, unstage, discard, stage-all,

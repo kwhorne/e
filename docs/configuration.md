@@ -27,6 +27,7 @@ and `keybindings`), which is created on first use.
   "auto_close": true,      // auto-close brackets and quotes
   "inlay_hints": true,     // show LSP inlay hints (types, parameter names)
   "sticky_scroll": true,   // pin enclosing scope lines at the top while scrolling
+  "xdebug": false,         // enable Xdebug step-debugging via Grove (grove debug on)
   "sidebar_side": "left",  // explorer/Git panel side: "left" or "right"
   "agent_side": "right",   // agent panel side: "right" or "left"
   "keybindings": { "cmd+k": "delete-line" }, // override or add bindings
@@ -46,6 +47,7 @@ and `keybindings`), which is created on first use.
 | `auto_close` | bool | `true` | Auto-close brackets/quotes |
 | `inlay_hints` | bool | `true` | Show LSP inlay hints |
 | `sticky_scroll` | bool | `true` | Pin enclosing scope at the top |
+| `xdebug` | bool | `false` | Toggling this runs `grove debug on`/`off` to load Xdebug for step-debugging (see [Debugging](debugging.md)) |
 | `sidebar_side` | string | `"left"` | Side of the explorer/Git sidebar (`"left"` or `"right"`) |
 | `agent_side` | string | `"right"` | Side of the agent panel (`"right"` or `"left"`) |
 | `agents` | object | built-ins | AI agent configuration |

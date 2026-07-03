@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use floem::event::{EventListener, EventPropagation};
+use floem::event::{Event, EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::{Command, CommandExecuted};
 use floem::views::editor::core::command::{EditCommand, MoveCommand};
@@ -289,6 +289,8 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 b.git_marks.clone(),
                 b.find_marks.clone(),
                 b.bracket_marks.clone(),
+                b.bp_marks.clone(),
+                b.stop_line.clone(),
                 state.font_size,
                 state.settings.get_untracked().tab_width,
             ))
@@ -369,6 +371,17 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 .on_move(move |point| win_origin.set(point))
                 .on_event(EventListener::PointerDown, move |_| {
                     state.focused.set(pane_idx);
+                    EventPropagation::Continue
+                })
+                // Alt-click toggles a breakpoint on the clicked line (the caret
+                // lands there first). Floem's built-in gutter isn't clickable,
+                // so this is the in-editor way to set breakpoints by mouse.
+                .on_event(EventListener::PointerUp, move |evt| {
+                    if let Event::PointerUp(pe) = evt {
+                        if pe.modifiers.alt() {
+                            state.debug_toggle_breakpoint();
+                        }
+                    }
                     EventPropagation::Continue
                 })
                 .style(move |s| {

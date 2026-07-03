@@ -15,6 +15,7 @@ native code editor written in Rust.
 - [Find & Replace](find-and-replace.md) — in-file and workspace search
 - [Navigation](navigation.md) — palettes, recent files, go-to-line, history
 - [Languages & LSP](languages-and-lsp.md) — syntax, completion, diagnostics
+- [Debugging](debugging.md) — breakpoints, stepping, call stack & variables (DAP)
 - [Laravel](laravel.md) — PHP/Laravel-aware features
 - [Inertia / VILT](inertia.md) — Inertia page resolution, props & form contracts
 

@@ -19,6 +19,8 @@ mod config;
 mod contract;
 mod contract_view;
 mod db_view;
+mod debug;
+mod debug_view;
 mod dialogs;
 mod diff_view;
 mod editing;

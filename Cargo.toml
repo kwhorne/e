@@ -14,11 +14,11 @@ name = "e"
 path = "e-app/src/bin/e.rs"
 
 [workspace]
-members  = ["e-app", "e-core", "e-db", "e-lsp", "e-term"]
+members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term"]
 resolver = "2"
 
 [workspace.package]
-version      = "0.6.6"
+version      = "0.6.7"
 edition      = "2021"
 rust-version = "1.87.0"
 license      = "MIT"
@@ -41,6 +41,7 @@ self_update = { version = "0.42", default-features = false, features = ["archive
 regex       = "1"
 e-core      = { path = "./e-core" }
 e-db        = { path = "./e-db" }
+e-dap       = { path = "./e-dap" }
 e-lsp       = { path = "./e-lsp" }
 e-term      = { path = "./e-term" }
 

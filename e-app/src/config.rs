@@ -20,6 +20,8 @@ pub struct Settings {
     /// Laravel-aware completion, hover and navigation (auto-enabled in Laravel
     /// projects; set to false to turn off).
     pub laravel: bool,
+    /// Enable Xdebug step-debugging via Grove (`grove debug on`) when toggled.
+    pub xdebug: bool,
     /// Base URL for request-replay (empty = derive https://<folder>.test, Grove).
     pub app_url: String,
     /// Explorer/Git sidebar on the right instead of the left.
@@ -44,6 +46,7 @@ impl Default for Settings {
             inlay_hints: true,
             sticky_scroll: true,
             laravel: true,
+            xdebug: false,
             app_url: String::new(),
             sidebar_right: false,
             agent_left: false,
@@ -91,6 +94,7 @@ pub fn load_settings() -> Settings {
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         laravel: bool_of("laravel", d.laravel),
+        xdebug: bool_of("xdebug", d.xdebug),
         app_url: v
             .get("app_url")
             .and_then(|x| x.as_str())

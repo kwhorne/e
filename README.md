@@ -43,6 +43,8 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Language Server Protocol** — diagnostics, completion, hover, go-to-definition,
   find references, document & workspace symbols, formatting, rename, code actions,
   signature help and **inlay hints**, with per-language servers auto-selected
+- **Step debugging** — breakpoints, call stack, variables and step controls via
+  the Debug Adapter Protocol: PHP/Xdebug (with [Grove](https://elyracode.com/grove)), plus JavaScript/TypeScript and Rust/C/C++
 - **Framework-aware completion** — Flux UI (`<flux:…>`), Livewire (`wire:`),
   Tailwind classes, Vue/Svelte directives, and Laravel helpers (`route()`,
   `view()`, `config()`, `env()`)
@@ -163,7 +165,7 @@ Full user documentation also lives in [`docs/`](docs/README.md):
 
 - [Installation](docs/installation.md) · [Getting started](docs/getting-started.md) · [Keyboard shortcuts](docs/keyboard-shortcuts.md)
 - [Editing](docs/editing.md) · [Find & Replace](docs/find-and-replace.md) · [Navigation](docs/navigation.md)
-- [Languages & LSP](docs/languages-and-lsp.md) · [Laravel](docs/laravel.md) · [Inertia / VILT](docs/inertia.md)
+- [Languages & LSP](docs/languages-and-lsp.md) · [Debugging](docs/debugging.md) · [Laravel](docs/laravel.md) · [Inertia / VILT](docs/inertia.md)
 - [Source Control](docs/source-control.md) · [Database](docs/database.md) · [Terminal](docs/terminal.md)
 - [AI Agents](docs/agents.md) · [Agent Workspace Sync](docs/agent-sync.md)
 - [Configuration](docs/configuration.md) · [Updating](docs/updating.md) · [Troubleshooting](docs/troubleshooting.md)
@@ -241,6 +243,7 @@ Global settings live in `~/.config/e/config.json` (open it with `⌘,`):
 | --------- | -------------------------------------------------------------------- |
 | `e-core`  | GUI-agnostic core: rope buffers, language detection, tree-sitter syntax, git diff, markdown |
 | `e-lsp`   | Multi-server Language Server Protocol client                         |
+| `e-dap`   | Debug Adapter Protocol client (step debugging over stdio & TCP)      |
 | `e-term`  | PTY-backed terminal with a minimal VT100 screen model                |
 | `e-app`   | The UI — editor, panels, palettes, theming, state                    |
 | `e`       | The binary entry point                                               |

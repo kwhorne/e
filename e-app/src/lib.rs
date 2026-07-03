@@ -15,6 +15,7 @@ mod cmd_palette;
 mod codegen;
 mod commands;
 mod completion;
+mod completion_state;
 mod config;
 mod contract;
 mod contract_view;

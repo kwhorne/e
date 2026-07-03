@@ -814,6 +814,34 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         }
     });
 
+    let filter_chip = label(move || {
+        state
+            .db_filter
+            .get()
+            .map(|(c, v)| match v {
+                Some(v) => format!("⚑ {c} = {v}  ✕"),
+                None => format!("⚑ {c} IS NULL  ✕"),
+            })
+            .unwrap_or_default()
+    })
+    .style(move |s| {
+        let s = s
+            .padding_horiz(8.0)
+            .padding_vert(2.0)
+            .border_radius(5.0)
+            .font_size(11.0)
+            .background(theme::bg_hover())
+            .color(theme::fg())
+            .cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.color(theme::fg_dim()));
+        if state.db_filter.get().is_some() && state.db_subview.get() == "data" {
+            s
+        } else {
+            s.hide()
+        }
+    })
+    .on_click_stop(move |_| state.db_clear_filter());
+
     let spacer = empty().style(|s| s.flex_grow(1.0));
 
     // Saved queries: a popout menu to load them, and a save button + name input.
@@ -884,6 +912,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     let toolbar = stack((
         subview_chips,
         pager,
+        filter_chip,
         spacer,
         saved_menu,
         name_input,
@@ -1164,7 +1193,21 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         })
         .on_click_stop(move |_| state.db_hop_fk());
-    let row_actions = stack((delete_row, follow_fk)).style(|s| {
+    let filter_to = label(|| "Filter to value".to_string())
+        .style(|s| {
+            s.padding_horiz(12.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_filter_to_cell());
+    let row_actions = stack((delete_row, follow_fk, filter_to)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(8.0)

@@ -1157,19 +1157,28 @@ pub fn table_data(
     table: &str,
     max: usize,
 ) -> Result<QueryResult, String> {
-    let sql = browse_sql(engine, table, None, max, 0);
+    let sql = browse_sql(engine, table, None, None, max, 0);
     query(conn, &sql, max)
 }
 
-/// Build a browsing query with optional sort + pagination.
+/// Build a browsing query with an optional `col = value` (or `IS NULL`) filter,
+/// sort and pagination.
 pub fn browse_sql(
     engine: &str,
     table: &str,
+    filter: Option<(&str, Option<&str>)>,
     order_by: Option<(&str, bool)>,
     limit: usize,
     offset: usize,
 ) -> String {
     let mut sql = format!("SELECT * FROM {}", quote_ident(engine, table));
+    if let Some((col, val)) = filter {
+        let cond = match val {
+            Some(v) => format!("{} = '{}'", quote_ident(engine, col), esc(v)),
+            None => format!("{} IS NULL", quote_ident(engine, col)),
+        };
+        sql.push_str(&format!(" WHERE {cond}"));
+    }
     if let Some((col, asc)) = order_by {
         sql.push_str(&format!(
             " ORDER BY {} {}",
@@ -1558,6 +1567,34 @@ mod tests {
         c.engine = engine.to_string();
         c.host = host.to_string();
         c
+    }
+
+    #[test]
+    fn browse_sql_filter_and_sort() {
+        assert_eq!(
+            browse_sql("sqlite", "posts", None, None, 50, 0),
+            "SELECT * FROM `posts` LIMIT 50 OFFSET 0"
+        );
+        assert_eq!(
+            browse_sql("sqlite", "posts", Some(("user_id", Some("1"))), None, 50, 0),
+            "SELECT * FROM `posts` WHERE `user_id` = '1' LIMIT 50 OFFSET 0"
+        );
+        assert_eq!(
+            browse_sql("sqlite", "posts", Some(("deleted_at", None)), None, 50, 0),
+            "SELECT * FROM `posts` WHERE `deleted_at` IS NULL LIMIT 50 OFFSET 0"
+        );
+        // filter + sort compose, and values are escaped.
+        assert_eq!(
+            browse_sql(
+                "mysql",
+                "t",
+                Some(("name", Some("O'x"))),
+                Some(("id", false)),
+                10,
+                20
+            ),
+            "SELECT * FROM `t` WHERE `name` = 'O''x' ORDER BY `id` DESC LIMIT 10 OFFSET 20"
+        );
     }
 
     #[test]

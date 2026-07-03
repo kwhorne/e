@@ -431,6 +431,8 @@ pub struct AppState {
     pub db_indexes: RwSignal<Vec<e_db::IndexInfo>>,
     /// Active sort: `(column, ascending)`.
     pub db_sort: RwSignal<Option<(String, bool)>>,
+    /// Active data-view filter: `(column, Some(value) | None for IS NULL)`.
+    pub db_filter: RwSignal<Option<(String, Option<String>)>>,
     /// Current page (0-based) when browsing a table.
     pub db_page: RwSignal<usize>,
     /// Test-connection state for the add form: ``/`testing`/`ok`/error.
@@ -934,6 +936,7 @@ impl AppState {
             db_columns: RwSignal::new(Vec::new()),
             db_indexes: RwSignal::new(Vec::new()),
             db_sort: RwSignal::new(None),
+            db_filter: RwSignal::new(None),
             db_page: RwSignal::new(0),
             db_test_state: RwSignal::new(String::new()),
             db_editing_key: RwSignal::new(None),

@@ -212,6 +212,7 @@ impl AppState {
             .set(format!("{} · {}", entry.config.display_name(), table));
         self.db_subview.set("data".into());
         self.db_sort.set(None);
+        self.db_filter.set(None);
         self.db_page.set(0);
         self.db_columns.set(Vec::new());
         self.db_result_open.set(true);
@@ -239,9 +240,11 @@ impl AppState {
         let engine = entry.config.engine.clone();
         let page = self.db_page.get_untracked();
         let sort = self.db_sort.get_untracked();
+        let filter = self.db_filter.get_untracked();
         self.db_query_text.set({
             let by = sort.as_ref().map(|(c, a)| (c.as_str(), *a));
-            e_db::browse_sql(&engine, &table, by, DB_PAGE, page * DB_PAGE)
+            let f = filter.as_ref().map(|(c, v)| (c.as_str(), v.as_deref()));
+            e_db::browse_sql(&engine, &table, f, by, DB_PAGE, page * DB_PAGE)
         });
         self.db_result_loading.set(true);
         self.db_result_error.set(None);
@@ -251,9 +254,41 @@ impl AppState {
         });
         std::thread::spawn(move || {
             let by = sort.as_ref().map(|(c, a)| (c.as_str(), *a));
-            let sql = e_db::browse_sql(&engine, &table, by, DB_PAGE, page * DB_PAGE);
+            let f = filter.as_ref().map(|(c, v)| (c.as_str(), v.as_deref()));
+            let sql = e_db::browse_sql(&engine, &table, f, by, DB_PAGE, page * DB_PAGE);
             send(e_db::query(&conn, &sql, DB_PAGE));
         });
+    }
+
+    /// Filter the current table to the value in the cell open in the edit
+    /// overlay (WHERE col = value / IS NULL), then reload.
+    pub fn db_filter_to_cell(&self) {
+        let Some((row, col, column)) = self.db_edit.get_untracked() else {
+            return;
+        };
+        let value = self.db_result.with_untracked(|r| {
+            r.as_ref().and_then(|r| {
+                r.rows
+                    .get(row)
+                    .and_then(|row| row.get(col))
+                    .cloned()
+                    .flatten()
+            })
+        });
+        self.db_edit.set(None);
+        self.db_filter.set(Some((column, value)));
+        self.db_page.set(0);
+        self.db_reload_table();
+    }
+
+    /// Clear the active data-view filter and reload.
+    pub fn db_clear_filter(&self) {
+        if self.db_filter.get_untracked().is_none() {
+            return;
+        }
+        self.db_filter.set(None);
+        self.db_page.set(0);
+        self.db_reload_table();
     }
 
     /// Toggle the sort on a column (asc → desc → off) and reload.
@@ -854,6 +889,7 @@ impl AppState {
                     state.db_result_title.set(format!("{disp} · {ref_table}"));
                     state.db_subview.set("data".into());
                     state.db_sort.set(None);
+                    state.db_filter.set(None);
                     state.db_page.set(0);
                     state.db_columns.set(Vec::new());
                     state.db_load_columns(entry.clone(), ref_table);

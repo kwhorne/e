@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linked value. Backed by new tested `e-db` primitives `insert_row`,
   `delete_row` (with an empty-predicate guard so it can never wipe a table),
   `fk_target` and `rows_where`.
+- **Column filters.** **Filter to value** in the cell dialog restricts the data
+  view to rows matching that cell (`WHERE col = value` / `IS NULL`), composing
+  with sort and pagination. An active filter shows as a chip in the toolbar —
+  click it to clear.
 
 ## [0.7.1] - 2026-07-03
 

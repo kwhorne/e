@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Command palette (`⌘⇧P`) now actually filters as you type.** The real cause
+  wasn't just a stale query (0.7.0) — its query/selection lived on `AppState`
+  (a different reactive scope), so the `text_input` and the results list didn't
+  stay in sync and the list stayed on the unfiltered set. The palette now uses
+  view-local signals like the file finder, so typing filters live.
+
 ## [0.7.0] - 2026-07-03
 
 ### Fixed

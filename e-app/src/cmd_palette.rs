@@ -90,16 +90,12 @@ const COMMANDS: &[(&str, &str)] = &[
 #[derive(Clone, Copy)]
 pub struct CmdPalette {
     pub open: RwSignal<bool>,
-    pub query: RwSignal<String>,
-    pub selected: RwSignal<usize>,
 }
 
 impl CmdPalette {
     pub fn new() -> Self {
         Self {
             open: RwSignal::new(false),
-            query: RwSignal::new(String::new()),
-            selected: RwSignal::new(0),
         }
     }
 }
@@ -127,6 +123,12 @@ fn rank_commands(query: &str) -> Vec<(&'static str, &'static str)> {
 
 pub fn command_palette(state: AppState) -> impl IntoView {
     let cmd = state.cmd;
+    // Local signals (like the goto-file palette). The `text_input`, filter and
+    // list all share these within this view's reactive scope, so typing filters
+    // live. (Using AppState-owned signals from another scope didn't propagate
+    // reliably, leaving the list stuck on the unfiltered set.)
+    let query: RwSignal<String> = RwSignal::new(String::new());
+    let selected: RwSignal<usize> = RwSignal::new(0);
 
     let focus_pulse: RwSignal<u64> = RwSignal::new(0);
     create_effect(move |_| {
@@ -134,33 +136,33 @@ pub fn command_palette(state: AppState) -> impl IntoView {
             // Start fresh every time: a stale query from a previous invocation
             // would make new keystrokes append (e.g. "che" → "<old>che") and match
             // nothing — which read as an unresponsive palette.
-            cmd.query.set(String::new());
-            cmd.selected.set(0);
+            query.set(String::new());
+            selected.set(0);
             focus_pulse.update(|x| *x += 1);
         }
     });
 
     // Reset the highlight to the top result whenever the query changes.
     create_effect(move |_| {
-        cmd.query.get();
-        cmd.selected.set(0);
+        query.get();
+        selected.set(0);
     });
 
     // Fuzzy subsequence match on the label, ranked by score (word-boundary and
     // consecutive-character bonuses), ties broken by original order.
-    let filtered = move || -> Vec<(&'static str, &'static str)> { rank_commands(&cmd.query.get()) };
+    let filtered = move || -> Vec<(&'static str, &'static str)> { rank_commands(&query.get()) };
 
     let run_selected = move || {
         let results = filtered();
         if results.is_empty() {
             return;
         }
-        let idx = cmd.selected.get().min(results.len() - 1);
+        let idx = selected.get().min(results.len() - 1);
         cmd.open.set(false);
         run_command(state, results[idx].0);
     };
 
-    let input = text_input(cmd.query)
+    let input = text_input(query)
         .placeholder("Run a command…")
         .on_enter(run_selected)
         .style(|s| {
@@ -193,7 +195,7 @@ pub fn command_palette(state: AppState) -> impl IntoView {
             move |_| {
                 let len = filtered().len();
                 if len > 0 {
-                    cmd.selected.update(|i| *i = (*i + 1).min(len - 1));
+                    selected.update(|i| *i = (*i + 1).min(len - 1));
                 }
             },
         )
@@ -201,7 +203,7 @@ pub fn command_palette(state: AppState) -> impl IntoView {
             Key::Named(NamedKey::ArrowUp),
             |_| true,
             move |_| {
-                cmd.selected.update(|i| *i = i.saturating_sub(1));
+                selected.update(|i| *i = i.saturating_sub(1));
             },
         );
 
@@ -218,7 +220,7 @@ pub fn command_palette(state: AppState) -> impl IntoView {
                         .padding_horiz(12.0)
                         .color(theme::fg())
                         .cursor(floem::style::CursorStyle::Pointer);
-                    if cmd.selected.get() == i {
+                    if selected.get() == i {
                         s.background(theme::bg_active())
                     } else {
                         s.hover(|s| s.background(theme::bg_hover()))
@@ -235,7 +237,7 @@ pub fn command_palette(state: AppState) -> impl IntoView {
     let rows_scroll = scroll(rows)
         .scroll_to_percent(move || {
             let n = filtered().len().max(1) as f32;
-            cmd.selected.get() as f32 / n
+            selected.get() as f32 / n
         })
         .style(|s| s.max_height(360.0).width_full());
 

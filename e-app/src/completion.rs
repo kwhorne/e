@@ -2,7 +2,7 @@
 
 use floem::kurbo::Point;
 use floem::peniko::Color;
-use floem::reactive::{RwSignal, SignalGet};
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
 use floem::IntoView;
 use lsp_types::{CompletionItem, CompletionItemKind};
@@ -127,12 +127,19 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
                     .gap(8.0)
                     .height(22.0)
                     .width_full()
-                    .padding_horiz(8.0);
+                    .padding_horiz(8.0)
+                    .cursor(floem::style::CursorStyle::Pointer);
                 if comp.selected.get() == i {
                     s.background(theme::bg_active())
                 } else {
                     s.hover(|s| s.background(theme::bg_hover()))
                 }
+            })
+            // Click to insert: select this row then accept it. The rows aren't
+            // keyboard-focusable, so the editor keeps focus after the click.
+            .on_click_stop(move |_| {
+                comp.selected.set(i);
+                state.accept_completion();
             })
         },
     )

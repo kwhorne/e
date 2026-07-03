@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-03
+
+### Added
+
+- **Click to accept a completion.** Completion suggestions can now be inserted
+  with the mouse — click a row to select and apply it (previously only Enter/Tab
+  worked). Combined with the 0.7.3 crash fix, accepting a suggestion (including
+  Flux UI / Livewire / framework completions) now works reliably.
+
 ## [0.7.3] - 2026-07-03
 
 ### Fixed

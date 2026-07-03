@@ -157,6 +157,16 @@ pub struct DbConsent {
     pub reply: std::sync::mpsc::Sender<serde_json::Value>,
 }
 
+/// One editable field in the "insert row" dialog, bound to its own signals.
+#[derive(Clone)]
+pub struct InsertField {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub value: RwSignal<String>,
+    pub is_null: RwSignal<bool>,
+}
+
 /// Status of the TDD test-runner loop.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TddStatus {
@@ -546,6 +556,9 @@ pub struct AppState {
     pub db_edit: RwSignal<Option<(usize, usize, String)>>,
     pub db_edit_value: RwSignal<String>,
     pub db_edit_null: RwSignal<bool>,
+    /// "Insert row" dialog: whether it's open, and one field per column.
+    pub db_insert_open: RwSignal<bool>,
+    pub db_insert_fields: RwSignal<Vec<InsertField>>,
     /// Saved queries for the current project.
     pub db_queries: RwSignal<Vec<e_db::SavedQuery>>,
     /// Whether the "name this query" input is showing.
@@ -1001,6 +1014,8 @@ impl AppState {
             db_edit: RwSignal::new(None),
             db_edit_value: RwSignal::new(String::new()),
             db_edit_null: RwSignal::new(false),
+            db_insert_open: RwSignal::new(false),
+            db_insert_fields: RwSignal::new(Vec::new()),
             db_queries: RwSignal::new(Vec::new()),
             db_saving_query: RwSignal::new(false),
             db_query_name: RwSignal::new(String::new()),

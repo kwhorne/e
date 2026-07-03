@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view to rows matching that cell (`WHERE col = value` / `IS NULL`), composing
   with sort and pagination. An active filter shows as a chip in the toolbar —
   click it to clear.
+- **Insert rows.** A **+ Row** button on the data toolbar opens a dialog with one
+  field per column (each with a NULL toggle). Blank, non-NULL columns are omitted
+  so database defaults / auto-increment apply. Honours the read-only guard.
 
 ## [0.7.1] - 2026-07-03
 

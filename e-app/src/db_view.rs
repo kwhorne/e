@@ -908,12 +908,30 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             state.db_saving_query.get();
         });
     let export = toolbar_btn("⬇ CSV", Box::new(move || state.db_export_csv()));
+    let add_row = label(|| "+ Row".to_string())
+        .style(move |s| {
+            let s = s
+                .padding_horiz(8.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .font_size(12.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
+            if state.db_result_table.get().is_some() && state.db_subview.get() == "data" {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.db_begin_insert());
 
     let toolbar = stack((
         subview_chips,
         pager,
         filter_chip,
         spacer,
+        add_row,
         saved_menu,
         name_input,
         save_btn,
@@ -990,6 +1008,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         status,
         grid,
         db_edit_popup(state),
+        db_insert_popup(state),
     ))
     .style(move |s| {
         let s = s
@@ -1248,6 +1267,146 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
         if state.db_edit.get().is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
+/// The "insert row" dialog: one labelled input per column + a NULL toggle.
+fn db_insert_popup(state: AppState) -> impl IntoView {
+    let title = label(move || {
+        format!(
+            "Insert row · {}",
+            state.db_result_table.get().unwrap_or_default()
+        )
+    })
+    .style(|s| {
+        s.font_size(13.0)
+            .font_bold()
+            .color(theme::fg())
+            .margin_bottom(10.0)
+    });
+
+    let fields = dyn_stack(
+        move || state.db_insert_fields.get(),
+        |f| f.name.clone(),
+        move |f| {
+            let name = f.name.clone();
+            let dt = f.data_type.clone();
+            let nullable = f.nullable;
+            let val = f.value;
+            let is_null = f.is_null;
+            let name_lbl = label(move || format!("{name}  {dt}")).style(|s| {
+                s.width(150.0)
+                    .flex_shrink(0.0)
+                    .font_size(11.0)
+                    .text_ellipsis()
+                    .color(theme::fg_dim())
+            });
+            let input = text_input(val).placeholder("value").style(move |s| {
+                let s = theme::input_colors(s)
+                    .flex_grow(1.0)
+                    .min_width(0.0)
+                    .height(30.0)
+                    .font_size(12.0)
+                    .padding_horiz(8.0);
+                if is_null.get() {
+                    s.color(theme::fg_dim())
+                } else {
+                    s
+                }
+            });
+            let null_toggle = label(move || {
+                if is_null.get() {
+                    "☑ NULL".to_string()
+                } else {
+                    "☐ NULL".to_string()
+                }
+            })
+            .style(move |s| {
+                let s = s
+                    .width(64.0)
+                    .flex_shrink(0.0)
+                    .font_size(11.0)
+                    .cursor(floem::style::CursorStyle::Pointer);
+                if nullable {
+                    s.color(theme::fg_dim()).hover(|s| s.color(theme::fg()))
+                } else {
+                    s.color(theme::border())
+                }
+            })
+            .on_click_stop(move |_| {
+                if nullable {
+                    is_null.update(|n| *n = !*n);
+                }
+            });
+            stack((name_lbl, input, null_toggle)).style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .gap(8.0)
+                    .width_full()
+                    .margin_bottom(6.0)
+            })
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+    let fields = scroll(fields).style(|s| s.width_full().max_height(360.0));
+
+    let cancel = label(|| "Cancel".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_cancel_insert());
+    let save = label(|| "Insert".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .background(theme::accent())
+                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .cursor(floem::style::CursorStyle::Pointer)
+        })
+        .on_click_stop(move |_| state.db_commit_insert());
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), cancel, save)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .margin_top(12.0)
+    });
+
+    let card = stack((title, fields, buttons)).style(|s| {
+        s.flex_col()
+            .width(520.0)
+            .padding(16.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg())
+    });
+
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 120));
+        if state.db_insert_open.get() {
             s
         } else {
             s.hide()

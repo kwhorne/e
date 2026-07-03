@@ -13,7 +13,7 @@ use floem::views::editor::text::Document;
 
 use e_core::language::Language;
 
-use crate::state::{AppState, DbEntry, DbForm};
+use crate::state::{AppState, DbEntry, DbForm, InsertField};
 
 /// Rows per page when browsing a table in the Database panel.
 const DB_PAGE: usize = 200;
@@ -289,6 +289,94 @@ impl AppState {
         self.db_filter.set(None);
         self.db_page.set(0);
         self.db_reload_table();
+    }
+
+    /// Open the "insert row" dialog, one field per column of the current table.
+    pub fn db_begin_insert(&self) {
+        if self.db_result_table.get_untracked().is_none() {
+            return;
+        }
+        // Block on a read-only (production) connection up front.
+        if let Some((entry, ..)) = self.db_edit_target() {
+            if entry.read_only.get_untracked() {
+                Self::notify(
+                    "Read-only: this connection is protected from writes. Toggle read-only off \
+                     in the Database panel to insert.",
+                );
+                return;
+            }
+        }
+        let fields: Vec<InsertField> = self.db_columns.with_untracked(|cols| {
+            cols.iter()
+                .map(|c| InsertField {
+                    name: c.name.clone(),
+                    data_type: c.data_type.clone(),
+                    nullable: c.nullable,
+                    value: self.cx.create_rw_signal(String::new()),
+                    // Nullable non-PK columns default to NULL; others start blank
+                    // so DB defaults / auto-increment apply.
+                    is_null: self.cx.create_rw_signal(c.nullable && c.key != "PRI"),
+                })
+                .collect()
+        });
+        if fields.is_empty() {
+            Self::notify("Insert: no column metadata — open a table first");
+            return;
+        }
+        self.db_insert_fields.set(fields);
+        self.db_insert_open.set(true);
+    }
+
+    pub fn db_cancel_insert(&self) {
+        self.db_insert_open.set(false);
+    }
+
+    /// Insert the row built in the dialog. Columns left blank (and not marked
+    /// NULL) are omitted so database defaults / auto-increment apply.
+    pub fn db_commit_insert(&self) {
+        let Some((entry, conn, table, engine)) = self.db_edit_target() else {
+            return;
+        };
+        if entry.read_only.get_untracked() {
+            Self::notify("Read-only: this connection is protected from writes.");
+            self.db_insert_open.set(false);
+            return;
+        }
+        let values: Vec<(String, Option<String>)> = self.db_insert_fields.with_untracked(|fs| {
+            fs.iter()
+                .filter_map(|f| {
+                    if f.is_null.get_untracked() {
+                        Some((f.name.clone(), None))
+                    } else {
+                        let v = f.value.get_untracked();
+                        if v.is_empty() {
+                            None
+                        } else {
+                            Some((f.name.clone(), Some(v)))
+                        }
+                    }
+                })
+                .collect()
+        });
+        if values.is_empty() {
+            Self::notify("Insert: fill at least one column");
+            return;
+        }
+        let state = *self;
+        let send = create_ext_action(self.cx, move |res: Result<u64, String>| match res {
+            Ok(_) => {
+                state.db_insert_open.set(false);
+                Self::notify("Row inserted");
+                state.db_reload_table();
+            }
+            Err(e) => {
+                state.db_insert_open.set(false);
+                state.db_result_error.set(Some(e));
+            }
+        });
+        std::thread::spawn(move || {
+            send(e_db::insert_row(&conn, &engine, &table, &values));
+        });
     }
 
     /// Toggle the sort on a column (asc → desc → off) and reload.

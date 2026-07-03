@@ -55,6 +55,7 @@ mod relations;
 mod relations_view;
 mod rename;
 mod request;
+mod runtime;
 mod runtime_view;
 mod schema_diff;
 mod semantic;

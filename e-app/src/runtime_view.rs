@@ -9,7 +9,8 @@ use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
 use floem::IntoView;
 
-use crate::state::{AppState, RuntimeReq};
+use crate::runtime::RuntimeReq;
+use crate::state::AppState;
 use crate::theme;
 
 const GREEN: Color = Color::from_rgb8(0x9e, 0xce, 0x6a);

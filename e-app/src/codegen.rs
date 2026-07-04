@@ -138,6 +138,61 @@ pub fn valid_table(t: &str) -> bool {
     !t.is_empty() && t.chars().all(is_ident)
 }
 
+/// Convert Unix seconds (UTC) to `(year, month, day, hour, min, sec)` using
+/// Howard Hinnant's civil-from-days algorithm (no date crate needed).
+fn ymd_hms_from_unix(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (h, mi, s) = (
+        (rem / 3600) as u32,
+        ((rem % 3600) / 60) as u32,
+        (rem % 60) as u32,
+    );
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = y + if m <= 2 { 1 } else { 0 };
+    (y, m, d, h, mi, s)
+}
+
+/// A Laravel-style migration filename timestamp (`YYYY_MM_DD_HHMMSS`) for now.
+pub fn migration_timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (y, mo, d, h, mi, s) = ymd_hms_from_unix(secs);
+    format!("{y:04}_{mo:02}_{d:02}_{h:02}{mi:02}{s:02}")
+}
+
+/// A Laravel migration scaffold that alters `table` — offered instead of running
+/// DDL directly, so structure changes go through version control (DB-803).
+pub fn change_table_migration(table: &str) -> String {
+    format!(
+        "<?php\n\n\
+         use Illuminate\\Database\\Migrations\\Migration;\n\
+         use Illuminate\\Database\\Schema\\Blueprint;\n\
+         use Illuminate\\Support\\Facades\\Schema;\n\n\
+         return new class extends Migration\n{{\n\
+         \x20   public function up(): void\n    {{\n\
+         \x20       Schema::table('{table}', function (Blueprint $table) {{\n\
+         \x20           // Describe your change, e.g.:\n\
+         \x20           // $table->string('new_column')->nullable();\n\
+         \x20           // $table->index('some_column');\n\
+         \x20       }});\n    }}\n\n\
+         \x20   public function down(): void\n    {{\n\
+         \x20       Schema::table('{table}', function (Blueprint $table) {{\n\
+         \x20           // Reverse the change above.\n\
+         \x20       }});\n    }}\n}};\n"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +204,23 @@ mod tests {
             nullable,
             key: String::new(),
         }
+    }
+
+    #[test]
+    fn civil_date_conversion() {
+        // 1700000000 = 2023-11-14 22:13:20 UTC.
+        assert_eq!(ymd_hms_from_unix(1_700_000_000), (2023, 11, 14, 22, 13, 20));
+        // Unix epoch.
+        assert_eq!(ymd_hms_from_unix(0), (1970, 1, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn change_migration_scaffold() {
+        let m = change_table_migration("orders");
+        assert!(m.contains("extends Migration"));
+        assert!(m.contains("Schema::table('orders'"));
+        assert!(m.contains("public function up"));
+        assert!(m.contains("public function down"));
     }
 
     #[test]

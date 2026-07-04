@@ -845,6 +845,32 @@ impl AppState {
         self.db_activate_tab(0);
     }
 
+    /// Generate a Laravel migration scaffold for structure changes to the
+    /// current table and open it, instead of running DDL directly (DB-803).
+    pub fn db_new_migration_for_table(&self) {
+        let Some(table) = self.db_result_table.get_untracked() else {
+            return;
+        };
+        if !crate::codegen::valid_table(&table) {
+            return;
+        }
+        let root = self.root.get_untracked();
+        let dir = root.join("database/migrations");
+        if !dir.is_dir() {
+            Self::notify("Not a Laravel project (no database/migrations)");
+            return;
+        }
+        let ts = crate::codegen::migration_timestamp();
+        let file = dir.join(format!("{ts}_update_{table}_table.php"));
+        let content = crate::codegen::change_table_migration(&table);
+        if std::fs::write(&file, content).is_ok() {
+            self.open_path(file.clone());
+            Self::notify(&format!("Created {}", file.display()));
+        } else {
+            Self::notify("Could not write the migration");
+        }
+    }
+
     /// Copy the current table's CREATE DDL to the clipboard (DB-204).
     pub fn db_copy_ddl(&self) {
         let (Some(key), Some(table)) = (

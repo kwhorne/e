@@ -2978,8 +2978,24 @@ fn structure_grid(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
         })
         .on_click_stop(move |_| state.db_copy_ddl());
+    let new_migration = label(|| "+ Migration".to_string())
+        .style(|s| {
+            s.font_size(11.0)
+                .padding_horiz(8.0)
+                .padding_vert(3.0)
+                .margin_vert(6.0)
+                .margin_left(6.0)
+                .border_radius(4.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_new_migration_for_table());
+    let ddl_row = stack((copy_ddl, new_migration)).style(|s| s.flex_row().items_center());
 
-    stack((header, rows, idx_title, idx_rows, copy_ddl)).style(|s| s.flex_col().width(520.0))
+    stack((header, rows, idx_title, idx_rows, ddl_row)).style(|s| s.flex_col().width(520.0))
 }
 
 #[cfg(test)]

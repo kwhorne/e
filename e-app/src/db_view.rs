@@ -675,11 +675,11 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_run_query());
-    let sql_wrap = floem::views::container(sql).style(|s| {
+    let sql_wrap = floem::views::container(sql).style(move |s| {
         s.flex_grow(1.0)
             .min_width(0.0)
-            .min_height(76.0)
-            .max_height(200.0)
+            .height(state.db_console_height.get())
+            .flex_shrink(0.0)
             .border(1.0)
             .border_color(theme::border())
             .border_radius(5.0)
@@ -689,11 +689,47 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         s.flex_row()
             .items_start()
             .gap(8.0)
-            .padding(10.0)
+            .padding_horiz(10.0)
+            .padding_top(10.0)
+            .padding_bottom(2.0)
             .width_full()
-            .border_bottom(1.0)
-            .border_color(theme::border())
     });
+
+    // Draggable handle to resize the console vertically (drag down for more room).
+    let query_resize = {
+        let drag_start: RwSignal<Option<f64>> = RwSignal::new(None);
+        let v = floem::views::empty();
+        let id = floem::View::id(&v);
+        v.on_event_stop(floem::event::EventListener::PointerDown, move |e| {
+            id.request_active();
+            if let floem::event::Event::PointerDown(pe) = e {
+                drag_start.set(Some(pe.pos.y));
+            }
+        })
+        .on_event_stop(floem::event::EventListener::PointerMove, move |e| {
+            if let floem::event::Event::PointerMove(pe) = e {
+                if let Some(start) = drag_start.get_untracked() {
+                    let delta = pe.pos.y - start;
+                    let cur = state.db_console_height.get_untracked();
+                    state
+                        .db_console_height
+                        .set((cur + delta).clamp(60.0, 600.0));
+                }
+            }
+        })
+        .on_event_stop(floem::event::EventListener::PointerUp, move |_| {
+            drag_start.set(None)
+        })
+        .style(|s| {
+            s.height(7.0)
+                .width_full()
+                .cursor(floem::style::CursorStyle::RowResize)
+                .border_bottom(1.0)
+                .border_color(theme::border())
+                .hover(|s| s.background(theme::accent()))
+        })
+    };
+    let query_row = stack((query_row, query_resize)).style(|s| s.flex_col().width_full());
 
     // Status / error line.
     let status = label(move || {

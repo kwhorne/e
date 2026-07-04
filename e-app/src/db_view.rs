@@ -898,9 +898,41 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     };
     let prev = toolbar_btn("‹ Prev", Box::new(move || state.db_page_by(-1)));
     let next = toolbar_btn("Next ›", Box::new(move || state.db_page_by(1)));
-    let page_lbl = label(move || format!("p{}", state.db_page.get() + 1))
-        .style(|s| s.font_size(11.0).color(theme::fg_dim()).items_center());
-    let pager = stack((prev, page_lbl, next)).style(move |s| {
+    let page_lbl = label(move || {
+        let page = state.db_page.get() + 1;
+        match state.db_total_rows.get() {
+            Some(total) => {
+                let pages = (total.max(1) as usize).div_ceil(crate::db_state::DB_PAGE);
+                format!("p{page}/{pages} · {total} rows")
+            }
+            None => format!("p{page}"),
+        }
+    })
+    .style(|s| s.font_size(11.0).color(theme::fg_dim()).items_center());
+    // Jump-to-page: type a page number and press Enter.
+    let jump = create_rw_signal(String::new());
+    let jump_box = text_input(jump)
+        .placeholder("#")
+        .style(|s| {
+            theme::input_colors(s)
+                .width(44.0)
+                .height(22.0)
+                .font_size(11.0)
+                .padding_horiz(6.0)
+        })
+        .on_key_down(
+            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter),
+            |_| true,
+            move |_| {
+                if let Ok(n) = jump.get_untracked().trim().parse::<usize>() {
+                    if n >= 1 {
+                        state.db_goto_page(n - 1);
+                    }
+                }
+                jump.set(String::new());
+            },
+        );
+    let pager = stack((prev, page_lbl, next, jump_box)).style(move |s| {
         let s = s.flex_row().gap(4.0).items_center();
         if state.db_result_table.get().is_some() && state.db_subview.get() == "data" {
             s

@@ -495,6 +495,8 @@ pub struct AppState {
     /// Run generation: bumped on each run and on cancel, so a cancelled/superseded
     /// query's result is discarded when it finally returns.
     pub db_run_gen: RwSignal<u64>,
+    /// Total row count of the current browsed table (with filter), for paging.
+    pub db_total_rows: RwSignal<Option<i64>>,
     /// A destructive / non-local / submit action awaiting confirmation, if any.
     pub db_confirm: RwSignal<Option<DbConfirm>>,
     /// Staged cell edits `(row, col) -> edit` and staged row deletions
@@ -1026,6 +1028,7 @@ impl AppState {
             db_result_tabs: RwSignal::new(Vec::new()),
             db_active_tab: RwSignal::new(0),
             db_run_gen: RwSignal::new(0),
+            db_total_rows: RwSignal::new(None),
             db_confirm: RwSignal::new(None),
             db_pending_edits: RwSignal::new(HashMap::new()),
             db_pending_deletes: RwSignal::new(HashMap::new()),

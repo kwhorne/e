@@ -1236,6 +1236,33 @@ pub fn fk_target(
         .map(|fk| (fk.ref_table, fk.ref_column)))
 }
 
+/// Count rows in `table`, honouring an optional `col = value` / `IS NULL`
+/// filter — for pagination totals.
+pub fn count_rows(
+    conn: &Conn,
+    engine: &str,
+    table: &str,
+    filter: Option<(&str, Option<&str>)>,
+) -> Result<i64, String> {
+    let mut sql = format!("SELECT COUNT(*) FROM {}", quote_ident(engine, table));
+    if let Some((col, val)) = filter {
+        let cond = match val {
+            Some(v) => format!("{} = '{}'", quote_ident(engine, col), esc(v)),
+            None => format!("{} IS NULL", quote_ident(engine, col)),
+        };
+        sql.push_str(&format!(" WHERE {cond}"));
+    }
+    let res = query(conn, &sql, 1)?;
+    let n = res
+        .rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|c| c.as_ref())
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    Ok(n)
+}
+
 /// Browse rows of `table` where `column` equals `value` (or IS NULL). Used for
 /// FK-hopping and column filters.
 pub fn rows_where(
@@ -2071,6 +2098,17 @@ mod tests {
         let fk = fk_target(&conn, "posts", "user_id").unwrap();
         assert_eq!(fk, Some(("users".to_string(), "id".to_string())));
         assert_eq!(fk_target(&conn, "posts", "title").unwrap(), None);
+
+        // count_rows (pagination totals)
+        assert_eq!(count_rows(&conn, "sqlite", "posts", None).unwrap(), 1);
+        assert_eq!(
+            count_rows(&conn, "sqlite", "posts", Some(("user_id", Some("1")))).unwrap(),
+            1
+        );
+        assert_eq!(
+            count_rows(&conn, "sqlite", "posts", Some(("user_id", Some("999")))).unwrap(),
+            0
+        );
 
         // rows_where (FK-hop target)
         let hop = rows_where(&conn, "sqlite", "users", "id", Some("1"), 100).unwrap();

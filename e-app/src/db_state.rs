@@ -18,7 +18,7 @@ use e_core::language::Language;
 use crate::state::{AppState, DbEntry, DbForm, InsertField};
 
 /// Rows per page when browsing a table in the Database panel.
-const DB_PAGE: usize = 200;
+pub(crate) const DB_PAGE: usize = 200;
 
 /// Quote a CSV field if it contains a comma, quote or newline.
 fn csv_escape(s: &str) -> String {
@@ -268,6 +268,7 @@ impl AppState {
         self.db_sort.set(None);
         self.db_filter.set(None);
         self.db_page.set(0);
+        self.db_total_rows.set(None);
         self.db_columns.set(Vec::new());
         self.db_result_open.set(true);
         self.db_load_columns(entry.clone(), table.clone());
@@ -302,6 +303,20 @@ impl AppState {
         });
         self.db_result_loading.set(true);
         self.db_result_error.set(None);
+        // Total row count (with the active filter) for pagination, loaded in
+        // parallel with the page.
+        let send_count = create_ext_action(self.cx, {
+            let state = *self;
+            move |n: i64| state.db_total_rows.set(Some(n))
+        });
+        {
+            let (conn, engine, table, filter) =
+                (conn.clone(), engine.clone(), table.clone(), filter.clone());
+            std::thread::spawn(move || {
+                let f = filter.as_ref().map(|(c, v)| (c.as_str(), v.as_deref()));
+                send_count(e_db::count_rows(&conn, &engine, &table, f).unwrap_or(0));
+            });
+        }
         let send = create_ext_action(self.cx, {
             let state = *self;
             move |res: Result<e_db::QueryResult, String>| state.db_apply_result(res)
@@ -312,6 +327,21 @@ impl AppState {
             let sql = e_db::browse_sql(&engine, &table, f, by, DB_PAGE, page * DB_PAGE);
             send(e_db::query(&conn, &sql, DB_PAGE));
         });
+    }
+
+    /// Jump to a specific 0-based page (clamped to the known range) and reload.
+    pub fn db_goto_page(&self, page: usize) {
+        let max_page = self
+            .db_total_rows
+            .get_untracked()
+            .map(|n| ((n.max(1) as usize).div_ceil(DB_PAGE)).saturating_sub(1))
+            .unwrap_or(page);
+        let target = page.min(max_page);
+        if target == self.db_page.get_untracked() {
+            return;
+        }
+        self.db_page.set(target);
+        self.db_reload_table();
     }
 
     /// Filter the current table to the value in the cell open in the edit

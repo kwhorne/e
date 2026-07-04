@@ -5,6 +5,8 @@
 //! [`DbConfig`], opened into a live [`Conn`], and queried into a [`QueryResult`]
 //! whose cells are all stringified for display in a grid.
 
+pub mod history;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -1192,6 +1194,117 @@ pub fn browse_sql(
 
 // ── query ──────────────────────────────────────────────────────
 
+/// Split a SQL script into individual statements on top-level `;`, ignoring
+/// semicolons inside string literals (`'…'`, `"…"`), backtick identifiers,
+/// line comments (`-- …`, `# …`) and block comments (`/* … */`). Handles
+/// doubled-quote (`''`) and backslash escapes inside strings. Blank statements
+/// are dropped.
+pub fn split_statements(sql: &str) -> Vec<String> {
+    #[derive(PartialEq)]
+    enum St {
+        Normal,
+        Single,
+        Double,
+        Backtick,
+        Line,
+        Block,
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut st = St::Normal;
+    let chars: Vec<char> = sql.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        match st {
+            St::Normal => match c {
+                ';' => {
+                    let stmt = cur.trim();
+                    if !stmt.is_empty() {
+                        out.push(stmt.to_string());
+                    }
+                    cur.clear();
+                }
+                '\'' => {
+                    st = St::Single;
+                    cur.push(c);
+                }
+                '"' => {
+                    st = St::Double;
+                    cur.push(c);
+                }
+                '`' => {
+                    st = St::Backtick;
+                    cur.push(c);
+                }
+                '-' if next == Some('-') => {
+                    st = St::Line;
+                    cur.push(c);
+                }
+                '#' => {
+                    st = St::Line;
+                    cur.push(c);
+                }
+                '/' if next == Some('*') => {
+                    st = St::Block;
+                    cur.push(c);
+                }
+                _ => cur.push(c),
+            },
+            St::Single | St::Double => {
+                let quote = if st == St::Single { '\'' } else { '"' };
+                if c == '\\' {
+                    cur.push(c);
+                    if let Some(n) = next {
+                        cur.push(n);
+                        i += 2;
+                        continue;
+                    }
+                } else if c == quote {
+                    if next == Some(quote) {
+                        cur.push(c);
+                        cur.push(quote);
+                        i += 2;
+                        continue;
+                    }
+                    st = St::Normal;
+                    cur.push(c);
+                } else {
+                    cur.push(c);
+                }
+            }
+            St::Backtick => {
+                cur.push(c);
+                if c == '`' {
+                    st = St::Normal;
+                }
+            }
+            St::Line => {
+                cur.push(c);
+                if c == '\n' {
+                    st = St::Normal;
+                }
+            }
+            St::Block => {
+                cur.push(c);
+                if c == '*' && next == Some('/') {
+                    cur.push('/');
+                    i += 2;
+                    st = St::Normal;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    let stmt = cur.trim();
+    if !stmt.is_empty() {
+        out.push(stmt.to_string());
+    }
+    out
+}
+
 fn is_select(sql: &str) -> bool {
     let s = sql.trim_start().to_lowercase();
     s.starts_with("select")
@@ -1567,6 +1680,48 @@ mod tests {
         c.engine = engine.to_string();
         c.host = host.to_string();
         c
+    }
+
+    #[test]
+    fn split_statements_basic_and_edge_cases() {
+        assert_eq!(
+            split_statements("SELECT 1; SELECT 2"),
+            vec!["SELECT 1", "SELECT 2"]
+        );
+        // trailing semicolon + blank fragments dropped
+        assert_eq!(split_statements("SELECT 1;;  ;"), vec!["SELECT 1"]);
+        // semicolon inside a single-quoted string is not a separator
+        assert_eq!(
+            split_statements("INSERT INTO t VALUES ('a;b'); SELECT 1"),
+            vec!["INSERT INTO t VALUES ('a;b')", "SELECT 1"]
+        );
+        // doubled-quote escape keeps the string intact
+        assert_eq!(
+            split_statements("SELECT 'O''Brien; x'; SELECT 2"),
+            vec!["SELECT 'O''Brien; x'", "SELECT 2"]
+        );
+        // backslash escape
+        assert_eq!(
+            split_statements("SELECT 'a\\'; b'; SELECT 2"),
+            vec!["SELECT 'a\\'; b'", "SELECT 2"]
+        );
+        // line + block comments containing semicolons
+        assert_eq!(
+            split_statements("SELECT 1 -- c; c\n; SELECT 2"),
+            vec!["SELECT 1 -- c; c", "SELECT 2"]
+        );
+        assert_eq!(
+            split_statements("SELECT 1 /* a; b */; SELECT 2"),
+            vec!["SELECT 1 /* a; b */", "SELECT 2"]
+        );
+        // backtick identifier with a semicolon
+        assert_eq!(
+            split_statements("SELECT `we;ird`; SELECT 2"),
+            vec!["SELECT `we;ird`", "SELECT 2"]
+        );
+        // single statement, no trailing semicolon
+        assert_eq!(split_statements("SELECT 1"), vec!["SELECT 1"]);
+        assert!(split_statements("  ;; ").is_empty());
     }
 
     #[test]

@@ -158,13 +158,15 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
     let q_btn = action_glyph("⌗", move || state.db_new_query(e_q.clone()));
     let e_r = entry.clone();
     let r_btn = action_glyph("⟳", move || state.db_refresh_tables(e_r.clone()));
+    let e_snap = entry.clone();
+    let snap_btn = action_glyph("⤓", move || state.db_snapshot(e_snap.clone()));
     let e_d = entry.clone();
     let d_btn = action_glyph("⏏", move || state.db_disconnect(e_d.clone()));
     let e_e = entry.clone();
     let edit_btn = action_glyph("✎", move || state.db_start_edit(e_e.clone()));
     let key_rm = entry.key();
     let x_btn = action_glyph("✕", move || state.db_remove(key_rm.clone()));
-    let actions = stack((q_btn, r_btn, d_btn, edit_btn, x_btn))
+    let actions = stack((q_btn, r_btn, snap_btn, d_btn, edit_btn, x_btn))
         .style(|s| s.flex_row().gap(2.0).items_center());
 
     let row = stack((head, actions)).style(|s| {

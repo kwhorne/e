@@ -228,6 +228,18 @@ pub fn settings_path() -> Option<PathBuf> {
     config_path()
 }
 
+/// Directory for database snapshots (`~/.config/e/snapshots/`), created if
+/// missing. Returns the directory path.
+pub fn snapshot_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let dir = PathBuf::from(home)
+        .join(".config")
+        .join("e")
+        .join("snapshots");
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir)
+}
+
 /// Path to the shared query-history database (`~/.config/e/history.db`).
 /// Ensures the directory exists so the SQLite file can be created.
 pub fn history_db_path() -> Option<String> {

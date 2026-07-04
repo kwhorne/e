@@ -642,6 +642,75 @@ impl AppState {
         });
     }
 
+    /// Take a snapshot of a (local) database: an SQLite file copy, or a
+    /// mysqldump / pg_dump into ~/.config/e/snapshots/ (DB-704).
+    pub fn db_snapshot(&self, entry: DbEntry) {
+        if !entry.config.environment().is_local() {
+            Self::notify("Snapshot: only available on local connections");
+            return;
+        }
+        let Some(dir) = crate::config::snapshot_dir() else {
+            return;
+        };
+        let cfg = entry.config.clone();
+        let stamp = crate::state::now_ms_epoch() / 1000;
+        let base = if cfg.label.trim().is_empty() {
+            cfg.database.clone()
+        } else {
+            cfg.label.clone()
+        };
+        let base = base.replace(|c: char| !c.is_alphanumeric(), "_");
+        let send = create_ext_action(self.cx, move |res: Result<String, String>| match res {
+            Ok(path) => Self::notify(&format!("Snapshot saved: {path}")),
+            Err(e) => Self::notify(&format!("Snapshot failed: {e}")),
+        });
+        std::thread::spawn(move || {
+            let res = (|| -> Result<String, String> {
+                match cfg.engine.as_str() {
+                    "sqlite" => {
+                        let dest = dir.join(format!("{base}-{stamp}.sqlite"));
+                        std::fs::copy(&cfg.path, &dest).map_err(|e| e.to_string())?;
+                        Ok(dest.to_string_lossy().into_owned())
+                    }
+                    "mysql" | "mariadb" => {
+                        let dest = dir.join(format!("{base}-{stamp}.sql"));
+                        let out = std::process::Command::new("mysqldump")
+                            .env("MYSQL_PWD", &cfg.password)
+                            .arg(format!("--host={}", cfg.host))
+                            .arg(format!("--port={}", cfg.port))
+                            .arg(format!("--user={}", cfg.username))
+                            .arg(&cfg.database)
+                            .output()
+                            .map_err(|e| format!("mysqldump: {e}"))?;
+                        if !out.status.success() {
+                            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+                        }
+                        std::fs::write(&dest, out.stdout).map_err(|e| e.to_string())?;
+                        Ok(dest.to_string_lossy().into_owned())
+                    }
+                    "postgres" | "postgresql" | "pgsql" => {
+                        let dest = dir.join(format!("{base}-{stamp}.sql"));
+                        let out = std::process::Command::new("pg_dump")
+                            .env("PGPASSWORD", &cfg.password)
+                            .arg(format!("--host={}", cfg.host))
+                            .arg(format!("--port={}", cfg.port))
+                            .arg(format!("--username={}", cfg.username))
+                            .arg(&cfg.database)
+                            .output()
+                            .map_err(|e| format!("pg_dump: {e}"))?;
+                        if !out.status.success() {
+                            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+                        }
+                        std::fs::write(&dest, out.stdout).map_err(|e| e.to_string())?;
+                        Ok(dest.to_string_lossy().into_owned())
+                    }
+                    other => Err(format!("snapshots not supported for {other}")),
+                }
+            })();
+            send(res);
+        });
+    }
+
     /// Seed `count` rows into the current table via its Eloquent factory
     /// (through Tinker). Local connections only (uses the app's configured DB).
     pub fn db_seed_table(&self, count: usize) {

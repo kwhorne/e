@@ -583,6 +583,84 @@ fn prepare(config: &DbConfig) -> Result<(DbConfig, Option<SshTunnel>), String> {
 
 // ── schema ─────────────────────────────────────────────────────
 
+/// List the views in the database (empty if the engine has none).
+pub fn views(conn: &Conn) -> Result<Vec<String>, String> {
+    match &conn.backend {
+        Backend::Mysql(pool) => {
+            use mysql::prelude::Queryable;
+            let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            let rows: Vec<(String, String)> = c
+                .query("SHOW FULL TABLES WHERE Table_type = 'VIEW'")
+                .map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|(name, _)| name).collect())
+        }
+        Backend::Sqlite(path) => {
+            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let mut stmt = c
+                .prepare("SELECT name FROM sqlite_master WHERE type='view' ORDER BY name")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            Ok(rows.filter_map(|r| r.ok()).collect())
+        }
+        Backend::Postgres(m) => {
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
+            let res = pg_query(
+                &mut client,
+                "SELECT table_name FROM information_schema.views \
+                 WHERE table_schema NOT IN ('pg_catalog','information_schema') ORDER BY table_name",
+                MAX_ROWS,
+            )?;
+            Ok(res
+                .rows
+                .into_iter()
+                .filter_map(|r| r.into_iter().next().flatten())
+                .collect())
+        }
+        Backend::Clickhouse { .. } => Ok(Vec::new()),
+    }
+}
+
+/// The `CREATE VIEW`/definition SQL for a view (read-only display).
+pub fn view_definition(conn: &Conn, view: &str) -> Result<String, String> {
+    match &conn.backend {
+        Backend::Mysql(pool) => {
+            use mysql::prelude::Queryable;
+            let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            let q = format!("SHOW CREATE VIEW `{}`", view.replace('`', "``"));
+            let row: Option<(String, String, String, String)> =
+                c.query_first(q).map_err(|e| e.to_string())?;
+            Ok(row.map(|(_, def, _, _)| def).unwrap_or_default())
+        }
+        Backend::Sqlite(path) => {
+            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            c.query_row(
+                "SELECT sql FROM sqlite_master WHERE type='view' AND name = ?1",
+                [view],
+                |r| r.get::<_, String>(0),
+            )
+            .map_err(|e| e.to_string())
+        }
+        Backend::Postgres(m) => {
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
+            let v = view.replace('\'', "''");
+            let res = pg_query(
+                &mut client,
+                &format!("SELECT pg_get_viewdef('{v}'::regclass, true)"),
+                1,
+            )?;
+            Ok(res
+                .rows
+                .into_iter()
+                .next()
+                .and_then(|r| r.into_iter().next().flatten())
+                .unwrap_or_default())
+        }
+        Backend::Clickhouse { .. } => Ok(String::new()),
+    }
+}
+
 pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
     match &conn.backend {
         Backend::Mysql(pool) => {
@@ -2016,6 +2094,34 @@ mod tests {
         assert_eq!(res.columns, vec!["id".to_string(), "name".to_string()]);
         assert_eq!(res.rows.len(), 2);
         assert_eq!(res.rows[0][1], Some("Alice".to_string()));
+        let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn sqlite_views() {
+        let dir = std::env::temp_dir().join("e_db_views_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("views.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, active INTEGER);\
+                 CREATE VIEW active_users AS SELECT id FROM users WHERE active = 1;",
+            )
+            .unwrap();
+        }
+        let cfg = DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let conn = connect(&cfg).unwrap();
+        assert_eq!(views(&conn).unwrap(), vec!["active_users".to_string()]);
+        // Views are excluded from tables().
+        assert_eq!(tables(&conn).unwrap(), vec!["users".to_string()]);
+        let def = view_definition(&conn, "active_users").unwrap();
+        assert!(def.to_uppercase().contains("SELECT"), "{def}");
         let _ = std::fs::remove_file(&dbfile);
     }
 

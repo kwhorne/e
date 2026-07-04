@@ -208,6 +208,8 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
             }
         });
 
+    let e_views_read = entry.clone();
+    let e_views_open = entry.clone();
     let e_tables = entry.clone();
     let tables = dyn_stack(
         move || {
@@ -249,7 +251,48 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    stack((row, err, filter, tables)).style(|s| s.flex_col().width_full().margin_bottom(2.0))
+    // Views: same look as tables, opened (browsed) the same way.
+    let views = dyn_stack(
+        move || {
+            let f = e_views_read.filter.get().to_lowercase();
+            if e_views_read.expanded.get() && e_views_read.conn.get().is_some() {
+                e_views_read
+                    .views
+                    .get()
+                    .into_iter()
+                    .filter(|t| f.is_empty() || t.to_lowercase().contains(&f))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            }
+        },
+        |t| t.clone(),
+        move |t| {
+            let entry = e_views_open.clone();
+            let view = t.clone();
+            let vn = t.clone();
+            stack((
+                label(|| "◉".to_string()).style(|s| s.color(theme::fg_dim()).font_size(11.0)),
+                label(move || vn.clone())
+                    .style(|s| s.color(theme::fg()).text_ellipsis().min_width(0.0)),
+            ))
+            .style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .gap(7.0)
+                    .width_full()
+                    .padding_left(22.0)
+                    .padding_vert(3.0)
+                    .border_radius(5.0)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.background(theme::bg_hover()))
+            })
+            .on_click_stop(move |_| state.db_open_table(entry.clone(), view.clone()))
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+
+    stack((row, err, filter, tables, views)).style(|s| s.flex_col().width_full().margin_bottom(2.0))
 }
 
 fn action_glyph(glyph: &'static str, on: impl Fn() + 'static) -> impl IntoView {

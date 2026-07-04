@@ -55,6 +55,7 @@ pub struct DbEntry {
     pub expanded: RwSignal<bool>,
     pub connecting: RwSignal<bool>,
     pub tables: RwSignal<Vec<String>>,
+    pub views: RwSignal<Vec<String>>,
     pub error: RwSignal<Option<String>>,
     pub filter: RwSignal<String>,
     /// Block writes (cell edits, …). Defaults on for production-looking targets.
@@ -70,6 +71,7 @@ impl DbEntry {
             expanded: cx.create_rw_signal(false),
             connecting: cx.create_rw_signal(false),
             tables: cx.create_rw_signal(Vec::new()),
+            views: cx.create_rw_signal(Vec::new()),
             error: cx.create_rw_signal(None),
             filter: cx.create_rw_signal(String::new()),
             read_only: cx.create_rw_signal(config_read_only),

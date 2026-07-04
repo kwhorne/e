@@ -20,6 +20,9 @@ use crate::state::{AppState, DbEntry, DbForm, InsertField};
 /// Rows per page when browsing a table in the Database panel.
 pub(crate) const DB_PAGE: usize = 200;
 
+/// Result of connecting: the live connection plus its table and view names.
+type ConnectResult = Result<(Arc<e_db::Conn>, Vec<String>, Vec<String>), String>;
+
 impl AppState {
     // ---- Database panel ------------------------------------------------
 
@@ -195,25 +198,24 @@ impl AppState {
         entry.connecting.set(true);
         entry.error.set(None);
         let cfg = entry.config.clone();
-        let send = create_ext_action(
-            self.cx,
-            move |res: Result<(Arc<e_db::Conn>, Vec<String>), String>| {
-                entry.connecting.set(false);
-                match res {
-                    Ok((conn, tables)) => {
-                        entry.conn.set(Some(conn));
-                        entry.tables.set(tables);
-                        entry.expanded.set(true);
-                    }
-                    Err(e) => entry.error.set(Some(e)),
+        let send = create_ext_action(self.cx, move |res: ConnectResult| {
+            entry.connecting.set(false);
+            match res {
+                Ok((conn, tables, views)) => {
+                    entry.conn.set(Some(conn));
+                    entry.tables.set(tables);
+                    entry.views.set(views);
+                    entry.expanded.set(true);
                 }
-            },
-        );
+                Err(e) => entry.error.set(Some(e)),
+            }
+        });
         std::thread::spawn(move || {
             let res = e_db::connect(&cfg).and_then(|conn| {
                 let conn = Arc::new(conn);
                 let tables = e_db::tables(&conn)?;
-                Ok((conn, tables))
+                let views = e_db::views(&conn).unwrap_or_default();
+                Ok((conn, tables, views))
             });
             send(res);
         });

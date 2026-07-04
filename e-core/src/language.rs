@@ -29,6 +29,7 @@ pub enum Language {
     Blade,
     Vue,
     Svelte,
+    Sql,
 }
 
 impl Language {
@@ -70,6 +71,7 @@ impl Language {
             "php" => Language::Php,
             "vue" => Language::Vue,
             "svelte" => Language::Svelte,
+            "sql" => Language::Sql,
             _ => Language::PlainText,
         }
     }
@@ -80,6 +82,7 @@ impl Language {
         match self {
             Rust | C | Cpp | Go | JavaScript | TypeScript | Php | Vue | Svelte => Some("//"),
             Python | Shell | Toml => Some("#"),
+            Sql => Some("--"),
             // Languages without a line comment (block-only or none).
             PlainText | Json | Markdown | Html | Css | Blade => None,
         }
@@ -106,6 +109,7 @@ impl Language {
             Language::Blade => "Blade",
             Language::Vue => "Vue",
             Language::Svelte => "Svelte",
+            Language::Sql => "SQL",
         }
     }
 }

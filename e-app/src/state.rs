@@ -431,6 +431,9 @@ pub struct AppState {
     pub db_result_key: RwSignal<Option<String>>,
     /// The SQL editor text in query mode.
     pub db_query_text: RwSignal<String>,
+    /// The SQL console's backing document, so programmatic SQL (browse queries,
+    /// run-under-cursor, saved/history queries) can be pushed into the editor.
+    pub db_console_doc: RwSignal<Option<Rc<TextDocument>>>,
     /// The table being browsed (None in free-query mode).
     pub db_result_table: RwSignal<Option<String>>,
     /// Results subview: `data` or `structure`.
@@ -946,6 +949,7 @@ impl AppState {
             db_result_loading: RwSignal::new(false),
             db_result_key: RwSignal::new(None),
             db_query_text: RwSignal::new(String::new()),
+            db_console_doc: RwSignal::new(None),
             db_result_table: RwSignal::new(None),
             db_subview: RwSignal::new("data".into()),
             db_columns: RwSignal::new(Vec::new()),

@@ -215,6 +215,8 @@ pub fn highlight_lines(language: Language, text: &str) -> Vec<Vec<LineSpan>> {
         Language::Html | Language::Vue => merge_spans(ts_spans(language, text), class_spans(text)),
         // Overlay SQL highlighting on raw-SQL strings (DB::select("…"), …).
         Language::Php => merge_spans(ts_spans(Language::Php, text), php_sql_spans(text)),
+        // Standalone SQL (the database console) uses the SQL grammar directly.
+        Language::Sql => sql_spans(text),
         _ => ts_spans(language, text),
     };
     for (start, end, kind) in spans {
@@ -734,6 +736,24 @@ mod tests {
         let kinds: Vec<_> = lines[0].iter().map(|s| s.kind).collect();
         assert!(kinds.contains(&HighlightKind::Keyword));
         assert!(kinds.contains(&HighlightKind::Function));
+    }
+
+    /// A standalone SQL document (the database console) highlights clause
+    /// keywords directly via the SQL grammar.
+    #[test]
+    fn standalone_sql_document_highlighted() {
+        let src = "SELECT id FROM users WHERE id = 1";
+        let spans = &highlight_lines(Language::Sql, src)[0];
+        let kind_at = |needle: &str| -> Option<HighlightKind> {
+            let at = src.find(needle)?;
+            spans
+                .iter()
+                .find(|s| s.start <= at && at < s.end)
+                .map(|s| s.kind)
+        };
+        assert_eq!(kind_at("SELECT"), Some(HighlightKind::Keyword), "{spans:?}");
+        assert_eq!(kind_at("FROM"), Some(HighlightKind::Keyword));
+        assert_eq!(kind_at("WHERE"), Some(HighlightKind::Keyword));
     }
 
     /// SQL inside a PHP `DB::select("…")` string is highlighted as SQL: every

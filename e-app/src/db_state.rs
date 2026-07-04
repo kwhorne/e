@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 use floem::ext_event::create_ext_action;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::views::editor::core::editor::EditType;
+use floem::views::editor::core::selection::Selection;
 use floem::views::editor::text::Document;
 
 use e_core::language::Language;
@@ -97,7 +99,21 @@ impl AppState {
 
     /// Load a saved query into the editor.
     pub fn db_load_query(&self, sql: String) {
-        self.db_query_text.set(sql);
+        self.set_console_sql(sql);
+    }
+
+    /// Set the SQL console text, keeping the `db_query_text` signal and the
+    /// editor's document in sync. Programmatic callers (browse queries,
+    /// run-under-cursor, saved/history queries) go through here so the editor
+    /// reflects the change; the editor's own edits mirror back the other way.
+    pub fn set_console_sql(&self, sql: String) {
+        self.db_query_text.set(sql.clone());
+        if let Some(doc) = self.db_console_doc.get_untracked() {
+            if doc.text().to_string() != sql {
+                let len = doc.text().len();
+                doc.edit_single(Selection::region(0, len), &sql, EditType::InsertChars);
+            }
+        }
     }
 
     #[allow(dead_code)]
@@ -241,7 +257,7 @@ impl AppState {
         let page = self.db_page.get_untracked();
         let sort = self.db_sort.get_untracked();
         let filter = self.db_filter.get_untracked();
-        self.db_query_text.set({
+        self.set_console_sql({
             let by = sort.as_ref().map(|(c, a)| (c.as_str(), *a));
             let f = filter.as_ref().map(|(c, v)| (c.as_str(), v.as_deref()));
             e_db::browse_sql(&engine, &table, f, by, DB_PAGE, page * DB_PAGE)
@@ -543,7 +559,7 @@ impl AppState {
         self.db_result.set(None);
         self.db_result_error.set(None);
         if self.db_query_text.with_untracked(|q| q.trim().is_empty()) {
-            self.db_query_text.set("SELECT 1".into());
+            self.set_console_sql("SELECT 1".into());
         }
         self.db_result_open.set(true);
     }
@@ -622,7 +638,7 @@ impl AppState {
             "{} · query under cursor",
             entry.config.display_name()
         ));
-        self.db_query_text.set(sql);
+        self.set_console_sql(sql);
         self.db_result.set(None);
         self.db_result_error.set(None);
         self.db_result_open.set(true);

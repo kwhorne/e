@@ -660,23 +660,8 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             .border_color(theme::border())
     });
 
-    // Query editor row.
-    let sql = text_input(state.db_query_text)
-        .placeholder("SQL — ⌘↵ to run")
-        .style(|s| {
-            theme::input_colors(s)
-                .width_full()
-                .min_height(40.0)
-                .font_family("monospace".to_string())
-                .font_size(13.0)
-                .padding_horiz(10.0)
-                .padding_vert(10.0)
-        })
-        .on_key_down(
-            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter),
-            |m| m.meta() || m.control(),
-            move |_| state.db_run_query(),
-        );
+    // Query editor row: a syntax-highlighted SQL console.
+    let sql = crate::db_console::sql_console(state);
     let run = label(|| "Run".to_string())
         .style(|s| {
             s.padding_horiz(18.0)
@@ -690,10 +675,19 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_run_query());
-    let sql_wrap = floem::views::container(sql).style(|s| s.flex_grow(1.0).min_width(0.0));
+    let sql_wrap = floem::views::container(sql).style(|s| {
+        s.flex_grow(1.0)
+            .min_width(0.0)
+            .min_height(76.0)
+            .max_height(200.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(5.0)
+            .background(theme::bg())
+    });
     let query_row = stack((sql_wrap, run)).style(|s| {
         s.flex_row()
-            .items_center()
+            .items_start()
             .gap(8.0)
             .padding(10.0)
             .width_full()

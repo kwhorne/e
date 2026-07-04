@@ -639,6 +639,72 @@ impl AppState {
         });
     }
 
+    /// Search every table's text columns for a value, showing one result tab per
+    /// table that matches (DB-805). Cancellable via the run generation.
+    pub fn db_search_all(&self) {
+        let needle = self.db_search_query.get_untracked().trim().to_string();
+        if needle.is_empty() {
+            return;
+        }
+        let Some(entry) = self.db_conns.with_untracked(|cs| {
+            cs.iter()
+                .find(|e| e.conn.get_untracked().is_some())
+                .cloned()
+        }) else {
+            Self::notify("Search: connect a database first");
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let engine = entry.config.engine.clone();
+        let key = entry.key();
+        self.db_result_key.set(Some(key.clone()));
+        self.db_result_title.set(format!(
+            "{} · search “{needle}”",
+            entry.config.display_name()
+        ));
+        self.db_result_loading.set(true);
+        self.db_result_open.set(true);
+        self.db_run_gen.update(|g| *g += 1);
+        let gen = self.db_run_gen.get_untracked();
+        let state = *self;
+        let send = create_ext_action(self.cx, move |hits: Vec<(String, e_db::QueryResult)>| {
+            if state.db_run_gen.get_untracked() != gen {
+                return;
+            }
+            state.db_show_search_results(key.clone(), hits);
+        });
+        std::thread::spawn(move || {
+            send(e_db::search_all(&conn, &engine, &needle, DB_PAGE).unwrap_or_default());
+        });
+    }
+
+    /// Show cross-table search hits as read-only result tabs (one per table).
+    fn db_show_search_results(&self, key: String, hits: Vec<(String, e_db::QueryResult)>) {
+        self.db_result_loading.set(false);
+        if hits.is_empty() {
+            self.db_result_tabs.set(Vec::new());
+            self.db_result.set(None);
+            Self::notify("No matches in any table");
+            return;
+        }
+        let tabs: Vec<crate::state::ResultTab> = hits
+            .into_iter()
+            .map(|(table, res)| crate::state::ResultTab {
+                title: table,
+                result: Some(res),
+                error: None,
+                pinned: false,
+                key: Some(key.clone()),
+            })
+            .collect();
+        self.db_result_table.set(None);
+        self.db_columns.set(Vec::new());
+        self.db_result_tabs.set(tabs);
+        self.db_activate_tab(0);
+    }
+
     /// Copy the current table's CREATE DDL to the clipboard (DB-204).
     pub fn db_copy_ddl(&self) {
         let (Some(key), Some(table)) = (

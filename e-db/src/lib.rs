@@ -1382,6 +1382,55 @@ pub fn referencing(
         .collect())
 }
 
+/// Whether a column type holds text (searchable with LIKE).
+fn is_texty(data_type: &str) -> bool {
+    let t = data_type.to_ascii_lowercase();
+    [
+        "char", "text", "string", "varchar", "json", "enum", "clob", "uuid",
+    ]
+    .iter()
+    .any(|k| t.contains(k))
+}
+
+/// Search every table's text columns for `needle` (case-insensitive substring),
+/// returning `(table, matching_rows)` for tables with at least one hit. Each
+/// table is capped at `limit` rows. Skips tables with no text columns.
+pub fn search_all(
+    conn: &Conn,
+    engine: &str,
+    needle: &str,
+    limit: usize,
+) -> Result<Vec<(String, QueryResult)>, String> {
+    let mut out = Vec::new();
+    for t in tables(conn)? {
+        let cols = match columns(conn, &t) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let text_cols: Vec<&ColumnInfo> = cols.iter().filter(|c| is_texty(&c.data_type)).collect();
+        if text_cols.is_empty() {
+            continue;
+        }
+        let esc_needle = esc(needle);
+        let conds: Vec<String> = text_cols
+            .iter()
+            .map(|c| format!("{} LIKE '%{}%'", quote_ident(engine, &c.name), esc_needle))
+            .collect();
+        let sql = format!(
+            "SELECT * FROM {} WHERE {} LIMIT {}",
+            quote_ident(engine, &t),
+            conds.join(" OR "),
+            limit
+        );
+        if let Ok(res) = query(conn, &sql, limit) {
+            if !res.rows.is_empty() {
+                out.push((t, res));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Count rows in `table`, honouring an optional `col = value` / `IS NULL`
 /// filter — for pagination totals.
 pub fn count_rows(
@@ -2477,6 +2526,17 @@ mod tests {
             vec![("posts".to_string(), "user_id".to_string())]
         );
         assert!(referencing(&conn, "posts", "id").unwrap().is_empty());
+
+        // search_all: 'O'Brien' is in posts.title
+        let hits = search_all(&conn, "sqlite", "Brien", 50).unwrap();
+        assert!(
+            hits.iter().any(|(t, _)| t == "posts"),
+            "expected a posts hit, got {:?}",
+            hits.iter().map(|(t, _)| t).collect::<Vec<_>>()
+        );
+        assert!(search_all(&conn, "sqlite", "nonexistent-zzz", 50)
+            .unwrap()
+            .is_empty());
 
         // count_rows (pagination totals)
         assert_eq!(count_rows(&conn, "sqlite", "posts", None).unwrap(), 1);

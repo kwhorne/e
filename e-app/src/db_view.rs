@@ -662,6 +662,23 @@ pub fn database_panel(state: AppState) -> impl IntoView {
             .padding_bottom(6.0)
             .width_full()
     });
+    // Search across all tables' text columns (DB-805); Enter runs it.
+    let search_all = text_input(state.db_search_query)
+        .placeholder("Search all data…")
+        .style(|s| {
+            theme::input_colors(s)
+                .width_full()
+                .height(26.0)
+                .font_size(11.0)
+                .padding_horiz(8.0)
+                .margin_horiz(12.0)
+                .margin_bottom(6.0)
+        })
+        .on_key_down(
+            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter),
+            |_| true,
+            move |_| state.db_search_all(),
+        );
 
     let form = dyn_stack(
         move || {
@@ -699,7 +716,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
         }
     });
 
-    stack((header, form, empty_hint, list)).style(|s| {
+    stack((header, search_all, form, empty_hint, list)).style(|s| {
         s.flex_col()
             .height_full()
             .width_full()

@@ -157,6 +157,18 @@ pub struct DbConsent {
     pub reply: std::sync::mpsc::Sender<serde_json::Value>,
 }
 
+/// One SQL console result set, shown as a tab. Pinned tabs survive the next run;
+/// unpinned ones are replaced.
+#[derive(Clone)]
+pub struct ResultTab {
+    pub title: String,
+    pub result: Option<e_db::QueryResult>,
+    pub error: Option<String>,
+    pub pinned: bool,
+    /// Connection key, so the tab stays associated with its database.
+    pub key: Option<String>,
+}
+
 /// One editable field in the "insert row" dialog, bound to its own signals.
 #[derive(Clone)]
 pub struct InsertField {
@@ -443,6 +455,9 @@ pub struct AppState {
     pub db_history_open: RwSignal<bool>,
     pub db_history: RwSignal<Vec<e_db::history::HistoryEntry>>,
     pub db_history_query: RwSignal<String>,
+    /// SQL console result tabs (one per statement of the last run + pinned ones).
+    pub db_result_tabs: RwSignal<Vec<ResultTab>>,
+    pub db_active_tab: RwSignal<usize>,
     /// The table being browsed (None in free-query mode).
     pub db_result_table: RwSignal<Option<String>>,
     /// Results subview: `data` or `structure`.
@@ -965,6 +980,8 @@ impl AppState {
             db_history_open: RwSignal::new(false),
             db_history: RwSignal::new(Vec::new()),
             db_history_query: RwSignal::new(String::new()),
+            db_result_tabs: RwSignal::new(Vec::new()),
+            db_active_tab: RwSignal::new(0),
             db_result_table: RwSignal::new(None),
             db_subview: RwSignal::new("data".into()),
             db_columns: RwSignal::new(Vec::new()),

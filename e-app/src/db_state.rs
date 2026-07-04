@@ -618,7 +618,9 @@ impl AppState {
             return;
         };
         let sql = self.db_query_text.get_untracked();
-        if sql.trim().is_empty() {
+        // Split into individual statements so each gets its own result tab.
+        let statements = e_db::split_statements(&sql);
+        if statements.is_empty() {
             return;
         }
         self.db_result_loading.set(true);
@@ -627,38 +629,115 @@ impl AppState {
         let project = self.root.get_untracked().to_string_lossy().into_owned();
         let conn_label = entry.config.display_name();
         let history_path = crate::config::history_db_path();
-        let sql_for_hist = sql.clone();
+        let key = entry.key();
         let send = create_ext_action(self.cx, {
             let state = *self;
-            move |res: Result<e_db::QueryResult, String>| state.db_apply_result(res)
+            move |results: Vec<Result<e_db::QueryResult, String>>| {
+                state.db_build_console_tabs(key.clone(), results);
+            }
         });
         std::thread::spawn(move || {
-            let res = e_db::query(&conn, &sql, e_db::MAX_ROWS);
-            if let Some(hp) = history_path {
-                let (rows, dur, ok, err) = match &res {
-                    Ok(r) => (
-                        r.rows_affected
-                            .map(|n| n as i64)
-                            .or(Some(r.rows.len() as i64)),
-                        r.elapsed_ms as i64,
-                        true,
-                        None,
-                    ),
-                    Err(e) => (None, 0, false, Some(e.clone())),
-                };
-                let _ = e_db::history::record(
-                    &hp,
-                    &project,
-                    &conn_label,
-                    &sql_for_hist,
-                    rows,
-                    dur,
-                    ok,
-                    err.as_deref(),
-                );
+            let mut out = Vec::with_capacity(statements.len());
+            for stmt in &statements {
+                let res = e_db::query(&conn, stmt, e_db::MAX_ROWS);
+                if let Some(hp) = &history_path {
+                    let (rows, dur, ok, err) = match &res {
+                        Ok(r) => (
+                            r.rows_affected
+                                .map(|n| n as i64)
+                                .or(Some(r.rows.len() as i64)),
+                            r.elapsed_ms as i64,
+                            true,
+                            None,
+                        ),
+                        Err(e) => (None, 0, false, Some(e.clone())),
+                    };
+                    let _ = e_db::history::record(
+                        hp,
+                        &project,
+                        &conn_label,
+                        stmt,
+                        rows,
+                        dur,
+                        ok,
+                        err.as_deref(),
+                    );
+                }
+                out.push(res);
             }
-            send(res);
+            send(out);
         });
+    }
+
+    /// Build console result tabs from a multi-statement run: keep pinned tabs,
+    /// replace unpinned ones with the new results, and activate the first new tab.
+    fn db_build_console_tabs(&self, key: String, results: Vec<Result<e_db::QueryResult, String>>) {
+        self.db_result_loading.set(false);
+        let mut tabs: Vec<crate::state::ResultTab> = self
+            .db_result_tabs
+            .get_untracked()
+            .into_iter()
+            .filter(|t| t.pinned)
+            .collect();
+        let first_new = tabs.len();
+        for (i, res) in results.into_iter().enumerate() {
+            let (result, error) = match res {
+                Ok(r) => (Some(r), None),
+                Err(e) => (None, Some(e)),
+            };
+            tabs.push(crate::state::ResultTab {
+                title: format!("Result {}", i + 1),
+                result,
+                error,
+                pinned: false,
+                key: Some(key.clone()),
+            });
+        }
+        self.db_result_tabs.set(tabs);
+        // Console results aren't tied to a table, so they're read-only.
+        self.db_result_table.set(None);
+        self.db_columns.set(Vec::new());
+        self.db_activate_tab(first_new);
+    }
+
+    /// Show the result stored in tab `i` in the grid.
+    pub fn db_activate_tab(&self, i: usize) {
+        let tabs = self.db_result_tabs.get_untracked();
+        let Some(tab) = tabs.get(i) else {
+            return;
+        };
+        self.db_active_tab.set(i);
+        self.db_result_key.set(tab.key.clone());
+        self.db_result.set(tab.result.clone());
+        self.db_result_error.set(tab.error.clone());
+        self.db_selected_cell.set(None);
+    }
+
+    /// Toggle whether tab `i` is pinned (survives the next run).
+    pub fn db_toggle_pin(&self, i: usize) {
+        self.db_result_tabs.update(|tabs| {
+            if let Some(t) = tabs.get_mut(i) {
+                t.pinned = !t.pinned;
+            }
+        });
+    }
+
+    /// Close result tab `i`.
+    pub fn db_close_tab(&self, i: usize) {
+        self.db_result_tabs.update(|tabs| {
+            if i < tabs.len() {
+                tabs.remove(i);
+            }
+        });
+        let len = self.db_result_tabs.with_untracked(|t| t.len());
+        if len == 0 {
+            self.db_result.set(None);
+            self.db_result_error.set(None);
+            self.db_active_tab.set(0);
+        } else {
+            let active = self.db_active_tab.get_untracked().min(len - 1);
+            self.db_activate_tab(active);
+        }
     }
 
     /// Run the raw SQL string under the cursor (`DB::select("…")`, `->whereRaw`,
@@ -780,6 +859,8 @@ impl AppState {
     fn db_apply_result(&self, res: Result<e_db::QueryResult, String>) {
         self.db_result_loading.set(false);
         self.db_selected_cell.set(None);
+        // Browsing a table is a single result; drop any console result tabs.
+        self.db_result_tabs.set(Vec::new());
         match res {
             Ok(r) => {
                 self.db_result_error.set(None);

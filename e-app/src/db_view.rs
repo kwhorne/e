@@ -1053,6 +1053,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         header,
         query_row,
         toolbar,
+        result_tabs_strip(state),
         status,
         grid,
         db_value_viewer(state),
@@ -1720,6 +1721,87 @@ fn db_history_panel(state: AppState) -> impl IntoView {
             s
         } else {
             s.hide()
+        }
+    })
+}
+
+/// The console result-tab strip: one tab per statement of the last run, plus
+/// pinned tabs. Click to switch, pin to keep, ✕ to close. Hidden when empty.
+fn result_tabs_strip(state: AppState) -> impl IntoView {
+    let tabs = dyn_stack(
+        move || {
+            state
+                .db_result_tabs
+                .get()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, t)| (*i, t.pinned),
+        move |(i, t)| {
+            let title = t.title.clone();
+            let pinned = t.pinned;
+            let is_err = t.error.is_some();
+            let pin = label(move || if pinned { "★" } else { "☆" }.to_string())
+                .style(move |s| {
+                    s.font_size(11.0)
+                        .color(if pinned {
+                            Color::from_rgb8(0xe5, 0xc0, 0x7b)
+                        } else {
+                            theme::fg_dim()
+                        })
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.color(theme::fg()))
+                })
+                .on_click_stop(move |_| state.db_toggle_pin(i));
+            let name = label(move || title.clone()).style(move |s| {
+                s.font_size(12.0).color(if is_err {
+                    Color::from_rgb8(0xe0, 0x6c, 0x75)
+                } else {
+                    theme::fg()
+                })
+            });
+            let close = label(|| "✕".to_string())
+                .style(|s| {
+                    s.font_size(11.0)
+                        .color(theme::fg_dim())
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.color(theme::fg()))
+                })
+                .on_click_stop(move |_| state.db_close_tab(i));
+            stack((pin, name, close))
+                .style(move |s| {
+                    let active = state.db_active_tab.get() == i;
+                    let s = s
+                        .flex_row()
+                        .items_center()
+                        .gap(6.0)
+                        .padding_horiz(10.0)
+                        .padding_vert(5.0)
+                        .border_right(1.0)
+                        .border_color(theme::border())
+                        .cursor(floem::style::CursorStyle::Pointer);
+                    if active {
+                        s.background(theme::bg_active())
+                    } else {
+                        s.hover(|s| s.background(theme::bg_hover()))
+                    }
+                })
+                .on_click_stop(move |_| state.db_activate_tab(i))
+        },
+    )
+    .style(|s| s.flex_row().items_center());
+
+    floem::views::scroll(tabs).style(move |s| {
+        let s = s
+            .width_full()
+            .border_bottom(1.0)
+            .border_color(theme::border())
+            .background(theme::bg_hover());
+        if state.db_result_tabs.with(|t| t.is_empty()) {
+            s.hide()
+        } else {
+            s
         }
     })
 }

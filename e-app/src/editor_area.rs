@@ -310,8 +310,19 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                     .indent_guide(state.settings.get().indent_guides)
                     .wrap_method(wrap)
             })
-            .style(|s| s.size_full())
-            .pre_command(move |pre| {
+            .style(|s| s.size_full());
+
+            let editor_handle = te.editor().clone();
+            b.editor.set(Some(editor_handle.clone()));
+
+            // Intercept Up/Down/Enter/Tab to drive the completion popup. This
+            // MUST be registered on the inner TextDocument (`b.doc`), not via
+            // the builder's `.pre_command()`: that helper downcasts the current
+            // doc to `TextDocument`, which fails after `.use_doc(HintsDoc)`, so
+            // it silently did nothing — arrow keys and Enter never reached the
+            // popup. `run_command` delegates HintsDoc -> b.doc, which dispatches
+            // pre-commands keyed by editor id.
+            b.doc.add_pre_command(editor_handle.id(), move |pre| {
                 if state.completion.open.get_untracked() {
                     match pre.cmd {
                         Command::Move(MoveCommand::Down) => {
@@ -333,9 +344,6 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 }
                 CommandExecuted::No
             });
-
-            let editor_handle = te.editor().clone();
-            b.editor.set(Some(editor_handle.clone()));
 
             // Give this editor keyboard focus whenever its buffer becomes the
             // active one (e.g. ⌘N, opening a file, switching tabs), so you can

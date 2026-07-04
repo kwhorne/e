@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-07-03
+
+### Fixed
+
+- **Keyboard navigation in the completion popup didn't work.** Up/Down to move
+  the selection and Enter/Tab to accept were silently ignored, so completions
+  (Flux UI, Livewire, Laravel, LSP, …) could only be taken with the mouse. The
+  handler was registered through the editor builder's `.pre_command()`, which
+  only attaches to a plain `TextDocument`; because the editor uses a custom
+  document wrapper for inlay hints and ghost text, the registration was dropped
+  on the floor. It's now registered directly on the backing document, so the
+  arrow keys and Enter/Tab drive the popup again — fingers stay on the keyboard.
+
 ## [0.7.4] - 2026-07-03
 
 ### Added

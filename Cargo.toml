@@ -18,7 +18,7 @@ members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term"]
 resolver = "2"
 
 [workspace.package]
-version      = "0.7.4"
+version      = "0.7.5"
 edition      = "2021"
 rust-version = "1.87.0"
 license      = "MIT"

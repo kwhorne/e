@@ -64,6 +64,42 @@ impl DbConfig {
     /// Heuristic: does this look like a production database? Remote/SSH targets
     /// and names containing prod/production/live are treated as production, so
     /// the editor can default them to read-only and warn before writes.
+    /// Classify the connection's environment for labelling and write guards.
+    /// Production name hints win; then staging hints; then locality of the host.
+    pub fn environment(&self) -> Environment {
+        if name_hints_prod(&self.label)
+            || name_hints_prod(&self.database)
+            || name_hints_prod(&self.host)
+            || name_hints_prod(&self.path)
+        {
+            return Environment::Production;
+        }
+        if name_hints_staging(&self.label)
+            || name_hints_staging(&self.database)
+            || name_hints_staging(&self.host)
+            || name_hints_staging(&self.path)
+        {
+            return Environment::Staging;
+        }
+        if self.engine == "sqlite" {
+            return Environment::Local;
+        }
+        if self.use_ssh && !self.ssh_host.is_empty() {
+            return Environment::Staging; // remote via tunnel, no hint
+        }
+        let host = self.host.trim().to_ascii_lowercase();
+        let local = matches!(
+            host.as_str(),
+            "" | "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "host.docker.internal"
+        ) || host.ends_with(".test")
+            || host.ends_with(".localhost");
+        if local {
+            Environment::Local
+        } else {
+            Environment::Staging
+        }
+    }
+
     pub fn looks_like_prod(&self) -> bool {
         if self.engine == "sqlite" {
             return name_hints_prod(&self.path) || name_hints_prod(&self.label);
@@ -1653,6 +1689,53 @@ fn name_hints_prod(s: &str) -> bool {
         .any(|needle| s.contains(needle))
 }
 
+fn name_hints_staging(s: &str) -> bool {
+    let s = s.to_ascii_lowercase();
+    ["staging", "stage", "stg", "uat", "preprod", "pre-prod"]
+        .iter()
+        .any(|needle| s.contains(needle))
+}
+
+/// A connection's environment, used for coloured labels and write guards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Environment {
+    Local,
+    Staging,
+    Production,
+}
+
+impl Environment {
+    pub fn label(self) -> &'static str {
+        match self {
+            Environment::Local => "local",
+            Environment::Staging => "staging",
+            Environment::Production => "production",
+        }
+    }
+    pub fn is_local(self) -> bool {
+        self == Environment::Local
+    }
+}
+
+/// If `sql` is a destructive statement that should require explicit confirmation
+/// (DROP, TRUNCATE, or DELETE/UPDATE with no WHERE clause), return a short
+/// human-readable reason; otherwise `None`. Operates on a single statement.
+pub fn is_destructive(sql: &str) -> Option<&'static str> {
+    let trimmed = sql.trim_start().to_ascii_lowercase();
+    let first = trimmed.split_whitespace().next().unwrap_or("");
+    // Whole-word presence of `where` (ignores it appearing inside identifiers).
+    let has_where = trimmed
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|w| w == "where");
+    match first {
+        "drop" => Some("DROP"),
+        "truncate" => Some("TRUNCATE"),
+        "delete" if !has_where => Some("DELETE without WHERE"),
+        "update" if !has_where => Some("UPDATE without WHERE"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1744,6 +1827,47 @@ mod tests {
             ),
             "SELECT * FROM `t` WHERE `name` = 'O''x' ORDER BY `id` DESC LIMIT 10 OFFSET 20"
         );
+    }
+
+    #[test]
+    fn environment_classification() {
+        assert_eq!(cfg("mysql", "127.0.0.1").environment(), Environment::Local);
+        assert_eq!(cfg("mysql", "myapp.test").environment(), Environment::Local); // Grove
+        assert_eq!(
+            cfg("mysql", "db.example.com").environment(),
+            Environment::Staging
+        ); // remote, no hint
+        assert_eq!(
+            cfg("mysql", "staging-db.internal").environment(),
+            Environment::Staging
+        );
+        assert_eq!(
+            cfg("mysql", "prod-db.internal").environment(),
+            Environment::Production
+        );
+        let mut sqlite = cfg("sqlite", "");
+        sqlite.path = "/data/app.sqlite".into();
+        assert_eq!(sqlite.environment(), Environment::Local);
+        sqlite.path = "/data/production.sqlite".into();
+        assert_eq!(sqlite.environment(), Environment::Production);
+    }
+
+    #[test]
+    fn destructive_detection() {
+        assert_eq!(is_destructive("DROP TABLE users"), Some("DROP"));
+        assert_eq!(is_destructive("truncate table t"), Some("TRUNCATE"));
+        assert_eq!(
+            is_destructive("DELETE FROM orders"),
+            Some("DELETE without WHERE")
+        );
+        assert_eq!(is_destructive("DELETE FROM orders WHERE id = 1"), None);
+        assert_eq!(
+            is_destructive("UPDATE orders SET total = 0"),
+            Some("UPDATE without WHERE")
+        );
+        assert_eq!(is_destructive("UPDATE orders SET x=1 WHERE id=2"), None);
+        assert_eq!(is_destructive("SELECT * FROM users"), None);
+        assert_eq!(is_destructive("  insert into t values (1)"), None);
     }
 
     #[test]

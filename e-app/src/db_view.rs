@@ -13,6 +13,15 @@ use floem::IntoView;
 use crate::state::{AppState, DbEntry, DbForm};
 use crate::theme;
 
+/// The accent colour for a connection's environment (green / amber / red).
+fn env_color(env: e_db::Environment) -> Color {
+    match env {
+        e_db::Environment::Local => Color::from_rgb8(0x98, 0xc3, 0x79),
+        e_db::Environment::Staging => Color::from_rgb8(0xe5, 0xc0, 0x7b),
+        e_db::Environment::Production => Color::from_rgb8(0xe0, 0x6c, 0x75),
+    }
+}
+
 /// Nudge the results-grid scroll by `(dx, dy)`; the tick makes each call a
 /// distinct signal value so the `scroll_delta` effect always re-fires.
 fn db_scroll(state: AppState, dx: f64, dy: f64) {
@@ -111,7 +120,27 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
     })
     .on_click_stop(move |_| state.db_toggle_read_only(e_lock2.clone()));
 
-    let head = stack((caret, glyph, name, lock, count))
+    // Environment: coloured dot (green local / amber staging / red production),
+    // plus an explicit badge for non-local so writes are never a surprise.
+    let env = entry.config.environment();
+    let env_color = env_color(env);
+    let env_dot = label(|| "●".to_string()).style(move |s| s.font_size(9.0).color(env_color));
+    let env_badge = label(move || env.label().to_uppercase()).style(move |s| {
+        let s = s
+            .font_size(9.0)
+            .padding_horiz(4.0)
+            .border_radius(3.0)
+            .color(env_color)
+            .border(1.0)
+            .border_color(env_color);
+        if env.is_local() {
+            s.hide()
+        } else {
+            s
+        }
+    });
+
+    let head = stack((caret, env_dot, glyph, name, env_badge, lock, count))
         .style(|s| {
             s.flex_row()
                 .items_center()

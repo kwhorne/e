@@ -604,6 +604,41 @@ impl AppState {
         });
     }
 
+    /// Seed `count` rows into the current table via its Eloquent factory
+    /// (through Tinker). Local connections only (uses the app's configured DB).
+    pub fn db_seed_table(&self, count: usize) {
+        let (Some(key), Some(table)) = (
+            self.db_result_key.get_untracked(),
+            self.db_result_table.get_untracked(),
+        ) else {
+            return;
+        };
+        let local = self
+            .db_conns
+            .with_untracked(|c| {
+                c.iter()
+                    .find(|e| e.key() == key)
+                    .map(|e| e.config.environment())
+            })
+            .map(|env| env.is_local())
+            .unwrap_or(false);
+        if !local {
+            Self::notify("Seed: only available on local connections");
+            return;
+        }
+        let model = crate::laravel::model_class_from_table(&table);
+        let code = format!(
+            "\\{model}::factory()->count({count})->create(); \
+             echo 'Seeded {count} row(s) via {model}';"
+        );
+        self.run_tinker(code);
+        // The factory writes through the app; refresh the grid shortly after.
+        let state = *self;
+        floem::action::exec_after(std::time::Duration::from_millis(1500), move |_| {
+            state.db_reload_table();
+        });
+    }
+
     /// Copy the current table's CREATE DDL to the clipboard (DB-204).
     pub fn db_copy_ddl(&self) {
         let (Some(key), Some(table)) = (

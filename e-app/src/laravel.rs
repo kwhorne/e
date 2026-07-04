@@ -873,9 +873,72 @@ fn find_function_line(path: &Path, method: &str) -> Option<usize> {
     src.lines().position(|l| l.contains(&needle))
 }
 
+/// Naive English singularisation of a table name segment.
+fn singularize(w: &str) -> String {
+    let lower = w.to_ascii_lowercase();
+    if let Some(stem) = lower.strip_suffix("ies") {
+        return format!("{stem}y");
+    }
+    for suf in ["ches", "shes", "sses", "xes", "zes"] {
+        if let Some(stem) = lower.strip_suffix(suf) {
+            // keep the base consonant cluster, drop the "es"
+            let keep = &suf[..suf.len() - 2];
+            return format!("{stem}{keep}");
+        }
+    }
+    if lower.ends_with("ss") {
+        return lower;
+    }
+    lower
+        .strip_suffix('s')
+        .map(|s| s.to_string())
+        .unwrap_or(lower)
+}
+
+/// Guess the Eloquent model class for a table using Laravel conventions
+/// (singularise + StudlyCase, `App\Models\` namespace). Imperfect, but right
+/// for the common cases (`users`->`User`, `order_items`->`OrderItem`).
+pub fn model_class_from_table(table: &str) -> String {
+    let parts: Vec<String> = table
+        .split('_')
+        .collect::<Vec<_>>()
+        .iter()
+        .enumerate()
+        .map(|(i, seg)| {
+            // Singularise only the last segment (the noun).
+            let seg = if i + 1 == table.split('_').count() {
+                singularize(seg)
+            } else {
+                seg.to_ascii_lowercase()
+            };
+            let mut chars = seg.chars();
+            match chars.next() {
+                Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    format!("App\\Models\\{}", parts.join(""))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_class_guess() {
+        assert_eq!(model_class_from_table("users"), "App\\Models\\User");
+        assert_eq!(model_class_from_table("posts"), "App\\Models\\Post");
+        assert_eq!(
+            model_class_from_table("order_items"),
+            "App\\Models\\OrderItem"
+        );
+        assert_eq!(
+            model_class_from_table("categories"),
+            "App\\Models\\Category"
+        );
+        assert_eq!(model_class_from_table("addresses"), "App\\Models\\Address");
+    }
 
     #[test]
     fn detects_helpers() {

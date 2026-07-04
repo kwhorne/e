@@ -1161,6 +1161,31 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             }
         })
         .on_click_stop(move |_| state.db_import_csv());
+    let seed = label(|| "Seed 10".to_string())
+        .style(move |s| {
+            let s = s
+                .padding_horiz(8.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .font_size(12.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
+            // Local tables only (factory seeding runs through Tinker/the app DB).
+            let local = state.db_result_key.get().and_then(|key| {
+                state.db_conns.with(|c| {
+                    c.iter()
+                        .find(|e| e.key() == key)
+                        .map(|e| e.config.environment().is_local())
+                })
+            });
+            if local == Some(true) && state.db_subview.get() == "data" {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.db_seed_table(10));
 
     let toolbar = stack((
         subview_chips,
@@ -1169,6 +1194,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         spacer,
         add_row,
         import_csv,
+        seed,
         saved_menu,
         name_input,
         save_btn,

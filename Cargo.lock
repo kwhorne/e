@@ -1249,14 +1249,14 @@ checksum = "edf234dd1594d6dd434a8fb8cada51ddbbc593e40e4a01556a0b31c62da2775b"
 
 [[package]]
 name = "e"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "e-app",
 ]
 
 [[package]]
 name = "e-app"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1276,7 +1276,7 @@ dependencies = [
 
 [[package]]
 name = "e-core"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "anyhow",
  "encoding_rs",
@@ -1303,7 +1303,7 @@ dependencies = [
 
 [[package]]
 name = "e-dap"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1313,7 +1313,7 @@ dependencies = [
 
 [[package]]
 name = "e-db"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "mysql",
  "postgres",
@@ -1325,7 +1325,7 @@ dependencies = [
 
 [[package]]
 name = "e-lsp"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "e-term"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "anyhow",
  "portable-pty",

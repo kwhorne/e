@@ -119,6 +119,17 @@ impl AppState {
         self.db_history.set(entries);
     }
 
+    /// Open the session write-log (undo-log) panel.
+    pub fn db_open_write_log(&self) {
+        self.db_write_log_open.set(true);
+    }
+
+    /// Run a logged reverse statement to undo a change (gated like any run).
+    pub fn db_undo_write(&self, reverse_sql: String) {
+        self.db_write_log_open.set(false);
+        self.run_console_sql(reverse_sql);
+    }
+
     /// Load a history entry's SQL back into the console and close the panel.
     pub fn db_reopen_history(&self, sql: String) {
         self.set_console_sql(sql);
@@ -1496,6 +1507,12 @@ impl AppState {
         let is_null = self.db_edit_null.get_untracked();
         let value = self.db_edit_value.get_untracked();
         let new = if is_null { None } else { Some(value.clone()) };
+        let old = result
+            .rows
+            .get(row)
+            .and_then(|r| r.get(col))
+            .cloned()
+            .flatten();
 
         // Stage the edit (transactional): reflect it in the grid and record it as
         // pending; the write happens on Submit.
@@ -1513,6 +1530,7 @@ impl AppState {
                     column: column.clone(),
                     pk,
                     new,
+                    old,
                 },
             );
         });
@@ -1635,25 +1653,34 @@ impl AppState {
         };
         let engine = entry.config.engine.clone();
         let mut stmts: Vec<String> = Vec::new();
+        let mut log: Vec<crate::state::WriteLogEntry> = Vec::new();
         self.db_pending_edits.with_untracked(|edits| {
             for e in edits.values() {
-                stmts.push(e_db::update_sql(
-                    &engine,
-                    &table,
-                    &e.column,
-                    e.new.as_deref(),
-                    &e.pk,
-                ));
+                let fwd = e_db::update_sql(&engine, &table, &e.column, e.new.as_deref(), &e.pk);
+                // Reverse: set the column back to its old value.
+                let rev = e_db::update_sql(&engine, &table, &e.column, e.old.as_deref(), &e.pk);
+                stmts.push(fwd.clone());
+                log.push(crate::state::WriteLogEntry {
+                    forward: fwd,
+                    reverse: Some(rev),
+                });
             }
         });
         self.db_pending_deletes.with_untracked(|dels| {
             for pk in dels.values() {
-                stmts.push(e_db::delete_sql(&engine, &table, pk));
+                let fwd = e_db::delete_sql(&engine, &table, pk);
+                stmts.push(fwd.clone());
+                // A delete's reverse (re-insert) needs the full row; not tracked.
+                log.push(crate::state::WriteLogEntry {
+                    forward: fwd,
+                    reverse: None,
+                });
             }
         });
         if stmts.is_empty() {
             return;
         }
+        self.db_pending_log.set(log);
         let env = entry.config.environment();
         self.db_confirm.set(Some(crate::state::DbConfirm {
             verb: "Submit".into(),
@@ -1687,6 +1714,10 @@ impl AppState {
                 Ok(n) => {
                     state.db_pending_edits.update(|m| m.clear());
                     state.db_pending_deletes.update(|m| m.clear());
+                    // Record the executed writes in the session undo-log.
+                    let entries = state.db_pending_log.get_untracked();
+                    state.db_write_log.update(|log| log.extend(entries));
+                    state.db_pending_log.set(Vec::new());
                     Self::notify(&format!("Submitted — {n} row(s) affected"));
                     state.db_reload_table();
                 }

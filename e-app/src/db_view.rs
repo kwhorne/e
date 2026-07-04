@@ -1160,6 +1160,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         copy_md,
     ))
     .style(|s| s.flex_row().items_center().gap(2.0));
+    let write_log = toolbar_btn("Log", Box::new(move || state.db_open_write_log()));
     let add_row = label(|| "+ Row".to_string())
         .style(move |s| {
             let s = s
@@ -1231,6 +1232,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         saved_menu,
         name_input,
         save_btn,
+        write_log,
         copy,
         export,
     ))
@@ -1311,6 +1313,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         db_edit_popup(state),
         db_insert_popup(state),
         db_history_panel(state),
+        db_write_log_panel(state),
     ))
     .style(move |s| {
         let s = s
@@ -2113,6 +2116,127 @@ fn rel_ago(ts_ms: i64) -> String {
     } else {
         format!("{}d ago", secs / 86_400)
     }
+}
+
+/// The session write-log (undo-log): every write executed this session, with a
+/// generated reverse where possible (Undo runs it). (DB-705)
+fn db_write_log_panel(state: AppState) -> impl IntoView {
+    let close = label(|| "✕".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_write_log_open.set(false));
+    let header = stack((
+        label(|| "Session write log".to_string()).style(|s| {
+            s.flex_grow(1.0)
+                .font_size(13.0)
+                .font_bold()
+                .color(theme::fg())
+        }),
+        close,
+    ))
+    .style(|s| {
+        s.flex_row()
+            .items_center()
+            .width_full()
+            .padding(10.0)
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+    let rows = dyn_stack(
+        move || {
+            // Newest first.
+            let mut v = state.db_write_log.get();
+            v.reverse();
+            v.into_iter().enumerate().collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, e)| {
+            let fwd = e.forward.clone();
+            let rev = e.reverse.clone();
+            let has_rev = rev.is_some();
+            let undo = label(|| "Undo".to_string())
+                .style(move |s| {
+                    let s = s
+                        .font_size(10.5)
+                        .flex_shrink(0.0)
+                        .padding_horiz(8.0)
+                        .border_radius(4.0)
+                        .border(1.0)
+                        .border_color(theme::border())
+                        .color(theme::accent())
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.background(theme::bg_hover()));
+                    if has_rev {
+                        s
+                    } else {
+                        s.hide()
+                    }
+                })
+                .on_click_stop(move |_| {
+                    if let Some(r) = &rev {
+                        state.db_undo_write(r.clone());
+                    }
+                });
+            stack((
+                label(move || fwd.clone()).style(|s| {
+                    s.flex_grow(1.0)
+                        .font_family("monospace".to_string())
+                        .font_size(12.0)
+                        .color(theme::fg())
+                        .text_ellipsis()
+                }),
+                undo,
+            ))
+            .style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .gap(8.0)
+                    .width_full()
+                    .padding_horiz(10.0)
+                    .padding_vert(5.0)
+                    .border_bottom(1.0)
+                    .border_color(theme::border())
+            })
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+    let empty_hint = label(|| "No writes this session.".to_string()).style(move |s| {
+        let s = s.padding(16.0).font_size(12.0).color(theme::fg_dim());
+        if state.db_write_log.with(|l| l.is_empty()) {
+            s
+        } else {
+            s.hide()
+        }
+    });
+    let list = scroll(stack((rows, empty_hint)).style(|s| s.flex_col().width_full()))
+        .style(|s| s.flex_grow(1.0).width_full());
+    let card = stack((header, list)).style(|s| {
+        s.flex_col()
+            .width(680.0)
+            .height(460.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg())
+    });
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 120));
+        if state.db_write_log_open.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
 }
 
 /// The query-history panel: a searchable list of past runs; click one to load

@@ -203,6 +203,16 @@ pub struct PendingEdit {
     pub column: String,
     pub pk: RowPk,
     pub new: Option<String>,
+    /// The value before the edit, for the session undo-log's reverse statement.
+    pub old: Option<String>,
+}
+
+/// One executed write in the session log: the statement, and its reverse when
+/// one can be generated.
+#[derive(Clone)]
+pub struct WriteLogEntry {
+    pub forward: String,
+    pub reverse: Option<String>,
 }
 
 /// One SQL console result set, shown as a tab. Pinned tabs survive the next run;
@@ -515,6 +525,11 @@ pub struct AppState {
     pub db_explain_issues: RwSignal<Vec<String>>,
     /// The "search all tables" input.
     pub db_search_query: RwSignal<String>,
+    /// Session undo-log of executed writes (newest last), and the panel's state.
+    pub db_write_log: RwSignal<Vec<WriteLogEntry>>,
+    pub db_write_log_open: RwSignal<bool>,
+    /// Log entries for the in-flight submit, appended to the log on success.
+    pub db_pending_log: RwSignal<Vec<WriteLogEntry>>,
     /// A destructive / non-local / submit action awaiting confirmation, if any.
     pub db_confirm: RwSignal<Option<DbConfirm>>,
     /// A `:param` prompt awaiting values, and the last-entered values to prefill.
@@ -1052,6 +1067,9 @@ impl AppState {
             db_total_rows: RwSignal::new(None),
             db_explain_issues: RwSignal::new(Vec::new()),
             db_search_query: RwSignal::new(String::new()),
+            db_write_log: RwSignal::new(Vec::new()),
+            db_write_log_open: RwSignal::new(false),
+            db_pending_log: RwSignal::new(Vec::new()),
             db_confirm: RwSignal::new(None),
             db_params: RwSignal::new(None),
             db_param_last: RwSignal::new(HashMap::new()),

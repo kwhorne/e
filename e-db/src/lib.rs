@@ -622,6 +622,60 @@ pub fn views(conn: &Conn) -> Result<Vec<String>, String> {
     }
 }
 
+/// The `CREATE TABLE` DDL for a table (read-only display / copy). PostgreSQL has
+/// no single-call DDL, so a basic definition is reconstructed from its columns.
+pub fn table_ddl(conn: &Conn, table: &str) -> Result<String, String> {
+    match &conn.backend {
+        Backend::Mysql(pool) => {
+            use mysql::prelude::Queryable;
+            let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            let q = format!("SHOW CREATE TABLE `{}`", table.replace('`', "``"));
+            let row: Option<(String, String)> = c.query_first(q).map_err(|e| e.to_string())?;
+            Ok(row.map(|(_, ddl)| ddl).unwrap_or_default())
+        }
+        Backend::Sqlite(path) => {
+            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            c.query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?1",
+                [table],
+                |r| r.get::<_, String>(0),
+            )
+            .map_err(|e| e.to_string())
+        }
+        Backend::Clickhouse { .. } => {
+            let q = format!("SHOW CREATE TABLE `{}`", table.replace('`', "``"));
+            let res = ch_query(&conn.backend, &q, 1)?;
+            Ok(res
+                .rows
+                .into_iter()
+                .next()
+                .and_then(|r| r.into_iter().next().flatten())
+                .unwrap_or_default())
+        }
+        Backend::Postgres(_) => {
+            // Reconstruct a basic CREATE TABLE from the column list.
+            let cols = columns(conn, table)?;
+            let mut lines = Vec::new();
+            for c in &cols {
+                let null = if c.nullable { "" } else { " NOT NULL" };
+                let pk = if c.key == "PRI" { " PRIMARY KEY" } else { "" };
+                lines.push(format!(
+                    "    {} {}{}{}",
+                    quote_ident("postgres", &c.name),
+                    c.data_type,
+                    null,
+                    pk
+                ));
+            }
+            Ok(format!(
+                "CREATE TABLE {} (\n{}\n);",
+                quote_ident("postgres", table),
+                lines.join(",\n")
+            ))
+        }
+    }
+}
+
 /// The `CREATE VIEW`/definition SQL for a view (read-only display).
 pub fn view_definition(conn: &Conn, view: &str) -> Result<String, String> {
     match &conn.backend {
@@ -2122,6 +2176,8 @@ mod tests {
         assert_eq!(tables(&conn).unwrap(), vec!["users".to_string()]);
         let def = view_definition(&conn, "active_users").unwrap();
         assert!(def.to_uppercase().contains("SELECT"), "{def}");
+        let ddl = table_ddl(&conn, "users").unwrap();
+        assert!(ddl.to_uppercase().contains("CREATE TABLE"), "{ddl}");
         let _ = std::fs::remove_file(&dbfile);
     }
 

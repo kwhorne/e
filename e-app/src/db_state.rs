@@ -604,6 +604,36 @@ impl AppState {
         });
     }
 
+    /// Copy the current table's CREATE DDL to the clipboard (DB-204).
+    pub fn db_copy_ddl(&self) {
+        let (Some(key), Some(table)) = (
+            self.db_result_key.get_untracked(),
+            self.db_result_table.get_untracked(),
+        ) else {
+            return;
+        };
+        let Some(entry) = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let send = create_ext_action(self.cx, move |ddl: String| {
+            if ddl.is_empty() {
+                Self::notify("No DDL available");
+            } else {
+                let _ = floem::Clipboard::set_contents(ddl);
+                Self::notify("DDL copied to clipboard");
+            }
+        });
+        std::thread::spawn(move || {
+            send(e_db::table_ddl(&conn, &table).unwrap_or_default());
+        });
+    }
+
     /// Import a CSV file into the current table: parse it, map columns by header
     /// name, and stage the INSERTs behind the confirmation dialog (one
     /// transaction).

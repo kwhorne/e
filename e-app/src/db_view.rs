@@ -2509,7 +2509,22 @@ fn structure_grid(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col());
 
-    stack((header, rows, idx_title, idx_rows)).style(|s| s.flex_col().width(520.0))
+    let copy_ddl = label(|| "⧉ Copy DDL".to_string())
+        .style(|s| {
+            s.font_size(11.0)
+                .padding_horiz(8.0)
+                .padding_vert(3.0)
+                .margin_vert(6.0)
+                .border_radius(4.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_copy_ddl());
+
+    stack((header, rows, idx_title, idx_rows, copy_ddl)).style(|s| s.flex_col().width(520.0))
 }
 
 #[cfg(test)]

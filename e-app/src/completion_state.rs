@@ -21,6 +21,10 @@ use crate::laravel::{self, LaravelData};
 use crate::state::{dedup_by_label, is_word_char, line_indent, word_start, AppState};
 use crate::{builtin_completion, framework_completion, snippets};
 
+/// Sentinel `buffer_id` marking the completion popup as owned by the SQL console
+/// (which is not a real editor buffer), so its accept path edits the console doc.
+pub(crate) const CONSOLE_COMP_ID: u64 = u64::MAX;
+
 impl AppState {
     // ---- Completion & hover --------------------------------------------
 
@@ -96,42 +100,7 @@ impl AppState {
         if schema.is_empty() {
             return false;
         }
-        let lower = prefix.to_lowercase();
-        let mut items: Vec<lsp_types::CompletionItem> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        let mut push = |name: &str, kind: lsp_types::CompletionItemKind, detail: String| {
-            if !name.to_lowercase().contains(&lower) {
-                return;
-            }
-            if !seen.insert(name.to_string()) {
-                return;
-            }
-            items.push(lsp_types::CompletionItem {
-                label: name.to_string(),
-                insert_text: Some(name.to_string()),
-                kind: Some(kind),
-                detail: Some(detail),
-                ..Default::default()
-            });
-        };
-
-        let mut tables: Vec<&String> = schema.keys().collect();
-        tables.sort();
-        if !wants_tables {
-            // Columns first (most likely), then tables.
-            let mut cols: Vec<&e_db::ColumnInfo> = schema.values().flatten().collect();
-            cols.sort_by(|a, b| a.name.cmp(&b.name));
-            for c in cols {
-                push(
-                    &c.name,
-                    lsp_types::CompletionItemKind::FIELD,
-                    format!("column · {}", c.data_type),
-                );
-            }
-        }
-        for t in tables {
-            push(t, lsp_types::CompletionItemKind::CLASS, "table".to_string());
-        }
+        let items = sql_completion_items(&schema, &prefix, wants_tables);
         if items.is_empty() {
             return false;
         }
@@ -147,6 +116,96 @@ impl AppState {
         comp.items.set(items);
         comp.selected.set(0);
         comp.open.set(true);
+        true
+    }
+
+    /// Schema-aware completion for the standalone SQL console. Triggered on
+    /// typing in the console; the whole document is SQL. Closes the popup when
+    /// there's nothing to offer.
+    pub(crate) fn console_sql_completion(&self) {
+        let comp = self.completion;
+        let close_if_ours = || {
+            if comp.buffer_id.get_untracked() == Some(CONSOLE_COMP_ID) {
+                comp.open.set(false);
+            }
+        };
+        let (Some(editor), Some(doc)) = (
+            self.db_console_editor.get_untracked(),
+            self.db_console_doc.get_untracked(),
+        ) else {
+            return;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let offset = cursor.offset();
+        let text = doc.text().to_string();
+        if offset > text.len() {
+            close_if_ours();
+            return;
+        }
+        let (prefix, wants_tables) = sql_prefix_and_context(&text[..offset]);
+        if prefix.is_empty() && !wants_tables {
+            close_if_ours();
+            return;
+        }
+        let schema = self.db_schema_cache.get_untracked();
+        if schema.is_empty() {
+            close_if_ours();
+            return;
+        }
+        let items = sql_completion_items(&schema, &prefix, wants_tables);
+        if items.is_empty() {
+            close_if_ours();
+            return;
+        }
+        let start = offset - prefix.len();
+        let (_, below) = editor.points_of_offset(start, cursor.affinity);
+        let vp = editor.viewport.get_untracked();
+        let win = self.db_console_win.get_untracked();
+        comp.anchor
+            .set(Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0));
+        comp.buffer_id.set(Some(CONSOLE_COMP_ID));
+        comp.start_offset.set(start);
+        comp.items.set(items);
+        comp.selected.set(0);
+        comp.open.set(true);
+    }
+
+    /// Accept the selected console completion into the console document.
+    /// Returns false if the popup isn't the console's (so callers fall through).
+    pub(crate) fn accept_console_completion(&self) -> bool {
+        let comp = self.completion;
+        if !comp.open.get_untracked() || comp.buffer_id.get_untracked() != Some(CONSOLE_COMP_ID) {
+            return false;
+        }
+        let items = comp.items.get_untracked();
+        if items.is_empty() {
+            return false;
+        }
+        let sel = comp.selected.get_untracked().min(items.len() - 1);
+        let insert = items[sel]
+            .insert_text
+            .clone()
+            .unwrap_or_else(|| items[sel].label.clone());
+        let (Some(editor), Some(doc)) = (
+            self.db_console_editor.get_untracked(),
+            self.db_console_doc.get_untracked(),
+        ) else {
+            return false;
+        };
+        let end = editor.cursor.get_untracked().offset();
+        let start = comp.start_offset.get_untracked().min(end);
+        comp.open.set(false);
+        doc.edit_single(
+            Selection::region(start, end),
+            &insert,
+            EditType::InsertChars,
+        );
+        let pos = start + insert.len();
+        editor.cursor.set(Cursor::new(
+            CursorMode::Insert(Selection::caret(pos)),
+            None,
+            None,
+        ));
         true
     }
 
@@ -839,6 +898,51 @@ impl AppState {
 /// Given the SQL text before the cursor, return the identifier prefix being
 /// typed and whether the context wants table names (after FROM/JOIN/INTO/…)
 /// rather than columns.
+/// Build SQL completion items (columns then tables, or tables-only after
+/// `FROM`/`JOIN`/…) from the cached schema, filtered by `prefix`. Shared by the
+/// inline-SQL (PHP) and console completion paths.
+fn sql_completion_items(
+    schema: &std::collections::HashMap<String, Vec<e_db::ColumnInfo>>,
+    prefix: &str,
+    wants_tables: bool,
+) -> Vec<lsp_types::CompletionItem> {
+    let lower = prefix.to_lowercase();
+    let mut items: Vec<lsp_types::CompletionItem> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push = |name: &str, kind: lsp_types::CompletionItemKind, detail: String| {
+        if !name.to_lowercase().contains(&lower) {
+            return;
+        }
+        if !seen.insert(name.to_string()) {
+            return;
+        }
+        items.push(lsp_types::CompletionItem {
+            label: name.to_string(),
+            insert_text: Some(name.to_string()),
+            kind: Some(kind),
+            detail: Some(detail),
+            ..Default::default()
+        });
+    };
+    let mut tables: Vec<&String> = schema.keys().collect();
+    tables.sort();
+    if !wants_tables {
+        let mut cols: Vec<&e_db::ColumnInfo> = schema.values().flatten().collect();
+        cols.sort_by(|a, b| a.name.cmp(&b.name));
+        for c in cols {
+            push(
+                &c.name,
+                lsp_types::CompletionItemKind::FIELD,
+                format!("column · {}", c.data_type),
+            );
+        }
+    }
+    for t in tables {
+        push(t, lsp_types::CompletionItemKind::CLASS, "table".to_string());
+    }
+    items
+}
+
 fn sql_prefix_and_context(sql_before: &str) -> (String, bool) {
     let bytes = sql_before.as_bytes();
     let mut i = bytes.len();

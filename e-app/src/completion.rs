@@ -139,7 +139,14 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
             // keyboard-focusable, so the editor keeps focus after the click.
             .on_click_stop(move |_| {
                 comp.selected.set(i);
-                state.accept_completion();
+                // The console owns the popup via a sentinel buffer id; route to
+                // its own accept path (the buffer-based one can't resolve it).
+                if comp.buffer_id.get_untracked() == Some(crate::completion_state::CONSOLE_COMP_ID)
+                {
+                    state.accept_console_completion();
+                } else {
+                    state.accept_completion();
+                }
             })
         },
     )

@@ -10,7 +10,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use floem::reactive::{SignalGet, SignalUpdate};
-use floem::views::editor::command::CommandExecuted;
+use floem::views::editor::command::{Command, CommandExecuted};
+use floem::views::editor::core::command::{EditCommand, MoveCommand};
 use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::text::{Document, WrapMethod};
@@ -57,23 +58,38 @@ pub fn sql_console(state: AppState) -> impl IntoView {
     let hl = highlights.clone();
     let doc_for_update = doc.clone();
 
-    text_editor_keys("", move |editor_sig, kp, mods| {
+    let te = text_editor_keys("", move |editor_sig, kp, mods| {
+        let comp = state.completion;
+        let ours = comp.open.get_untracked()
+            && comp.buffer_id.get_untracked() == Some(crate::completion_state::CONSOLE_COMP_ID);
         if let KeyInput::Keyboard(key, _) = &kp.key {
+            use floem::keyboard::{Key, NamedKey};
             // ⌘/Ctrl+Enter runs the console (intercepted before app shortcuts so
             // it doesn't hit the PHP "run SQL under cursor" binding).
-            if matches!(
-                key,
-                floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter)
-            ) && (mods.meta() || mods.control())
-            {
+            if matches!(key, Key::Named(NamedKey::Enter)) && (mods.meta() || mods.control()) {
                 state.db_run_query();
+                return CommandExecuted::Yes;
+            }
+            // Dismiss the completion popup on Escape.
+            if ours && matches!(key, Key::Named(NamedKey::Escape)) {
+                comp.open.set(false);
                 return CommandExecuted::Yes;
             }
             if handle_shortcut(state, key, mods) {
                 return CommandExecuted::Yes;
             }
         }
-        default_key_handler(editor_sig)(kp, mods)
+        let res = default_key_handler(editor_sig)(kp, mods);
+        // After a character or backspace, (re)compute schema completion. Doing
+        // it here (not in `.update`) means programmatic edits (browse queries)
+        // never pop the completion list.
+        if let KeyInput::Keyboard(key, _) = &kp.key {
+            use floem::keyboard::{Key, NamedKey};
+            if matches!(key, Key::Character(_) | Key::Named(NamedKey::Backspace)) {
+                state.console_sql_completion();
+            }
+        }
+        res
     })
     .use_doc(doc.clone() as Rc<dyn Document>)
     .styling(styling)
@@ -85,11 +101,40 @@ pub fn sql_console(state: AppState) -> impl IntoView {
         doc_for_update.cache_rev().update(|r| *r += 1);
         state.db_query_text.set(text);
     })
+    .pre_command(move |pre| {
+        let comp = state.completion;
+        if comp.open.get_untracked()
+            && comp.buffer_id.get_untracked() == Some(crate::completion_state::CONSOLE_COMP_ID)
+        {
+            match pre.cmd {
+                Command::Move(MoveCommand::Down) => {
+                    state.move_completion(1);
+                    return CommandExecuted::Yes;
+                }
+                Command::Move(MoveCommand::Up) => {
+                    state.move_completion(-1);
+                    return CommandExecuted::Yes;
+                }
+                Command::Edit(EditCommand::InsertNewLine)
+                | Command::Edit(EditCommand::InsertTab)
+                    if state.accept_console_completion() =>
+                {
+                    return CommandExecuted::Yes;
+                }
+                _ => {}
+            }
+        }
+        CommandExecuted::No
+    })
     .style(|s| {
         s.size_full()
             .font_family("monospace".to_string())
             .font_size(13.0)
             .padding_horiz(10.0)
             .padding_vert(8.0)
-    })
+    });
+
+    // Store the editor handle + track its window origin (for popup placement).
+    state.db_console_editor.set(Some(te.editor().clone()));
+    te.on_move(move |p| state.db_console_win.set(p))
 }

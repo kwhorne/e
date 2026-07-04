@@ -1474,6 +1474,185 @@ pub fn browse_sql(
 
 // ── query ──────────────────────────────────────────────────────
 
+/// Find named `:param` placeholders in `sql`, in first-seen order, ignoring
+/// occurrences inside strings, comments and backtick identifiers, and skipping
+/// PostgreSQL `::type` casts. Returns the parameter names (without the colon).
+pub fn find_params(sql: &str) -> Vec<String> {
+    let chars: Vec<char> = sql.chars().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    // Reuse a tiny state machine for string/comment skipping.
+    #[derive(PartialEq)]
+    enum St {
+        Normal,
+        Single,
+        Double,
+        Backtick,
+        Line,
+        Block,
+    }
+    let mut st = St::Normal;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        match st {
+            St::Normal => match c {
+                '\'' => st = St::Single,
+                '"' => st = St::Double,
+                '`' => st = St::Backtick,
+                '-' if next == Some('-') => st = St::Line,
+                '#' => st = St::Line,
+                '/' if next == Some('*') => st = St::Block,
+                ':' if next == Some(':') => {
+                    i += 2; // PostgreSQL cast, not a param
+                    continue;
+                }
+                ':' if next.is_some_and(|n| n.is_ascii_alphabetic() || n == '_') => {
+                    let mut j = i + 1;
+                    let mut name = String::new();
+                    while j < chars.len() && (chars[j].is_ascii_alphanumeric() || chars[j] == '_') {
+                        name.push(chars[j]);
+                        j += 1;
+                    }
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                    i = j;
+                    continue;
+                }
+                _ => {}
+            },
+            St::Single => {
+                if c == '\\' {
+                    i += 2;
+                    continue;
+                }
+                if c == '\'' {
+                    st = St::Normal;
+                }
+            }
+            St::Double => {
+                if c == '\\' {
+                    i += 2;
+                    continue;
+                }
+                if c == '"' {
+                    st = St::Normal;
+                }
+            }
+            St::Backtick => {
+                if c == '`' {
+                    st = St::Normal;
+                }
+            }
+            St::Line => {
+                if c == '\n' {
+                    st = St::Normal;
+                }
+            }
+            St::Block => {
+                if c == '*' && next == Some('/') {
+                    i += 2;
+                    st = St::Normal;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Substitute `:param` placeholders with quoted SQL literals from `values`
+/// (missing values become NULL). Ignores strings/comments and `::` casts, like
+/// [`find_params`].
+pub fn substitute_params(sql: &str, values: &HashMap<String, String>) -> String {
+    let chars: Vec<char> = sql.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    #[derive(PartialEq)]
+    enum St {
+        Normal,
+        Single,
+        Double,
+        Backtick,
+        Line,
+        Block,
+    }
+    let mut st = St::Normal;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        match st {
+            St::Normal => match c {
+                '\'' => {
+                    st = St::Single;
+                    out.push(c);
+                }
+                '"' => {
+                    st = St::Double;
+                    out.push(c);
+                }
+                '`' => {
+                    st = St::Backtick;
+                    out.push(c);
+                }
+                '-' if next == Some('-') => {
+                    st = St::Line;
+                    out.push(c);
+                }
+                '#' => {
+                    st = St::Line;
+                    out.push(c);
+                }
+                '/' if next == Some('*') => {
+                    st = St::Block;
+                    out.push(c);
+                }
+                ':' if next == Some(':') => {
+                    out.push(':');
+                    out.push(':');
+                    i += 2;
+                    continue;
+                }
+                ':' if next.is_some_and(|n| n.is_ascii_alphabetic() || n == '_') => {
+                    let mut j = i + 1;
+                    let mut name = String::new();
+                    while j < chars.len() && (chars[j].is_ascii_alphanumeric() || chars[j] == '_') {
+                        name.push(chars[j]);
+                        j += 1;
+                    }
+                    match values.get(&name) {
+                        Some(v) => out.push_str(&format!("'{}'", esc(v))),
+                        None => out.push_str("NULL"),
+                    }
+                    i = j;
+                    continue;
+                }
+                _ => out.push(c),
+            },
+            _ => {
+                out.push(c);
+                match st {
+                    St::Single if c == '\'' => st = St::Normal,
+                    St::Double if c == '"' => st = St::Normal,
+                    St::Backtick if c == '`' => st = St::Normal,
+                    St::Line if c == '\n' => st = St::Normal,
+                    St::Block if c == '*' && next == Some('/') => {
+                        out.push('/');
+                        i += 2;
+                        st = St::Normal;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 /// Split a SQL script into individual statements on top-level `;`, ignoring
 /// semicolons inside string literals (`'…'`, `"…"`), backtick identifiers,
 /// line comments (`-- …`, `# …`) and block comments (`/* … */`). Handles
@@ -1995,6 +2174,23 @@ mod tests {
         c.engine = engine.to_string();
         c.host = host.to_string();
         c
+    }
+
+    #[test]
+    fn find_and_substitute_params() {
+        let sql =
+            "SELECT * FROM t WHERE id = :id AND name = ':notparam' -- :nope\n  AND x = :id::int";
+        // :id found once; the one in the string/comment ignored; ::int cast skipped.
+        assert_eq!(find_params(sql), vec!["id".to_string()]);
+        let mut vals = std::collections::HashMap::new();
+        vals.insert("id".to_string(), "O'x".to_string());
+        let out = substitute_params(sql, &vals);
+        assert!(out.contains("id = 'O''x'"), "{out}");
+        assert!(out.contains("':notparam'"), "{out}"); // untouched in string
+        assert!(
+            out.contains(":id::int") || out.contains("'O''x'::int"),
+            "{out}"
+        );
     }
 
     #[test]

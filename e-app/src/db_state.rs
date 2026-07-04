@@ -758,9 +758,24 @@ impl AppState {
         self.run_console_sql(sql);
     }
 
-    /// Gate a console run: destructive statements (any environment) or writes to
-    /// a non-local database require explicit confirmation first (DB-702/703).
+    /// Gate a console run: prompt for `:param` values first (DB-408), then
+    /// destructive/non-local confirmation (DB-702/703).
     fn run_console_sql(&self, sql: String) {
+        // Prompt for named parameters if any are present.
+        let params = e_db::find_params(&sql);
+        if !params.is_empty() {
+            let last = self.db_param_last.get_untracked();
+            let fields = params
+                .into_iter()
+                .map(|p| {
+                    let init = last.get(&p).cloned().unwrap_or_default();
+                    (p, self.cx.create_rw_signal(init))
+                })
+                .collect();
+            self.db_params
+                .set(Some(crate::state::DbParams { sql, fields }));
+            return;
+        }
         let Some(entry) = self.db_result_key.get_untracked().and_then(|key| {
             self.db_conns
                 .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
@@ -792,6 +807,29 @@ impl AppState {
                 run: crate::state::ConfirmRun::Console(sql),
             }));
         }
+    }
+
+    /// Fill parameters, remember them, and run the substituted SQL.
+    pub fn db_params_run(&self) {
+        let Some(p) = self.db_params.get_untracked() else {
+            return;
+        };
+        let mut values = std::collections::HashMap::new();
+        for (name, sig) in &p.fields {
+            values.insert(name.clone(), sig.get_untracked());
+        }
+        self.db_param_last.update(|m| {
+            for (k, v) in &values {
+                m.insert(k.clone(), v.clone());
+            }
+        });
+        self.db_params.set(None);
+        let sql = e_db::substitute_params(&p.sql, &values);
+        self.run_console_sql(sql);
+    }
+
+    pub fn db_params_cancel(&self) {
+        self.db_params.set(None);
     }
 
     /// Confirm and run the pending action (console SQL or a submit transaction).

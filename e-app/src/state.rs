@@ -182,6 +182,15 @@ pub struct DbConfirm {
     pub run: ConfirmRun,
 }
 
+/// A `:param` prompt awaiting values before a console run.
+#[derive(Clone)]
+pub struct DbParams {
+    /// The original SQL (with placeholders) to run once values are supplied.
+    pub sql: String,
+    /// `(name, value-input)` for each parameter.
+    pub fields: Vec<(String, RwSignal<String>)>,
+}
+
 /// A row's primary key as `(column, value)` predicates.
 pub type RowPk = Vec<(String, Option<String>)>;
 
@@ -501,6 +510,9 @@ pub struct AppState {
     pub db_total_rows: RwSignal<Option<i64>>,
     /// A destructive / non-local / submit action awaiting confirmation, if any.
     pub db_confirm: RwSignal<Option<DbConfirm>>,
+    /// A `:param` prompt awaiting values, and the last-entered values to prefill.
+    pub db_params: RwSignal<Option<DbParams>>,
+    pub db_param_last: RwSignal<HashMap<String, String>>,
     /// Staged cell edits `(row, col) -> edit` and staged row deletions
     /// `row -> pk`, for transactional editing (Submit / Revert).
     pub db_pending_edits: RwSignal<HashMap<(usize, usize), PendingEdit>>,
@@ -1032,6 +1044,8 @@ impl AppState {
             db_run_gen: RwSignal::new(0),
             db_total_rows: RwSignal::new(None),
             db_confirm: RwSignal::new(None),
+            db_params: RwSignal::new(None),
+            db_param_last: RwSignal::new(HashMap::new()),
             db_pending_edits: RwSignal::new(HashMap::new()),
             db_pending_deletes: RwSignal::new(HashMap::new()),
             db_result_table: RwSignal::new(None),

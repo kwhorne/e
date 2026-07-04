@@ -1268,6 +1268,125 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
 }
 
 /// The consent dialog shown when the AI agent proposes a query to run.
+/// Prompt for `:param` values before running a console query (DB-408).
+pub fn db_params_dialog(state: AppState) -> impl IntoView {
+    let fields = dyn_stack(
+        move || {
+            state
+                .db_params
+                .get()
+                .map(|p| p.fields)
+                .unwrap_or_default()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, (name, sig))| {
+            let label_name = name.clone();
+            stack((
+                label(move || format!(":{label_name}")).style(|s| {
+                    s.width(120.0)
+                        .flex_shrink(0.0)
+                        .font_family("monospace".to_string())
+                        .font_size(12.0)
+                        .color(theme::accent())
+                }),
+                text_input(sig)
+                    .style(|s| {
+                        theme::input_colors(s)
+                            .flex_grow(1.0)
+                            .min_width(0.0)
+                            .height(28.0)
+                            .font_size(12.0)
+                            .padding_horiz(8.0)
+                    })
+                    .on_key_down(
+                        floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter),
+                        |_| true,
+                        move |_| state.db_params_run(),
+                    ),
+            ))
+            .style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .gap(8.0)
+                    .width_full()
+                    .margin_bottom(6.0)
+            })
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+
+    let cancel = label(|| "Cancel".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_params_cancel());
+    let run = label(|| "Run".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .background(theme::accent())
+                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .cursor(floem::style::CursorStyle::Pointer)
+        })
+        .on_click_stop(move |_| state.db_params_run());
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), cancel, run)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .margin_top(12.0)
+    });
+
+    let card = stack((
+        label(|| "Query parameters".to_string()).style(|s| {
+            s.font_size(14.0)
+                .font_bold()
+                .color(theme::fg())
+                .margin_bottom(10.0)
+        }),
+        fields,
+        buttons,
+    ))
+    .style(|s| {
+        s.flex_col()
+            .width(460.0)
+            .padding(16.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg_panel())
+    });
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 120));
+        if state.db_params.get().is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 /// Confirmation dialog for destructive or non-local console runs (DB-702/703).
 pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
     let title = label(move || match state.db_confirm.get() {

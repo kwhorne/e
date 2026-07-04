@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-07-04
+
+### Added
+
+- **SQL console is now a real editor.** The database panel's query box is a
+  syntax-highlighted SQL editor (multi-line, monospace) instead of a plain text
+  input, and it's **resizable** — drag the handle below it for more room.
+- **Schema-aware completion in the console.** As you type SQL, table and column
+  names (from the connected database) and keywords are suggested; ⌘↵ runs the
+  console. Reuses the inline-SQL engine.
+
 ## [0.7.6] - 2026-07-03
 
 ### Added

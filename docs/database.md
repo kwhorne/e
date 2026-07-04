@@ -86,7 +86,56 @@ connected:
 
 Schema-aware completion suggests table and column names as you type SQL.
 
+## The SQL console
+
+The query box in the results panel is a full SQL editor: syntax highlighting,
+schema-aware completion (tables, columns, keywords) as you type, and a draggable
+handle below it to resize.
+
+- **⌘↵** runs the **selection**, or the **statement under the cursor**;
+  **⌘⇧↵** (or **Run**) runs the whole console. Each statement gets its own
+  **result tab** — pin one (★) to keep it across runs.
+- **`:param`** placeholders prompt for values before running (remembered).
+- **○ History** opens a searchable log of every query you've run in this project;
+  click one to load it back into the console.
+- Long queries show a **✕ Cancel** while running.
+- Export the result as **CSV / JSON / SQL**, or copy it as **TSV / Markdown**.
+
+## Environments & safety
+
+Each connection is labelled **local**, **staging** or **production** (green /
+amber / red), shown as a dot + badge in the list and on the active result. The
+label is guessed from the host and name and drives the safety rails:
+
+- **Destructive statements** (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without a
+  `WHERE`) and **any write to a non-local database** open a confirmation dialog
+  that lists the exact statements; non-local writes require an explicit
+  acknowledgement.
+- **Transactional editing:** cell edits and row deletes are *staged* (edited
+  cells turn amber, deleted rows red). A **N pending changes** bar offers
+  **Submit** (all in one transaction, via the confirmation dialog) and
+  **Revert**. A **Log** button shows the session's writes with an **Undo** where
+  a reverse statement can be generated.
+- **Snapshots:** the **⤓** action on a local connection dumps the database
+  (SQLite copy / mysqldump / pg_dump) into `~/.config/e/snapshots/` — handy
+  before a migration.
+
+## Structure, relationships & tooling
+
+- The **Structure** tab lists columns and indexes; **Copy DDL** copies the
+  `CREATE TABLE`, and **+ Migration** scaffolds a Laravel migration for the table
+  and opens it (instead of running DDL directly).
+- The **⇄** button in the panel header shows **schema relationships** (every
+  foreign key as `table.column → ref_table.ref_column`).
+- The cell dialog can **Follow FK →** (jump to the referenced row) and show
+  **Related →** rows (reverse foreign keys).
+- **Seed 10** (local tables) creates rows via the Eloquent factory through
+  Tinker; **⬆ CSV** imports a CSV into the table.
+- **Search all data…** in the panel header scans every table's text columns for
+  a value and shows one result tab per matching table.
+- Row counts appear next to each table in the tree.
+
 ## Connection actions
 
 Hover a connection for its actions: **⌗** new query, **⟳** refresh tables,
-**⏏** disconnect, **✎** edit, **✕** remove.
+**⤓** snapshot, **⏏** disconnect, **✎** edit, **✕** remove.

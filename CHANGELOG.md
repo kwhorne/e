@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-04
+
+A major expansion of the database tools — the full “PhpStorm-parity and beyond”
+PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
+
+### SQL console (phase 1)
+
+- **Real editor** with SQL syntax highlighting, **schema-aware completion**
+  (tables/columns/keywords), and a draggable resize handle.
+- **Multi-statement runs**: `⌘↵` runs the selection or the statement under the
+  cursor, `⌘⇧↵` (or Run) runs everything; each statement gets its own
+  **result tab** (pinnable).
+- **Query history** persisted per project (searchable; click to reload).
+- **Named parameters**: `:param` placeholders prompt for values (remembered).
+- **Cancellable** runs; duration + row counts shown per run.
+
+### Safe editing (phase 2)
+
+- **Transactional editing**: cell edits and row deletes stage as pending (amber
+  cells, red rows) with a **Submit** (one transaction, via a confirmation
+  dialog) / **Revert** bar.
+- **Environment labels** (local / staging / production) with colour, on each
+  connection and the active result.
+- **Destructive-statement** and **non-local write** confirmation dialogs.
+- **Pagination** with total count + jump-to-page; **value viewer** with JSON
+  pretty-printing; explicit NULL handling.
+
+### Data in/out (phase 3)
+
+- **Export** results as CSV / JSON / SQL inserts; **copy** as TSV / Markdown.
+- **CSV import** into a table (header mapping, one transaction).
+- **Views** in the object tree; **search** the tree.
+
+### Power tools (phase 4)
+
+- **EXPLAIN** findings banner + **EXPLAIN a query straight from the Runtime
+  panel**; agent-suggested index migrations.
+- **Generate/Copy DDL**; **related rows** via reverse foreign keys; **seed rows**
+  through an Eloquent factory.
+
+### Beyond parity (phase 5)
+
+- **Database snapshots** (SQLite copy / mysqldump / pg_dump), local only.
+- **Session undo-log** of writes (with generated reverse statements).
+- **Schema relationships (ERD)** view; **search a value across all tables**;
+  **row counts** in the tree; **generate a migration scaffold** from Structure.
+
 ## [0.7.7] - 2026-07-04
 
 ### Added

@@ -122,7 +122,15 @@ if [[ -n "${CI:-}" ]]; then
   rm -rf target || true
   rm -rf "${CARGO_HOME:-$HOME/.cargo}/registry" "${CARGO_HOME:-$HOME/.cargo}/git" || true
   rm -rf "${RUSTUP_HOME:-$HOME/.rustup}/toolchains" || true
-  df -h / || true
+  # hdiutil and mktemp write scratch to $TMPDIR. On the CI runners that points at
+  # a tiny volume even though the workspace has ~90 GB free, which is why the DMG
+  # build kept failing with "No space left on device" while `df /` looked fine.
+  # Pin TMPDIR into the workspace so both the staging copy and hdiutil's scratch
+  # land on the roomy volume.
+  export TMPDIR="$PWD/.dmg-tmp"
+  rm -rf "$TMPDIR"
+  mkdir -p "$TMPDIR"
+  df -h / . "$TMPDIR" || true
 fi
 
 # --- 4. build the DMG ------------------------------------------------------

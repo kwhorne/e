@@ -439,6 +439,10 @@ pub struct AppState {
     /// The SQL console's editor handle + window origin, for schema completion.
     pub db_console_editor: RwSignal<Option<Editor>>,
     pub db_console_win: RwSignal<Point>,
+    /// Query-history panel: open state, current (searched) entries, search text.
+    pub db_history_open: RwSignal<bool>,
+    pub db_history: RwSignal<Vec<e_db::history::HistoryEntry>>,
+    pub db_history_query: RwSignal<String>,
     /// The table being browsed (None in free-query mode).
     pub db_result_table: RwSignal<Option<String>>,
     /// Results subview: `data` or `structure`.
@@ -958,6 +962,9 @@ impl AppState {
             db_console_height: RwSignal::new(120.0),
             db_console_editor: RwSignal::new(None),
             db_console_win: RwSignal::new(Point::ZERO),
+            db_history_open: RwSignal::new(false),
+            db_history: RwSignal::new(Vec::new()),
+            db_history_query: RwSignal::new(String::new()),
             db_result_table: RwSignal::new(None),
             db_subview: RwSignal::new("data".into()),
             db_columns: RwSignal::new(Vec::new()),

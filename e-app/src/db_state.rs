@@ -102,6 +102,44 @@ impl AppState {
         self.set_console_sql(sql);
     }
 
+    /// Open the query-history panel and load the most recent entries.
+    pub fn db_open_history(&self) {
+        self.db_history_query.set(String::new());
+        self.db_reload_history();
+        self.db_history_open.set(true);
+    }
+
+    /// (Re)load history entries for the current project, honouring the search box.
+    pub fn db_reload_history(&self) {
+        let Some(path) = crate::config::history_db_path() else {
+            return;
+        };
+        let project = self.root.get_untracked().to_string_lossy().into_owned();
+        let needle = self.db_history_query.get_untracked();
+        let entries = if needle.trim().is_empty() {
+            e_db::history::recent(&path, &project, 200)
+        } else {
+            e_db::history::search(&path, &project, needle.trim(), 200)
+        }
+        .unwrap_or_default();
+        self.db_history.set(entries);
+    }
+
+    /// Load a history entry's SQL back into the console and close the panel.
+    pub fn db_reopen_history(&self, sql: String) {
+        self.set_console_sql(sql);
+        self.db_history_open.set(false);
+    }
+
+    /// Clear all query history for the current project.
+    pub fn db_clear_history(&self) {
+        if let Some(path) = crate::config::history_db_path() {
+            let project = self.root.get_untracked().to_string_lossy().into_owned();
+            let _ = e_db::history::clear(&path, &project);
+        }
+        self.db_history.set(Vec::new());
+    }
+
     /// Set the SQL console text, keeping the `db_query_text` signal and the
     /// editor's document in sync. Programmatic callers (browse queries,
     /// run-under-cursor, saved/history queries) go through here so the editor
@@ -585,12 +623,41 @@ impl AppState {
         }
         self.db_result_loading.set(true);
         self.db_result_error.set(None);
+        // Metadata for the query-history log (written off the UI thread).
+        let project = self.root.get_untracked().to_string_lossy().into_owned();
+        let conn_label = entry.config.display_name();
+        let history_path = crate::config::history_db_path();
+        let sql_for_hist = sql.clone();
         let send = create_ext_action(self.cx, {
             let state = *self;
             move |res: Result<e_db::QueryResult, String>| state.db_apply_result(res)
         });
         std::thread::spawn(move || {
-            send(e_db::query(&conn, &sql, e_db::MAX_ROWS));
+            let res = e_db::query(&conn, &sql, e_db::MAX_ROWS);
+            if let Some(hp) = history_path {
+                let (rows, dur, ok, err) = match &res {
+                    Ok(r) => (
+                        r.rows_affected
+                            .map(|n| n as i64)
+                            .or(Some(r.rows.len() as i64)),
+                        r.elapsed_ms as i64,
+                        true,
+                        None,
+                    ),
+                    Err(e) => (None, 0, false, Some(e.clone())),
+                };
+                let _ = e_db::history::record(
+                    &hp,
+                    &project,
+                    &conn_label,
+                    &sql_for_hist,
+                    rows,
+                    dur,
+                    ok,
+                    err.as_deref(),
+                );
+            }
+            send(res);
         });
     }
 

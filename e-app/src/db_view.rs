@@ -2,7 +2,9 @@
 //! overlay. Inspired by the Conductor database panel.
 
 use floem::peniko::Color;
-use floem::reactive::{create_rw_signal, RwSignal, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{
+    create_effect, create_rw_signal, RwSignal, SignalGet, SignalUpdate, SignalWith,
+};
 use floem::views::{
     container, dyn_container, dyn_stack, empty, label, scroll, stack, text_input, Decorators,
 };
@@ -675,6 +677,22 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_run_query());
+    let history_btn = label(|| "○ History".to_string())
+        .style(|s| {
+            s.padding_horiz(12.0)
+                .height(28.0)
+                .items_center()
+                .justify_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_open_history());
+    let run_col = stack((run, history_btn)).style(|s| s.flex_col().gap(6.0).flex_shrink(0.0));
     let sql_wrap = floem::views::container(sql).style(move |s| {
         s.flex_grow(1.0)
             .min_width(0.0)
@@ -685,7 +703,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             .border_radius(5.0)
             .background(theme::bg())
     });
-    let query_row = stack((sql_wrap, run)).style(|s| {
+    let query_row = stack((sql_wrap, run_col)).style(|s| {
         s.flex_row()
             .items_start()
             .gap(8.0)
@@ -1040,6 +1058,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         db_value_viewer(state),
         db_edit_popup(state),
         db_insert_popup(state),
+        db_history_panel(state),
     ))
     .style(move |s| {
         let s = s
@@ -1529,6 +1548,175 @@ fn db_value_viewer(state: AppState) -> impl IntoView {
             .border_color(theme::border())
             .background(theme::bg_panel());
         if state.db_selected_cell.get().is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
+/// A compact "N min ago" for an epoch-ms timestamp.
+fn rel_ago(ts_ms: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(ts_ms);
+    let secs = ((now - ts_ms) / 1000).max(0);
+    if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86_400)
+    }
+}
+
+/// The query-history panel: a searchable list of past runs; click one to load
+/// it back into the console.
+fn db_history_panel(state: AppState) -> impl IntoView {
+    // Reload the list whenever the search text changes (while open).
+    create_effect(move |_| {
+        let _ = state.db_history_query.get();
+        if state.db_history_open.get_untracked() {
+            state.db_reload_history();
+        }
+    });
+
+    let search = text_input(state.db_history_query)
+        .placeholder("Search history…")
+        .style(|s| {
+            theme::input_colors(s)
+                .flex_grow(1.0)
+                .height(28.0)
+                .padding_horiz(8.0)
+        });
+    let clear = label(|| "Clear".to_string())
+        .style(|s| {
+            s.padding_horiz(10.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_clear_history());
+    let close = label(|| "✕".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_history_open.set(false));
+    let header = stack((
+        label(|| "Query History".to_string())
+            .style(|s| s.font_size(13.0).font_bold().color(theme::fg())),
+        search,
+        clear,
+        close,
+    ))
+    .style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .padding(10.0)
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+
+    let rows = dyn_stack(
+        move || {
+            state
+                .db_history
+                .get()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, e)| {
+            let sql = e.sql.clone();
+            let sql_for_click = sql.clone();
+            let meta = {
+                let count = match e.rows {
+                    Some(n) if e.ok => format!("{n} rows"),
+                    _ => String::new(),
+                };
+                let status = if e.ok { count } else { "error".to_string() };
+                format!(
+                    "{} · {} · {}ms · {}",
+                    e.connection,
+                    status,
+                    e.duration_ms,
+                    rel_ago(e.ts)
+                )
+            };
+            let ok = e.ok;
+            stack((
+                label(move || sanitize_cell(&sql)).style(move |s| {
+                    s.width_full()
+                        .font_family("monospace".to_string())
+                        .font_size(12.0)
+                        .text_ellipsis()
+                        .color(if ok {
+                            theme::fg()
+                        } else {
+                            Color::from_rgb8(0xe0, 0x6c, 0x75)
+                        })
+                }),
+                label(move || meta.clone())
+                    .style(|s| s.font_size(10.5).color(theme::fg_dim()).margin_top(2.0)),
+            ))
+            .style(|s| {
+                s.flex_col()
+                    .width_full()
+                    .padding_horiz(10.0)
+                    .padding_vert(6.0)
+                    .border_bottom(1.0)
+                    .border_color(theme::border())
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.background(theme::bg_hover()))
+            })
+            .on_click_stop(move |_| state.db_reopen_history(sql_for_click.clone()))
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+    let empty_hint = label(|| "No queries yet.".to_string()).style(move |s| {
+        let s = s.padding(16.0).font_size(12.0).color(theme::fg_dim());
+        if state.db_history.with(|h| h.is_empty()) {
+            s
+        } else {
+            s.hide()
+        }
+    });
+    let list = scroll(stack((rows, empty_hint)).style(|s| s.flex_col().width_full()))
+        .style(|s| s.flex_grow(1.0).width_full());
+
+    let card = stack((header, list)).style(|s| {
+        s.flex_col()
+            .width(640.0)
+            .height(460.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg())
+    });
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 120));
+        if state.db_history_open.get() {
             s
         } else {
             s.hide()

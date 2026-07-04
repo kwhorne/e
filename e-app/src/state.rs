@@ -556,6 +556,8 @@ pub struct AppState {
     pub db_edit: RwSignal<Option<(usize, usize, String)>>,
     pub db_edit_value: RwSignal<String>,
     pub db_edit_null: RwSignal<bool>,
+    /// The cell (row, col) selected in the data grid, shown in the value viewer.
+    pub db_selected_cell: RwSignal<Option<(usize, usize)>>,
     /// "Insert row" dialog: whether it's open, and one field per column.
     pub db_insert_open: RwSignal<bool>,
     pub db_insert_fields: RwSignal<Vec<InsertField>>,
@@ -1014,6 +1016,7 @@ impl AppState {
             db_edit: RwSignal::new(None),
             db_edit_value: RwSignal::new(String::new()),
             db_edit_null: RwSignal::new(false),
+            db_selected_cell: RwSignal::new(None),
             db_insert_open: RwSignal::new(false),
             db_insert_fields: RwSignal::new(Vec::new()),
             db_queries: RwSignal::new(Vec::new()),

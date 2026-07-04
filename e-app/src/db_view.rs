@@ -1007,6 +1007,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         toolbar,
         status,
         grid,
+        db_value_viewer(state),
         db_edit_popup(state),
         db_insert_popup(state),
     ))
@@ -1414,6 +1415,97 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
     })
 }
 
+/// Pretty-print a cell value for the viewer: JSON objects/arrays are
+/// re-indented; everything else is shown verbatim.
+pub(crate) fn pretty_value(s: &str) -> String {
+    let t = s.trim_start();
+    if t.starts_with('{') || t.starts_with('[') {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+            if let Ok(p) = serde_json::to_string_pretty(&v) {
+                return p;
+            }
+        }
+    }
+    s.to_string()
+}
+
+/// A read-only inspector for the selected cell (full value, pretty-printed JSON)
+/// docked at the bottom of the result panel — like PhpStorm's value viewer.
+fn db_value_viewer(state: AppState) -> impl IntoView {
+    let head = label(move || match state.db_selected_cell.get() {
+        Some((r, c)) => {
+            let col = state.db_result.with(|res| {
+                res.as_ref()
+                    .and_then(|res| res.columns.get(c).cloned())
+                    .unwrap_or_default()
+            });
+            format!("{col}  ·  row {}", r + 1)
+        }
+        None => String::new(),
+    })
+    .style(|s| {
+        s.font_size(11.0)
+            .font_bold()
+            .color(theme::fg_dim())
+            .padding_horiz(10.0)
+            .padding_vert(5.0)
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+
+    let body = label(move || match state.db_selected_cell.get() {
+        Some((r, c)) => state.db_result.with(|res| {
+            res.as_ref()
+                .and_then(|res| res.rows.get(r).and_then(|row| row.get(c)))
+                .map(|cell| match cell {
+                    Some(v) => pretty_value(v),
+                    None => "NULL".to_string(),
+                })
+                .unwrap_or_default()
+        }),
+        None => String::new(),
+    })
+    .style(|s| {
+        s.font_family("monospace".to_string())
+            .font_size(12.0)
+            .color(theme::fg())
+            .padding(10.0)
+    });
+    let body = scroll(body).style(|s| s.flex_grow(1.0).width_full());
+
+    let close = label(|| "✕".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_selected_cell.set(None));
+    let head_row = stack((head.style(|s| s.flex_grow(1.0)), close)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .width_full()
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+
+    stack((head_row, body)).style(move |s| {
+        let s = s
+            .flex_col()
+            .width_full()
+            .height(160.0)
+            .flex_shrink(0.0)
+            .border_top(1.0)
+            .border_color(theme::border())
+            .background(theme::bg_panel());
+        if state.db_selected_cell.get().is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 fn result_grid(state: AppState) -> impl IntoView {
     // Header row.
     let header = dyn_stack(
@@ -1489,6 +1581,7 @@ fn result_grid(state: AppState) -> impl IntoView {
                     };
                     label(move || text.clone())
                         .style(move |s| {
+                            let selected = state.db_selected_cell.get() == Some((ri, ci));
                             let s = s
                                 .width(180.0)
                                 .flex_shrink(0.0)
@@ -1504,12 +1597,19 @@ fn result_grid(state: AppState) -> impl IntoView {
                             } else {
                                 s.color(theme::fg())
                             };
+                            let s = if selected {
+                                s.background(theme::bg_active())
+                            } else {
+                                s
+                            };
                             if state.db_editable() {
                                 s.cursor(floem::style::CursorStyle::Text)
                             } else {
                                 s
                             }
                         })
+                        // Single click selects (→ value viewer); double click edits.
+                        .on_click_stop(move |_| state.db_selected_cell.set(Some((ri, ci))))
                         .on_double_click_stop(move |_| state.db_begin_edit(ri, ci))
                 },
             )
@@ -1686,4 +1786,23 @@ fn structure_grid(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col());
 
     stack((header, rows, idx_title, idx_rows)).style(|s| s.flex_col().width(520.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pretty_value;
+
+    #[test]
+    fn pretty_value_formats_json_objects_and_arrays() {
+        assert_eq!(pretty_value("{\"a\":1}"), "{\n  \"a\": 1\n}");
+        assert_eq!(pretty_value("[1,2]"), "[\n  1,\n  2\n]");
+    }
+
+    #[test]
+    fn pretty_value_leaves_scalars_and_invalid_json_untouched() {
+        assert_eq!(pretty_value("hello"), "hello");
+        assert_eq!(pretty_value("123"), "123");
+        assert_eq!(pretty_value("{not json"), "{not json");
+        assert_eq!(pretty_value(""), "");
+    }
 }

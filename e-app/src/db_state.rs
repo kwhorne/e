@@ -696,6 +696,7 @@ impl AppState {
 
     fn db_apply_result(&self, res: Result<e_db::QueryResult, String>) {
         self.db_result_loading.set(false);
+        self.db_selected_cell.set(None);
         match res {
             Ok(r) => {
                 self.db_result_error.set(None);

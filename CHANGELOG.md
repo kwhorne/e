@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Cell value viewer.** Single-click a cell in the data grid to dock a read-only
+  inspector at the bottom of the panel showing the full value — JSON objects and
+  arrays are pretty-printed. Double-click still edits. (PhpStorm-style.)
+
+### Fixed
+
+- **Laravel settings tab overflowed the dialog.** The content pane sized itself to
+  its widest row, pushing toggles and the App URL field off the right edge with a
+  horizontal scrollbar; the pane is now pinned to the dialog width.
+
 ## [0.7.5] - 2026-07-03
 
 ### Fixed

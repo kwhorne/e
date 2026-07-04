@@ -603,7 +603,46 @@ impl AppState {
     }
 
     /// Run the SQL currently in the query editor against the bound connection.
+    /// Run the whole console (all statements).
     pub fn db_run_query(&self) {
+        self.run_console_sql(self.db_query_text.get_untracked());
+    }
+
+    /// Run just the selected text, or — with no selection — the statement under
+    /// the cursor. Falls back to the whole console if neither resolves.
+    pub fn run_console_under_cursor(&self) {
+        let text = self.db_query_text.get_untracked();
+        let sql = self
+            .db_console_editor
+            .get_untracked()
+            .and_then(|editor| {
+                let cursor = editor.cursor.get_untracked();
+                // Selection wins.
+                if let floem::views::editor::core::cursor::CursorMode::Insert(sel) =
+                    cursor.mode.clone()
+                {
+                    if let Some(r) = sel.regions().first() {
+                        if r.max() > r.min() {
+                            return text.get(r.min()..r.max()).map(|s| s.to_string());
+                        }
+                    }
+                }
+                // Otherwise the statement containing the caret.
+                let off = cursor.offset();
+                let ranges = e_db::split_statement_ranges(&text);
+                ranges
+                    .iter()
+                    .find(|(s, e)| *s <= off && off <= *e)
+                    .or_else(|| ranges.last())
+                    .map(|(s, e)| text[*s..*e].to_string())
+            })
+            .unwrap_or(text);
+        self.run_console_sql(sql);
+    }
+
+    /// Run `sql` (which may contain multiple statements) against the active
+    /// connection, one result tab per statement.
+    fn run_console_sql(&self, sql: String) {
         let Some(key) = self.db_result_key.get_untracked() else {
             return;
         };
@@ -617,7 +656,6 @@ impl AppState {
             self.db_result_error.set(Some("Not connected".into()));
             return;
         };
-        let sql = self.db_query_text.get_untracked();
         // Split into individual statements so each gets its own result tab.
         let statements = e_db::split_statements(&sql);
         if statements.is_empty() {
@@ -625,6 +663,10 @@ impl AppState {
         }
         self.db_result_loading.set(true);
         self.db_result_error.set(None);
+        // Bump the run generation so any prior in-flight query (or a cancel) is
+        // ignored when it returns.
+        self.db_run_gen.update(|g| *g += 1);
+        let gen = self.db_run_gen.get_untracked();
         // Metadata for the query-history log (written off the UI thread).
         let project = self.root.get_untracked().to_string_lossy().into_owned();
         let conn_label = entry.config.display_name();
@@ -633,6 +675,10 @@ impl AppState {
         let send = create_ext_action(self.cx, {
             let state = *self;
             move |results: Vec<Result<e_db::QueryResult, String>>| {
+                // Discard if cancelled or superseded by a newer run.
+                if state.db_run_gen.get_untracked() != gen {
+                    return;
+                }
                 state.db_build_console_tabs(key.clone(), results);
             }
         });
@@ -698,6 +744,15 @@ impl AppState {
         self.db_result_table.set(None);
         self.db_columns.set(Vec::new());
         self.db_activate_tab(first_new);
+    }
+
+    /// Cancel the in-flight query: free the UI and discard the pending result
+    /// when it eventually returns. (The query itself runs to completion in the
+    /// background — server-side KILL is a future refinement.)
+    pub fn db_cancel_query(&self) {
+        self.db_run_gen.update(|g| *g += 1);
+        self.db_result_loading.set(false);
+        Self::notify("Query cancelled");
     }
 
     /// Show the result stored in tab `i` in the grid.

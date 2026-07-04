@@ -458,6 +458,9 @@ pub struct AppState {
     /// SQL console result tabs (one per statement of the last run + pinned ones).
     pub db_result_tabs: RwSignal<Vec<ResultTab>>,
     pub db_active_tab: RwSignal<usize>,
+    /// Run generation: bumped on each run and on cancel, so a cancelled/superseded
+    /// query's result is discarded when it finally returns.
+    pub db_run_gen: RwSignal<u64>,
     /// The table being browsed (None in free-query mode).
     pub db_result_table: RwSignal<Option<String>>,
     /// Results subview: `data` or `structure`.
@@ -982,6 +985,7 @@ impl AppState {
             db_history_query: RwSignal::new(String::new()),
             db_result_tabs: RwSignal::new(Vec::new()),
             db_active_tab: RwSignal::new(0),
+            db_run_gen: RwSignal::new(0),
             db_result_table: RwSignal::new(None),
             db_subview: RwSignal::new("data".into()),
             db_columns: RwSignal::new(Vec::new()),

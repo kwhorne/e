@@ -804,7 +804,25 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 ));
             }
         });
-    let status = stack((status, explain)).style(|s| s.flex_row().items_center().gap(8.0));
+    // Cancel button, shown only while a query is running.
+    let cancel = label(|| "✕ Cancel".to_string())
+        .style(move |s| {
+            let s = s
+                .font_size(11.0)
+                .padding_horiz(8.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()));
+            if state.db_result_loading.get() {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.db_cancel_query());
+    let status = stack((status, explain, cancel)).style(|s| s.flex_row().items_center().gap(8.0));
 
     // Toolbar: Data/Structure (table mode), pagination, export.
     let chip = move |id: &'static str, name: &'static str| {

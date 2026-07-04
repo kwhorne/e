@@ -64,10 +64,15 @@ pub fn sql_console(state: AppState) -> impl IntoView {
             && comp.buffer_id.get_untracked() == Some(crate::completion_state::CONSOLE_COMP_ID);
         if let KeyInput::Keyboard(key, _) = &kp.key {
             use floem::keyboard::{Key, NamedKey};
-            // ⌘/Ctrl+Enter runs the console (intercepted before app shortcuts so
-            // it doesn't hit the PHP "run SQL under cursor" binding).
+            // ⌘/Ctrl+Enter runs the selection or the statement under the cursor;
+            // add Shift to run the whole console. Intercepted before app shortcuts
+            // so it doesn't hit the PHP "run SQL under cursor" binding.
             if matches!(key, Key::Named(NamedKey::Enter)) && (mods.meta() || mods.control()) {
-                state.db_run_query();
+                if mods.shift() {
+                    state.db_run_query();
+                } else {
+                    state.run_console_under_cursor();
+                }
                 return CommandExecuted::Yes;
             }
             // Dismiss the completion popup on Escape.

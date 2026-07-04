@@ -1200,6 +1200,15 @@ pub fn browse_sql(
 /// doubled-quote (`''`) and backslash escapes inside strings. Blank statements
 /// are dropped.
 pub fn split_statements(sql: &str) -> Vec<String> {
+    split_statement_ranges(sql)
+        .into_iter()
+        .map(|(s, e)| sql[s..e].to_string())
+        .collect()
+}
+
+/// Like [`split_statements`], but returns the byte range of each (trimmed,
+/// non-empty) statement in `sql` — used to run the statement under the cursor.
+pub fn split_statement_ranges(sql: &str) -> Vec<(usize, usize)> {
     #[derive(PartialEq)]
     enum St {
         Normal,
@@ -1210,86 +1219,62 @@ pub fn split_statements(sql: &str) -> Vec<String> {
         Block,
     }
     let mut out = Vec::new();
-    let mut cur = String::new();
     let mut st = St::Normal;
-    let chars: Vec<char> = sql.chars().collect();
+    let idx: Vec<(usize, char)> = sql.char_indices().collect();
+    // Byte where the current segment starts (after the last top-level `;`).
+    let mut seg_start = 0usize;
+    let push = |out: &mut Vec<(usize, usize)>, from: usize, to: usize| {
+        let seg = &sql[from..to];
+        let trimmed = seg.trim();
+        if !trimmed.is_empty() {
+            let lead = seg.len() - seg.trim_start().len();
+            let start = from + lead;
+            out.push((start, start + trimmed.len()));
+        }
+    };
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        let next = chars.get(i + 1).copied();
+    while i < idx.len() {
+        let (b, c) = idx[i];
+        let next = idx.get(i + 1).map(|x| x.1);
         match st {
             St::Normal => match c {
                 ';' => {
-                    let stmt = cur.trim();
-                    if !stmt.is_empty() {
-                        out.push(stmt.to_string());
-                    }
-                    cur.clear();
+                    push(&mut out, seg_start, b);
+                    seg_start = b + 1; // ';' is one byte
                 }
-                '\'' => {
-                    st = St::Single;
-                    cur.push(c);
-                }
-                '"' => {
-                    st = St::Double;
-                    cur.push(c);
-                }
-                '`' => {
-                    st = St::Backtick;
-                    cur.push(c);
-                }
-                '-' if next == Some('-') => {
-                    st = St::Line;
-                    cur.push(c);
-                }
-                '#' => {
-                    st = St::Line;
-                    cur.push(c);
-                }
-                '/' if next == Some('*') => {
-                    st = St::Block;
-                    cur.push(c);
-                }
-                _ => cur.push(c),
+                '\'' => st = St::Single,
+                '"' => st = St::Double,
+                '`' => st = St::Backtick,
+                '-' if next == Some('-') => st = St::Line,
+                '#' => st = St::Line,
+                '/' if next == Some('*') => st = St::Block,
+                _ => {}
             },
             St::Single | St::Double => {
                 let quote = if st == St::Single { '\'' } else { '"' };
                 if c == '\\' {
-                    cur.push(c);
-                    if let Some(n) = next {
-                        cur.push(n);
-                        i += 2;
-                        continue;
-                    }
+                    i += 2;
+                    continue;
                 } else if c == quote {
                     if next == Some(quote) {
-                        cur.push(c);
-                        cur.push(quote);
                         i += 2;
                         continue;
                     }
                     st = St::Normal;
-                    cur.push(c);
-                } else {
-                    cur.push(c);
                 }
             }
             St::Backtick => {
-                cur.push(c);
                 if c == '`' {
                     st = St::Normal;
                 }
             }
             St::Line => {
-                cur.push(c);
                 if c == '\n' {
                     st = St::Normal;
                 }
             }
             St::Block => {
-                cur.push(c);
                 if c == '*' && next == Some('/') {
-                    cur.push('/');
                     i += 2;
                     st = St::Normal;
                     continue;
@@ -1298,10 +1283,7 @@ pub fn split_statements(sql: &str) -> Vec<String> {
         }
         i += 1;
     }
-    let stmt = cur.trim();
-    if !stmt.is_empty() {
-        out.push(stmt.to_string());
-    }
+    push(&mut out, seg_start, sql.len());
     out
 }
 
@@ -1722,6 +1704,18 @@ mod tests {
         // single statement, no trailing semicolon
         assert_eq!(split_statements("SELECT 1"), vec!["SELECT 1"]);
         assert!(split_statements("  ;; ").is_empty());
+    }
+
+    #[test]
+    fn split_statement_ranges_map_back_to_text() {
+        let sql = "SELECT 1;  SELECT 2 ; SELECT 'a;b'";
+        let ranges = split_statement_ranges(sql);
+        let slices: Vec<&str> = ranges.iter().map(|(s, e)| &sql[*s..*e]).collect();
+        assert_eq!(slices, vec!["SELECT 1", "SELECT 2", "SELECT 'a;b'"]);
+        // A cursor inside the second statement resolves to its range.
+        let cursor = sql.find("SELECT 2").unwrap() + 3;
+        let hit = ranges.iter().find(|(s, e)| *s <= cursor && cursor <= *e);
+        assert_eq!(hit.map(|(s, e)| &sql[*s..*e]), Some("SELECT 2"));
     }
 
     #[test]

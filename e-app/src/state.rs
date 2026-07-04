@@ -508,6 +508,8 @@ pub struct AppState {
     pub db_run_gen: RwSignal<u64>,
     /// Total row count of the current browsed table (with filter), for paging.
     pub db_total_rows: RwSignal<Option<i64>>,
+    /// EXPLAIN findings (full scans / missing indexes) for the current plan.
+    pub db_explain_issues: RwSignal<Vec<String>>,
     /// A destructive / non-local / submit action awaiting confirmation, if any.
     pub db_confirm: RwSignal<Option<DbConfirm>>,
     /// A `:param` prompt awaiting values, and the last-entered values to prefill.
@@ -1043,6 +1045,7 @@ impl AppState {
             db_active_tab: RwSignal::new(0),
             db_run_gen: RwSignal::new(0),
             db_total_rows: RwSignal::new(None),
+            db_explain_issues: RwSignal::new(Vec::new()),
             db_confirm: RwSignal::new(None),
             db_params: RwSignal::new(None),
             db_param_last: RwSignal::new(HashMap::new()),

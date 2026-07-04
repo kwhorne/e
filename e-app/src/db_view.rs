@@ -1270,6 +1270,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         query_row,
         toolbar,
         result_tabs_strip(state),
+        explain_banner(state),
         status,
         grid,
         pending_bar(state),
@@ -2301,6 +2302,44 @@ fn pending_bar(state: AppState) -> impl IntoView {
 
 /// The console result-tab strip: one tab per statement of the last run, plus
 /// pinned tabs. Click to switch, pin to keep, ✕ to close. Hidden when empty.
+/// A banner listing EXPLAIN findings (full scans / missing indexes) for the
+/// current plan, with a hint to ask the agent for an index migration (DB-602).
+fn explain_banner(state: AppState) -> impl IntoView {
+    let issues = label(move || {
+        let list = state.db_explain_issues.get();
+        if list.is_empty() {
+            String::new()
+        } else {
+            format!("⚠ {}", list.join("  ·  "))
+        }
+    })
+    .style(|s| {
+        s.flex_grow(1.0)
+            .font_size(11.0)
+            .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+            .text_ellipsis()
+    });
+    let hint = label(|| "Suggest Index → ask the agent".to_string())
+        .style(|s| s.font_size(10.5).color(theme::fg_dim()).flex_shrink(0.0));
+    stack((issues, hint)).style(move |s| {
+        let s = s
+            .flex_row()
+            .items_center()
+            .gap(10.0)
+            .width_full()
+            .padding_horiz(12.0)
+            .padding_vert(5.0)
+            .border_bottom(1.0)
+            .border_color(theme::border())
+            .background(Color::from_rgba8(0xe0, 0x6c, 0x75, 24));
+        if state.db_explain_issues.with(|i| i.is_empty()) {
+            s.hide()
+        } else {
+            s
+        }
+    })
+}
+
 fn result_tabs_strip(state: AppState) -> impl IntoView {
     let tabs = dyn_stack(
         move || {

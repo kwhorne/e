@@ -1122,16 +1122,13 @@ impl AppState {
         self.db_result_open.set(true);
         let state = *self;
         let send = create_ext_action(self.cx, move |res: Result<e_db::QueryResult, String>| {
-            if let Ok(plan) = &res {
-                let issues = e_db::analyze_explain(&engine, plan);
-                if !issues.is_empty() {
-                    Self::notify(&format!(
-                        "EXPLAIN: {} — run “Suggest Index” to ask the agent for a migration",
-                        issues.join("; ")
-                    ));
-                }
-            }
+            let issues = match &res {
+                Ok(plan) => e_db::analyze_explain(&engine, plan),
+                Err(_) => Vec::new(),
+            };
             state.db_apply_result(res);
+            // Show the findings as a persistent banner (db_apply_result cleared it).
+            state.db_explain_issues.set(issues);
         });
         std::thread::spawn(move || send(e_db::explain(&conn, &sql)));
     }
@@ -1188,6 +1185,7 @@ impl AppState {
         self.db_selected_cell.set(None);
         // Browsing a table is a single result; drop any console result tabs.
         self.db_result_tabs.set(Vec::new());
+        self.db_explain_issues.set(Vec::new());
         // Pending edits are keyed by row/col of the *current* result, which just
         // changed — clear them so we never write against stale indices.
         self.db_pending_edits.update(|m| m.clear());

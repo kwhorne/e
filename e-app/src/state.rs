@@ -525,6 +525,10 @@ pub struct AppState {
     pub db_explain_issues: RwSignal<Vec<String>>,
     /// The "search all tables" input.
     pub db_search_query: RwSignal<String>,
+    /// Foreign-key relationships of the active DB (for the schema-relationships
+    /// view), and whether that panel is open.
+    pub db_erd: RwSignal<Vec<e_db::ForeignKey>>,
+    pub db_erd_open: RwSignal<bool>,
     /// Session undo-log of executed writes (newest last), and the panel's state.
     pub db_write_log: RwSignal<Vec<WriteLogEntry>>,
     pub db_write_log_open: RwSignal<bool>,
@@ -1067,6 +1071,8 @@ impl AppState {
             db_total_rows: RwSignal::new(None),
             db_explain_issues: RwSignal::new(Vec::new()),
             db_search_query: RwSignal::new(String::new()),
+            db_erd: RwSignal::new(Vec::new()),
+            db_erd_open: RwSignal::new(false),
             db_write_log: RwSignal::new(Vec::new()),
             db_write_log_open: RwSignal::new(false),
             db_pending_log: RwSignal::new(Vec::new()),

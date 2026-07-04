@@ -757,6 +757,28 @@ impl AppState {
         });
     }
 
+    /// Load the active database's foreign-key relationships and open the schema-
+    /// relationships (ERD) panel (DB-207). Works for tables without models.
+    pub fn db_show_erd(&self) {
+        let Some(entry) = self.db_conns.with_untracked(|cs| {
+            cs.iter()
+                .find(|e| e.conn.get_untracked().is_some())
+                .cloned()
+        }) else {
+            Self::notify("Relationships: connect a database first");
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        self.db_erd_open.set(true);
+        let sig = self.db_erd;
+        let send = create_ext_action(self.cx, move |fks: Vec<e_db::ForeignKey>| sig.set(fks));
+        std::thread::spawn(move || {
+            send(e_db::foreign_keys(&conn).unwrap_or_default());
+        });
+    }
+
     /// Search every table's text columns for a value, showing one result tab per
     /// table that matches (DB-805). Cancellable via the run generation.
     pub fn db_search_all(&self) {

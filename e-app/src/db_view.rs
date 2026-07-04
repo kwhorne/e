@@ -669,7 +669,19 @@ pub fn database_panel(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.db_adding.update(|a| *a = !*a));
-    let header = stack((title, add)).style(|s| {
+    let rel = label(|| "⇄".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .padding_vert(1.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(6.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_show_erd());
+    let header = stack((title, rel, add)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(6.0)
@@ -1331,6 +1343,93 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
 }
 
 /// The consent dialog shown when the AI agent proposes a query to run.
+/// The schema-relationships (ERD) panel: every foreign key in the database as
+/// `table.column → ref_table.ref_column`, grouped by source table (DB-207).
+pub fn db_erd_panel(state: AppState) -> impl IntoView {
+    let close = label(|| "✕".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_erd_open.set(false));
+    let header = stack((
+        label(|| "Schema relationships".to_string()).style(|s| {
+            s.flex_grow(1.0)
+                .font_size(13.0)
+                .font_bold()
+                .color(theme::fg())
+        }),
+        close,
+    ))
+    .style(|s| {
+        s.flex_row()
+            .items_center()
+            .width_full()
+            .padding(10.0)
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+    let rows = dyn_stack(
+        move || {
+            let mut fks = state.db_erd.get();
+            fks.sort_by(|a, b| a.table.cmp(&b.table).then(a.column.cmp(&b.column)));
+            fks.into_iter().enumerate().collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, fk)| {
+            let text = format!(
+                "{}.{}  →  {}.{}",
+                fk.table, fk.column, fk.ref_table, fk.ref_column
+            );
+            label(move || text.clone()).style(|s| {
+                s.font_family("monospace".to_string())
+                    .font_size(12.0)
+                    .color(theme::fg())
+                    .width_full()
+                    .padding_horiz(12.0)
+                    .padding_vert(4.0)
+                    .text_ellipsis()
+            })
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+    let empty_hint = label(|| "No foreign keys in this database.".to_string()).style(move |s| {
+        let s = s.padding(16.0).font_size(12.0).color(theme::fg_dim());
+        if state.db_erd.with(|f| f.is_empty()) {
+            s
+        } else {
+            s.hide()
+        }
+    });
+    let list = scroll(stack((rows, empty_hint)).style(|s| s.flex_col().width_full()))
+        .style(|s| s.flex_grow(1.0).width_full());
+    let card = stack((header, list)).style(|s| {
+        s.flex_col()
+            .width(620.0)
+            .height(460.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg())
+    });
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 120));
+        if state.db_erd_open.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 /// Prompt for `:param` values before running a console query (DB-408).
 pub fn db_params_dialog(state: AppState) -> impl IntoView {
     let fields = dyn_stack(

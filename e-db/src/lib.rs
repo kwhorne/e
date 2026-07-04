@@ -1047,6 +1047,58 @@ fn group_indexes(rows: impl Iterator<Item = (String, bool, String)>) -> Vec<Inde
     order.into_iter().filter_map(|n| map.remove(&n)).collect()
 }
 
+/// Run several write statements in a single transaction (all-or-nothing),
+/// returning the total rows affected. On any error the transaction is rolled
+/// back. ClickHouse has no transactions, so statements run sequentially
+/// (best-effort) — a mid-way failure leaves earlier statements applied.
+pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, String> {
+    if statements.is_empty() {
+        return Ok(0);
+    }
+    match &conn.backend {
+        Backend::Mysql(pool) => {
+            use mysql::prelude::Queryable;
+            let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            let mut tx = c
+                .start_transaction(mysql::TxOpts::default())
+                .map_err(|e| e.to_string())?;
+            let mut affected = 0u64;
+            for s in statements {
+                tx.query_drop(s.as_str()).map_err(|e| e.to_string())?;
+                affected += tx.affected_rows();
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(affected)
+        }
+        Backend::Sqlite(path) => {
+            let mut c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let tx = c.transaction().map_err(|e| e.to_string())?;
+            let mut affected = 0u64;
+            for s in statements {
+                affected += tx.execute(s.as_str(), []).map_err(|e| e.to_string())? as u64;
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(affected)
+        }
+        Backend::Postgres(m) => {
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
+            let mut tx = client.transaction().map_err(|e| e.to_string())?;
+            let mut affected = 0u64;
+            for s in statements {
+                affected += tx.execute(s.as_str(), &[]).map_err(|e| e.to_string())?;
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(affected)
+        }
+        Backend::Clickhouse { .. } => {
+            for s in statements {
+                ch_query(&conn.backend, s, 0)?;
+            }
+            Ok(0)
+        }
+    }
+}
+
 /// Quote an identifier for the given engine.
 fn quote_ident(engine: &str, ident: &str) -> String {
     match engine {
@@ -1074,26 +1126,69 @@ pub fn update_cell(
     if pk.is_empty() {
         return Err("Table has no primary key — cannot edit safely".into());
     }
-    let set_expr = match set_val {
+    let sql = update_sql(engine, table, set_col, set_val, pk);
+    let r = query(conn, &sql, 0)?;
+    Ok(r.rows_affected.unwrap_or(0))
+}
+
+/// A scalar SQL literal: quoted+escaped string, or NULL.
+fn sql_literal(v: Option<&str>) -> String {
+    match v {
         Some(v) => format!("'{}'", esc(v)),
         None => "NULL".to_string(),
-    };
-    let conds: Vec<String> = pk
-        .iter()
+    }
+}
+
+/// `col = 'v'` / `col IS NULL` predicates joined by AND, for a primary key.
+fn pk_conds(engine: &str, pk: &[(String, Option<String>)]) -> String {
+    pk.iter()
         .map(|(c, v)| match v {
             Some(v) => format!("{} = '{}'", quote_ident(engine, c), esc(v)),
             None => format!("{} IS NULL", quote_ident(engine, c)),
         })
-        .collect();
-    let sql = format!(
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+/// Build an `UPDATE … SET col = val WHERE pk…` statement (no execution).
+pub fn update_sql(
+    engine: &str,
+    table: &str,
+    set_col: &str,
+    set_val: Option<&str>,
+    pk: &[(String, Option<String>)],
+) -> String {
+    format!(
         "UPDATE {} SET {} = {} WHERE {}",
         quote_ident(engine, table),
         quote_ident(engine, set_col),
-        set_expr,
-        conds.join(" AND ")
-    );
-    let r = query(conn, &sql, 0)?;
-    Ok(r.rows_affected.unwrap_or(0))
+        sql_literal(set_val),
+        pk_conds(engine, pk)
+    )
+}
+
+/// Build a `DELETE FROM table WHERE pk…` statement (no execution).
+pub fn delete_sql(engine: &str, table: &str, pk: &[(String, Option<String>)]) -> String {
+    format!(
+        "DELETE FROM {} WHERE {}",
+        quote_ident(engine, table),
+        pk_conds(engine, pk)
+    )
+}
+
+/// Build an `INSERT INTO table (…) VALUES (…)` statement (no execution).
+pub fn insert_sql(engine: &str, table: &str, values: &[(String, Option<String>)]) -> String {
+    let cols: Vec<String> = values.iter().map(|(c, _)| quote_ident(engine, c)).collect();
+    let vals: Vec<String> = values
+        .iter()
+        .map(|(_, v)| sql_literal(v.as_deref()))
+        .collect();
+    format!(
+        "INSERT INTO {} ({}) VALUES ({})",
+        quote_ident(engine, table),
+        cols.join(", "),
+        vals.join(", ")
+    )
 }
 
 /// Insert a row. `values` maps column name to optional value (`None` = NULL).
@@ -1107,20 +1202,7 @@ pub fn insert_row(
     if values.is_empty() {
         return Err("No columns to insert".into());
     }
-    let cols: Vec<String> = values.iter().map(|(c, _)| quote_ident(engine, c)).collect();
-    let vals: Vec<String> = values
-        .iter()
-        .map(|(_, v)| match v {
-            Some(v) => format!("'{}'", esc(v)),
-            None => "NULL".to_string(),
-        })
-        .collect();
-    let sql = format!(
-        "INSERT INTO {} ({}) VALUES ({})",
-        quote_ident(engine, table),
-        cols.join(", "),
-        vals.join(", ")
-    );
+    let sql = insert_sql(engine, table, values);
     let r = query(conn, &sql, 0)?;
     Ok(r.rows_affected.unwrap_or(0))
 }
@@ -1136,18 +1218,7 @@ pub fn delete_row(
     if pk.is_empty() {
         return Err("Table has no primary key — cannot delete safely".into());
     }
-    let conds: Vec<String> = pk
-        .iter()
-        .map(|(c, v)| match v {
-            Some(v) => format!("{} = '{}'", quote_ident(engine, c), esc(v)),
-            None => format!("{} IS NULL", quote_ident(engine, c)),
-        })
-        .collect();
-    let sql = format!(
-        "DELETE FROM {} WHERE {}",
-        quote_ident(engine, table),
-        conds.join(" AND ")
-    );
+    let sql = delete_sql(engine, table, pk);
     let r = query(conn, &sql, 0)?;
     Ok(r.rows_affected.unwrap_or(0))
 }
@@ -2032,6 +2103,53 @@ mod tests {
 
         // delete guard: empty predicate is refused
         assert!(delete_row(&conn, "sqlite", "posts", &[]).is_err());
+        let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn sqlite_transaction_commit_and_rollback() {
+        let dir = std::env::temp_dir().join("e_db_tx_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("tx.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);")
+                .unwrap();
+        }
+        let cfg = DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let conn = connect(&cfg).unwrap();
+
+        // Commit: both rows land.
+        let n = execute_transaction(
+            &conn,
+            &[
+                "INSERT INTO t (id, v) VALUES (1, 'a')".into(),
+                "INSERT INTO t (id, v) VALUES (2, 'b')".into(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(table_data(&conn, "sqlite", "t", 100).unwrap().rows.len(), 2);
+
+        // Rollback: the second statement fails (duplicate PK), so neither applies.
+        let err = execute_transaction(
+            &conn,
+            &[
+                "INSERT INTO t (id, v) VALUES (3, 'c')".into(),
+                "INSERT INTO t (id, v) VALUES (1, 'dup')".into(),
+            ],
+        );
+        assert!(err.is_err());
+        assert_eq!(
+            table_data(&conn, "sqlite", "t", 100).unwrap().rows.len(),
+            2,
+            "failed transaction must not add rows"
+        );
         let _ = std::fs::remove_file(&dbfile);
     }
 

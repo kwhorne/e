@@ -666,16 +666,17 @@ impl AppState {
             self.execute_console_sql(sql);
         } else {
             self.db_confirm.set(Some(crate::state::DbConfirm {
-                sql,
-                flagged,
+                verb: "Run".into(),
+                statements: flagged,
                 env,
                 needs_ack: non_local,
                 ack: self.cx.create_rw_signal(false),
+                run: crate::state::ConfirmRun::Console(sql),
             }));
         }
     }
 
-    /// Confirm and run the pending destructive/non-local SQL.
+    /// Confirm and run the pending action (console SQL or a submit transaction).
     pub fn db_confirm_run(&self) {
         let Some(c) = self.db_confirm.get_untracked() else {
             return;
@@ -685,7 +686,10 @@ impl AppState {
             return;
         }
         self.db_confirm.set(None);
-        self.execute_console_sql(c.sql);
+        match c.run {
+            crate::state::ConfirmRun::Console(sql) => self.execute_console_sql(sql),
+            crate::state::ConfirmRun::Transaction(stmts) => self.execute_submit(stmts),
+        }
     }
 
     /// Dismiss the confirmation dialog without running.
@@ -970,6 +974,10 @@ impl AppState {
         self.db_selected_cell.set(None);
         // Browsing a table is a single result; drop any console result tabs.
         self.db_result_tabs.set(Vec::new());
+        // Pending edits are keyed by row/col of the *current* result, which just
+        // changed — clear them so we never write against stale indices.
+        self.db_pending_edits.update(|m| m.clear());
+        self.db_pending_deletes.update(|m| m.clear());
         match res {
             Ok(r) => {
                 self.db_result_error.set(None);
@@ -1078,7 +1086,7 @@ impl AppState {
         else {
             return;
         };
-        let Some(conn) = entry.conn.get_untracked() else {
+        let Some(_conn) = entry.conn.get_untracked() else {
             return;
         };
         // Write guard: refuse edits to a read-only (e.g. production) connection.
@@ -1093,50 +1101,61 @@ impl AppState {
         let Some(result) = self.db_result.get_untracked() else {
             return;
         };
-        // Build the primary-key conditions from the row's current values.
+        let _ = table;
+        // Primary key of this row (from its current values).
+        let Some(pk) = self.db_row_pk_full(row, &result) else {
+            Self::notify("Edit: table has no primary key — cannot edit safely");
+            self.db_edit.set(None);
+            return;
+        };
+        let is_null = self.db_edit_null.get_untracked();
+        let value = self.db_edit_value.get_untracked();
+        let new = if is_null { None } else { Some(value.clone()) };
+
+        // Stage the edit (transactional): reflect it in the grid and record it as
+        // pending; the write happens on Submit.
+        self.db_result.update(|r| {
+            if let Some(r) = r {
+                if let Some(cell) = r.rows.get_mut(row).and_then(|row| row.get_mut(col)) {
+                    *cell = new.clone();
+                }
+            }
+        });
+        self.db_pending_edits.update(|m| {
+            m.insert(
+                (row, col),
+                crate::state::PendingEdit {
+                    column: column.clone(),
+                    pk,
+                    new,
+                },
+            );
+        });
+        self.db_edit.set(None);
+    }
+
+    /// Primary-key `(name, value)` pairs for `row`, using the result's columns.
+    fn db_row_pk_full(
+        &self,
+        row: usize,
+        result: &e_db::QueryResult,
+    ) -> Option<Vec<(String, Option<String>)>> {
         let pk_names: Vec<String> = self.db_columns.with_untracked(|cols| {
             cols.iter()
                 .filter(|c| c.key == "PRI")
                 .map(|c| c.name.clone())
                 .collect()
         });
-        let mut pk: Vec<(String, Option<String>)> = Vec::new();
+        if pk_names.is_empty() {
+            return None;
+        }
+        let mut pk = Vec::new();
         for name in &pk_names {
             if let Some(idx) = result.columns.iter().position(|c| c == name) {
                 pk.push((name.clone(), result.rows[row].get(idx).cloned().flatten()));
             }
         }
-        let engine = entry.config.engine.clone();
-        let is_null = self.db_edit_null.get_untracked();
-        let value = self.db_edit_value.get_untracked();
-        let set_val = if is_null { None } else { Some(value.clone()) };
-
-        let state = *self;
-        let send = create_ext_action(self.cx, move |res: Result<u64, String>| match res {
-            Ok(_) => {
-                // Reflect the change in the in-memory grid.
-                state.db_result.update(|r| {
-                    if let Some(r) = r {
-                        if let Some(cell) = r.rows.get_mut(row).and_then(|row| row.get_mut(col)) {
-                            *cell = if is_null { None } else { Some(value.clone()) };
-                        }
-                    }
-                });
-                state.db_edit.set(None);
-            }
-            Err(e) => state.db_result_error.set(Some(e)),
-        });
-        std::thread::spawn(move || {
-            let pk_ref = pk;
-            send(e_db::update_cell(
-                &conn,
-                &engine,
-                &table,
-                &column,
-                set_val.as_deref(),
-                &pk_ref,
-            ));
-        });
+        Some(pk)
     }
 
     /// Resolve the edit overlay's connection + table + entry, honouring the
@@ -1181,7 +1200,7 @@ impl AppState {
         let Some((row, _, _)) = self.db_edit.get_untracked() else {
             return;
         };
-        let Some((entry, conn, table, engine)) = self.db_edit_target() else {
+        let Some((entry, ..)) = self.db_edit_target() else {
             return;
         };
         if entry.read_only.get_untracked() {
@@ -1197,23 +1216,100 @@ impl AppState {
             Self::notify("Delete: table has no primary key — cannot delete safely");
             return;
         }
-        let state = *self;
-        let send = create_ext_action(self.cx, move |res: Result<u64, String>| match res {
-            Ok(_) => {
-                state.db_result.update(|r| {
-                    if let Some(r) = r {
-                        if row < r.rows.len() {
-                            r.rows.remove(row);
-                        }
-                    }
-                });
-                state.db_edit.set(None);
-                Self::notify("Row deleted");
+        // Stage the deletion (transactional): mark the row pending; the DELETE
+        // runs on Submit. Toggling again un-marks it.
+        self.db_pending_deletes.update(|m| {
+            if m.remove(&row).is_none() {
+                m.insert(row, pk);
             }
-            Err(e) => state.db_result_error.set(Some(e)),
+        });
+        self.db_edit.set(None);
+    }
+
+    /// Discard all staged changes and reload the table from the database.
+    pub fn db_revert_changes(&self) {
+        self.db_pending_edits.update(|m| m.clear());
+        self.db_pending_deletes.update(|m| m.clear());
+        self.db_reload_table();
+    }
+
+    /// Review staged changes and (after confirmation) run them in one
+    /// transaction. Builds UPDATE/DELETE statements from the pending sets.
+    pub fn db_submit_changes(&self) {
+        let (Some(key), Some(table)) = (
+            self.db_result_key.get_untracked(),
+            self.db_result_table.get_untracked(),
+        ) else {
+            return;
+        };
+        let Some(entry) = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
+        let engine = entry.config.engine.clone();
+        let mut stmts: Vec<String> = Vec::new();
+        self.db_pending_edits.with_untracked(|edits| {
+            for e in edits.values() {
+                stmts.push(e_db::update_sql(
+                    &engine,
+                    &table,
+                    &e.column,
+                    e.new.as_deref(),
+                    &e.pk,
+                ));
+            }
+        });
+        self.db_pending_deletes.with_untracked(|dels| {
+            for pk in dels.values() {
+                stmts.push(e_db::delete_sql(&engine, &table, pk));
+            }
+        });
+        if stmts.is_empty() {
+            return;
+        }
+        let env = entry.config.environment();
+        self.db_confirm.set(Some(crate::state::DbConfirm {
+            verb: "Submit".into(),
+            statements: stmts.clone(),
+            env,
+            needs_ack: !env.is_local(),
+            ack: self.cx.create_rw_signal(false),
+            run: crate::state::ConfirmRun::Transaction(stmts),
+        }));
+    }
+
+    /// Run the staged statements as one transaction, then refresh.
+    fn execute_submit(&self, stmts: Vec<String>) {
+        let Some(key) = self.db_result_key.get_untracked() else {
+            return;
+        };
+        let Some(entry) = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        self.db_result_loading.set(true);
+        let state = *self;
+        let send = create_ext_action(self.cx, move |res: Result<u64, String>| {
+            state.db_result_loading.set(false);
+            match res {
+                Ok(n) => {
+                    state.db_pending_edits.update(|m| m.clear());
+                    state.db_pending_deletes.update(|m| m.clear());
+                    Self::notify(&format!("Submitted — {n} row(s) affected"));
+                    state.db_reload_table();
+                }
+                Err(e) => state.db_result_error.set(Some(e)),
+            }
         });
         std::thread::spawn(move || {
-            send(e_db::delete_row(&conn, &engine, &table, &pk));
+            send(e_db::execute_transaction(&conn, &stmts));
         });
     }
 

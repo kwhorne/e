@@ -157,17 +157,38 @@ pub struct DbConsent {
     pub reply: std::sync::mpsc::Sender<serde_json::Value>,
 }
 
-/// A pending destructive / non-local run awaiting explicit confirmation.
+/// What a confirmed [`DbConfirm`] does when accepted.
+#[derive(Clone)]
+pub enum ConfirmRun {
+    /// Execute this SQL in the console (per-statement result tabs).
+    Console(String),
+    /// Execute these statements as one transaction, then reload the table.
+    Transaction(Vec<String>),
+}
+
+/// A pending destructive / non-local / submit action awaiting confirmation.
 #[derive(Clone)]
 pub struct DbConfirm {
-    /// The full SQL to execute once confirmed.
-    pub sql: String,
-    /// The individual statements flagged as dangerous (shown in the dialog).
-    pub flagged: Vec<String>,
+    /// Button/verb, e.g. "Run" or "Submit".
+    pub verb: String,
+    /// The statements shown in the dialog for review.
+    pub statements: Vec<String>,
     pub env: e_db::Environment,
     /// Whether an "I understand" acknowledgement is required (non-local).
     pub needs_ack: bool,
     pub ack: RwSignal<bool>,
+    pub run: ConfirmRun,
+}
+
+/// A row's primary key as `(column, value)` predicates.
+pub type RowPk = Vec<(String, Option<String>)>;
+
+/// A staged (not-yet-committed) cell edit in the data grid.
+#[derive(Clone)]
+pub struct PendingEdit {
+    pub column: String,
+    pub pk: RowPk,
+    pub new: Option<String>,
 }
 
 /// One SQL console result set, shown as a tab. Pinned tabs survive the next run;
@@ -474,8 +495,12 @@ pub struct AppState {
     /// Run generation: bumped on each run and on cancel, so a cancelled/superseded
     /// query's result is discarded when it finally returns.
     pub db_run_gen: RwSignal<u64>,
-    /// A destructive / non-local run awaiting confirmation, if any.
+    /// A destructive / non-local / submit action awaiting confirmation, if any.
     pub db_confirm: RwSignal<Option<DbConfirm>>,
+    /// Staged cell edits `(row, col) -> edit` and staged row deletions
+    /// `row -> pk`, for transactional editing (Submit / Revert).
+    pub db_pending_edits: RwSignal<HashMap<(usize, usize), PendingEdit>>,
+    pub db_pending_deletes: RwSignal<HashMap<usize, RowPk>>,
     /// The table being browsed (None in free-query mode).
     pub db_result_table: RwSignal<Option<String>>,
     /// Results subview: `data` or `structure`.
@@ -1002,6 +1027,8 @@ impl AppState {
             db_active_tab: RwSignal::new(0),
             db_run_gen: RwSignal::new(0),
             db_confirm: RwSignal::new(None),
+            db_pending_edits: RwSignal::new(HashMap::new()),
+            db_pending_deletes: RwSignal::new(HashMap::new()),
             db_result_table: RwSignal::new(None),
             db_subview: RwSignal::new("data".into()),
             db_columns: RwSignal::new(Vec::new()),

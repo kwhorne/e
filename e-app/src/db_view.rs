@@ -1103,6 +1103,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         result_tabs_strip(state),
         status,
         grid,
+        pending_bar(state),
         db_value_viewer(state),
         db_edit_popup(state),
         db_insert_popup(state),
@@ -1127,7 +1128,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
 /// Confirmation dialog for destructive or non-local console runs (DB-702/703).
 pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
     let title = label(move || match state.db_confirm.get() {
-        Some(c) => format!("Run against {}?", c.env.label().to_uppercase()),
+        Some(c) => format!("{} on {}?", c.verb, c.env.label().to_uppercase()),
         None => String::new(),
     })
     .style(move |s| {
@@ -1144,7 +1145,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
     let subtitle = label(move || match state.db_confirm.get() {
         Some(c) => format!(
             "{} statement(s) will run on this database. Review them:",
-            c.flagged.len()
+            c.statements.len()
         ),
         None => String::new(),
     })
@@ -1155,7 +1156,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             state
                 .db_confirm
                 .get()
-                .map(|c| c.flagged)
+                .map(|c| c.statements)
                 .unwrap_or_default()
                 .into_iter()
                 .enumerate()
@@ -1228,7 +1229,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
         })
         .on_click_stop(move |_| state.db_confirm_cancel());
     let confirm = label(move || match state.db_confirm.get() {
-        Some(c) => format!("Run {} statement(s)", c.flagged.len()),
+        Some(c) => format!("{} {} statement(s)", c.verb, c.statements.len()),
         None => "Run".to_string(),
     })
     .style(move |s| {
@@ -1928,6 +1929,73 @@ fn db_history_panel(state: AppState) -> impl IntoView {
     })
 }
 
+/// The transactional "pending changes" bar: shown at the bottom of the grid
+/// while there are staged edits/deletes, with Submit (one transaction, via the
+/// confirmation dialog) and Revert.
+fn pending_bar(state: AppState) -> impl IntoView {
+    let summary = label(move || {
+        let e = state.db_pending_edits.with(|m| m.len());
+        let d = state.db_pending_deletes.with(|m| m.len());
+        let total = e + d;
+        format!(
+            "⚠ {total} pending change{}  ·  {e} update{}, {d} delete{}",
+            if total == 1 { "" } else { "s" },
+            if e == 1 { "" } else { "s" },
+            if d == 1 { "" } else { "s" },
+        )
+    })
+    .style(|s| {
+        s.flex_grow(1.0)
+            .font_size(12.0)
+            .color(Color::from_rgb8(0xe5, 0xc0, 0x7b))
+    });
+    let revert = label(|| "Revert".to_string())
+        .style(|s| {
+            s.padding_horiz(12.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_revert_changes());
+    let submit = label(|| "Submit…".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .background(theme::accent())
+                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .cursor(floem::style::CursorStyle::Pointer)
+        })
+        .on_click_stop(move |_| state.db_submit_changes());
+    stack((summary, revert, submit)).style(move |s| {
+        let s = s
+            .flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .padding_horiz(12.0)
+            .padding_vert(8.0)
+            .border_top(1.0)
+            .border_color(theme::border())
+            .background(theme::bg_panel());
+        let any = state.db_pending_edits.with(|m| !m.is_empty())
+            || state.db_pending_deletes.with(|m| !m.is_empty());
+        if any {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 /// The console result-tab strip: one tab per statement of the last run, plus
 /// pinned tabs. Click to switch, pin to keep, ✕ to close. Hidden when empty.
 fn result_tabs_strip(state: AppState) -> impl IntoView {
@@ -2085,6 +2153,10 @@ fn result_grid(state: AppState) -> impl IntoView {
                     label(move || text.clone())
                         .style(move |s| {
                             let selected = state.db_selected_cell.get() == Some((ri, ci));
+                            let pending_edit =
+                                state.db_pending_edits.with(|m| m.contains_key(&(ri, ci)));
+                            let pending_del =
+                                state.db_pending_deletes.with(|m| m.contains_key(&ri));
                             let s = s
                                 .width(180.0)
                                 .flex_shrink(0.0)
@@ -2095,12 +2167,18 @@ fn result_grid(state: AppState) -> impl IntoView {
                                 .text_ellipsis()
                                 .border_right(1.0)
                                 .border_color(theme::border());
-                            let s = if is_null {
+                            // Colour: deleted row (red) > pending edit (amber) >
+                            // NULL (dim) > normal.
+                            let s = if pending_del {
+                                s.color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                            } else if is_null {
                                 s.color(theme::fg_dim())
                             } else {
                                 s.color(theme::fg())
                             };
-                            let s = if selected {
+                            let s = if pending_edit {
+                                s.background(Color::from_rgba8(0xe5, 0xc0, 0x7b, 40))
+                            } else if selected {
                                 s.background(theme::bg_active())
                             } else {
                                 s

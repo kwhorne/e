@@ -1431,6 +1431,69 @@ impl AppState {
         });
     }
 
+    /// Show rows in other tables that reference the current row (reverse FK).
+    /// Uses the current table's primary key value; opens the first referencing
+    /// table filtered to it.
+    pub fn db_show_related(&self) {
+        let Some((row, _, _)) = self.db_edit.get_untracked() else {
+            return;
+        };
+        let (Some(key), Some(table)) = (
+            self.db_result_key.get_untracked(),
+            self.db_result_table.get_untracked(),
+        ) else {
+            return;
+        };
+        let Some(entry) = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let Some(result) = self.db_result.get_untracked() else {
+            return;
+        };
+        let Some(pk) = self.db_row_pk_full(row, &result) else {
+            Self::notify("Related: table has no primary key");
+            return;
+        };
+        let Some((pk_col, Some(pk_val))) = pk.into_iter().next() else {
+            return;
+        };
+        let disp = entry.config.display_name();
+        let state = *self;
+        let send = create_ext_action(self.cx, move |refs: Vec<(String, String)>| {
+            let Some((child_table, child_col)) = refs.first().cloned() else {
+                Self::notify("No tables reference this row");
+                return;
+            };
+            state.db_edit.set(None);
+            state.db_result_key.set(Some(key.clone()));
+            state.db_result_table.set(Some(child_table.clone()));
+            state.db_result_title.set(format!("{disp} · {child_table}"));
+            state.db_subview.set("data".into());
+            state.db_sort.set(None);
+            state.db_filter.set(Some((child_col, Some(pk_val.clone()))));
+            state.db_page.set(0);
+            state.db_total_rows.set(None);
+            state.db_columns.set(Vec::new());
+            state.db_load_columns(entry.clone(), child_table);
+            state.db_reload_table();
+            if refs.len() > 1 {
+                Self::notify(&format!(
+                    "{} tables reference this row; showing the first",
+                    refs.len()
+                ));
+            }
+        });
+        std::thread::spawn(move || {
+            send(e_db::referencing(&conn, &table, &pk_col).unwrap_or_default());
+        });
+    }
+
     /// Hop to the foreign-key target of the column open in the edit overlay,
     /// filtered to the current cell's value.
     pub fn db_hop_fk(&self) {

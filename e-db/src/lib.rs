@@ -1368,6 +1368,20 @@ pub fn fk_target(
         .map(|fk| (fk.ref_table, fk.ref_column)))
 }
 
+/// Find the `(child_table, child_column)` pairs whose foreign keys point at
+/// `table`.`column` — i.e. rows that reference this row (reverse FK).
+pub fn referencing(
+    conn: &Conn,
+    table: &str,
+    column: &str,
+) -> Result<Vec<(String, String)>, String> {
+    Ok(foreign_keys(conn)?
+        .into_iter()
+        .filter(|fk| fk.ref_table == table && fk.ref_column == column)
+        .map(|fk| (fk.table, fk.column))
+        .collect())
+}
+
 /// Count rows in `table`, honouring an optional `col = value` / `IS NULL`
 /// filter — for pagination totals.
 pub fn count_rows(
@@ -2260,6 +2274,13 @@ mod tests {
         let fk = fk_target(&conn, "posts", "user_id").unwrap();
         assert_eq!(fk, Some(("users".to_string(), "id".to_string())));
         assert_eq!(fk_target(&conn, "posts", "title").unwrap(), None);
+
+        // referencing (reverse FK): who points at users.id?
+        assert_eq!(
+            referencing(&conn, "users", "id").unwrap(),
+            vec![("posts".to_string(), "user_id".to_string())]
+        );
+        assert!(referencing(&conn, "posts", "id").unwrap().is_empty());
 
         // count_rows (pagination totals)
         assert_eq!(count_rows(&conn, "sqlite", "posts", None).unwrap(), 1);

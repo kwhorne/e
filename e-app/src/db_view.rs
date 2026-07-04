@@ -1610,6 +1610,20 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         })
         .on_click_stop(move |_| state.db_hop_fk());
+    let related = label(|| "Related →".to_string())
+        .style(|s| {
+            s.padding_horiz(12.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_show_related());
     let filter_to = label(|| "Filter to value".to_string())
         .style(|s| {
             s.padding_horiz(12.0)
@@ -1624,8 +1638,9 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         })
         .on_click_stop(move |_| state.db_filter_to_cell());
-    let row_actions = stack((delete_row, follow_fk, filter_to)).style(|s| {
+    let row_actions = stack((delete_row, follow_fk, related, filter_to)).style(|s| {
         s.flex_row()
+            .flex_wrap(floem::taffy::style::FlexWrap::Wrap)
             .items_center()
             .gap(8.0)
             .width_full()

@@ -1050,7 +1050,40 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         .request_focus(move || {
             state.db_saving_query.get();
         });
-    let export = toolbar_btn("⬇ CSV", Box::new(move || state.db_export_csv()));
+    let export_csv = toolbar_btn(
+        "CSV",
+        Box::new(move || state.db_export(crate::db_export::Format::Csv)),
+    );
+    let export_json = toolbar_btn(
+        "JSON",
+        Box::new(move || state.db_export(crate::db_export::Format::Json)),
+    );
+    let export_sql = toolbar_btn(
+        "SQL",
+        Box::new(move || state.db_export(crate::db_export::Format::SqlInserts)),
+    );
+    let export = stack((
+        label(|| "⬇".to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        export_csv,
+        export_json,
+        export_sql,
+    ))
+    .style(|s| s.flex_row().items_center().gap(2.0));
+    // Copy to clipboard: TSV (spreadsheet-friendly) or a Markdown table.
+    let copy_tsv = toolbar_btn(
+        "TSV",
+        Box::new(move || state.db_copy_result(crate::db_export::Format::Tsv)),
+    );
+    let copy_md = toolbar_btn(
+        "MD",
+        Box::new(move || state.db_copy_result(crate::db_export::Format::Markdown)),
+    );
+    let copy = stack((
+        label(|| "⧉".to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        copy_tsv,
+        copy_md,
+    ))
+    .style(|s| s.flex_row().items_center().gap(2.0));
     let add_row = label(|| "+ Row".to_string())
         .style(move |s| {
             let s = s
@@ -1078,6 +1111,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         saved_menu,
         name_input,
         save_btn,
+        copy,
         export,
     ))
     .style(|s| {

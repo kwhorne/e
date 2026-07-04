@@ -20,15 +20,6 @@ use crate::state::{AppState, DbEntry, DbForm, InsertField};
 /// Rows per page when browsing a table in the Database panel.
 pub(crate) const DB_PAGE: usize = 200;
 
-/// Quote a CSV field if it contains a comma, quote or newline.
-fn csv_escape(s: &str) -> String {
-    if s.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
-}
-
 impl AppState {
     // ---- Database panel ------------------------------------------------
 
@@ -586,34 +577,46 @@ impl AppState {
         self.db_add_config(cfg);
     }
 
-    /// Export the current result grid to a CSV file.
-    pub fn db_export_csv(&self) {
+    /// Export the current result grid to a file in the given format.
+    pub fn db_export(&self, fmt: crate::db_export::Format) {
         let Some(result) = self.db_result.get_untracked() else {
             return;
         };
         if result.columns.is_empty() {
             return;
         }
+        let table = self
+            .db_result_table
+            .get_untracked()
+            .unwrap_or_else(|| "results".into());
+        let ext = fmt.extension();
         let opts = floem::file::FileDialogOptions::new()
-            .title("Export results as CSV")
-            .default_name("results.csv");
+            .title("Export results")
+            .default_name(format!("{table}.{ext}"));
         floem::action::save_as(opts, move |info| {
             let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
                 return;
             };
-            let mut out = String::new();
-            out.push_str(&result.columns.join(","));
-            out.push('\n');
-            for row in &result.rows {
-                let cells: Vec<String> = row
-                    .iter()
-                    .map(|c| csv_escape(c.as_deref().unwrap_or("")))
-                    .collect();
-                out.push_str(&cells.join(","));
-                out.push('\n');
-            }
+            let out = crate::db_export::format(&result, fmt, &table);
             let _ = std::fs::write(&path, out);
         });
+    }
+
+    /// Copy the current result to the clipboard in the given format.
+    pub fn db_copy_result(&self, fmt: crate::db_export::Format) {
+        let Some(result) = self.db_result.get_untracked() else {
+            return;
+        };
+        if result.columns.is_empty() {
+            return;
+        }
+        let table = self
+            .db_result_table
+            .get_untracked()
+            .unwrap_or_else(|| "results".into());
+        let text = crate::db_export::format(&result, fmt, &table);
+        let _ = floem::Clipboard::set_contents(text);
+        Self::notify("Result copied to clipboard");
     }
 
     /// Open a blank query editor for a connection.

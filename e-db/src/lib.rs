@@ -1323,6 +1323,12 @@ pub fn split_statement_ranges(sql: &str) -> Vec<(usize, usize)> {
     out
 }
 
+/// Whether a statement writes (anything that isn't a read: not SELECT/SHOW/
+/// EXPLAIN/PRAGMA/DESCRIBE/WITH). Used to gate writes to non-local databases.
+pub fn is_write_statement(sql: &str) -> bool {
+    !is_select(sql)
+}
+
 fn is_select(sql: &str) -> bool {
     let s = sql.trim_start().to_lowercase();
     s.starts_with("select")

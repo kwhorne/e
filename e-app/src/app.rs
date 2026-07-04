@@ -450,6 +450,7 @@ fn app_view() -> impl IntoView {
             main_row,
             crate::db_view::db_result_overlay(state),
             crate::db_view::db_consent_dialog(state),
+            crate::db_view::db_confirm_dialog(state),
             crate::tinker::tinker_panel(state),
             crate::map::laravel_map(state),
             crate::agent_ui::agent_edit_review(state),

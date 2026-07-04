@@ -640,9 +640,63 @@ impl AppState {
         self.run_console_sql(sql);
     }
 
-    /// Run `sql` (which may contain multiple statements) against the active
-    /// connection, one result tab per statement.
+    /// Gate a console run: destructive statements (any environment) or writes to
+    /// a non-local database require explicit confirmation first (DB-702/703).
     fn run_console_sql(&self, sql: String) {
+        let Some(entry) = self.db_result_key.get_untracked().and_then(|key| {
+            self.db_conns
+                .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        }) else {
+            return;
+        };
+        let statements = e_db::split_statements(&sql);
+        if statements.is_empty() {
+            return;
+        }
+        let env = entry.config.environment();
+        let non_local = !env.is_local();
+        let flagged: Vec<String> = statements
+            .iter()
+            .filter(|s| {
+                e_db::is_destructive(s).is_some() || (non_local && e_db::is_write_statement(s))
+            })
+            .cloned()
+            .collect();
+        if flagged.is_empty() {
+            self.execute_console_sql(sql);
+        } else {
+            self.db_confirm.set(Some(crate::state::DbConfirm {
+                sql,
+                flagged,
+                env,
+                needs_ack: non_local,
+                ack: self.cx.create_rw_signal(false),
+            }));
+        }
+    }
+
+    /// Confirm and run the pending destructive/non-local SQL.
+    pub fn db_confirm_run(&self) {
+        let Some(c) = self.db_confirm.get_untracked() else {
+            return;
+        };
+        if c.needs_ack && !c.ack.get_untracked() {
+            Self::notify("Tick the acknowledgement to proceed");
+            return;
+        }
+        self.db_confirm.set(None);
+        self.execute_console_sql(c.sql);
+    }
+
+    /// Dismiss the confirmation dialog without running.
+    pub fn db_confirm_cancel(&self) {
+        self.db_confirm.set(None);
+    }
+
+    /// Run `sql` (which may contain multiple statements) against the active
+    /// connection, one result tab per statement. Assumes confirmation (if any)
+    /// has already been given.
+    fn execute_console_sql(&self, sql: String) {
         let Some(key) = self.db_result_key.get_untracked() else {
             return;
         };

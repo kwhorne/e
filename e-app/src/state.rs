@@ -157,6 +157,19 @@ pub struct DbConsent {
     pub reply: std::sync::mpsc::Sender<serde_json::Value>,
 }
 
+/// A pending destructive / non-local run awaiting explicit confirmation.
+#[derive(Clone)]
+pub struct DbConfirm {
+    /// The full SQL to execute once confirmed.
+    pub sql: String,
+    /// The individual statements flagged as dangerous (shown in the dialog).
+    pub flagged: Vec<String>,
+    pub env: e_db::Environment,
+    /// Whether an "I understand" acknowledgement is required (non-local).
+    pub needs_ack: bool,
+    pub ack: RwSignal<bool>,
+}
+
 /// One SQL console result set, shown as a tab. Pinned tabs survive the next run;
 /// unpinned ones are replaced.
 #[derive(Clone)]
@@ -461,6 +474,8 @@ pub struct AppState {
     /// Run generation: bumped on each run and on cancel, so a cancelled/superseded
     /// query's result is discarded when it finally returns.
     pub db_run_gen: RwSignal<u64>,
+    /// A destructive / non-local run awaiting confirmation, if any.
+    pub db_confirm: RwSignal<Option<DbConfirm>>,
     /// The table being browsed (None in free-query mode).
     pub db_result_table: RwSignal<Option<String>>,
     /// Results subview: `data` or `structure`.
@@ -986,6 +1001,7 @@ impl AppState {
             db_result_tabs: RwSignal::new(Vec::new()),
             db_active_tab: RwSignal::new(0),
             db_run_gen: RwSignal::new(0),
+            db_confirm: RwSignal::new(None),
             db_result_table: RwSignal::new(None),
             db_subview: RwSignal::new("data".into()),
             db_columns: RwSignal::new(Vec::new()),

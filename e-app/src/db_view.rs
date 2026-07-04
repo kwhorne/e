@@ -1124,6 +1124,162 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
 }
 
 /// The consent dialog shown when the AI agent proposes a query to run.
+/// Confirmation dialog for destructive or non-local console runs (DB-702/703).
+pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
+    let title = label(move || match state.db_confirm.get() {
+        Some(c) => format!("Run against {}?", c.env.label().to_uppercase()),
+        None => String::new(),
+    })
+    .style(move |s| {
+        let color = state
+            .db_confirm
+            .get()
+            .map(|c| env_color(c.env))
+            .unwrap_or(theme::fg());
+        s.font_size(15.0)
+            .font_bold()
+            .color(color)
+            .margin_bottom(6.0)
+    });
+    let subtitle = label(move || match state.db_confirm.get() {
+        Some(c) => format!(
+            "{} statement(s) will run on this database. Review them:",
+            c.flagged.len()
+        ),
+        None => String::new(),
+    })
+    .style(|s| s.font_size(12.0).color(theme::fg_dim()).margin_bottom(10.0));
+
+    let list = dyn_stack(
+        move || {
+            state
+                .db_confirm
+                .get()
+                .map(|c| c.flagged)
+                .unwrap_or_default()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, stmt)| {
+            label(move || stmt.clone()).style(|s| {
+                s.font_family("monospace".to_string())
+                    .font_size(12.0)
+                    .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                    .padding_vert(2.0)
+                    .width_full()
+                    .text_ellipsis()
+            })
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+    let list = scroll(list).style(|s| {
+        s.max_height(180.0)
+            .width_full()
+            .padding(8.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(6.0)
+            .background(theme::bg())
+    });
+
+    let ack = label(move || match state.db_confirm.get() {
+        Some(c) => format!(
+            "{}  I understand this affects {}",
+            if c.ack.get() { "☑" } else { "☐" },
+            c.env.label()
+        ),
+        None => String::new(),
+    })
+    .style(move |s| {
+        let s = s
+            .font_size(12.0)
+            .color(theme::fg())
+            .margin_top(10.0)
+            .cursor(floem::style::CursorStyle::Pointer);
+        if state
+            .db_confirm
+            .with(|c| c.as_ref().map(|c| c.needs_ack).unwrap_or(false))
+        {
+            s
+        } else {
+            s.hide()
+        }
+    })
+    .on_click_stop(move |_| {
+        if let Some(c) = state.db_confirm.get_untracked() {
+            c.ack.update(|a| *a = !*a);
+        }
+    });
+
+    let cancel = label(|| "Cancel".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(30.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_confirm_cancel());
+    let confirm = label(move || match state.db_confirm.get() {
+        Some(c) => format!("Run {} statement(s)", c.flagged.len()),
+        None => "Run".to_string(),
+    })
+    .style(move |s| {
+        let color = state
+            .db_confirm
+            .get()
+            .map(|c| env_color(c.env))
+            .unwrap_or(theme::accent());
+        s.padding_horiz(14.0)
+            .height(30.0)
+            .items_center()
+            .border_radius(5.0)
+            .font_size(12.0)
+            .background(color)
+            .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+            .cursor(floem::style::CursorStyle::Pointer)
+    })
+    .on_click_stop(move |_| state.db_confirm_run());
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), cancel, confirm)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .margin_top(12.0)
+    });
+
+    let card = stack((title, subtitle, list, ack, buttons)).style(|s| {
+        s.flex_col()
+            .width(560.0)
+            .padding(16.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg_panel())
+    });
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 130));
+        if state.db_confirm.get().is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 pub fn db_consent_dialog(state: AppState) -> impl IntoView {
     let title = label(|| "Agent wants to run a query".to_string())
         .style(|s| s.font_size(14.0).font_bold().color(theme::fg()));

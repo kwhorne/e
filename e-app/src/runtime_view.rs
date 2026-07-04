@@ -169,15 +169,37 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
         |(i, _)| *i,
         move |(_, (sql, dur))| {
             let text = format!("{}  ({dur}ms)", sql.trim());
-            label(move || text.clone()).style(|s| {
-                s.font_size(11.0)
-                    .font_family("monospace".to_string())
-                    .color(theme::fg_dim())
+            let raw = sql.clone();
+            let explain = label(|| "EXPLAIN".to_string())
+                .style(|s| {
+                    s.font_size(10.0)
+                        .flex_shrink(0.0)
+                        .padding_horiz(6.0)
+                        .border_radius(3.0)
+                        .color(theme::accent())
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.background(theme::bg_hover()))
+                })
+                .on_click_stop(move |_| state.db_explain_from_runtime(raw.clone()));
+            stack((
+                label(move || text.clone()).style(|s| {
+                    s.font_size(11.0)
+                        .font_family("monospace".to_string())
+                        .color(theme::fg_dim())
+                        .flex_grow(1.0)
+                        .min_width(0.0)
+                        .text_ellipsis()
+                }),
+                explain,
+            ))
+            .style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .gap(6.0)
                     .padding_left(24.0)
                     .padding_right(12.0)
                     .padding_vert(1.0)
                     .width_full()
-                    .text_ellipsis()
             })
         },
     )

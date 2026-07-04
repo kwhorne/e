@@ -1066,7 +1066,14 @@ impl AppState {
         let Some((entry, sql)) = self.sql_and_conn_under_cursor() else {
             return;
         };
+        self.db_explain_sql(entry, sql);
+    }
+
+    /// Run EXPLAIN on `sql` against a specific connection, showing the plan in
+    /// the result overlay and flagging full scans / missing indexes.
+    pub fn db_explain_sql(&self, entry: DbEntry, sql: String) {
         let Some(conn) = entry.conn.get_untracked() else {
+            Self::notify("EXPLAIN: not connected");
             return;
         };
         let engine = entry.config.engine.clone();
@@ -1076,6 +1083,7 @@ impl AppState {
         self.db_result.set(None);
         self.db_result_error.set(None);
         self.db_result_loading.set(true);
+        self.db_open.set(true);
         self.db_result_open.set(true);
         let state = *self;
         let send = create_ext_action(self.cx, move |res: Result<e_db::QueryResult, String>| {
@@ -1091,6 +1099,21 @@ impl AppState {
             state.db_apply_result(res);
         });
         std::thread::spawn(move || send(e_db::explain(&conn, &sql)));
+    }
+
+    /// EXPLAIN a query observed in the runtime panel: pick the first connected
+    /// database and show its plan in the DB panel (DB-604).
+    pub fn db_explain_from_runtime(&self, sql: String) {
+        let entry = self.db_conns.with_untracked(|cs| {
+            cs.iter()
+                .find(|e| e.conn.get_untracked().is_some())
+                .cloned()
+        });
+        let Some(entry) = entry else {
+            Self::notify("EXPLAIN: connect a database in the Database panel (⌘3) first");
+            return;
+        };
+        self.db_explain_sql(entry, sql);
     }
 
     /// Run EXPLAIN on the SQL under the cursor and, if it has performance red

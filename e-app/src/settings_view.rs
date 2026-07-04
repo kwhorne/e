@@ -123,14 +123,16 @@ fn app_url_row(state: AppState) -> impl IntoView {
     stack((
         row_label(
             "App URL",
-            "For request-replay. Empty = https://<folder>.test (Grove).",
+            "Request-replay base URL. Empty = Grove default.",
             false,
         ),
         text_input(sig)
             .placeholder("https://myapp.test")
             .style(|s| {
                 theme::input_colors(s)
-                    .width(260.0)
+                    .width(200.0)
+                    .min_width(0.0)
+                    .flex_shrink(1.0)
                     .font_size(12.0)
                     .padding_horiz(8.0)
                     .padding_vert(4.0)
@@ -702,8 +704,14 @@ pub fn settings_view(state: AppState) -> impl IntoView {
             .into_any()
         },
     );
-    let content_pane = scroll(content.style(|s| s.padding_horiz(24.0).padding_vert(18.0)))
-        .style(|s| s.flex_grow(1.0).min_width(0.0).height_full());
+    // Pin the scrollable content to the pane width. `scroll` otherwise sizes its
+    // child to the *content* width, so the widest row (e.g. the App URL field)
+    // stretched every tab and pushed toggles/inputs off the right edge with a
+    // horizontal scrollbar. Width = dialog 780 − side borders − sidebar 210, minus
+    // a couple px of slack so rounding can never re-introduce the scrollbar.
+    let content_pane =
+        scroll(content.style(|s| s.width(564.0).padding_horiz(24.0).padding_vert(18.0)))
+            .style(|s| s.flex_grow(1.0).min_width(0.0).height_full());
 
     let middle = stack((sidebar, content_pane))
         .style(|s| s.flex_row().flex_grow(1.0).min_height(0.0).width_full());

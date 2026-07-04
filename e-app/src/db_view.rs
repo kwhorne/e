@@ -230,10 +230,24 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
             let entry = entry.clone();
             let table = t.clone();
             let tn = t.clone();
+            let e_count = entry.clone();
+            let t_count = t.clone();
+            let count = label(move || {
+                e_count
+                    .table_counts
+                    .with(|m| m.get(&t_count).map(|n| n.to_string()))
+                    .unwrap_or_default()
+            })
+            .style(|s| s.color(theme::fg_dim()).font_size(10.0).flex_shrink(0.0));
             stack((
                 label(|| "▦".to_string()).style(|s| s.color(theme::fg_dim()).font_size(11.0)),
-                label(move || tn.clone())
-                    .style(|s| s.color(theme::fg()).text_ellipsis().min_width(0.0)),
+                label(move || tn.clone()).style(|s| {
+                    s.color(theme::fg())
+                        .flex_grow(1.0)
+                        .text_ellipsis()
+                        .min_width(0.0)
+                }),
+                count,
             ))
             .style(|s| {
                 s.flex_row()

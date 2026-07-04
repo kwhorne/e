@@ -56,6 +56,8 @@ pub struct DbEntry {
     pub connecting: RwSignal<bool>,
     pub tables: RwSignal<Vec<String>>,
     pub views: RwSignal<Vec<String>>,
+    /// Lazily-loaded approximate row counts per table (shown in the tree).
+    pub table_counts: RwSignal<HashMap<String, i64>>,
     pub error: RwSignal<Option<String>>,
     pub filter: RwSignal<String>,
     /// Block writes (cell edits, …). Defaults on for production-looking targets.
@@ -72,6 +74,7 @@ impl DbEntry {
             connecting: cx.create_rw_signal(false),
             tables: cx.create_rw_signal(Vec::new()),
             views: cx.create_rw_signal(Vec::new()),
+            table_counts: cx.create_rw_signal(HashMap::new()),
             error: cx.create_rw_signal(None),
             filter: cx.create_rw_signal(String::new()),
             read_only: cx.create_rw_signal(config_read_only),

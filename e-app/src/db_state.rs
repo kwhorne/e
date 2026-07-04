@@ -198,6 +198,7 @@ impl AppState {
         entry.connecting.set(true);
         entry.error.set(None);
         let cfg = entry.config.clone();
+        let state = *self;
         let send = create_ext_action(self.cx, move |res: ConnectResult| {
             entry.connecting.set(false);
             match res {
@@ -206,6 +207,7 @@ impl AppState {
                     entry.tables.set(tables);
                     entry.views.set(views);
                     entry.expanded.set(true);
+                    state.db_load_table_counts(entry.clone());
                 }
                 Err(e) => entry.error.set(Some(e)),
             }
@@ -229,10 +231,46 @@ impl AppState {
 
     pub fn db_toggle(&self, entry: DbEntry) {
         if entry.conn.get_untracked().is_some() {
-            entry.expanded.update(|e| *e = !*e);
+            let expanding = !entry.expanded.get_untracked();
+            entry.expanded.set(expanding);
+            if expanding {
+                self.db_load_table_counts(entry);
+            }
         } else {
             self.db_connect(entry);
         }
+    }
+
+    /// Lazily load approximate row counts for every table (shown in the tree).
+    /// Loaded once per connection; runs off the UI thread.
+    fn db_load_table_counts(&self, entry: DbEntry) {
+        if !entry.table_counts.with_untracked(|m| m.is_empty()) {
+            return; // already loaded
+        }
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        let engine = entry.config.engine.clone();
+        let tables = entry.tables.get_untracked();
+        if tables.is_empty() {
+            return;
+        }
+        let counts_sig = entry.table_counts;
+        let send = create_ext_action(
+            self.cx,
+            move |counts: std::collections::HashMap<String, i64>| {
+                counts_sig.set(counts);
+            },
+        );
+        std::thread::spawn(move || {
+            let mut counts = std::collections::HashMap::new();
+            for t in tables {
+                if let Ok(n) = e_db::count_rows(&conn, &engine, &t, None) {
+                    counts.insert(t, n);
+                }
+            }
+            send(counts);
+        });
     }
 
     pub fn db_refresh_tables(&self, entry: DbEntry) {

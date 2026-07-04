@@ -681,9 +681,25 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.close_db_result());
-    let header = stack((title, close)).style(|s| {
+    // Environment dot for the active connection (green/amber/red), so it's always
+    // clear which database's data you're looking at (DB-104).
+    let env_dot = label(|| "●".to_string()).style(move |s| {
+        let env = state.db_result_key.get().and_then(|key| {
+            state.db_conns.with(|c| {
+                c.iter()
+                    .find(|e| e.key() == key)
+                    .map(|e| e.config.environment())
+            })
+        });
+        match env {
+            Some(env) => s.font_size(10.0).color(env_color(env)),
+            None => s.hide(),
+        }
+    });
+    let header = stack((env_dot, title, close)).style(|s| {
         s.flex_row()
             .items_center()
+            .gap(6.0)
             .padding_horiz(12.0)
             .padding_vert(8.0)
             .width_full()

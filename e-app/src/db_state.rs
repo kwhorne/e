@@ -604,6 +604,59 @@ impl AppState {
         });
     }
 
+    /// Import a CSV file into the current table: parse it, map columns by header
+    /// name, and stage the INSERTs behind the confirmation dialog (one
+    /// transaction).
+    pub fn db_import_csv(&self) {
+        let (Some(key), Some(table)) = (
+            self.db_result_key.get_untracked(),
+            self.db_result_table.get_untracked(),
+        ) else {
+            Self::notify("Import: open a table first");
+            return;
+        };
+        let Some(entry) = self
+            .db_conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
+        let engine = entry.config.engine.clone();
+        let env = entry.config.environment();
+        let columns: Vec<String> = self
+            .db_columns
+            .with_untracked(|cols| cols.iter().map(|c| c.name.clone()).collect());
+        if columns.is_empty() {
+            Self::notify("Import: table columns not loaded yet");
+            return;
+        }
+        let state = *self;
+        let opts = floem::file::FileDialogOptions::new().title("Import CSV into this table");
+        floem::action::open_file(opts, move |info| {
+            let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
+                return;
+            };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                Self::notify("Import: could not read the file");
+                return;
+            };
+            let rows = crate::db_import::parse_csv(&text);
+            match crate::db_import::build_inserts(&engine, &table, &rows, &columns) {
+                Ok(stmts) => {
+                    state.db_confirm.set(Some(crate::state::DbConfirm {
+                        verb: "Import".into(),
+                        statements: stmts.clone(),
+                        env,
+                        needs_ack: !env.is_local(),
+                        ack: state.cx.create_rw_signal(false),
+                        run: crate::state::ConfirmRun::Transaction(stmts),
+                    }));
+                }
+                Err(e) => Self::notify(&format!("Import: {e}")),
+            }
+        });
+    }
+
     /// Copy the current result to the clipboard in the given format.
     pub fn db_copy_result(&self, fmt: crate::db_export::Format) {
         let Some(result) = self.db_result.get_untracked() else {

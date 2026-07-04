@@ -1144,6 +1144,23 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             }
         })
         .on_click_stop(move |_| state.db_begin_insert());
+    let import_csv = label(|| "⬆ CSV".to_string())
+        .style(move |s| {
+            let s = s
+                .padding_horiz(8.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .font_size(12.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
+            if state.db_result_table.get().is_some() && state.db_subview.get() == "data" {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.db_import_csv());
 
     let toolbar = stack((
         subview_chips,
@@ -1151,6 +1168,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         filter_chip,
         spacer,
         add_row,
+        import_csv,
         saved_menu,
         name_input,
         save_btn,

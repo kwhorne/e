@@ -23,6 +23,7 @@ mod contract_view;
 mod corpus;
 mod db_console;
 mod db_export;
+mod db_import;
 mod db_state;
 mod db_view;
 mod debug;

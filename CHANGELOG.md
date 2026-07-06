@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-04
+
+### Added
+
+- **Column editing.** `⌥⌘↑` / `⌥⌘↓` add a caret one line above / below at the
+  same column, growing a vertical multi-cursor — the keyboard form of column
+  selection. Also available from the command palette.
+
 ## [0.8.0] - 2026-07-04
 
 A major expansion of the database tools — the full “PhpStorm-parity and beyond”

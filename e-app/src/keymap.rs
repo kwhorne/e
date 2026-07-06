@@ -49,6 +49,8 @@ const DEFAULT: &[(&str, &str)] = &[
     ("cmd+d", "duplicate-line"),
     ("cmd+shift+d", "select-next-occurrence"),
     ("cmd+shift+l", "select-all-occurrences"),
+    ("cmd+alt+up", "add-cursor-above"),
+    ("cmd+alt+down", "add-cursor-below"),
     ("cmd+shift+k", "delete-line"),
     ("cmd+]", "indent"),
     ("cmd+[", "outdent"),

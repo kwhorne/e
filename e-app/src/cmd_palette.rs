@@ -71,6 +71,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("markdown", "Toggle Markdown Preview"),
     ("diff", "Show Git Diff vs HEAD"),
     ("select-all-occurrences", "Select All Occurrences"),
+    ("add-cursor-above", "Add Cursor Above (⌥⌘↑)"),
+    ("add-cursor-below", "Add Cursor Below (⌥⌘↓)"),
     ("run-task", "Run Task…"),
     ("run-test", "Run Tests"),
     ("source-control", "Toggle Source Control"),

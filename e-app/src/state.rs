@@ -1506,6 +1506,59 @@ impl AppState {
             .set(Cursor::new(CursorMode::Insert(s), None, None));
     }
 
+    /// Add a caret one line above the top-most caret / below the bottom-most
+    /// caret at the same column (column editing). `delta` is -1 (above) or +1.
+    fn add_cursor_line(&self, delta: i64) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let CursorMode::Insert(sel) = cursor.mode.clone() else {
+            return;
+        };
+        let regions = sel.regions().to_vec();
+        if regions.is_empty() {
+            return;
+        }
+        // Anchor on the extreme caret in the direction we're growing.
+        let anchor = if delta < 0 {
+            regions.iter().map(|r| r.max()).min()
+        } else {
+            regions.iter().map(|r| r.max()).max()
+        };
+        let Some(anchor) = anchor else {
+            return;
+        };
+        let (line, col) = editor.offset_to_line_col(anchor);
+        let target = line as i64 + delta;
+        if target < 0 {
+            return;
+        }
+        let line_count = buf.doc.text().to_string().lines().count();
+        if target as usize >= line_count {
+            return;
+        }
+        let new_offset = editor.offset_of_line_col(target as usize, col);
+        let mut s = sel.clone();
+        s.add_region(SelRegion::new(new_offset, new_offset, None));
+        editor
+            .cursor
+            .set(Cursor::new(CursorMode::Insert(s), None, None));
+    }
+
+    /// Add a caret on the line above (column editing).
+    pub fn add_cursor_above(&self) {
+        self.add_cursor_line(-1);
+    }
+
+    /// Add a caret on the line below (column editing).
+    pub fn add_cursor_below(&self) {
+        self.add_cursor_line(1);
+    }
+
     // ---- Livewire ------------------------------------------------------
 
     /// Completion items for a `wire:model` value, from the component's class.

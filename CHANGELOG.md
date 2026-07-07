@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-07-04
+
+### Added
+
+- **EditorConfig support.** `.editorconfig` is honoured per file: indent size /
+  tab width, and `trim_trailing_whitespace` / `insert_final_newline` on save
+  (overriding the global On-Save settings). Full glob matching (`*`, `**`, `?`,
+  `{…}`) with root-stop and nearest-wins resolution.
+- **Compare files.** *Compare Active File With…* (command palette) shows a line
+  diff between the current file and any file you pick.
+- **Code actions / refactor.** `⌘.` requests LSP code actions (quick fixes,
+  extract variable/method, …) at the cursor or selection and applies the chosen
+  one — where the language server supports it.
+
 ## [0.8.1] - 2026-07-04
 
 ### Added

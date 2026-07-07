@@ -6,6 +6,7 @@
 
 pub mod buffer;
 pub mod diff;
+pub mod editorconfig;
 pub mod git;
 pub mod language;
 pub mod markdown;

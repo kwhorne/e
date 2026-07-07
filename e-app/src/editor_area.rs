@@ -298,7 +298,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 b.bp_marks.clone(),
                 b.stop_line.clone(),
                 state.font_size,
-                state.settings.get_untracked().tab_width,
+                b.tab_width,
             ))
             .editor_style(move |s| {
                 let wrap = if state.word_wrap.get() {

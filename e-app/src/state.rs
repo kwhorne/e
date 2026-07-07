@@ -313,6 +313,10 @@ pub struct Buffer {
     /// When set, a text change is caused by undo-tree navigation, so it must
     /// not be recorded back into the tree.
     pub undo_nav: Rc<std::cell::Cell<bool>>,
+    /// Tab width for this buffer (from `.editorconfig`, else the global setting).
+    pub tab_width: usize,
+    /// Resolved EditorConfig properties for this file's path.
+    pub editorconfig: e_core::editorconfig::EditorConfig,
 }
 
 /// One terminal session (a running shell).
@@ -2485,6 +2489,8 @@ impl AppState {
             lint: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
+            tab_width: self.settings.get_untracked().tab_width,
+            editorconfig: e_core::editorconfig::EditorConfig::default(),
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
@@ -3690,6 +3696,12 @@ impl AppState {
             .and_then(|p| std::fs::metadata(p).ok())
             .and_then(|m| m.modified().ok());
 
+        // Per-file EditorConfig (indent / trailing whitespace / final newline).
+        let ec = e_core::editorconfig::resolve(&canon);
+        let ec_tab = ec
+            .effective_tab_width()
+            .unwrap_or_else(|| self.settings.get_untracked().tab_width)
+            .clamp(1, 16);
         let buf = Buffer {
             id,
             file,
@@ -3716,6 +3728,8 @@ impl AppState {
             lint: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
+            tab_width: ec_tab,
+            editorconfig: ec,
         };
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
@@ -3867,7 +3881,15 @@ impl AppState {
         if self.settings.get_untracked().format_on_save {
             self.format_active();
         }
-        if self.settings.get_untracked().trim_on_save {
+        // EditorConfig `trim_trailing_whitespace` overrides the global setting.
+        let ec = self
+            .active_buffer()
+            .map(|b| b.editorconfig)
+            .unwrap_or_default();
+        let trim = ec
+            .trim_trailing_whitespace
+            .unwrap_or_else(|| self.settings.get_untracked().trim_on_save);
+        if trim {
             self.trim_active();
         }
         let Some(buf) = self.active_buffer() else {
@@ -3877,6 +3899,18 @@ impl AppState {
             self.save_active_as();
             return;
         };
+        // EditorConfig `insert_final_newline`: ensure exactly one trailing \n.
+        if ec.insert_final_newline == Some(true) {
+            let t = buf.doc.text().to_string();
+            if !t.is_empty() && !t.ends_with('\n') {
+                let len = t.len();
+                buf.doc.edit_single(
+                    Selection::caret(len),
+                    "\n",
+                    floem::views::editor::core::editor::EditType::InsertChars,
+                );
+            }
+        }
         let text = buf.doc.text().to_string();
         match buffer::write_with_encoding(path, &text, &buf.encoding.get_untracked()) {
             Ok(()) => {

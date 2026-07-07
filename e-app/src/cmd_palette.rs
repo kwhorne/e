@@ -70,6 +70,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("nav-forward", "Go Forward"),
     ("markdown", "Toggle Markdown Preview"),
     ("diff", "Show Git Diff vs HEAD"),
+    ("compare-file", "Compare Active File With…"),
     ("select-all-occurrences", "Select All Occurrences"),
     ("add-cursor-above", "Add Cursor Above (⌥⌘↑)"),
     ("add-cursor-below", "Add Cursor Below (⌥⌘↓)"),

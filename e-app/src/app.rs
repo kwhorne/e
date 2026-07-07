@@ -505,7 +505,16 @@ fn app_view() -> impl IntoView {
         ))
         .style(|s| s.size_full()),
         markdown_preview(state),
-        diff_view(state),
+        // Git diff + free file-comparison share one full-size wrapper (keeps the
+        // top-level stack within floem's tuple arity).
+        stack((diff_view(state), crate::diff_view::file_diff_view(state))).style(move |s| {
+            let s = s.absolute().inset(0.0).size_full();
+            if state.diff_open.get() || state.file_diff.with(|d| d.is_some()) {
+                s
+            } else {
+                s.hide()
+            }
+        }),
         find_bar(state),
         rename_bar(state),
         file_op_prompt(state),

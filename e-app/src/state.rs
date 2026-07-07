@@ -529,6 +529,8 @@ pub struct AppState {
     pub db_explain_issues: RwSignal<Vec<String>>,
     /// The "search all tables" input.
     pub db_search_query: RwSignal<String>,
+    /// File-comparison panel: `(left name, right name, diff lines)` when open.
+    pub file_diff: RwSignal<Option<(String, String, Vec<e_core::git::DiffLine>)>>,
     /// Foreign-key relationships of the active DB (for the schema-relationships
     /// view), and whether that panel is open.
     pub db_erd: RwSignal<Vec<e_db::ForeignKey>>,
@@ -1075,6 +1077,7 @@ impl AppState {
             db_total_rows: RwSignal::new(None),
             db_explain_issues: RwSignal::new(Vec::new()),
             db_search_query: RwSignal::new(String::new()),
+            file_diff: RwSignal::new(None),
             db_erd: RwSignal::new(Vec::new()),
             db_erd_open: RwSignal::new(false),
             db_write_log: RwSignal::new(Vec::new()),
@@ -1388,6 +1391,45 @@ impl AppState {
     pub fn toggle_diff(&self) {
         let cur = self.diff_open.get_untracked();
         self.diff_open.set(!cur);
+    }
+
+    /// Compare the active file against another file picked from disk (DB-free
+    /// diff), shown in the file-comparison panel.
+    pub fn compare_with_file(&self) {
+        let Some(buf) = self.active_buffer() else {
+            Self::notify("Compare: open a file first");
+            return;
+        };
+        let left_name = buf
+            .file
+            .path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "current".into());
+        let left_text = buf.doc.text().to_string();
+        let sig = self.file_diff;
+        let opts = floem::file::FileDialogOptions::new().title("Compare active file with…");
+        floem::action::open_file(opts, move |info| {
+            let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
+                return;
+            };
+            let Ok(right_text) = std::fs::read_to_string(&path) else {
+                Self::notify("Compare: could not read the file");
+                return;
+            };
+            let right_name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            // left = other file (old), right = active file (new).
+            let lines = e_core::git::diff(&right_text, &left_text);
+            sig.set(Some((right_name, left_name.clone(), lines)));
+        });
+    }
+
+    pub fn close_file_diff(&self) {
+        self.file_diff.set(None);
     }
 
     // ---- Local rename --------------------------------------------------

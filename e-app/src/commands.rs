@@ -43,6 +43,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "select-all-occurrences" => state.select_all_occurrences(),
         "add-cursor-above" => state.add_cursor_above(),
         "add-cursor-below" => state.add_cursor_below(),
+        "compare-file" => state.compare_with_file(),
         "completion" => {
             if let Some(id) = state.focused_active_id() {
                 state.request_completion(id);

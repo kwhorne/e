@@ -53,6 +53,15 @@ the status bar (`⨯ errors  ⚠ warnings`).
 The workspace problems panel collects every diagnostic across the project,
 grouped by file. Click an entry to jump straight to the issue.
 
+## Code actions & refactors
+
+Press **`⌘.`** to request code actions from the language server at the cursor or
+selection: quick fixes for diagnostics and refactors such as *extract variable*
+and *extract method*. Pick one from the list to apply its edit. What's offered
+depends on the server (e.g. rust-analyzer is rich here; some servers offer
+little). Symbol rename is **`F2`**; a document **outline** of the active file
+sits in the sidebar.
+
 ## Completion, snippets & signatures
 
 - Even without a language server, built-in completion offers language keywords,

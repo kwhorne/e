@@ -11,17 +11,20 @@ native code editor written in Rust.
 - [Keyboard shortcuts](keyboard-shortcuts.md) — the complete cheat sheet
 
 ### Working with code
-- [Editing](editing.md) — multi-cursor, comments, line operations, auto-closing
+- [Editing](editing.md) — multi-cursor, column editing, comments, line ops,
+  code actions/refactor, compare files, EditorConfig, auto-closing
 - [Find & Replace](find-and-replace.md) — in-file and workspace search
 - [Navigation](navigation.md) — palettes, recent files, go-to-line, history
-- [Languages & LSP](languages-and-lsp.md) — syntax, completion, diagnostics
+- [Languages & LSP](languages-and-lsp.md) — syntax, completion, diagnostics,
+  code actions, outline
 - [Debugging](debugging.md) — breakpoints, stepping, call stack & variables (DAP)
 - [Laravel](laravel.md) — PHP/Laravel-aware features
 - [Inertia / VILT](inertia.md) — Inertia page resolution, props & form contracts
 
 ### Panels & tools
 - [Source Control](source-control.md) — staging, commits, blame, conflicts
-- [Database](database.md) — browse & query MySQL, Postgres, SQLite
+- [Database](database.md) — SQL console, transactional editing, EXPLAIN, import/
+  export, snapshots — for MySQL, PostgreSQL, SQLite & ClickHouse
 - [Terminal](terminal.md) — the integrated terminal
 - [AI Agents](agents.md) — running coding agents in the editor
 - [Agent Workspace Sync](agent-sync.md) — let agents read & drive the editor

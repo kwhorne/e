@@ -58,6 +58,19 @@ and `keybindings`), which is created on first use.
 > `e` after changing it. By default the explorer/Git sidebar is on the left and
 > the agent panel on the right; set them to swap sides.
 
+## EditorConfig
+
+If a project has an [`.editorconfig`](https://editorconfig.org), `e` honours it
+per file, layered over the global settings above:
+
+- `indent_size` / `tab_width` → the buffer's tab width.
+- `trim_trailing_whitespace` → overrides `trim_on_save` for matching files.
+- `insert_final_newline` → ensures a single trailing newline on save.
+
+The usual resolution rules apply: files are read from the file's directory
+upward, stopping at `root = true`, and a nearer file (or a later matching
+section) wins. Globs support `*`, `**`, `?` and `{a,b}`.
+
 ## Keybindings
 
 Every action is a named command; rebind any of them in the `keybindings` section.

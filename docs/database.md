@@ -52,11 +52,14 @@ Results are capped at 1000 rows.
 In the **Data** view of a table that has a primary key:
 
 - **Double-click a cell** to open the edit dialog. Change the value (or tick
-  **NULL**) and press **⌘↵** to save.
+  **NULL**) and press **⌘↵**. Edits are **staged**, not written immediately — see
+  [Environments & safety](#environments--safety) for Submit/Revert.
 - The dialog also offers:
-  - **Delete row** — removes the row (requires a primary key).
+  - **Delete row** — stages a deletion (requires a primary key).
   - **Follow FK →** — if the column is a foreign key, jumps to the referenced
     table filtered to the linked value.
+  - **Related →** — shows rows in other tables that reference this row (reverse
+    foreign keys).
   - **Filter to value** — restricts the current table to rows matching that
     cell (`WHERE col = value` / `IS NULL`), composing with sort and pagination.
     An active filter appears as a chip in the toolbar — click it to clear.
@@ -64,12 +67,8 @@ In the **Data** view of a table that has a primary key:
   (each with a NULL toggle). Columns left blank (and not marked NULL) are
   omitted, so database defaults and auto-increment apply.
 
-### Write protection
-
-Connections that look like **production** — a remote (non-localhost) host, an
-SSH tunnel, or a name containing `prod`/`production`/`live` — default to
-**read-only**, and edits/inserts/deletes are refused. A 🔒 / 🔓 badge on the
-connection shows the state; click it to toggle writes on or off.
+A connection that looks like **production** defaults to **read-only** (a
+🔒 / 🔓 badge toggles it); see below.
 
 ## Inline SQL in PHP
 

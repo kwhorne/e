@@ -31,6 +31,10 @@ token is chosen from the file's language (`//` for Rust/JS/TS/PHP/C/Go,
 
 - **`⌘⇧D`** adds a cursor at the next occurrence of the current word or selection.
   Repeat to keep adding cursors, then edit them all at once.
+- **`⌘⇧L`** selects *all* occurrences at once.
+- **`⌥⌘↑` / `⌥⌘↓`** add a cursor on the line above / below at the same column
+  (column editing).
+- **`⌥`-click** adds a cursor with the mouse; **`⌥`-drag** adds a selection.
 
 ## Auto-closing brackets & quotes
 
@@ -70,6 +74,18 @@ Press **`F2`** to rename every whole-word occurrence of the identifier under the
 caret within the current file. (Project-wide LSP rename depends on the language
 server.)
 
+## Code actions & refactors
+
+Press **`⌘.`** to ask the language server for **code actions** at the cursor or
+selection — quick fixes for diagnostics and refactors like *extract variable* /
+*extract method* — then pick one to apply. Availability depends on the server.
+
+## Compare files
+
+Run **Compare Active File With…** from the command palette (`⌘⇧P`) to pick another
+file and see a line-by-line diff of it against the current file. (For changes vs
+git `HEAD`, use **Show Git Diff vs HEAD**.)
+
 ## Saving
 
 - **`⌘S`** saves the active file.
@@ -77,6 +93,9 @@ server.)
   is formatted via the language server and trailing whitespace is trimmed before
   writing.
 - **Auto-save** writes dirty buffers after a short idle period.
+- **EditorConfig:** if the project has an `.editorconfig`, its `indent_size` /
+  `tab_width` set the buffer's tab width, and `trim_trailing_whitespace` /
+  `insert_final_newline` override the on-save settings for matching files.
 
 See [Configuration](configuration.md) to adjust these.
 

@@ -51,6 +51,8 @@ Examples: `cmd+shift+p`, `ctrl+g`, `alt+up`, `cmd+/`, `f12`, `shift+f12`.
 | `save` / `save-as` | `cmd+s` / `cmd+shift+s` | Save / Save As |
 | `format` | — | Format document |
 | `rename` | `f2` | Rename symbol |
+| `code-actions` | `cmd+.` | Code actions / refactor |
+| `compare-file` | — | Compare active file with… |
 | `comment` | `cmd+/` | Toggle line comment |
 | `move-line-up` / `move-line-down` | `alt+up` / `alt+down` | Move line |
 | `duplicate-line` | `cmd+d` | Duplicate line |
@@ -58,6 +60,7 @@ Examples: `cmd+shift+p`, `ctrl+g`, `alt+up`, `cmd+/`, `f12`, `shift+f12`.
 | `indent` / `outdent` | `cmd+]` / `cmd+[` | Indent / outdent |
 | `select-next-occurrence` | `cmd+shift+d` | Add cursor at next match |
 | `select-all-occurrences` | `cmd+shift+l` | Add cursor at all matches |
+| `add-cursor-above` / `add-cursor-below` | `cmd+alt+up` / `cmd+alt+down` | Column editing |
 | `completion` | `cmd+space` | Trigger completion |
 | `hover` | `f1` | Hover info |
 | `definition` / `references` | `f12` / `shift+f12` | Go to definition / references |
@@ -68,6 +71,9 @@ Examples: `cmd+shift+p`, `ctrl+g`, `alt+up`, `cmd+/`, `f12`, `shift+f12`.
 | `run-task` / `run-test` | `cmd+shift+b` / — | Run task / tests |
 | `source-control` | `cmd+2` | Toggle Source Control |
 | `diff` | — | Git diff vs HEAD |
+| `toggle-database` | `cmd+3` | Toggle Database panel |
+| `run-sql` / `explain-sql` | `cmd+enter` / `cmd+alt+enter` | Run / EXPLAIN SQL under cursor (PHP) |
+| `suggest-index` | — | Ask the agent for an index migration |
 | `toggle-sidebar` | `cmd+1` | Toggle sidebar |
 | `split` | `cmd+\` | Split editor |
 | `toggle-terminal` | `cmd+t` / `ctrl+\`` | Toggle terminal |

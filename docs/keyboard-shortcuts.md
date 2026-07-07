@@ -30,6 +30,7 @@ Every shortcut below is also available by name from the command palette (`⌘⇧
 | `⌘W`     | Close tab / terminal / agent |
 | `⌘D`     | Duplicate line |
 | `⌘⇧D`    | Add cursor at next occurrence |
+| `⌥⌘↑` / `⌥⌘↓` | Add cursor above / below (column editing) |
 | `⌥↑` / `⌥↓` | Move line up / down |
 | `⇧⌥↓`    | Duplicate line down |
 | `⌘⇧K`    | Delete line |
@@ -38,6 +39,7 @@ Every shortcut below is also available by name from the command palette (`⌘⇧
 | `⌘⇧L`    | Select all occurrences |
 | `⌘⌥U`    | Toggle the visual undo tree |
 | `F2`     | Rename symbol |
+| `⌘.`     | Code actions / refactor (quick fixes, extract) |
 | `⌘Space` | Trigger completion |
 | `Tab`    | Expand Emmet abbreviation (HTML/Blade/Vue/Svelte) |
 

@@ -12,6 +12,7 @@ mod app;
 mod breadcrumbs;
 mod builtin_completion;
 mod cmd_palette;
+mod code_action;
 mod codegen;
 mod commands;
 mod completion;

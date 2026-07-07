@@ -531,6 +531,10 @@ pub struct AppState {
     pub db_search_query: RwSignal<String>,
     /// File-comparison panel: `(left name, right name, diff lines)` when open.
     pub file_diff: RwSignal<Option<(String, String, Vec<e_core::git::DiffLine>)>>,
+    /// LSP code actions (quick fixes / refactors) offered at the cursor, and
+    /// whether the picker is open.
+    pub code_actions: RwSignal<Vec<e_lsp::CodeActionItem>>,
+    pub code_actions_open: RwSignal<bool>,
     /// Foreign-key relationships of the active DB (for the schema-relationships
     /// view), and whether that panel is open.
     pub db_erd: RwSignal<Vec<e_db::ForeignKey>>,
@@ -1078,6 +1082,8 @@ impl AppState {
             db_explain_issues: RwSignal::new(Vec::new()),
             db_search_query: RwSignal::new(String::new()),
             file_diff: RwSignal::new(None),
+            code_actions: RwSignal::new(Vec::new()),
+            code_actions_open: RwSignal::new(false),
             db_erd: RwSignal::new(Vec::new()),
             db_erd_open: RwSignal::new(false),
             db_write_log: RwSignal::new(Vec::new()),
@@ -3893,6 +3899,95 @@ impl AppState {
         for (s, en, text) in offs {
             buf.doc
                 .edit_single(Selection::region(s, en), &text, EditType::InsertChars);
+        }
+    }
+
+    /// Request LSP code actions (quick fixes / refactors like extract) at the
+    /// cursor or selection, and open the picker.
+    pub fn request_code_actions(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let (Some(client), Some(uri), Some(editor)) = (
+            self.lsp_for_active(),
+            buf.uri.clone(),
+            buf.editor.get_untracked(),
+        ) else {
+            Self::notify("No language server for this file");
+            return;
+        };
+        let cursor = editor.cursor.get_untracked();
+        let (sl, sc, el, ec) = if let CursorMode::Insert(sel) = cursor.mode.clone() {
+            match sel.regions().first() {
+                Some(r) => {
+                    let (al, ac) = editor.offset_to_line_col(r.min());
+                    let (bl, bc) = editor.offset_to_line_col(r.max());
+                    (al as u32, ac as u32, bl as u32, bc as u32)
+                }
+                None => (0, 0, 0, 0),
+            }
+        } else {
+            let (l, c) = editor.offset_to_line_col(cursor.offset());
+            (l as u32, c as u32, l as u32, c as u32)
+        };
+        let diags = self
+            .diagnostics
+            .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
+        let list_sig = self.code_actions;
+        let open_sig = self.code_actions_open;
+        self.spawn_bg(
+            move || {
+                client
+                    .code_actions(&uri, sl, sc, el, ec, &diags)
+                    .unwrap_or_default()
+            },
+            move |list: Vec<e_lsp::CodeActionItem>| {
+                if list.is_empty() {
+                    Self::notify("No code actions here");
+                    return;
+                }
+                list_sig.set(list);
+                open_sig.set(true);
+            },
+        );
+    }
+
+    /// Apply the chosen code action's edits to the matching open buffers.
+    pub fn apply_code_action(&self, index: usize) {
+        self.code_actions_open.set(false);
+        let Some(item) = self.code_actions.with_untracked(|l| l.get(index).cloned()) else {
+            return;
+        };
+        let buffers = self.buffers.get_untracked();
+        for (uri, edits) in &item.edits {
+            let Some(buf) = buffers
+                .iter()
+                .find(|b| b.uri.as_deref() == Some(uri.as_str()))
+            else {
+                continue; // v1: only edits to already-open files are applied
+            };
+            let Some(editor) = buf.editor.get_untracked() else {
+                continue;
+            };
+            let mut offs: Vec<(usize, usize, String)> = edits
+                .iter()
+                .map(|e| {
+                    let s = editor.offset_of_line_col(
+                        e.range.start.line as usize,
+                        e.range.start.character as usize,
+                    );
+                    let en = editor.offset_of_line_col(
+                        e.range.end.line as usize,
+                        e.range.end.character as usize,
+                    );
+                    (s, en, e.new_text.clone())
+                })
+                .collect();
+            offs.sort_by_key(|b| std::cmp::Reverse(b.0));
+            for (s, en, text) in offs {
+                buf.doc
+                    .edit_single(Selection::region(s, en), &text, EditType::InsertChars);
+            }
         }
     }
 

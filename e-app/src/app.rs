@@ -533,6 +533,7 @@ fn app_view() -> impl IntoView {
             recent_palette(state),
             task_palette(state),
             settings_view(state),
+            crate::code_action::code_action_picker(state),
         ))
         .style(move |s| {
             let s = s.absolute().inset(0.0).size_full();
@@ -541,6 +542,7 @@ fn app_view() -> impl IntoView {
                 || state.recent.open.get()
                 || state.task.open.get()
                 || state.settings_open.get()
+                || state.code_actions_open.get()
             {
                 s
             } else {

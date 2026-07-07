@@ -64,6 +64,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("save", "Save File"),
     ("format", "Format Document"),
     ("rename", "Rename Symbol"),
+    ("code-actions", "Code Actions / Refactor (⌘.)"),
     ("definition", "Go to Definition"),
     ("references", "Find References"),
     ("nav-back", "Go Back"),

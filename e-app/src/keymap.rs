@@ -70,6 +70,7 @@ const DEFAULT: &[(&str, &str)] = &[
     ("alt+shift+down", "duplicate-line"),
     ("f1", "hover"),
     ("f2", "rename"),
+    ("cmd+.", "code-actions"),
     ("f8", "theme"),
     ("f5", "debug"),
     ("f9", "debug-toggle-breakpoint"),

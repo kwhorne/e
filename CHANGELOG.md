@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.2] - 2026-07-04
+## [0.8.2] - 2026-07-07
 
 ### Added
 
@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extract variable/method, …) at the cursor or selection and applies the chosen
   one — where the language server supports it.
 
-## [0.8.1] - 2026-07-04
+## [0.8.1] - 2026-07-06
 
 ### Added
 

@@ -99,6 +99,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
       <key>CFBundleTypeOSTypes</key>
       <array><string>****</string></array>
     </dict>
+    <!-- e is a folder-based editor: accept folders so "Open With e" / dropping a
+         folder on the icon opens it as a project instead of erroring. -->
+    <dict>
+      <key>CFBundleTypeName</key>       <string>Folder</string>
+      <key>CFBundleTypeRole</key>       <string>Editor</string>
+      <key>LSHandlerRank</key>          <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.folder</string>
+        <string>public.directory</string>
+      </array>
+    </dict>
   </array>
 </dict>
 </plist>

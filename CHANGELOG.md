@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-07-08
+
+### Fixed
+
+- **macOS: “cannot open files in the ‘folder’ format”.** The app bundle now
+  declares that it accepts folders, so opening a folder via *Open With → e* (or
+  dropping one on the icon) no longer errors. Opening folders from the CLI
+  (`e <folder>`) and with `⌘O` already worked.
+
 ## [0.8.2] - 2026-07-07
 
 ### Added

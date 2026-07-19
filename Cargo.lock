@@ -1255,6 +1255,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "e-agent"
+version = "0.8.3"
+dependencies = [
+ "anyhow",
+ "crossbeam-channel",
+ "serde_json",
+]
+
+[[package]]
 name = "e-app"
 version = "0.8.3"
 dependencies = [

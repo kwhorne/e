@@ -1,0 +1,17 @@
+{"type":"session","version":3,"id":"11111111-2222-3333-4444-555555555555","timestamp":"2026-07-19T10:00:00.000Z","cwd":"/Users/kh/Code/demo"}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[]}}
+{"type":"message_update","message":{"role":"assistant","content":[{"type":"text","text":"I'll "}]},"assistantMessageEvent":{"type":"text_delta","delta":"I'll "}}
+{"type":"message_update","message":{"role":"assistant","content":[{"type":"text","text":"I'll list the files."}]},"assistantMessageEvent":{"type":"text_delta","delta":"list the files."}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"I'll list the files."},{"type":"tool_use","id":"tool_1","name":"bash"}]}}
+{"type":"turn_end","message":{"role":"assistant","content":[]},"toolResults":[]}
+{"type":"tool_execution_start","toolCallId":"tool_1","toolName":"bash","args":{"command":"ls -1"}}
+{"type":"tool_execution_end","toolCallId":"tool_1","toolName":"bash","result":{"output":"Cargo.toml\nsrc\nREADME.md"},"isError":false}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[]}}
+{"type":"message_update","message":{"role":"assistant","content":[{"type":"text","text":"There are "}]},"assistantMessageEvent":{"type":"text_delta","delta":"There are "}}
+{"type":"message_update","message":{"role":"assistant","content":[{"type":"text","text":"There are three entries: Cargo.toml, src, and README.md."}]},"assistantMessageEvent":{"type":"text_delta","delta":"three entries: Cargo.toml, src, and README.md."}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"There are three entries: Cargo.toml, src, and README.md."}]}}
+{"type":"turn_end","message":{"role":"assistant","content":[]},"toolResults":[]}
+{"type":"agent_end","messages":[]}

@@ -14,7 +14,7 @@ name = "e"
 path = "e-app/src/bin/e.rs"
 
 [workspace]
-members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term"]
+members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term", "e-agent"]
 resolver = "2"
 
 [workspace.package]

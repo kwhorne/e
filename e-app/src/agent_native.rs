@@ -257,12 +257,20 @@ fn composer(state: AppState) -> impl IntoView {
         default_key_handler(editor_sig)(kp, mods)
     })
     .use_doc(doc.clone() as Rc<dyn Document>)
-    .editor_style(|s| theme::editor_style(s).wrap_method(WrapMethod::EditorWidth))
+    // Built-in placeholder (positioned by the editor) + no line-number gutter,
+    // so the caret starts at the left edge instead of being pushed in.
+    .placeholder("Message the agent\u{2026}   @ for context, / for commands")
+    .editor_style(|s| {
+        theme::editor_style(s)
+            .wrap_method(WrapMethod::EditorWidth)
+            .hide_gutter(true)
+    })
     .update(move |_| {
         state.agent_composer.set(doc_for_update.text().to_string());
     })
     .style(|s| {
-        s.width_full()
+        s.flex_grow(1.0)
+            .min_width(0.0)
             .min_height(40.0)
             .max_height(160.0)
             .font_size(13.0)
@@ -278,27 +286,7 @@ fn composer(state: AppState) -> impl IntoView {
         state.agent_focus_pulse.get();
     });
 
-    // Placeholder overlay. `pointer_events_none` so clicks fall through to the
-    // editor beneath — otherwise the box never focuses and takes no input.
-    let placeholder =
-        label(|| "Message the agent\u{2026}   @ for context, / for commands".to_string()).style(
-            move |s| {
-                let s = s
-                    .absolute()
-                    .inset_left(12.0)
-                    .inset_top(10.0)
-                    .font_size(13.0)
-                    .color(theme::fg_dim())
-                    .pointer_events_none();
-                if state.agent_composer.with(|t| t.is_empty()) {
-                    s
-                } else {
-                    s.hide()
-                }
-            },
-        );
-
-    let input = stack((editor, placeholder)).style(|s| s.flex_grow(1.0).min_width(0.0));
+    let input = editor;
 
     // Stop while running, Send otherwise — sits to the *right* of the input on
     // the same row so it never gets pushed below the window edge.

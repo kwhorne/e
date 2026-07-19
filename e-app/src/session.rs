@@ -10,6 +10,8 @@ use serde_json::{json, Value};
 #[derive(Default, Debug)]
 pub struct SessionData {
     pub open: Vec<String>,
+    /// Contents of unsaved "untitled" scratch buffers, so they survive a quit.
+    pub untitled: Vec<String>,
     pub active: Option<String>,
     pub active2: Option<String>,
     pub split: bool,
@@ -48,6 +50,7 @@ pub fn load(root: &Path) -> Option<SessionData> {
     };
     Some(SessionData {
         open: strings("open"),
+        untitled: strings("untitled"),
         active: v.get("active").and_then(|s| s.as_str()).map(String::from),
         active2: v.get("active2").and_then(|s| s.as_str()).map(String::from),
         split: v.get("split").and_then(|b| b.as_bool()).unwrap_or(false),
@@ -63,6 +66,7 @@ pub fn save(root: &Path, data: &SessionData) {
     }
     let value = json!({
         "open": data.open,
+        "untitled": data.untitled,
         "active": data.active,
         "active2": data.active2,
         "split": data.split,

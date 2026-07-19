@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-19
+
+### Fixed
+
+- **Unsaved “untitled” tabs are no longer lost on quit.** Scratch buffers with
+  content are now saved in the workspace session (and backed up periodically
+  while you type) and recreated as untitled tabs the next time you open the
+  project — no more losing notes because you closed the window without saving.
+- **macOS: the app now fully quits when you close the window** — the process and
+  its Dock icon no longer linger (floem defaults to *don't exit on close* on
+  macOS; `e` is single-window, so it exits).
+
 ## [0.9.0] - 2026-07-19
 
 ### Added

@@ -2667,14 +2667,20 @@ impl AppState {
 
     /// Create a new, empty, untitled buffer and focus it.
     pub fn new_untitled(&self) {
+        self.new_untitled_with(String::new());
+    }
+
+    /// Create an untitled buffer seeded with `initial` content and focus it.
+    pub fn new_untitled_with(&self, initial: String) {
         let id = self.next_id.get_untracked();
         self.next_id.set(id + 1);
 
-        let highlights: Highlights = Rc::new(RefCell::new(Vec::new()));
-        let doc = Rc::new(TextDocument::new(self.cx, String::new()));
+        let highlights: Highlights =
+            Rc::new(RefCell::new(highlight_lines(Language::PlainText, &initial)));
+        let doc = Rc::new(TextDocument::new(self.cx, initial.clone()));
         doc.auto_indent.set(true);
-        let dirty = RwSignal::new(false);
-        let undo = Rc::new(RefCell::new(e_core::undotree::UndoTree::new("")));
+        let dirty = RwSignal::new(!initial.is_empty());
+        let undo = Rc::new(RefCell::new(e_core::undotree::UndoTree::new(&initial)));
         let undo_nav = Rc::new(std::cell::Cell::new(false));
 
         {
@@ -3059,6 +3065,9 @@ impl AppState {
         for p in &data.open {
             self.open_path(PathBuf::from(p));
         }
+        for text in &data.untitled {
+            self.new_untitled_with(text.clone());
+        }
         if let Some(a) = data
             .active
             .as_deref()
@@ -3090,8 +3099,17 @@ impl AppState {
             .iter()
             .filter_map(|b| b.file.path.as_ref().map(|p| p.display().to_string()))
             .collect();
+        // Unsaved untitled scratch buffers with content, so a quit doesn't lose
+        // them (they're recreated as untitled tabs on restore).
+        let untitled: Vec<String> = buffers
+            .iter()
+            .filter(|b| b.file.path.is_none())
+            .map(|b| b.doc.text().to_string())
+            .filter(|t| !t.trim().is_empty())
+            .collect();
         let data = SessionData {
             open,
+            untitled,
             active: path_of(self.active.get_untracked()),
             active2: path_of(self.active2.get_untracked()),
             split: self.split.get_untracked(),

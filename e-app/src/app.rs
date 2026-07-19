@@ -9,7 +9,7 @@ use floem::kurbo::Size;
 use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_container, stack, Decorators};
 use floem::window::WindowConfig;
-use floem::{Application, IntoView};
+use floem::{AppConfig, Application, IntoView};
 
 use crate::about::about_dialog;
 use crate::agent_view::agent_panel;
@@ -42,7 +42,10 @@ use crate::update_view::update_notice;
 /// Launch the editor.
 pub fn launch() {
     install_crash_logger();
-    Application::new()
+    // exit_on_close defaults to false on macOS, which leaves the process (and its
+    // Dock icon) alive after the window closes. e is single-window, so quit for
+    // real when the window closes.
+    Application::new_with_config(AppConfig::default().exit_on_close(true))
         .window(
             move |_| app_view(),
             Some(
@@ -313,6 +316,15 @@ fn app_view() -> impl IntoView {
         create_effect(move |_| {
             if ticks.get().is_some() {
                 state.maybe_autosave();
+                // Persist the session while there are unsaved untitled buffers, so
+                // a quit or crash never loses scratch work. (Saved-file changes
+                // are already persisted by the open/active/split effect.)
+                if state
+                    .buffers
+                    .with_untracked(|bs| bs.iter().any(|b| b.file.path.is_none()))
+                {
+                    state.save_session();
+                }
                 state.check_external_changes();
                 if state.log_open.get_untracked() {
                     state.refresh_laravel_log();

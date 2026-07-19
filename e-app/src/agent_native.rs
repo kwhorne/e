@@ -257,9 +257,9 @@ fn composer(state: AppState) -> impl IntoView {
         default_key_handler(editor_sig)(kp, mods)
     })
     .use_doc(doc.clone() as Rc<dyn Document>)
-    // Built-in placeholder (positioned by the editor) + no line-number gutter,
-    // so the caret starts at the left edge instead of being pushed in.
-    .placeholder("Message the agent\u{2026}   @ for context, / for commands")
+    // No line-number gutter, so the caret and text start at the left padding.
+    // (We draw our own placeholder overlay below rather than the built-in one,
+    // whose phantom text pushes the empty caret away from the left edge.)
     .editor_style(|s| {
         theme::editor_style(s)
             .wrap_method(WrapMethod::EditorWidth)
@@ -269,8 +269,7 @@ fn composer(state: AppState) -> impl IntoView {
         state.agent_composer.set(doc_for_update.text().to_string());
     })
     .style(|s| {
-        s.flex_grow(1.0)
-            .min_width(0.0)
+        s.width_full()
             .min_height(40.0)
             .max_height(160.0)
             .font_size(13.0)
@@ -286,7 +285,27 @@ fn composer(state: AppState) -> impl IntoView {
         state.agent_focus_pulse.get();
     });
 
-    let input = editor;
+    // Placeholder overlay, drawn on top but click-through so the editor still
+    // receives focus. Aligned with the editor's left text padding.
+    let placeholder =
+        label(|| "Message the agent\u{2026}   @ for context, / for commands".to_string()).style(
+            move |s| {
+                let s = s
+                    .absolute()
+                    .inset_left(10.0)
+                    .inset_top(10.0)
+                    .font_size(13.0)
+                    .color(theme::fg_dim())
+                    .pointer_events_none();
+                if state.agent_composer.with(|t| t.is_empty()) {
+                    s
+                } else {
+                    s.hide()
+                }
+            },
+        );
+
+    let input = stack((editor, placeholder)).style(|s| s.flex_grow(1.0).min_width(0.0));
 
     // Stop while running, Send otherwise — sits to the *right* of the input on
     // the same row so it never gets pushed below the window edge.

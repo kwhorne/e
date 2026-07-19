@@ -17,9 +17,7 @@ use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::text::{Document, WrapMethod};
 use floem::views::editor::text_document::TextDocument;
-use floem::views::{
-    container, dyn_stack, empty, label, scroll, stack, text_editor_keys, Decorators,
-};
+use floem::views::{dyn_stack, empty, label, scroll, stack, text_editor_keys, Decorators};
 use floem::IntoView;
 
 use crate::app::handle_shortcut;
@@ -265,20 +263,33 @@ fn composer(state: AppState) -> impl IntoView {
     })
     .style(|s| {
         s.width_full()
+            .min_height(40.0)
+            .max_height(160.0)
             .font_size(13.0)
             .padding_horiz(10.0)
-            .padding_vert(6.0)
+            .padding_vert(8.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg_panel())
+    })
+    // Grab focus when the panel opens / the agent (re)starts.
+    .request_focus(move || {
+        state.agent_focus_pulse.get();
     });
 
+    // Placeholder overlay. `pointer_events_none` so clicks fall through to the
+    // editor beneath — otherwise the box never focuses and takes no input.
     let placeholder =
         label(|| "Message the agent\u{2026}   @ for context, / for commands".to_string()).style(
             move |s| {
                 let s = s
                     .absolute()
                     .inset_left(12.0)
-                    .inset_top(9.0)
+                    .inset_top(10.0)
                     .font_size(13.0)
-                    .color(theme::fg_dim());
+                    .color(theme::fg_dim())
+                    .pointer_events_none();
                 if state.agent_composer.with(|t| t.is_empty()) {
                     s
                 } else {
@@ -287,16 +298,7 @@ fn composer(state: AppState) -> impl IntoView {
             },
         );
 
-    let input = container(stack((editor, placeholder))).style(|s| {
-        s.flex_grow(1.0)
-            .min_width(0.0)
-            .min_height(40.0)
-            .max_height(160.0)
-            .border(1.0)
-            .border_color(theme::border())
-            .border_radius(10.0)
-            .background(theme::bg_panel())
-    });
+    let input = stack((editor, placeholder)).style(|s| s.flex_grow(1.0).min_width(0.0));
 
     // Stop while running, Send otherwise — sits to the *right* of the input on
     // the same row so it never gets pushed below the window edge.

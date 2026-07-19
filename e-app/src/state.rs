@@ -2504,9 +2504,13 @@ impl AppState {
         let text = text.trim().to_string();
         floem::action::exec_after(std::time::Duration::ZERO, move |_| {
             st.send_native_prompt(&text);
+            // Clear via InsertChars (replace-all with empty), matching the SQL
+            // console. EditType::Delete here left the buffer's revision history
+            // inconsistent and the *next* keystroke aborted in xi-rope's
+            // Subset::transform (mk_new_rev).
             let len = doc.text().len();
             if len > 0 {
-                doc.edit_single(Selection::region(0, len), "", EditType::Delete);
+                doc.edit_single(Selection::region(0, len), "", EditType::InsertChars);
             }
         });
     }

@@ -11,7 +11,7 @@ use std::rc::Rc;
 use e_agent::{ChatItem, ToolStatus};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
-use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{create_effect, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
@@ -245,7 +245,7 @@ fn composer(state: AppState) -> impl IntoView {
     let doc = Rc::new(TextDocument::new(state.cx, String::new()));
     state.agent_composer_doc.set(Some(doc.clone()));
 
-    let input = text_editor_keys("", move |editor_sig, kp, mods| {
+    let te = text_editor_keys("", move |editor_sig, kp, mods| {
         if let KeyInput::Keyboard(key, _) = &kp.key {
             if matches!(key, Key::Named(NamedKey::Enter))
                 && !mods.shift()
@@ -280,11 +280,19 @@ fn composer(state: AppState) -> impl IntoView {
             .border_color(theme::border())
             .border_radius(10.0)
             .background(theme::bg_panel())
-    })
-    // Focus the field when the panel opens / the agent (re)starts.
-    .request_focus(move || {
-        state.agent_focus_pulse.get();
     });
+
+    // Focus the field when the panel opens / the agent (re)starts. The focusable
+    // is the editor's *inner* content view, so request focus on its view id
+    // rather than the wrapper (a plain .request_focus() focuses the wrong view).
+    let ed = te.editor().clone();
+    create_effect(move |_| {
+        state.agent_focus_pulse.get();
+        if let Some(vid) = ed.editor_view_id.get_untracked() {
+            vid.request_focus();
+        }
+    });
+    let input = te;
 
     // Stop while running, Send otherwise — sits to the *right* of the input on
     // the same row so it never gets pushed below the window edge.

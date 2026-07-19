@@ -130,10 +130,10 @@ pub fn parse(text: &str) -> Vec<Block> {
 /// Heading level used by the renderer (1..=6).
 pub fn heading_size(level: u8) -> f32 {
     match level {
-        1 => 28.0,
-        2 => 23.0,
-        3 => 19.0,
-        4 => 16.0,
+        1 => 24.0,
+        2 => 20.0,
+        3 => 17.0,
+        4 => 15.0,
         5 => 14.0,
         _ => 13.0,
     }

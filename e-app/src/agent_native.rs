@@ -228,8 +228,9 @@ fn composer(state: AppState) -> impl IntoView {
         })
         .style(|s| {
             theme::input_colors(s)
-                .width_full()
-                .height(44.0)
+                .flex_grow(1.0)
+                .min_width(0.0)
+                .height(40.0)
                 .padding_horiz(12.0)
                 .border(1.0)
                 .border_color(theme::border())
@@ -237,24 +238,13 @@ fn composer(state: AppState) -> impl IntoView {
                 .background(theme::bg_panel())
         });
 
-    // The active agent's name, shown bottom-left like Zed's model picker.
-    let model = label(move || {
-        let id = state.agent_current.get();
-        state
-            .agents
-            .with(|l| l.iter().find(|a| a.id == id).map(|a| a.name.clone()))
-            .unwrap_or_else(|| "Agent".to_string())
-    })
-    .style(|s| s.font_size(12.0).color(theme::fg_dim()).items_center());
-
-    let spacer = empty().style(|s| s.flex_grow(1.0));
-
-    // Stop while running, Send otherwise.
+    // Stop while running, Send otherwise — sits to the *right* of the input on
+    // the same row so it never gets pushed below the window edge.
     let action_btn = label(move || {
         if state.agent_chat.with(|c| c.running) {
-            "\u{25a0}  Stop".to_string()
+            "Stop".to_string()
         } else {
-            "Send  \u{2191}".to_string()
+            "Send".to_string()
         }
     })
     .style(move |s| {
@@ -264,12 +254,13 @@ fn composer(state: AppState) -> impl IntoView {
         } else {
             theme::accent()
         };
-        s.height(28.0)
+        s.height(40.0)
             .items_center()
             .justify_center()
-            .padding_horiz(12.0)
-            .border_radius(6.0)
-            .font_size(12.0)
+            .padding_horiz(16.0)
+            .margin_left(8.0)
+            .border_radius(10.0)
+            .font_size(13.0)
             .color(Color::WHITE)
             .background(bg)
             .cursor(floem::style::CursorStyle::Pointer)
@@ -290,11 +281,8 @@ fn composer(state: AppState) -> impl IntoView {
         }
     });
 
-    let toolbar =
-        stack((model, spacer, action_btn)).style(|s| s.items_center().width_full().margin_top(8.0));
-
-    stack((input, toolbar)).style(|s| {
-        s.flex_col()
+    stack((input, action_btn)).style(|s| {
+        s.items_center()
             .width_full()
             .padding(10.0)
             .border_top(1.0)

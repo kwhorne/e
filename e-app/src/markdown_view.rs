@@ -4,7 +4,9 @@ use std::ops::Range;
 
 use floem::peniko::Color;
 use floem::reactive::SignalGet;
-use floem::text::{Attrs, AttrsList, FamilyOwned, Style as TextStyle, TextLayout, Weight};
+use floem::text::{
+    Attrs, AttrsList, FamilyOwned, LineHeightValue, Style as TextStyle, TextLayout, Weight,
+};
 use floem::views::{dyn_stack, empty, rich_text, scroll, Decorators};
 use floem::IntoView;
 
@@ -23,6 +25,7 @@ fn layout(spans: &[Span], size: f32, base_bold: bool) -> TextLayout {
     let mut base = Attrs::new()
         .family(&sans)
         .font_size(size)
+        .line_height(LineHeightValue::Normal(1.45))
         .color(theme::fg());
     if base_bold {
         base = base.weight(Weight::BOLD);
@@ -33,7 +36,9 @@ fn layout(spans: &[Span], size: f32, base_bold: bool) -> TextLayout {
     for sp in spans {
         let start = text.len();
         text.push_str(&sp.text);
-        let mut a = Attrs::new().font_size(size);
+        let mut a = Attrs::new()
+            .font_size(size)
+            .line_height(LineHeightValue::Normal(1.45));
         if sp.code {
             a = a.family(&mono).color(CODE_COLOR);
         } else {
@@ -102,6 +107,7 @@ fn block_view(block: Block) -> impl IntoView {
             let attrs = Attrs::new()
                 .family(&mono)
                 .font_size(13.0)
+                .line_height(LineHeightValue::Normal(1.4))
                 .color(theme::fg());
             let mut tl = TextLayout::new();
             tl.set_text(&code, AttrsList::new(attrs), None);

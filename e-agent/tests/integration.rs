@@ -31,10 +31,7 @@ fn rpc_spawn_and_abort_roundtrip() {
         match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(ev) => {
                 eprintln!("event: {ev:?}");
-                if matches!(
-                    ev,
-                    AgentEvent::Session { .. } | AgentEvent::Response { .. }
-                ) {
+                if matches!(ev, AgentEvent::Session { .. } | AgentEvent::Response { .. }) {
                     saw_structured = true;
                     break;
                 }

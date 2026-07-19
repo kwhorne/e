@@ -19,6 +19,8 @@ pub struct Settings {
     pub sticky_scroll: bool,
     /// Inline AI completion ("ghost text") via a local Ollama code model.
     pub ai_completion: bool,
+    /// Use the native chat panel (elyra RPC) instead of the agent's terminal UI.
+    pub native_agent: bool,
     /// Laravel-aware completion, hover and navigation (auto-enabled in Laravel
     /// projects; set to false to turn off).
     pub laravel: bool,
@@ -48,6 +50,7 @@ impl Default for Settings {
             inlay_hints: true,
             sticky_scroll: true,
             ai_completion: false,
+            native_agent: true,
             laravel: true,
             xdebug: false,
             app_url: String::new(),
@@ -97,6 +100,7 @@ pub fn load_settings() -> Settings {
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         ai_completion: bool_of("ai_completion", d.ai_completion),
+        native_agent: bool_of("native_agent", d.native_agent),
         laravel: bool_of("laravel", d.laravel),
         xdebug: bool_of("xdebug", d.xdebug),
         app_url: v

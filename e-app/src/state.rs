@@ -4,10 +4,10 @@
 //! be handed to as many view closures as needed without cloning ceremony.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 
@@ -22,6 +22,7 @@ use floem::views::editor::text_document::TextDocument;
 use floem::views::editor::Editor;
 use lsp_types::{Diagnostic, PublishDiagnosticsParams};
 
+use e_agent::{AgentClient, ChatState, Streaming};
 use e_core::buffer::{self, FileInfo};
 use e_core::git;
 use e_core::language::Language;
@@ -478,6 +479,21 @@ pub struct AppState {
     pub agent_focused: RwSignal<bool>,
     /// Pulsed on open so the panel grabs focus without re-grabbing on close.
     pub agent_focus_pulse: RwSignal<u64>,
+
+    // ---- Native agent (elyra RPC) --------------------------------------
+    /// The running native RPC client, if started.
+    pub agent_native_client: RwSignal<Option<Rc<e_agent::AgentClient>>>,
+    /// The folded conversation rendered by the native chat panel.
+    pub agent_chat: RwSignal<e_agent::ChatState>,
+    /// Current text in the native composer.
+    pub agent_composer: RwSignal<String>,
+    /// Shared queue of decoded events (fed by the reader-forwarder thread,
+    /// drained on the UI thread). Never coalesced, so no delta is lost.
+    pub agent_events: RwSignal<Arc<Mutex<VecDeque<e_agent::AgentEvent>>>>,
+    /// Wake sender cloned into each forwarder thread to nudge the UI drain.
+    pub(crate) agent_wake_tx: RwSignal<std::sync::mpsc::Sender<()>>,
+    /// Taken once at startup to build the UI-thread drain bridge.
+    pub agent_wake_rx: RwSignal<Option<std::sync::mpsc::Receiver<()>>>,
 
     /// Draggable panel widths (pixels).
     pub sidebar_width: RwSignal<f64>,
@@ -1001,6 +1017,7 @@ impl AppState {
     pub fn new(cx: Scope, root: PathBuf) -> Self {
         let (tx, rx) = channel();
         let (term_tx, term_rx) = channel();
+        let (agent_wake_tx, agent_wake_rx) = channel::<()>();
         Self {
             cx,
             roots: RwSignal::new(vec![root.clone()]),
@@ -1053,6 +1070,12 @@ impl AppState {
             agent_term: RwSignal::new(None),
             agent_focused: RwSignal::new(false),
             agent_focus_pulse: RwSignal::new(0),
+            agent_native_client: RwSignal::new(None),
+            agent_chat: RwSignal::new(e_agent::ChatState::new()),
+            agent_composer: RwSignal::new(String::new()),
+            agent_events: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
+            agent_wake_tx: RwSignal::new(agent_wake_tx),
+            agent_wake_rx: RwSignal::new(Some(agent_wake_rx)),
             sidebar_width: RwSignal::new(240.0),
             agent_width: RwSignal::new(460.0),
             db_width: RwSignal::new(280.0),
@@ -2370,11 +2393,105 @@ impl AppState {
             self.agent_open.set(false);
         } else {
             self.agent_open.set(true);
-            if self.agent_term.get_untracked().is_none() {
+            if self.use_native_agent() {
+                if self.agent_native_client.get_untracked().is_none() {
+                    self.start_native_agent();
+                }
+            } else if self.agent_term.get_untracked().is_none() {
                 self.start_agent();
             }
             self.agent_focus_pulse.update(|x| *x += 1);
         }
+    }
+
+    /// Whether the current agent should use the native (elyra RPC) chat panel
+    /// rather than a terminal PTY. Only elyra speaks the RPC protocol today.
+    pub fn use_native_agent(&self) -> bool {
+        if !self.settings.get_untracked().native_agent {
+            return false;
+        }
+        let Some(agent) = self.current_agent() else {
+            return false;
+        };
+        let program = agent.command.split_whitespace().next().unwrap_or("");
+        agent.id == "elyra" || program == "elyra" || program.rsplit('/').next() == Some("elyra")
+    }
+
+    /// Spawn `elyra --mode rpc` and wire its event stream into the chat state.
+    /// The reader thread pushes decoded events onto a shared queue and nudges a
+    /// wake channel; the UI-thread drain (installed in `app`) applies them.
+    pub fn start_native_agent(&self) {
+        let Some(agent) = self.current_agent() else {
+            return;
+        };
+        let cwd = if agent.cwd.trim().is_empty() {
+            self.root.get_untracked()
+        } else {
+            PathBuf::from(&agent.cwd)
+        };
+        let mut parts = agent.command.split_whitespace();
+        let program = parts.next().unwrap_or("elyra").to_string();
+        let extra: Vec<String> = parts.map(str::to_string).collect();
+
+        match AgentClient::spawn(&program, &extra, &cwd, &[]) {
+            Ok((client, rx)) => {
+                self.agent_chat.set(ChatState::new());
+                let queue = self.agent_events.get_untracked();
+                let wake = self.agent_wake_tx.get_untracked();
+                std::thread::Builder::new()
+                    .name("e-agent-forward".into())
+                    .spawn(move || {
+                        while let Ok(ev) = rx.recv() {
+                            if let Ok(mut q) = queue.lock() {
+                                q.push_back(ev);
+                            }
+                            if wake.send(()).is_err() {
+                                break;
+                            }
+                        }
+                    })
+                    .ok();
+                self.agent_native_client.set(Some(Rc::new(client)));
+            }
+            Err(e) => eprintln!("e: native agent '{program}' failed: {e:#}"),
+        }
+    }
+
+    /// Send the composer text as a prompt (starting the agent if needed). While
+    /// the agent is streaming, the message is steered rather than rejected.
+    pub fn send_native_prompt(&self, text: &str) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        if self.agent_native_client.get_untracked().is_none() {
+            self.start_native_agent();
+        }
+        let Some(client) = self.agent_native_client.get_untracked() else {
+            return;
+        };
+        let busy = self.agent_chat.with_untracked(|c| c.running);
+        self.agent_chat.update(|c| c.push_user(text));
+        let streaming = busy.then_some(Streaming::Steer);
+        if let Err(e) = client.prompt(text, streaming) {
+            eprintln!("e: agent prompt failed: {e:#}");
+        }
+        self.agent_composer.set(String::new());
+    }
+
+    /// Abort the current native agent turn.
+    pub fn native_agent_abort(&self) {
+        if let Some(client) = self.agent_native_client.get_untracked() {
+            let _ = client.abort();
+        }
+    }
+
+    /// Restart the native agent in a fresh session.
+    pub fn native_agent_new_session(&self) {
+        if let Some(client) = self.agent_native_client.get_untracked() {
+            let _ = client.new_session();
+        }
+        self.agent_chat.set(ChatState::new());
     }
 
     /// (Re)start the selected agent in a fresh PTY.
@@ -2402,14 +2519,31 @@ impl AppState {
     pub fn select_agent(&self, id: &str) {
         self.agent_current.set(id.to_string());
         config::save_default_agent(id);
+        // Tear down whichever backend was running for the previous agent.
+        if let Some(client) = self.agent_native_client.get_untracked() {
+            client.shutdown();
+        }
+        self.agent_native_client.set(None);
         self.agent_term.set(None);
-        self.start_agent();
+        if self.use_native_agent() {
+            self.start_native_agent();
+        } else {
+            self.start_agent();
+        }
         self.agent_focus_pulse.update(|x| *x += 1);
     }
 
     pub fn restart_agent(&self) {
-        self.agent_term.set(None);
-        self.start_agent();
+        if self.use_native_agent() {
+            if let Some(client) = self.agent_native_client.get_untracked() {
+                client.shutdown();
+            }
+            self.agent_native_client.set(None);
+            self.start_native_agent();
+        } else {
+            self.agent_term.set(None);
+            self.start_agent();
+        }
         self.agent_focus_pulse.update(|x| *x += 1);
     }
 
@@ -2422,6 +2556,14 @@ impl AppState {
     /// Send a prompt to the AI agent panel (opening/starting it if needed) and
     /// focus it. Used by "Explain with agent" / "Fix with AI" affordances.
     pub fn send_to_agent(&self, prompt: &str) {
+        if self.use_native_agent() {
+            if !self.agent_open.get_untracked() {
+                self.agent_open.set(true);
+            }
+            self.send_native_prompt(prompt);
+            self.agent_focus_pulse.update(|x| *x += 1);
+            return;
+        }
         let just_started = self.agent_term.get_untracked().is_none();
         if !self.agent_open.get_untracked() {
             self.agent_open.set(true);

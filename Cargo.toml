@@ -39,6 +39,7 @@ lsp-types   = "0.95.1"
 crossbeam-channel = "0.5"
 self_update = { version = "0.42", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"] }
 regex       = "1"
+e-agent     = { path = "./e-agent" }
 e-core      = { path = "./e-core" }
 e-db        = { path = "./e-db" }
 e-dap       = { path = "./e-dap" }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Native agent chat panel (⌘L).** Elyra now runs headless over its structured
+  RPC protocol (`elyra --mode rpc`) and the conversation is rendered with native
+  views — streaming assistant text, tool-call cards with a result preview, and a
+  composer — instead of the agent's terminal UI inside a PTY. This removes the
+  per-frame ANSI re-parse that made the panel feel laggy, and adds a real Stop
+  button (abort), steering while the agent runs, and *New Chat*. Other agents
+  (Claude Code, Codex) keep the terminal panel. Toggle with the `native_agent`
+  setting (default on).
+
 ## [0.8.3] - 2026-07-08
 
 ### Fixed

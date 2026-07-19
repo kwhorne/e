@@ -206,6 +206,31 @@ fn app_view() -> impl IntoView {
         });
     }
 
+    // Bridge the native agent's event stream into the chat state. The wake
+    // channel only notifies; we drain the whole shared queue on each wake so no
+    // streaming delta is ever coalesced away.
+    if let Some(wake_rx) = state.agent_wake_rx.try_update(|opt| opt.take()).flatten() {
+        let notif = create_signal_from_channel(wake_rx);
+        let queue = state.agent_events.get_untracked();
+        let chat = state.agent_chat;
+        create_effect(move |_| {
+            if notif.get().is_none() {
+                return;
+            }
+            let drained: Vec<_> = match queue.lock() {
+                Ok(mut q) => q.drain(..).collect(),
+                Err(_) => return,
+            };
+            if !drained.is_empty() {
+                chat.update(|c| {
+                    for ev in drained {
+                        c.apply(ev);
+                    }
+                });
+            }
+        });
+    }
+
     // Scrape Laravel project data (routes/views/config/env) in the background.
     state.load_laravel();
     state.load_databases();

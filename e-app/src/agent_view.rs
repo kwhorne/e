@@ -8,9 +8,10 @@ use floem::menu::{Menu, MenuItem};
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
-use floem::views::{empty, label, rich_text, scroll, stack, Decorators};
+use floem::views::{dyn_container, empty, label, rich_text, scroll, stack, Decorators};
 use floem::IntoView;
 
+use crate::agent_native::agent_native_body;
 use crate::app::handle_shortcut;
 use crate::state::AppState;
 use crate::terminal_view::{char_size, key_to_bytes};
@@ -46,6 +47,7 @@ fn agent_header(state: AppState) -> impl IntoView {
             );
         }
         menu.separator()
+            .entry(MenuItem::new("New Chat").action(move || state.native_agent_new_session()))
             .entry(MenuItem::new("Restart Agent").action(move || state.restart_agent()))
             .entry(MenuItem::new("Settings…  (⌘,)").action(move || state.open_settings()))
     });
@@ -169,8 +171,42 @@ fn agent_body(state: AppState) -> impl IntoView {
         })
 }
 
+/// True when the currently-selected agent should render as the native chat
+/// panel (elyra RPC) rather than a terminal PTY. Reactive: recomputes when the
+/// setting or the selected agent changes.
+fn native_selected(state: AppState) -> bool {
+    if !state.settings.with(|s| s.native_agent) {
+        return false;
+    }
+    let id = state.agent_current.get();
+    let program = state
+        .agents
+        .with(|l| {
+            l.iter().find(|a| a.id == id).map(|a| {
+                a.command
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
+        })
+        .unwrap_or_default();
+    id == "elyra" || program == "elyra" || program.rsplit('/').next() == Some("elyra")
+}
+
 pub fn agent_panel(state: AppState) -> impl IntoView {
-    stack((agent_header(state), agent_body(state))).style(move |s| {
+    let body = dyn_container(
+        move || native_selected(state),
+        move |native| {
+            if native {
+                agent_native_body(state).into_any()
+            } else {
+                agent_body(state).into_any()
+            }
+        },
+    )
+    .style(|s| s.flex_col().size_full());
+    stack((agent_header(state), body)).style(move |s| {
         let s = s
             .flex_col()
             .width(state.agent_width.get())

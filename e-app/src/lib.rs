@@ -5,6 +5,7 @@
 //! name, language and dirty state. Everything else grows from here.
 
 mod about;
+mod agent_native;
 mod agent_sync;
 mod agent_ui;
 mod agent_view;

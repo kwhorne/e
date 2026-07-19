@@ -1269,6 +1269,7 @@ version = "0.8.3"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
+ "e-agent",
  "e-core",
  "e-dap",
  "e-db",

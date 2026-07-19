@@ -6,21 +6,12 @@
 //! This is what makes ⌘L feel responsive: we append only the changed text rather
 //! than re-parsing a whole ANSI grid every frame.
 
-use std::rc::Rc;
-
 use e_agent::{ChatItem, ToolStatus};
-use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
-use floem::views::editor::command::CommandExecuted;
-use floem::views::editor::keypress::default_key_handler;
-use floem::views::editor::keypress::key::KeyInput;
-use floem::views::editor::text::{Document, WrapMethod};
-use floem::views::editor::text_document::TextDocument;
-use floem::views::{dyn_stack, empty, label, scroll, stack, text_editor_keys, Decorators};
+use floem::views::{dyn_stack, empty, label, scroll, stack, text_input, Decorators};
 use floem::IntoView;
 
-use crate::app::handle_shortcut;
 use crate::state::AppState;
 use crate::theme;
 
@@ -229,88 +220,37 @@ fn transcript(state: AppState) -> impl IntoView {
 /// styled after Zed's agent panel so it sits comfortably above the window edge
 /// instead of being flush at the very bottom.
 fn composer(state: AppState) -> impl IntoView {
-    // A real multi-line editor (word-wrapped) so long prompts wrap and stay
-    // visible instead of scrolling out of a single-line box. Enter sends;
-    // Shift+Enter inserts a newline.
-    let doc = Rc::new(TextDocument::new(
-        state.cx,
-        state.agent_composer.get_untracked(),
-    ));
-    state.agent_composer_doc.set(Some(doc.clone()));
-    let doc_for_update = doc.clone();
-
-    let editor = text_editor_keys("", move |editor_sig, kp, mods| {
-        if let KeyInput::Keyboard(key, _) = &kp.key {
-            if matches!(key, Key::Named(NamedKey::Enter))
-                && !mods.shift()
-                && !mods.meta()
-                && !mods.control()
-                && !mods.alt()
-            {
-                // Defer out of the keydown: send_composer edits the document,
-                // and mutating it while we're inside the editor's own key
-                // handler triggers a reentrant-borrow abort.
-                floem::action::exec_after(std::time::Duration::ZERO, move |_| {
-                    state.send_composer();
-                });
-                return CommandExecuted::Yes;
-            }
-            if handle_shortcut(state, key, mods) {
-                return CommandExecuted::Yes;
-            }
+    // Send the current composer text, deferred out of the current event so we
+    // never mutate signals/documents reentrantly from inside a key handler.
+    let send = move || {
+        let t = state.agent_composer.get_untracked();
+        if t.trim().is_empty() {
+            return;
         }
-        default_key_handler(editor_sig)(kp, mods)
-    })
-    .use_doc(doc.clone() as Rc<dyn Document>)
-    // No line-number gutter, so the caret and text start at the left padding.
-    // (We draw our own placeholder overlay below rather than the built-in one,
-    // whose phantom text pushes the empty caret away from the left edge.)
-    .editor_style(|s| {
-        theme::editor_style(s)
-            .wrap_method(WrapMethod::EditorWidth)
-            .hide_gutter(true)
-    })
-    .update(move |_| {
-        state.agent_composer.set(doc_for_update.text().to_string());
-    })
-    .style(|s| {
-        s.width_full()
-            .min_height(40.0)
-            .max_height(160.0)
-            .font_size(13.0)
-            .padding_horiz(10.0)
-            .padding_vert(8.0)
-            .border(1.0)
-            .border_color(theme::border())
-            .border_radius(10.0)
-            .background(theme::bg_panel())
-    })
-    // Grab focus when the panel opens / the agent (re)starts.
-    .request_focus(move || {
-        state.agent_focus_pulse.get();
-    });
+        floem::action::exec_after(std::time::Duration::ZERO, move |_| {
+            state.send_native_prompt(t.trim());
+            state.agent_composer.set(String::new());
+        });
+    };
 
-    // Placeholder overlay, drawn on top but click-through so the editor still
-    // receives focus. Aligned with the editor's left text padding.
-    let placeholder =
-        label(|| "Message the agent\u{2026}   @ for context, / for commands".to_string()).style(
-            move |s| {
-                let s = s
-                    .absolute()
-                    .inset_left(10.0)
-                    .inset_top(10.0)
-                    .font_size(13.0)
-                    .color(theme::fg_dim())
-                    .pointer_events_none();
-                if state.agent_composer.with(|t| t.is_empty()) {
-                    s
-                } else {
-                    s.hide()
-                }
-            },
-        );
-
-    let input = stack((editor, placeholder)).style(|s| s.flex_grow(1.0).min_width(0.0));
+    let input = text_input(state.agent_composer)
+        .placeholder("Message the agent\u{2026}   @ for context, / for commands")
+        .on_enter(send)
+        .style(|s| {
+            theme::input_colors(s)
+                .flex_grow(1.0)
+                .min_width(0.0)
+                .height(40.0)
+                .padding_horiz(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(10.0)
+                .background(theme::bg_panel())
+        })
+        // Focus the field when the panel opens / the agent (re)starts.
+        .request_focus(move || {
+            state.agent_focus_pulse.get();
+        });
 
     // Stop while running, Send otherwise — sits to the *right* of the input on
     // the same row so it never gets pushed below the window edge.
@@ -350,7 +290,7 @@ fn composer(state: AppState) -> impl IntoView {
         if state.agent_chat.with_untracked(|c| c.running) {
             state.native_agent_abort();
         } else {
-            state.send_composer();
+            send();
         }
     });
 

@@ -41,6 +41,7 @@ use crate::update_view::update_notice;
 
 /// Launch the editor.
 pub fn launch() {
+    install_crash_logger();
     Application::new()
         .window(
             move |_| app_view(),
@@ -51,6 +52,33 @@ pub fn launch() {
             ),
         )
         .run();
+}
+
+/// Append panics (message + location + backtrace) to `~/.config/e/crash.log`
+/// before the default hook runs. GUI apps don't surface stderr, so this is how
+/// we recover the actual panic behind a macOS "quit unexpectedly" abort.
+fn install_crash_logger() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(home) = std::env::var_os("HOME") {
+            let path = std::path::PathBuf::from(home)
+                .join(".config")
+                .join("e")
+                .join("crash.log");
+            let bt = std::backtrace::Backtrace::force_capture();
+            let when = std::time::SystemTime::now();
+            let entry = format!("\n===== panic @ {when:?} =====\n{info}\n{bt}\n");
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                let _ = f.write_all(entry.as_bytes());
+            }
+        }
+        default_hook(info);
+    }));
 }
 
 /// Central keyboard shortcut dispatch. Returns true if the key was handled.

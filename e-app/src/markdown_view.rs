@@ -127,6 +127,18 @@ fn block_view(block: Block) -> impl IntoView {
     }
 }
 
+/// Render an arbitrary markdown string as a column of block views. Shared by the
+/// `.md` reading preview and the native agent chat panel.
+pub fn markdown_body(text: &str) -> impl IntoView {
+    let blocks = markdown::parse(text);
+    dyn_stack(
+        move || blocks.clone().into_iter().enumerate().collect::<Vec<_>>(),
+        |(i, _)| *i,
+        move |(_, block)| block_view(block),
+    )
+    .style(|s| s.flex_col().width_full().gap(8.0))
+}
+
 fn is_markdown(state: AppState) -> bool {
     state
         .active_buffer()

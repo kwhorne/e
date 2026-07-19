@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-frame ANSI re-parse that made the panel feel laggy, and adds a real Stop
   button (abort), steering while the agent runs, and *New Chat*. Other agents
   (Claude Code, Codex) keep the terminal panel. Toggle with the `native_agent`
-  setting (default on).
+  setting (default on). Assistant replies render as formatted **markdown**
+  (headings, lists, inline code, code blocks, links), and the composer is a
+  padded box with a model + Send/Stop toolbar rather than a bar pinned to the
+  window edge.
 
 ## [0.8.3] - 2026-07-08
 

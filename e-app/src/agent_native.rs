@@ -79,19 +79,23 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
             })
             .into_any(),
 
-        Some(ChatItem::Assistant { .. }) => label(move || {
-            let mut t = item_text(state, i);
-            if is_streaming(state, i) {
-                t.push('\u{258d}'); // ▍ caret while streaming
-            }
-            t
-        })
-        .style(|s| {
-            s.padding_horiz(12.0)
-                .padding_vert(6.0)
-                .color(theme::fg())
-                .width_full()
-        })
+        Some(ChatItem::Assistant { .. }) => floem::views::dyn_container(
+            // While streaming, show plain text (cheap per-delta rebuild); once the
+            // message is complete, render it as formatted markdown like Zed.
+            move || (is_streaming(state, i), item_text(state, i)),
+            move |(streaming, text)| {
+                if streaming {
+                    label(move || format!("{text}\u{258d}"))
+                        .style(|s| s.color(theme::fg()).width_full())
+                        .into_any()
+                } else {
+                    crate::markdown_view::markdown_body(&text)
+                        .style(|s| s.width_full())
+                        .into_any()
+                }
+            },
+        )
+        .style(|s| s.padding_horiz(14.0).padding_vert(6.0).width_full())
         .into_any(),
 
         Some(ChatItem::Reasoning { .. }) => label(move || item_text(state, i))
@@ -201,7 +205,7 @@ fn transcript(state: AppState) -> impl IntoView {
         |i| *i,
         move |i| render_item(state, i),
     )
-    .style(|s| s.flex_col().width_full());
+    .style(|s| s.flex_col().width_full().padding_vert(10.0).gap(2.0));
 
     scroll(rows)
         .style(|s| s.size_full().flex_grow(1.0).background(theme::bg()))
@@ -212,10 +216,12 @@ fn transcript(state: AppState) -> impl IntoView {
         })
 }
 
-/// The composer + send / stop controls.
+/// The composer: a padded input box with a toolbar row below (model + send/stop),
+/// styled after Zed's agent panel so it sits comfortably above the window edge
+/// instead of being flush at the very bottom.
 fn composer(state: AppState) -> impl IntoView {
     let input = text_input(state.agent_composer)
-        .placeholder("Message the agent…  (Enter to send)")
+        .placeholder("Message the agent…   @ for context, / for commands")
         .on_enter(move || {
             let t = state.agent_composer.get_untracked();
             state.send_native_prompt(&t);
@@ -223,30 +229,57 @@ fn composer(state: AppState) -> impl IntoView {
         .style(|s| {
             theme::input_colors(s)
                 .width_full()
-                .height(34.0)
-                .padding_horiz(10.0)
-                .border_radius(6.0)
+                .height(44.0)
+                .padding_horiz(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(10.0)
+                .background(theme::bg_panel())
         });
+
+    // The active agent's name, shown bottom-left like Zed's model picker.
+    let model = label(move || {
+        let id = state.agent_current.get();
+        state
+            .agents
+            .with(|l| l.iter().find(|a| a.id == id).map(|a| a.name.clone()))
+            .unwrap_or_else(|| "Agent".to_string())
+    })
+    .style(|s| s.font_size(12.0).color(theme::fg_dim()).items_center());
+
+    let spacer = empty().style(|s| s.flex_grow(1.0));
 
     // Stop while running, Send otherwise.
     let action_btn = label(move || {
         if state.agent_chat.with(|c| c.running) {
-            "Stop".to_string()
+            "\u{25a0}  Stop".to_string()
         } else {
-            "Send".to_string()
+            "Send  \u{2191}".to_string()
         }
     })
-    .style(|s| {
-        s.height(34.0)
+    .style(move |s| {
+        let running = state.agent_chat.with(|c| c.running);
+        let bg = if running {
+            Color::from_rgb8(0x6a, 0x3a, 0x3a)
+        } else {
+            theme::accent()
+        };
+        s.height(28.0)
             .items_center()
             .justify_center()
-            .padding_horiz(14.0)
-            .margin_left(6.0)
+            .padding_horiz(12.0)
             .border_radius(6.0)
-            .color(theme::fg())
-            .background(theme::bg_active())
+            .font_size(12.0)
+            .color(Color::WHITE)
+            .background(bg)
             .cursor(floem::style::CursorStyle::Pointer)
-            .hover(|s| s.background(theme::bg_hover()))
+            .hover(move |s| {
+                s.background(if running {
+                    Color::from_rgb8(0x7a, 0x44, 0x44)
+                } else {
+                    Color::from_rgb8(0x4a, 0x7c, 0xe0)
+                })
+            })
     })
     .on_click_stop(move |_| {
         if state.agent_chat.with_untracked(|c| c.running) {
@@ -257,12 +290,16 @@ fn composer(state: AppState) -> impl IntoView {
         }
     });
 
-    stack((input, action_btn)).style(|s| {
-        s.items_center()
+    let toolbar =
+        stack((model, spacer, action_btn)).style(|s| s.items_center().width_full().margin_top(8.0));
+
+    stack((input, toolbar)).style(|s| {
+        s.flex_col()
             .width_full()
-            .padding(8.0)
+            .padding(10.0)
             .border_top(1.0)
             .border_color(theme::border())
+            .background(theme::bg())
     })
 }
 

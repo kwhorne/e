@@ -2400,6 +2400,12 @@ impl AppState {
                 if self.agent_native_client.get_untracked().is_none() {
                     self.start_native_agent();
                 }
+                // Focus the composer once the panel has actually become visible
+                // (a synchronous focus request while still hidden is dropped).
+                let st = *self;
+                floem::action::exec_after(std::time::Duration::from_millis(30), move |_| {
+                    st.agent_focus_pulse.update(|x| *x += 1);
+                });
             } else if self.agent_term.get_untracked().is_none() {
                 self.start_agent();
             }

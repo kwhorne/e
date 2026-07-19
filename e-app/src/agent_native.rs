@@ -247,7 +247,12 @@ fn composer(state: AppState) -> impl IntoView {
                 && !mods.control()
                 && !mods.alt()
             {
-                state.send_composer();
+                // Defer out of the keydown: send_composer edits the document,
+                // and mutating it while we're inside the editor's own key
+                // handler triggers a reentrant-borrow abort.
+                floem::action::exec_after(std::time::Duration::ZERO, move |_| {
+                    state.send_composer();
+                });
                 return CommandExecuted::Yes;
             }
             if handle_shortcut(state, key, mods) {

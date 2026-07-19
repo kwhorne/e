@@ -7,19 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-19
+
 ### Added
 
-- **Native agent chat panel (⌘L).** Elyra now runs headless over its structured
+- **Native agent chat panel (`⌘L`).** Elyra now runs headless over its structured
   RPC protocol (`elyra --mode rpc`) and the conversation is rendered with native
-  views — streaming assistant text, tool-call cards with a result preview, and a
-  composer — instead of the agent's terminal UI inside a PTY. This removes the
-  per-frame ANSI re-parse that made the panel feel laggy, and adds a real Stop
-  button (abort), steering while the agent runs, and *New Chat*. Other agents
-  (Claude Code, Codex) keep the terminal panel. Toggle with the `native_agent`
-  setting (default on). Assistant replies render as formatted **markdown**
-  (headings, lists, inline code, code blocks, links), and the composer is a
-  padded box with a model + Send/Stop toolbar rather than a bar pinned to the
-  window edge.
+  views instead of the agent's terminal UI inside a PTY — removing the per-frame
+  ANSI re-parse that made the panel feel laggy. It brings:
+  - **Streaming replies** rendered as formatted **markdown** — headings, lists,
+    inline code, fenced code blocks and links, with comfortable line-height.
+  - **Tool-call cards** showing the tool, a one-line argument summary, status
+    (running / done / error) and a compact result preview.
+  - A **multi-line composer** that word-wraps and **auto-grows** with your text
+    (up to ~7 lines, then scrolls); **Enter** sends, **Shift+Enter** inserts a
+    newline. It is focused automatically when the panel opens.
+  - A real **Stop** button (abort), **steering** while the agent is running, and
+    **New Chat**.
+  - **Copy** buttons on fenced code blocks and under each assistant message.
+  - Other agents (Claude Code, Codex) keep the terminal panel. Toggle the native
+    panel with the `native_agent` setting (default on).
+- **`e-agent` crate** — a small, fully-tested RPC client (a lenient JSONL
+  protocol decoder plus a reducer that folds the event stream into a renderable
+  conversation) that powers the native panel.
+- **Crash logging.** Unhandled panics are appended to `~/.config/e/crash.log`
+  (message, location and backtrace) so GUI-only crashes can be diagnosed.
 
 ## [0.8.3] - 2026-07-08
 

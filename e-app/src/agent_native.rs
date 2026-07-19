@@ -6,12 +6,23 @@
 //! This is what makes ⌘L feel responsive: we append only the changed text rather
 //! than re-parsing a whole ANSI grid every frame.
 
+use std::rc::Rc;
+
 use e_agent::{ChatItem, ToolStatus};
+use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
-use floem::reactive::{SignalGet, SignalWith};
-use floem::views::{dyn_stack, empty, label, scroll, stack, text_input, Decorators};
+use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::views::editor::command::CommandExecuted;
+use floem::views::editor::keypress::default_key_handler;
+use floem::views::editor::keypress::key::KeyInput;
+use floem::views::editor::text::{Document, WrapMethod};
+use floem::views::editor::text_document::TextDocument;
+use floem::views::{
+    container, dyn_stack, empty, label, scroll, stack, text_editor_keys, Decorators,
+};
 use floem::IntoView;
 
+use crate::app::handle_shortcut;
 use crate::state::AppState;
 use crate::theme;
 
@@ -220,23 +231,72 @@ fn transcript(state: AppState) -> impl IntoView {
 /// styled after Zed's agent panel so it sits comfortably above the window edge
 /// instead of being flush at the very bottom.
 fn composer(state: AppState) -> impl IntoView {
-    let input = text_input(state.agent_composer)
-        .placeholder("Message the agent…   @ for context, / for commands")
-        .on_enter(move || {
-            let t = state.agent_composer.get_untracked();
-            state.send_native_prompt(&t);
-        })
-        .style(|s| {
-            theme::input_colors(s)
-                .flex_grow(1.0)
-                .min_width(0.0)
-                .height(40.0)
-                .padding_horiz(12.0)
-                .border(1.0)
-                .border_color(theme::border())
-                .border_radius(10.0)
-                .background(theme::bg_panel())
-        });
+    // A real multi-line editor (word-wrapped) so long prompts wrap and stay
+    // visible instead of scrolling out of a single-line box. Enter sends;
+    // Shift+Enter inserts a newline.
+    let doc = Rc::new(TextDocument::new(
+        state.cx,
+        state.agent_composer.get_untracked(),
+    ));
+    state.agent_composer_doc.set(Some(doc.clone()));
+    let doc_for_update = doc.clone();
+
+    let editor = text_editor_keys("", move |editor_sig, kp, mods| {
+        if let KeyInput::Keyboard(key, _) = &kp.key {
+            if matches!(key, Key::Named(NamedKey::Enter))
+                && !mods.shift()
+                && !mods.meta()
+                && !mods.control()
+                && !mods.alt()
+            {
+                state.send_composer();
+                return CommandExecuted::Yes;
+            }
+            if handle_shortcut(state, key, mods) {
+                return CommandExecuted::Yes;
+            }
+        }
+        default_key_handler(editor_sig)(kp, mods)
+    })
+    .use_doc(doc.clone() as Rc<dyn Document>)
+    .editor_style(|s| theme::editor_style(s).wrap_method(WrapMethod::EditorWidth))
+    .update(move |_| {
+        state.agent_composer.set(doc_for_update.text().to_string());
+    })
+    .style(|s| {
+        s.width_full()
+            .font_size(13.0)
+            .padding_horiz(10.0)
+            .padding_vert(6.0)
+    });
+
+    let placeholder =
+        label(|| "Message the agent\u{2026}   @ for context, / for commands".to_string()).style(
+            move |s| {
+                let s = s
+                    .absolute()
+                    .inset_left(12.0)
+                    .inset_top(9.0)
+                    .font_size(13.0)
+                    .color(theme::fg_dim());
+                if state.agent_composer.with(|t| t.is_empty()) {
+                    s
+                } else {
+                    s.hide()
+                }
+            },
+        );
+
+    let input = container(stack((editor, placeholder))).style(|s| {
+        s.flex_grow(1.0)
+            .min_width(0.0)
+            .min_height(40.0)
+            .max_height(160.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg_panel())
+    });
 
     // Stop while running, Send otherwise — sits to the *right* of the input on
     // the same row so it never gets pushed below the window edge.
@@ -276,13 +336,12 @@ fn composer(state: AppState) -> impl IntoView {
         if state.agent_chat.with_untracked(|c| c.running) {
             state.native_agent_abort();
         } else {
-            let t = state.agent_composer.get_untracked();
-            state.send_native_prompt(&t);
+            state.send_composer();
         }
     });
 
     stack((input, action_btn)).style(|s| {
-        s.items_center()
+        s.items_end()
             .width_full()
             .padding(10.0)
             .border_top(1.0)

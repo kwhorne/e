@@ -485,8 +485,10 @@ pub struct AppState {
     pub agent_native_client: RwSignal<Option<Rc<e_agent::AgentClient>>>,
     /// The folded conversation rendered by the native chat panel.
     pub agent_chat: RwSignal<e_agent::ChatState>,
-    /// Current text in the native composer.
+    /// Current text in the native composer (mirror of the composer document).
     pub agent_composer: RwSignal<String>,
+    /// The multi-line composer editor's backing document (source of truth).
+    pub agent_composer_doc: RwSignal<Option<Rc<TextDocument>>>,
     /// Shared queue of decoded events (fed by the reader-forwarder thread,
     /// drained on the UI thread). Never coalesced, so no delta is lost.
     pub agent_events: RwSignal<Arc<Mutex<VecDeque<e_agent::AgentEvent>>>>,
@@ -1073,6 +1075,7 @@ impl AppState {
             agent_native_client: RwSignal::new(None),
             agent_chat: RwSignal::new(e_agent::ChatState::new()),
             agent_composer: RwSignal::new(String::new()),
+            agent_composer_doc: RwSignal::new(None),
             agent_events: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
             agent_wake_tx: RwSignal::new(agent_wake_tx),
             agent_wake_rx: RwSignal::new(Some(agent_wake_rx)),
@@ -2477,6 +2480,31 @@ impl AppState {
             eprintln!("e: agent prompt failed: {e:#}");
         }
         self.agent_composer.set(String::new());
+    }
+
+    /// Send whatever is in the multi-line composer, then clear it.
+    pub fn send_composer(&self) {
+        let text = self
+            .agent_composer_doc
+            .get_untracked()
+            .map(|d| d.text().to_string())
+            .unwrap_or_else(|| self.agent_composer.get_untracked());
+        if text.trim().is_empty() {
+            return;
+        }
+        self.send_native_prompt(text.trim());
+        self.clear_composer();
+    }
+
+    /// Empty the composer document (and its mirror).
+    pub fn clear_composer(&self) {
+        self.agent_composer.set(String::new());
+        if let Some(doc) = self.agent_composer_doc.get_untracked() {
+            let len = doc.text().len();
+            if len > 0 {
+                doc.edit_single(Selection::region(0, len), "", EditType::Delete);
+            }
+        }
     }
 
     /// Abort the current native agent turn.

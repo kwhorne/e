@@ -489,6 +489,8 @@ pub struct AppState {
     pub agent_composer: RwSignal<String>,
     /// Backing document for the multi-line composer editor.
     pub agent_composer_doc: RwSignal<Option<Rc<TextDocument>>>,
+    /// The composer editor handle (to reset its cursor after clearing).
+    pub agent_composer_editor: RwSignal<Option<Editor>>,
     /// Shared queue of decoded events (fed by the reader-forwarder thread,
     /// drained on the UI thread). Never coalesced, so no delta is lost.
     pub agent_events: RwSignal<Arc<Mutex<VecDeque<e_agent::AgentEvent>>>>,
@@ -1076,6 +1078,7 @@ impl AppState {
             agent_chat: RwSignal::new(e_agent::ChatState::new()),
             agent_composer: RwSignal::new(String::new()),
             agent_composer_doc: RwSignal::new(None),
+            agent_composer_editor: RwSignal::new(None),
             agent_events: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
             agent_wake_tx: RwSignal::new(agent_wake_tx),
             agent_wake_rx: RwSignal::new(Some(agent_wake_rx)),
@@ -2511,6 +2514,17 @@ impl AppState {
             let len = doc.text().len();
             if len > 0 {
                 doc.edit_single(Selection::region(0, len), "", EditType::InsertChars);
+                // Reset the editor's cursor to the (now empty) start. Without
+                // this the cursor keeps its old offset, past the end of the
+                // cleared buffer, and the next keystroke's delta aborts in
+                // xi-rope's Subset::transform.
+                if let Some(editor) = st.agent_composer_editor.get_untracked() {
+                    editor.cursor.set(Cursor::new(
+                        CursorMode::Insert(Selection::caret(0)),
+                        None,
+                        None,
+                    ));
+                }
             }
         });
     }

@@ -286,6 +286,7 @@ fn composer(state: AppState) -> impl IntoView {
     // is the editor's *inner* content view, so request focus on its view id
     // rather than the wrapper (a plain .request_focus() focuses the wrong view).
     let ed = te.editor().clone();
+    state.agent_composer_editor.set(Some(ed.clone()));
     create_effect(move |_| {
         state.agent_focus_pulse.get();
         if let Some(vid) = ed.editor_view_id.get_untracked() {

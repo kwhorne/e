@@ -250,24 +250,50 @@ fn summarize_args(name: &str, args: &Value) -> String {
     }
 }
 
-/// Turn a tool result (string, or `{output|content|stdout: ...}`, or arbitrary
-/// JSON) into a trimmed textual preview.
+/// Turn a tool result into a trimmed textual preview. Handles plain strings,
+/// `{output|stdout|text: "..."}`, and the nested `{content: [{type:"text",
+/// text:"..."}]}` shape (so we don't dump a giant raw-JSON blob for e.g. a bash
+/// result). Falls back to pretty JSON only when no text can be extracted.
 fn preview_result(result: &Value) -> String {
-    let raw = if let Some(s) = result.as_str() {
-        s.to_string()
-    } else if let Some(s) = result
-        .get("output")
-        .or_else(|| result.get("content"))
-        .or_else(|| result.get("stdout"))
-        .and_then(Value::as_str)
-    {
-        s.to_string()
-    } else if result.is_null() {
-        String::new()
-    } else {
-        serde_json::to_string_pretty(result).unwrap_or_default()
-    };
+    let raw = extract_text(result).unwrap_or_else(|| {
+        if result.is_null() {
+            String::new()
+        } else {
+            serde_json::to_string_pretty(result).unwrap_or_default()
+        }
+    });
     truncate(&raw, RESULT_PREVIEW_LIMIT)
+}
+
+/// Best-effort extraction of human-readable text from a tool result value.
+fn extract_text(v: &Value) -> Option<String> {
+    if let Some(s) = v.as_str() {
+        return Some(s.to_string());
+    }
+    for key in ["output", "stdout", "text", "message"] {
+        if let Some(s) = v.get(key).and_then(Value::as_str) {
+            return Some(s.to_string());
+        }
+    }
+    // `content` may be a string or an array of text blocks / strings.
+    match v.get("content") {
+        Some(Value::String(s)) => return Some(s.clone()),
+        Some(Value::Array(arr)) => {
+            let mut out = String::new();
+            for block in arr {
+                if let Some(s) = block.as_str() {
+                    out.push_str(s);
+                } else if let Some(s) = block.get("text").and_then(Value::as_str) {
+                    out.push_str(s);
+                }
+            }
+            if !out.is_empty() {
+                return Some(out);
+            }
+        }
+        _ => {}
+    }
+    None
 }
 
 fn truncate(s: &str, limit: usize) -> String {
@@ -455,6 +481,30 @@ mod tests {
         assert!(
             matches!(&st.items[1], ChatItem::Notice { error: false, text } if text.contains("Compacting"))
         );
+    }
+
+    #[test]
+    fn extracts_text_from_nested_content_array() {
+        let st = feed(&[
+            AgentEvent::ToolStart {
+                id: "t".into(),
+                name: "bash".into(),
+                args: serde_json::json!({"command": "ls"}),
+            },
+            AgentEvent::ToolEnd {
+                id: "t".into(),
+                name: "bash".into(),
+                result: serde_json::json!({
+                    "content": [{"type": "text", "text": "a.rs\nb.rs"}]
+                }),
+                is_error: false,
+            },
+        ]);
+        if let ChatItem::Tool(tc) = &st.items[0] {
+            assert_eq!(tc.result.as_deref(), Some("a.rs\nb.rs"));
+        } else {
+            panic!();
+        }
     }
 
     #[test]

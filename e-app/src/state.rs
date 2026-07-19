@@ -487,6 +487,8 @@ pub struct AppState {
     pub agent_chat: RwSignal<e_agent::ChatState>,
     /// Current text in the native composer.
     pub agent_composer: RwSignal<String>,
+    /// Backing document for the multi-line composer editor.
+    pub agent_composer_doc: RwSignal<Option<Rc<TextDocument>>>,
     /// Shared queue of decoded events (fed by the reader-forwarder thread,
     /// drained on the UI thread). Never coalesced, so no delta is lost.
     pub agent_events: RwSignal<Arc<Mutex<VecDeque<e_agent::AgentEvent>>>>,
@@ -1073,6 +1075,7 @@ impl AppState {
             agent_native_client: RwSignal::new(None),
             agent_chat: RwSignal::new(e_agent::ChatState::new()),
             agent_composer: RwSignal::new(String::new()),
+            agent_composer_doc: RwSignal::new(None),
             agent_events: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
             agent_wake_tx: RwSignal::new(agent_wake_tx),
             agent_wake_rx: RwSignal::new(Some(agent_wake_rx)),
@@ -2483,6 +2486,29 @@ impl AppState {
             eprintln!("e: agent prompt failed: {e:#}");
         }
         self.agent_composer.set(String::new());
+    }
+
+    /// Send the composer's contents and clear it. Both the network send and the
+    /// document edit are deferred out of the current event: mutating the editor's
+    /// document from inside its own key handler is a reentrant borrow and aborts
+    /// across the objc FFI boundary.
+    pub fn send_composer(&self) {
+        let Some(doc) = self.agent_composer_doc.get_untracked() else {
+            return;
+        };
+        let text = doc.text().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
+        let st = *self;
+        let text = text.trim().to_string();
+        floem::action::exec_after(std::time::Duration::ZERO, move |_| {
+            st.send_native_prompt(&text);
+            let len = doc.text().len();
+            if len > 0 {
+                doc.edit_single(Selection::region(0, len), "", EditType::Delete);
+            }
+        });
     }
 
     /// Abort the current native agent turn.

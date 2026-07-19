@@ -6,12 +6,21 @@
 //! This is what makes ⌘L feel responsive: we append only the changed text rather
 //! than re-parsing a whole ANSI grid every frame.
 
+use std::rc::Rc;
+
 use e_agent::{ChatItem, ToolStatus};
+use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
-use floem::views::{dyn_stack, empty, label, scroll, stack, text_input, Decorators};
+use floem::views::editor::command::CommandExecuted;
+use floem::views::editor::keypress::default_key_handler;
+use floem::views::editor::keypress::key::KeyInput;
+use floem::views::editor::text::{Document, WrapMethod};
+use floem::views::editor::text_document::TextDocument;
+use floem::views::{dyn_stack, empty, label, scroll, stack, text_editor_keys, Decorators};
 use floem::IntoView;
 
+use crate::app::handle_shortcut;
 use crate::state::AppState;
 use crate::theme;
 
@@ -208,7 +217,16 @@ fn transcript(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col().width_full().padding_vert(10.0).gap(2.0));
 
     scroll(rows)
-        .style(|s| s.size_full().flex_grow(1.0).background(theme::bg()))
+        // min_height(0) lets the scroll area shrink inside the flex column and
+        // scroll internally, instead of growing to fit content and pushing the
+        // composer off the bottom of the panel.
+        .style(|s| {
+            s.width_full()
+                .flex_grow(1.0)
+                .flex_basis(0.0)
+                .min_height(0.0)
+                .background(theme::bg())
+        })
         // Follow the tail as content streams in.
         .scroll_to_percent(move || {
             let _ = transcript_size(state);
@@ -220,37 +238,53 @@ fn transcript(state: AppState) -> impl IntoView {
 /// styled after Zed's agent panel so it sits comfortably above the window edge
 /// instead of being flush at the very bottom.
 fn composer(state: AppState) -> impl IntoView {
-    // Send the current composer text, deferred out of the current event so we
-    // never mutate signals/documents reentrantly from inside a key handler.
-    let send = move || {
-        let t = state.agent_composer.get_untracked();
-        if t.trim().is_empty() {
-            return;
-        }
-        floem::action::exec_after(std::time::Duration::ZERO, move |_| {
-            state.send_native_prompt(t.trim());
-            state.agent_composer.set(String::new());
-        });
-    };
+    // Multi-line, word-wrapped editor so long prompts wrap and stay visible.
+    // Kept deliberately minimal (no reactive mirror, no placeholder overlay) and
+    // all mutation is deferred out of the key handler (see send_composer), which
+    // is what previously aborted on Enter.
+    let doc = Rc::new(TextDocument::new(state.cx, String::new()));
+    state.agent_composer_doc.set(Some(doc.clone()));
 
-    let input = text_input(state.agent_composer)
-        .placeholder("Message the agent\u{2026}   @ for context, / for commands")
-        .on_enter(send)
-        .style(|s| {
-            theme::input_colors(s)
-                .flex_grow(1.0)
-                .min_width(0.0)
-                .height(40.0)
-                .padding_horiz(12.0)
-                .border(1.0)
-                .border_color(theme::border())
-                .border_radius(10.0)
-                .background(theme::bg_panel())
-        })
-        // Focus the field when the panel opens / the agent (re)starts.
-        .request_focus(move || {
-            state.agent_focus_pulse.get();
-        });
+    let input = text_editor_keys("", move |editor_sig, kp, mods| {
+        if let KeyInput::Keyboard(key, _) = &kp.key {
+            if matches!(key, Key::Named(NamedKey::Enter))
+                && !mods.shift()
+                && !mods.meta()
+                && !mods.control()
+                && !mods.alt()
+            {
+                state.send_composer();
+                return CommandExecuted::Yes;
+            }
+            if handle_shortcut(state, key, mods) {
+                return CommandExecuted::Yes;
+            }
+        }
+        default_key_handler(editor_sig)(kp, mods)
+    })
+    .use_doc(doc.clone() as Rc<dyn Document>)
+    .editor_style(|s| {
+        theme::editor_style(s)
+            .wrap_method(WrapMethod::EditorWidth)
+            .hide_gutter(true)
+    })
+    .style(|s| {
+        s.flex_grow(1.0)
+            .min_width(0.0)
+            .min_height(40.0)
+            .max_height(160.0)
+            .font_size(13.0)
+            .padding_horiz(10.0)
+            .padding_vert(8.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg_panel())
+    })
+    // Focus the field when the panel opens / the agent (re)starts.
+    .request_focus(move || {
+        state.agent_focus_pulse.get();
+    });
 
     // Stop while running, Send otherwise — sits to the *right* of the input on
     // the same row so it never gets pushed below the window edge.
@@ -290,7 +324,7 @@ fn composer(state: AppState) -> impl IntoView {
         if state.agent_chat.with_untracked(|c| c.running) {
             state.native_agent_abort();
         } else {
-            send();
+            state.send_composer();
         }
     });
 

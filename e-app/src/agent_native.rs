@@ -267,12 +267,27 @@ fn composer(state: AppState) -> impl IntoView {
         theme::editor_style(s)
             .wrap_method(WrapMethod::EditorWidth)
             .hide_gutter(true)
-    })
-    .style(|s| {
+    });
+
+    // Grab the editor handle before styling so the height closure can read the
+    // current visual-line count.
+    let ed = te.editor().clone();
+
+    // Auto-grow: the box height follows the number of *visual* (soft-wrapped)
+    // lines, clamped between one line and ~7, then it scrolls internally. This
+    // is the professional chat-composer behaviour (grows as you type).
+    let ed_h = ed.clone();
+    let doc_h = doc.clone();
+    let te = te.style(move |s| {
+        use floem::views::editor::text::Document;
+        doc_h.cache_rev().get(); // re-evaluate whenever the text changes
+        ed_h.screen_lines.with(|_| {}); // and after each (re)layout / wrap
+        let line_h = (ed_h.line_height(0) as f64).max(16.0);
+        let lines = (ed_h.last_vline().get() + 1).clamp(1, 7);
+        let height = lines as f64 * line_h + 16.0; // + vertical padding
         s.flex_grow(1.0)
             .min_width(0.0)
-            .min_height(40.0)
-            .max_height(160.0)
+            .height(height)
             .font_size(13.0)
             .padding_horiz(10.0)
             .padding_vert(8.0)
@@ -285,7 +300,6 @@ fn composer(state: AppState) -> impl IntoView {
     // Focus the field when the panel opens / the agent (re)starts. The focusable
     // is the editor's *inner* content view, so request focus on its view id
     // rather than the wrapper (a plain .request_focus() focuses the wrong view).
-    let ed = te.editor().clone();
     state.agent_composer_editor.set(Some(ed.clone()));
     create_effect(move |_| {
         state.agent_focus_pulse.get();

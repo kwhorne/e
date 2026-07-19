@@ -3,11 +3,11 @@
 use std::ops::Range;
 
 use floem::peniko::Color;
-use floem::reactive::SignalGet;
+use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::text::{
     Attrs, AttrsList, FamilyOwned, LineHeightValue, Style as TextStyle, TextLayout, Weight,
 };
-use floem::views::{dyn_stack, empty, rich_text, scroll, Decorators};
+use floem::views::{dyn_stack, empty, label, rich_text, scroll, stack, Decorators};
 use floem::IntoView;
 
 use e_core::language::Language;
@@ -102,26 +102,63 @@ fn block_view(block: Block) -> impl IntoView {
                 .style(move |s| s.width_full().padding_left(indent))
                 .into_any()
         }
-        Block::Code(code) => rich_text(move || {
-            let mono: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
-            let attrs = Attrs::new()
-                .family(&mono)
-                .font_size(13.0)
-                .line_height(LineHeightValue::Normal(1.4))
-                .color(theme::fg());
-            let mut tl = TextLayout::new();
-            tl.set_text(&code, AttrsList::new(attrs), None);
-            tl
-        })
-        .style(|s| {
-            s.width_full()
-                .padding(12.0)
-                .background(theme::bg_panel())
-                .border(1.0)
-                .border_color(theme::border())
-                .border_radius(6.0)
-        })
-        .into_any(),
+        Block::Code(code) => {
+            let body = code.clone();
+            let code_text = rich_text(move || {
+                let mono: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
+                let attrs = Attrs::new()
+                    .family(&mono)
+                    .font_size(13.0)
+                    .line_height(LineHeightValue::Normal(1.4))
+                    .color(theme::fg());
+                let mut tl = TextLayout::new();
+                tl.set_text(&body, AttrsList::new(attrs), None);
+                tl
+            })
+            .style(|s| s.width_full().padding(12.0));
+
+            // Copy-to-clipboard button, top-right of the code block.
+            let copied = RwSignal::new(false);
+            let copy = label(move || {
+                if copied.get() {
+                    "Copied".to_string()
+                } else {
+                    "Copy".to_string()
+                }
+            })
+            .style(|s| {
+                s.absolute()
+                    .inset_right(8.0)
+                    .inset_top(8.0)
+                    .padding_horiz(8.0)
+                    .padding_vert(2.0)
+                    .font_size(11.0)
+                    .color(theme::fg_dim())
+                    .background(theme::bg())
+                    .border(1.0)
+                    .border_color(theme::border())
+                    .border_radius(4.0)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.color(theme::fg()).background(theme::bg_hover()))
+            })
+            .on_click_stop(move |_| {
+                let _ = floem::Clipboard::set_contents(code.clone());
+                copied.set(true);
+                floem::action::exec_after(std::time::Duration::from_millis(1200), move |_| {
+                    copied.set(false)
+                });
+            });
+
+            stack((code_text, copy))
+                .style(|s| {
+                    s.width_full()
+                        .background(theme::bg_panel())
+                        .border(1.0)
+                        .border_color(theme::border())
+                        .border_radius(6.0)
+                })
+                .into_any()
+        }
         Block::Rule => empty()
             .style(|s| {
                 s.width_full()

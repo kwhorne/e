@@ -11,7 +11,7 @@ use std::rc::Rc;
 use e_agent::{ChatItem, ToolStatus};
 use floem::keyboard::{Key, NamedKey};
 use floem::peniko::Color;
-use floem::reactive::{create_effect, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
@@ -88,24 +88,62 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
             })
             .into_any(),
 
-        Some(ChatItem::Assistant { .. }) => floem::views::dyn_container(
-            // While streaming, show plain text (cheap per-delta rebuild); once the
-            // message is complete, render it as formatted markdown like Zed.
-            move || (is_streaming(state, i), item_text(state, i)),
-            move |(streaming, text)| {
-                if streaming {
-                    label(move || format!("{text}\u{258d}"))
-                        .style(|s| s.color(theme::fg()).width_full())
-                        .into_any()
+        Some(ChatItem::Assistant { .. }) => {
+            let content = floem::views::dyn_container(
+                // While streaming, show plain text (cheap per-delta rebuild); once
+                // the message is complete, render it as formatted markdown.
+                move || (is_streaming(state, i), item_text(state, i)),
+                move |(streaming, text)| {
+                    if streaming {
+                        label(move || format!("{text}\u{258d}"))
+                            .style(|s| s.color(theme::fg()).width_full())
+                            .into_any()
+                    } else {
+                        crate::markdown_view::markdown_body(&text)
+                            .style(|s| s.width_full())
+                            .into_any()
+                    }
+                },
+            )
+            .style(|s| s.width_full());
+
+            // A subtle "Copy" action for the whole message (rich_text isn't
+            // selectable, so this is how you grab the answer text).
+            let copied = RwSignal::new(false);
+            let copy = label(move || {
+                if copied.get() {
+                    "Copied".to_string()
                 } else {
-                    crate::markdown_view::markdown_body(&text)
-                        .style(|s| s.width_full())
-                        .into_any()
+                    "Copy".to_string()
                 }
-            },
-        )
-        .style(|s| s.padding_horiz(14.0).padding_vert(6.0).width_full())
-        .into_any(),
+            })
+            .style(|s| {
+                s.padding_horiz(6.0)
+                    .padding_vert(1.0)
+                    .font_size(11.0)
+                    .color(theme::fg_dim())
+                    .border_radius(4.0)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.color(theme::fg()).background(theme::bg_hover()))
+            })
+            .on_click_stop(move |_| {
+                let _ = floem::Clipboard::set_contents(item_text(state, i));
+                copied.set(true);
+                floem::action::exec_after(std::time::Duration::from_millis(1200), move |_| {
+                    copied.set(false)
+                });
+            });
+            let copy_row = stack((copy,)).style(|s| s.width_full().justify_end());
+
+            stack((content, copy_row))
+                .style(|s| {
+                    s.flex_col()
+                        .padding_horiz(14.0)
+                        .padding_vert(6.0)
+                        .width_full()
+                })
+                .into_any()
+        }
 
         Some(ChatItem::Reasoning { .. }) => label(move || item_text(state, i))
             .style(|s| {

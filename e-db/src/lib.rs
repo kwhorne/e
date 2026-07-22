@@ -2214,6 +2214,85 @@ pub fn is_destructive(sql: &str) -> Option<&'static str> {
     }
 }
 
+// ---- Snapshot restore (DB-704, the reversible half of the verify-fix loop) ----
+
+/// `mysql` client args for replaying a dump into `config`'s database.
+fn mysql_restore_args(config: &DbConfig) -> Vec<String> {
+    vec![
+        format!("--host={}", config.host),
+        format!("--port={}", config.port),
+        format!("--user={}", config.username),
+        config.database.clone(),
+    ]
+}
+
+/// `psql` client args for replaying a dump into `config`'s database.
+fn pg_restore_args(config: &DbConfig) -> Vec<String> {
+    vec![
+        format!("--host={}", config.host),
+        format!("--port={}", config.port),
+        format!("--username={}", config.username),
+        "--dbname".to_string(),
+        config.database.clone(),
+    ]
+}
+
+fn run_sql_file(
+    program: &str,
+    args: &[String],
+    env: &[(&str, &str)],
+    file: &Path,
+) -> Result<(), String> {
+    let input = std::fs::File::open(file).map_err(|e| format!("open snapshot: {e}"))?;
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd
+        .stdin(std::process::Stdio::from(input))
+        .stdout(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("{program}: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// Restore a snapshot previously written by the editor's snapshot feature: an
+/// SQLite file copy, or a mysqldump / pg_dump `.sql` replayed through the
+/// client. Mirrors the snapshot writer. Local connections only (callers gate on
+/// [`DbConfig::environment`]); this overwrites the target database.
+pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String> {
+    if !snapshot.exists() {
+        return Err(format!("snapshot not found: {}", snapshot.display()));
+    }
+    match config.engine.as_str() {
+        "sqlite" => {
+            if config.path.trim().is_empty() {
+                return Err("sqlite connection has no file path".to_string());
+            }
+            std::fs::copy(snapshot, &config.path)
+                .map(|_| ())
+                .map_err(|e| format!("restore copy failed: {e}"))
+        }
+        "mysql" | "mariadb" => run_sql_file(
+            "mysql",
+            &mysql_restore_args(config),
+            &[("MYSQL_PWD", config.password.as_str())],
+            snapshot,
+        ),
+        "postgres" | "postgresql" | "pgsql" => run_sql_file(
+            "psql",
+            &pg_restore_args(config),
+            &[("PGPASSWORD", config.password.as_str())],
+            snapshot,
+        ),
+        other => Err(format!("restore not supported for {other}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2658,6 +2737,70 @@ mod tests {
             "expected a full-scan issue, got {issues:?}"
         );
         let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn restore_args_are_built_per_engine() {
+        let mut c = DbConfig {
+            host: "127.0.0.1".into(),
+            port: 3306,
+            username: "root".into(),
+            database: "shop".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            mysql_restore_args(&c),
+            vec!["--host=127.0.0.1", "--port=3306", "--user=root", "shop"]
+        );
+        c.port = 5432;
+        assert_eq!(
+            pg_restore_args(&c),
+            vec![
+                "--host=127.0.0.1",
+                "--port=5432",
+                "--username=root",
+                "--dbname",
+                "shop"
+            ]
+        );
+    }
+
+    #[test]
+    fn restore_sqlite_copies_the_file_back() {
+        let dir = std::env::temp_dir().join(format!("e-db-restore-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let live = dir.join("live.sqlite");
+        let snap = dir.join("snap.sqlite");
+        std::fs::write(&live, b"CURRENT").unwrap();
+        std::fs::write(&snap, b"SNAPSHOT").unwrap();
+
+        let c = DbConfig {
+            engine: "sqlite".into(),
+            path: live.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+
+        restore_snapshot(&c, &snap).unwrap();
+        assert_eq!(std::fs::read(&live).unwrap(), b"SNAPSHOT");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_errors_on_missing_snapshot_and_unknown_engine() {
+        let mut c = DbConfig {
+            engine: "sqlite".into(),
+            path: "/tmp/whatever.sqlite".into(),
+            ..Default::default()
+        };
+        assert!(restore_snapshot(&c, Path::new("/no/such/snapshot.sqlite")).is_err());
+
+        let dir = std::env::temp_dir().join(format!("e-db-restore2-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let snap = dir.join("s.dump");
+        std::fs::write(&snap, b"x").unwrap();
+        c.engine = "clickhouse".into();
+        assert!(restore_snapshot(&c, &snap).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

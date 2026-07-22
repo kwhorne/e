@@ -509,6 +509,78 @@ pub fn marks(head: &str, current: &str, line_count: usize) -> Vec<Option<LineMar
     marks
 }
 
+// ---- Reversible working-tree checkpoints (verify-fix loop) ------------------
+
+/// A capture of the working tree at a point in time, used to run a reversible
+/// experiment: apply changes, then restore exactly what was here before.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Checkpoint {
+    /// HEAD commit at capture time.
+    pub head: String,
+    /// A `git stash create` object of any tracked work-in-progress (empty if the
+    /// tree was clean), re-applied on restore so the user's own WIP survives.
+    pub stash: Option<String>,
+    /// Untracked files present at capture time (relative paths). On restore,
+    /// untracked files *not* in this set are removed as experiment artifacts.
+    pub untracked: Vec<String>,
+}
+
+fn git_out(root: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+fn untracked_files(root: &Path) -> Vec<String> {
+    git_out(root, &["ls-files", "--others", "--exclude-standard"])
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// Capture the current working tree so it can be restored later. Non-destructive
+/// (uses `git stash create`, which does not touch the working tree).
+pub fn checkpoint(root: &Path) -> Result<Checkpoint, String> {
+    let head = git_out(root, &["rev-parse", "HEAD"])?;
+    let stash = git_out(root, &["stash", "create"])
+        .ok()
+        .filter(|s| !s.is_empty());
+    Ok(Checkpoint {
+        head,
+        stash,
+        untracked: untracked_files(root),
+    })
+}
+
+/// Restore the working tree to a [`checkpoint`]: reset tracked files to the
+/// captured HEAD, remove untracked files created since (experiment artifacts),
+/// then re-apply the user's original WIP stash. Destructive by design.
+pub fn restore_checkpoint(root: &Path, cp: &Checkpoint) -> Result<(), String> {
+    run_git(root, &["reset", "--hard", &cp.head])?;
+    // Remove untracked files that appeared after the checkpoint (e.g. an agent's
+    // new migration), but keep the user's pre-existing untracked files.
+    let before: std::collections::HashSet<String> = cp.untracked.iter().cloned().collect();
+    for path in untracked_files(root) {
+        if !before.contains(&path) {
+            let _ = std::fs::remove_file(root.join(&path));
+        }
+    }
+    if let Some(stash) = &cp.stash {
+        // Re-apply the captured WIP. `stash create` made a commit object; apply
+        // it without touching the stash list.
+        run_git(root, &["stash", "apply", "--index", stash])
+            .or_else(|_| run_git(root, &["stash", "apply", stash]))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{diff, marks, DiffKind, LineMark};
@@ -530,5 +602,87 @@ mod tests {
             .iter()
             .any(|l| l.kind == DiffKind::Removed && l.text == "y"));
         assert!(d.iter().any(|l| l.kind == DiffKind::Added && l.text == "Y"));
+    }
+
+    use super::{checkpoint, restore_checkpoint};
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        assert!(ok, "git {args:?} failed");
+    }
+
+    fn init_repo(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("e-ckpt-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["config", "user.email", "t@example.com"]);
+        git(&dir, &["config", "user.name", "Test"]);
+        git(&dir, &["config", "commit.gpgsign", "false"]);
+        dir
+    }
+
+    #[test]
+    fn checkpoint_reverts_agent_changes() {
+        let dir = init_repo("revert");
+        std::fs::write(dir.join("a.txt"), "one").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "init"]);
+
+        let cp = checkpoint(&dir).unwrap();
+
+        // Simulate an experiment: modify a tracked file + add a new one.
+        std::fs::write(dir.join("a.txt"), "changed-by-agent").unwrap();
+        std::fs::write(dir.join("migration.txt"), "CREATE INDEX").unwrap();
+
+        restore_checkpoint(&dir, &cp).unwrap();
+
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "one");
+        assert!(
+            !dir.join("migration.txt").exists(),
+            "agent-created untracked file should be removed"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn checkpoint_preserves_preexisting_wip() {
+        let dir = init_repo("wip");
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "init"]);
+
+        // The user already has uncommitted work when the experiment starts.
+        std::fs::write(dir.join("a.txt"), "user-wip\n").unwrap();
+        let cp = checkpoint(&dir).unwrap();
+        assert!(
+            cp.stash.is_some(),
+            "WIP should be captured as a stash object"
+        );
+
+        // Agent changes on top, plus a new file.
+        std::fs::write(dir.join("a.txt"), "agent\n").unwrap();
+        std::fs::write(dir.join("new.txt"), "x").unwrap();
+
+        restore_checkpoint(&dir, &cp).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+            "user-wip\n",
+            "the user's original WIP should be restored"
+        );
+        assert!(!dir.join("new.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

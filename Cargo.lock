@@ -1354,6 +1354,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "e-verify"
+version = "0.9.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "ed25519"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

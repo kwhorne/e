@@ -14,7 +14,7 @@ name = "e"
 path = "e-app/src/bin/e.rs"
 
 [workspace]
-members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term", "e-agent"]
+members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term", "e-agent", "e-verify"]
 resolver = "2"
 
 [workspace.package]
@@ -40,6 +40,7 @@ crossbeam-channel = "0.5"
 self_update = { version = "0.42", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"] }
 regex       = "1"
 e-agent     = { path = "./e-agent" }
+e-verify    = { path = "./e-verify" }
 e-core      = { path = "./e-core" }
 e-db        = { path = "./e-db" }
 e-dap       = { path = "./e-dap" }

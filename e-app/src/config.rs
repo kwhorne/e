@@ -281,9 +281,46 @@ pub fn set_str(key: &str, s: &str) {
     set_value(key, json!(s));
 }
 
-/// Remember the last opened project so a bare launch reopens it.
+/// Remember the last opened project so a bare launch reopens it. Also records it
+/// at the front of the recent-projects list.
 pub fn save_last_project(path: &Path) {
     set_str("last_project", &path.to_string_lossy());
+    push_recent_project(path);
+}
+
+/// Maximum entries kept in the recent-projects list.
+const MAX_RECENT_PROJECTS: usize = 12;
+
+/// Prepend `path` to the recent-projects list (dedup, most-recent-first, capped).
+pub fn push_recent_project(path: &Path) {
+    let p = path.to_string_lossy().to_string();
+    let mut list: Vec<String> = recent_project_strings();
+    list.retain(|x| x != &p);
+    list.insert(0, p);
+    list.truncate(MAX_RECENT_PROJECTS);
+    set_value("recent_projects", json!(list));
+}
+
+fn recent_project_strings() -> Vec<String> {
+    read()
+        .get("recent_projects")
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| s.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Recent project directories, most-recent-first, filtered to those that still
+/// exist on disk.
+pub fn recent_projects() -> Vec<PathBuf> {
+    recent_project_strings()
+        .into_iter()
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .collect()
 }
 
 /// The last opened project directory, if one was recorded and still exists.

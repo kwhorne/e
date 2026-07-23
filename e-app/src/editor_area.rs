@@ -13,7 +13,8 @@ use floem::views::editor::keypress::default_key_handler;
 use floem::views::editor::keypress::key::KeyInput;
 use floem::views::editor::text::Document;
 use floem::views::{
-    container, dyn_container, dyn_stack, label, stack, text_editor_keys, Decorators,
+    container, dyn_container, dyn_stack, empty, label, stack, stack_from_iter, text_editor_keys,
+    Decorators,
 };
 use floem::IntoView;
 
@@ -81,7 +82,51 @@ fn welcome_glyph() -> impl IntoView {
         .style(|s| s.flex_col().gap(11.0).margin_bottom(16.0).items_start())
 }
 
-fn welcome() -> impl IntoView {
+/// A clickable list of recently-opened projects (Zed-style), shown on the
+/// welcome screen so a fresh launch offers somewhere to go.
+fn recent_projects_view(state: AppState) -> impl IntoView {
+    let projects = crate::config::recent_projects();
+    if projects.is_empty() {
+        return empty().into_any();
+    }
+    let rows = projects.into_iter().take(8).map(move |p| {
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.to_string_lossy().into_owned());
+        let path_str = p.display().to_string();
+        let open = p.clone();
+        stack((
+            label(move || name.clone()).style(|s| s.color(theme::fg()).font_size(13.0)),
+            label(move || path_str.clone()).style(|s| s.color(theme::fg_dim()).font_size(11.0)),
+        ))
+        .style(|s| {
+            s.flex_col()
+                .gap(1.0)
+                .width(360.0)
+                .padding_horiz(10.0)
+                .padding_vert(6.0)
+                .border_radius(6.0)
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.open_project(open.clone()))
+        .into_any()
+    });
+    stack((
+        label(|| "Recent projects".to_string()).style(|s| {
+            s.color(theme::fg_dim())
+                .font_size(11.0)
+                .margin_bottom(6.0)
+                .margin_left(10.0)
+        }),
+        stack_from_iter(rows).style(|s| s.flex_col().gap(2.0)),
+    ))
+    .style(|s| s.flex_col().items_start().margin_bottom(28.0))
+    .into_any()
+}
+
+fn welcome(state: AppState) -> impl IntoView {
     // The shortcut rows form a left-aligned block...
     let col1 = stack((
         cheat("⌘P", "Find file"),
@@ -116,6 +161,7 @@ fn welcome() -> impl IntoView {
         welcome_glyph(),
         label(|| "The editor for the rest of us".to_string())
             .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_bottom(22.0)),
+        recent_projects_view(state),
         cheats,
     ))
     .style(|s| s.flex_col().items_center())
@@ -429,7 +475,7 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                 .style(|s| s.flex_row().size_full().background(theme::bg()))
                 .into_any()
             } else {
-                let placeholder = container(welcome()).style(move |s| {
+                let placeholder = container(welcome(state)).style(move |s| {
                     let s = s
                         .absolute()
                         .inset(0.0)

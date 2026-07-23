@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-07-23
+
+### Added
+
+- **Recent projects on the welcome screen.** The empty-state screen now lists
+  your recently-opened projects (most-recent-first) — click one to open it — so a
+  fresh launch from the Dock has somewhere to go, Zed-style.
+
+### Changed
+
+- **The agent transcript is now selectable.** You can drag-select and copy
+  (`⌘C`) any text in an assistant reply. Block structure (heading sizes, code
+  boxes with a Copy button, list bullets) is preserved; inline emphasis within a
+  paragraph is rendered as plain text, since floem's selectable text is
+  single-style. User messages and reasoning are selectable too.
+
 ## [0.9.2] - 2026-07-23
 
 ### Fixed

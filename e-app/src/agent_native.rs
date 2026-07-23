@@ -77,6 +77,7 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
 
     match variant {
         Some(ChatItem::User { .. }) => label(move || item_text(state, i))
+            .label_style(|s| s.selectable(true))
             .style(|s| {
                 s.padding(10.0)
                     .margin_vert(4.0)
@@ -96,10 +97,11 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
                 move |(streaming, text)| {
                     if streaming {
                         label(move || format!("{text}\u{258d}"))
+                            .label_style(|s| s.selectable(true))
                             .style(|s| s.color(theme::fg()).width_full())
                             .into_any()
                     } else {
-                        crate::markdown_view::markdown_body(&text)
+                        crate::markdown_view::markdown_body_selectable(&text)
                             .style(|s| s.width_full())
                             .into_any()
                     }
@@ -146,6 +148,7 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
         }
 
         Some(ChatItem::Reasoning { .. }) => label(move || item_text(state, i))
+            .label_style(|s| s.selectable(true))
             .style(|s| {
                 s.padding_horiz(12.0)
                     .padding_vert(4.0)

@@ -105,6 +105,20 @@ fn notice_body(state: AppState) -> impl IntoView {
             .style(|s| s.flex_col())
             .into_any(),
 
+            UpdateStatus::CheckFailed(e) => stack((
+                label(|| "Couldn't check for updates".to_string())
+                    .style(|s| s.color(theme::fg()).font_size(15.0)),
+                label(move || e.clone())
+                    .style(|s| s.color(theme::fg_dim()).font_size(12.0).margin_top(2.0)),
+                stack((
+                    btn("Retry", true).on_click_stop(move |_| state.check_for_updates(true)),
+                    btn("Dismiss", false).on_click_stop(move |_| state.dismiss_update()),
+                ))
+                .style(|s| s.gap(8.0).margin_top(12.0)),
+            ))
+            .style(|s| s.flex_col())
+            .into_any(),
+
             // Idle / Checking with an available update.
             _ => {
                 let info = state.update_info.get();
@@ -167,6 +181,7 @@ pub fn update_notice(state: AppState) -> impl IntoView {
                 UpdateStatus::Downloading
                     | UpdateStatus::Installed
                     | UpdateStatus::Failed(_)
+                    | UpdateStatus::CheckFailed(_)
                     | UpdateStatus::UpToDate
             )
     };

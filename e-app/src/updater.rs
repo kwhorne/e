@@ -28,6 +28,8 @@ pub enum UpdateStatus {
     Downloading,
     Installed,
     Failed(String),
+    /// The update *check* itself failed (network / GitHub rate limit).
+    CheckFailed(String),
 }
 
 pub fn current_version() -> &'static str {

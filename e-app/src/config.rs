@@ -323,6 +323,18 @@ pub fn recent_projects() -> Vec<PathBuf> {
         .collect()
 }
 
+/// Epoch-seconds of the last (successful or attempted) update check.
+pub fn last_update_check() -> u64 {
+    read()
+        .get("last_update_check")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
+}
+
+pub fn set_last_update_check(epoch_secs: u64) {
+    set_value("last_update_check", json!(epoch_secs));
+}
+
 /// The last opened project directory, if one was recorded and still exists.
 pub fn load_last_project() -> Option<PathBuf> {
     let p = PathBuf::from(read().get("last_project")?.as_str()?);

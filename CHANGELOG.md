@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-07-23
+
+### Fixed
+
+- **“Check for updates” no longer reports “up to date” when the check actually
+  failed.** A failed request (e.g. GitHub's unauthenticated rate limit, 60/hr)
+  was silently treated as “no update”; it now shows a distinct *Couldn't check
+  for updates* notice with a Retry. The silent startup check is also throttled to
+  once every 6 hours so frequent restarts don't exhaust the rate limit (a manual
+  check always runs).
+
 ## [0.9.3] - 2026-07-23
 
 ### Added

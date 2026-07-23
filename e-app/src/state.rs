@@ -2918,28 +2918,45 @@ impl AppState {
         if self.update_status.get_untracked() == UpdateStatus::Downloading {
             return;
         }
+        // The silent startup check is throttled so frequent restarts don't burn
+        // the unauthenticated GitHub rate limit (60/hr); a manual check
+        // (`announce_up_to_date`) always runs.
+        let now = now_ms_epoch() / 1000;
+        if !announce_up_to_date && now.saturating_sub(config::last_update_check()) < 6 * 3600 {
+            return;
+        }
+        config::set_last_update_check(now);
+
         self.update_status.set(UpdateStatus::Checking);
         let info_sig = self.update_info;
         let status_sig = self.update_status;
-        let send =
-            create_ext_action(
-                self.cx,
-                move |result: Option<updater::UpdateInfo>| match result {
-                    Some(info) => {
-                        info_sig.set(Some(info));
-                        status_sig.set(UpdateStatus::Idle);
-                    }
-                    None => {
-                        status_sig.set(if announce_up_to_date {
-                            UpdateStatus::UpToDate
-                        } else {
-                            UpdateStatus::Idle
-                        });
-                    }
-                },
-            );
+        let send = create_ext_action(
+            self.cx,
+            move |result: Result<Option<updater::UpdateInfo>, String>| match result {
+                Ok(Some(info)) => {
+                    info_sig.set(Some(info));
+                    status_sig.set(UpdateStatus::Idle);
+                }
+                Ok(None) => {
+                    status_sig.set(if announce_up_to_date {
+                        UpdateStatus::UpToDate
+                    } else {
+                        UpdateStatus::Idle
+                    });
+                }
+                // Never report a *failed* check as "up to date". Surface it on a
+                // manual check; stay silent on the background startup check.
+                Err(e) => {
+                    status_sig.set(if announce_up_to_date {
+                        UpdateStatus::CheckFailed(e)
+                    } else {
+                        UpdateStatus::Idle
+                    });
+                }
+            },
+        );
         std::thread::spawn(move || {
-            let result = updater::check().unwrap_or(None);
+            let result = updater::check().map_err(|e| format!("{e:#}"));
             send(result);
         });
     }

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-19
+
+### Fixed
+
+- **Native agent panel did nothing when launched from Finder/Dock.** The agent
+  is now started through your login shell (`$SHELL -lc`), so the full `PATH`
+  (nvm/npm, Grove's `node`, etc.) is available — a bundled `.app` inherits only a
+  minimal `PATH`, so `elyra` (and the `node` its shebang needs) couldn't be found
+  by a direct spawn, and prompts silently went nowhere. Your message is now also
+  shown immediately, and a clear error appears in the panel if the agent can't be
+  started.
+
 ## [0.9.1] - 2026-07-19
 
 ### Fixed

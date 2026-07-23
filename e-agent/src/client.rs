@@ -41,17 +41,18 @@ pub struct AgentClient {
 }
 
 impl AgentClient {
-    /// Spawn `program --mode rpc [extra_args]` in `cwd` with `env` overlaid, and
-    /// return the client plus a receiver of decoded events.
+    /// Spawn `program args...` in `cwd` with `env` overlaid, and return the
+    /// client plus a receiver of decoded events. The caller is responsible for
+    /// passing the RPC flags (e.g. `--mode rpc`) and, if the process must be
+    /// found on the user's `PATH`, for invoking it through a login shell.
     pub fn spawn(
         program: &str,
-        extra_args: &[String],
+        args: &[String],
         cwd: &std::path::Path,
         env: &[(String, String)],
     ) -> Result<(Self, Receiver<AgentEvent>)> {
         let mut cmd = Command::new(program);
-        cmd.arg("--mode").arg("rpc");
-        cmd.args(extra_args);
+        cmd.args(args);
         cmd.current_dir(cwd);
         for (k, v) in env {
             cmd.env(k, v);

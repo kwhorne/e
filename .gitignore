@@ -2,3 +2,8 @@
 **/*.rs.bk
 /dist
 /target
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example

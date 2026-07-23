@@ -17,8 +17,13 @@ use e_agent::{AgentClient, AgentEvent};
 #[ignore = "requires elyra on PATH; run with --ignored"]
 fn rpc_spawn_and_abort_roundtrip() {
     let cwd = std::env::current_dir().unwrap();
-    let (client, rx) = AgentClient::spawn("elyra", &[], &cwd, &[])
-        .expect("failed to spawn `elyra --mode rpc` (is elyra installed?)");
+    let (client, rx) = AgentClient::spawn(
+        "elyra",
+        &["--mode".to_string(), "rpc".to_string()],
+        &cwd,
+        &[],
+    )
+    .expect("failed to spawn `elyra --mode rpc` (is elyra installed?)");
 
     // Nudge the process, then ask it to abort. Neither calls the LLM.
     client.abort().expect("send abort");

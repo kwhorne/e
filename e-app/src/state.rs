@@ -2441,11 +2441,15 @@ impl AppState {
         } else {
             PathBuf::from(&agent.cwd)
         };
-        let mut parts = agent.command.split_whitespace();
-        let program = parts.next().unwrap_or("elyra").to_string();
-        let extra: Vec<String> = parts.map(str::to_string).collect();
+        // Run through the user's login shell so the full PATH (nvm/npm/Grove
+        // node, etc.) is available — a GUI app launched from Finder/Dock inherits
+        // only a minimal PATH, so `elyra` (and the `node` its shebang needs)
+        // wouldn't be found by a direct spawn. This mirrors the terminal agent.
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let cmdline = format!("{} --mode rpc", agent.command.trim());
+        let shell_args = vec!["-lc".to_string(), cmdline];
 
-        match AgentClient::spawn(&program, &extra, &cwd, &[]) {
+        match AgentClient::spawn(&shell, &shell_args, &cwd, &[]) {
             Ok((client, rx)) => {
                 self.agent_chat.set(ChatState::new());
                 let queue = self.agent_events.get_untracked();
@@ -2465,7 +2469,14 @@ impl AppState {
                     .ok();
                 self.agent_native_client.set(Some(Rc::new(client)));
             }
-            Err(e) => eprintln!("e: native agent '{program}' failed: {e:#}"),
+            Err(e) => {
+                eprintln!("e: native agent failed: {e:#}");
+                self.agent_chat.update(|c| {
+                    c.apply(e_agent::AgentEvent::Error {
+                        message: format!("Could not start the agent: {e:#}"),
+                    })
+                });
+            }
         }
     }
 
@@ -2479,11 +2490,21 @@ impl AppState {
         if self.agent_native_client.get_untracked().is_none() {
             self.start_native_agent();
         }
+        // Capture whether a turn was already running *before* we add this
+        // message (push_user flips `running` on).
+        let busy = self.agent_chat.with_untracked(|c| c.running);
+        // Always show the user's message, even if the agent isn't available.
+        self.agent_chat.update(|c| c.push_user(text));
         let Some(client) = self.agent_native_client.get_untracked() else {
+            self.agent_chat.update(|c| {
+                c.apply(e_agent::AgentEvent::Error {
+                    message: "The agent isn't running — check that `elyra` is installed and on your PATH."
+                        .to_string(),
+                })
+            });
+            self.agent_composer.set(String::new());
             return;
         };
-        let busy = self.agent_chat.with_untracked(|c| c.running);
-        self.agent_chat.update(|c| c.push_user(text));
         let streaming = busy.then_some(Streaming::Steer);
         if let Err(e) = client.prompt(text, streaming) {
             eprintln!("e: agent prompt failed: {e:#}");

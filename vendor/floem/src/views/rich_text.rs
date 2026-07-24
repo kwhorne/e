@@ -62,6 +62,9 @@ pub struct RichText {
     selection_state: SelectionState,
     selection_range: Option<(Cursor, Cursor)>,
     selection_color: Color,
+    // Fired on a plain click (no drag) with the byte offset in `text` that was
+    // clicked — used for click-to-open file links in terminal/agent output.
+    on_click_offset: Option<Box<dyn Fn(usize)>>,
 }
 
 impl RichText {
@@ -75,6 +78,22 @@ impl RichText {
     pub fn selection_color(mut self, color: Color) -> Self {
         self.selection_color = color;
         self
+    }
+
+    /// Call `f` with the clicked byte offset (into the rendered text) on a plain
+    /// click that isn't a drag-selection.
+    pub fn on_click_offset(mut self, f: impl Fn(usize) + 'static) -> Self {
+        self.on_click_offset = Some(Box::new(f));
+        self
+    }
+
+    fn cursor_to_offset(&self, c: Cursor) -> usize {
+        let ranges = self.effective_text_layout().lines_range();
+        if c.line < ranges.len() {
+            (ranges[c.line].start + c.index).min(self.text.len())
+        } else {
+            self.text.len()
+        }
     }
 
     fn effective_text_layout(&self) -> &TextLayout {
@@ -192,6 +211,7 @@ pub fn rich_text(text_layout: impl Fn() -> TextLayout + 'static) -> RichText {
         selection_state: SelectionState::None,
         selection_range: None,
         selection_color: DEFAULT_SELECTION_COLOR,
+        on_click_offset: None,
     }
 }
 
@@ -227,7 +247,7 @@ impl View for RichText {
         _cx: &mut crate::context::EventCx,
         event: &Event,
     ) -> EventPropagation {
-        if !self.selectable {
+        if !self.selectable && self.on_click_offset.is_none() {
             return EventPropagation::Continue;
         }
         match event {
@@ -250,7 +270,8 @@ impl View for RichText {
                     self.id.request_layout();
                 }
             }
-            Event::PointerUp(_) => {
+            Event::PointerUp(pe) => {
+                let was_click = matches!(self.selection_state, SelectionState::Ready(_));
                 if let SelectionState::Selecting(start, end) = self.selection_state {
                     self.selection_state = SelectionState::Selected(start, end);
                 } else {
@@ -258,6 +279,14 @@ impl View for RichText {
                 }
                 self.id.clear_active();
                 self.id.request_layout();
+                // A click without a drag — report the byte offset that was hit.
+                if was_click {
+                    if let Some(cb) = self.on_click_offset.as_ref() {
+                        if let Some(cursor) = self.get_hit_point(pe.pos) {
+                            cb(self.cursor_to_offset(cursor));
+                        }
+                    }
+                }
             }
             Event::KeyDown(ke) => {
                 if self.handle_key_down(ke) {

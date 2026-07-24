@@ -27,6 +27,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("tinker-selection", "Tinker: Run Selection"),
     ("laravel-map", "Laravel: Architecture Map"),
     ("agent-log", "Agent: Timeline / Audit Log"),
+    ("agent-send-selection", "Agent: Send Selection to Agent"),
     ("run-tests", "Tests: Runner / Autonomous TDD"),
     ("laravel-log", "Laravel: Log Tail"),
     ("runtime", "Laravel: Runtime Insight (Telescope)"),

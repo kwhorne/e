@@ -98,6 +98,22 @@ The agent isn't just a terminal — it gets a local Unix socket
 
 See [Agent Workspace Sync](agent-sync.md) for the full protocol.
 
+## Editor integration
+
+Two conveniences tie the panel to the editor (toggle **Settings → Agents →
+“Editor integration”**, on by default):
+
+- **Click file paths in the output** — a `path`, `path:line` or `path:line:col`
+  reference in the agent (or terminal) output is clickable and opens that file at
+  the line in the editor.
+- **Send selection to agent** — the *Agent: Send Selection to Agent* command
+  (command palette) types a one-line reference to your current file and selected
+  lines into the agent, so you can add your question and let it read the exact
+  spot.
+
+You can also **drag-select** any text in the panel and copy it with `⌘C` (click
+to resume typing).
+
 ## Tips
 
 - Leave `cwd` empty so the agent operates on whatever project you have open.

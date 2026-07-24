@@ -190,6 +190,8 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
     })
     // Drag to select terminal output, Cmd/Ctrl+C to copy (click to resume typing).
     .selectable()
+    // Click a file path in the output to open it in the editor.
+    .on_click_offset(move |off| state.term_open_link_at(id_sig.get_untracked(), off))
     .style(|s| s.padding(8.0));
 
     // Background-colour rectangles (drawn behind the text), since the text

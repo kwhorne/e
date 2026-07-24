@@ -117,6 +117,8 @@ fn agent_body(state: AppState) -> impl IntoView {
     })
     // Drag to select agent output, Cmd/Ctrl+C to copy (click to resume typing).
     .selectable()
+    // Click a file path in the output to open it in the editor.
+    .on_click_offset(move |off| state.agent_open_link_at(off))
     .style(|s| s.padding(8.0));
 
     let cursor_block = empty().style(move |s| {

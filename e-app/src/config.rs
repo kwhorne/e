@@ -22,6 +22,9 @@ pub struct Settings {
     /// Experimental (off by default): render Elyra as a native chat panel (elyra
     /// RPC) instead of the terminal. Other agents always use the terminal.
     pub native_agent: bool,
+    /// File-level editor integration for the agent/terminal: click file paths in
+    /// output to open them, and “Send selection to agent”. On by default.
+    pub editor_integration: bool,
     /// Laravel-aware completion, hover and navigation (auto-enabled in Laravel
     /// projects; set to false to turn off).
     pub laravel: bool,
@@ -52,6 +55,7 @@ impl Default for Settings {
             sticky_scroll: true,
             ai_completion: false,
             native_agent: false,
+            editor_integration: true,
             laravel: true,
             xdebug: false,
             app_url: String::new(),
@@ -102,6 +106,7 @@ pub fn load_settings() -> Settings {
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         ai_completion: bool_of("ai_completion", d.ai_completion),
         native_agent: bool_of("native_agent", d.native_agent),
+        editor_integration: bool_of("editor_integration", d.editor_integration),
         laravel: bool_of("laravel", d.laravel),
         xdebug: bool_of("xdebug", d.xdebug),
         app_url: v

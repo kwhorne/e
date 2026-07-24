@@ -586,6 +586,21 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
         )
         .into_any(),
     );
+    push(
+        5,
+        "Editor integration",
+        "Click file paths in agent/terminal output to open them, and enable “Send selection to agent”.",
+        toggle_row(
+            "Editor integration",
+            "Click file paths in agent/terminal output to open them, and enable “Send selection to agent”.",
+            move || s.settings.get().editor_integration,
+            move |v| {
+                s.settings.update(|st| st.editor_integration = v);
+                config::set_bool("editor_integration", v);
+            },
+        )
+        .into_any(),
+    );
 
     rows
 }

@@ -61,3 +61,6 @@ local changes forward. Record any local patches in this file as they land:
   `Cmd/Ctrl+C`. Upstream `rich_text` had no selection at all — this removes the
   “selectable *or* styled, pick one” limitation we were working around with
   single-style labels.
+- **`src/views/rich_text.rs`: click offsets.** Added `RichText::on_click_offset(cb)`
+  which fires on a plain click (not a drag-selection) with the byte offset of the
+  hit character. Used to make file paths in terminal/agent output click-to-open.

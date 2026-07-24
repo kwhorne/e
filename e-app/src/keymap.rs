@@ -29,6 +29,7 @@ const DEFAULT: &[(&str, &str)] = &[
     ("cmd+alt+t", "tinker"),
     ("cmd+alt+m", "laravel-map"),
     ("cmd+alt+a", "agent-log"),
+    ("cmd+alt+s", "agent-send-selection"),
     ("cmd+shift+t", "run-tests"),
     ("cmd+alt+l", "laravel-log"),
     ("cmd+alt+i", "runtime"),

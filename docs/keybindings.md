@@ -79,6 +79,7 @@ Examples: `cmd+shift+p`, `ctrl+g`, `alt+up`, `cmd+/`, `f12`, `shift+f12`.
 | `toggle-terminal` | `cmd+t` / `ctrl+\`` | Toggle terminal |
 | `new-terminal` / `split-terminal` | — | New / split terminal |
 | `toggle-agent` / `restart-agent` | `cmd+l` / — | Agent panel / restart |
+| `agent-send-selection` | `cmd+alt+s` | Send editor selection to the agent |
 | `markdown` | `cmd+shift+m` | Markdown preview |
 | `theme` | `f8` | Light / dark theme |
 | `zoom-in` / `zoom-out` / `zoom-reset` | `cmd+=` / `cmd+-` / `cmd+0` | Zoom |

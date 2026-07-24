@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-07-24
+
+### Added
+
+- **Selectable terminal & agent output.** Drag across output in the agent panel
+  or the integrated terminal to select it, and copy with `⌘C`. A plain click
+  still focuses the panel for typing — click again to resume after selecting.
+  (Powered by the vendored Floem fork's selectable `rich_text`.)
+- **Click-to-open file paths.** A `path`, `path:line` or `path:line:col`
+  reference in agent/terminal output is now clickable and opens that file at the
+  line in the editor.
+- **Send selection to the agent** (`⌘⌥S`, or *Agent: Send Selection to Agent*
+  in the command palette). Types a one-line reference to your current file and
+  selected lines into the agent — without submitting — so you can add your
+  question and let it read the exact spot.
+- **“Editor integration” setting** (Settings → Agents, on by default) gates the
+  click-to-open and send-selection features.
+
 ## [0.9.5] - 2026-07-24
 
 ### Added

@@ -15,6 +15,9 @@ path = "e-app/src/bin/e.rs"
 
 [workspace]
 members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term", "e-agent", "e-verify"]
+# The vendored Floem fork (vendor/floem) is its own workspace; keep it out of
+# ours so the two don't collide. We depend on it via path below.
+exclude  = ["vendor/floem"]
 resolver = "2"
 
 [workspace.package]
@@ -47,15 +50,15 @@ e-dap       = { path = "./e-dap" }
 e-lsp       = { path = "./e-lsp" }
 e-term      = { path = "./e-term" }
 
-# Same Floem revision Lapce builds against, so we can use it as a reference.
+# Vendored Floem fork (vendor/floem), forked from lapce/floem @ 31fa8f44. We own
+# this copy so we can extend the editor/text/input views instead of being
+# limited by upstream. See vendor/floem/FORK.md.
 [workspace.dependencies.floem]
-git      = "https://github.com/lapce/floem"
-rev      = "31fa8f444c37f4c314f47d88c23ffdbc25f2ab53"
+path     = "vendor/floem"
 features = ["editor", "serde", "default-image-formats", "rfd-async-std"]
 
 [workspace.dependencies.floem-editor-core]
-git      = "https://github.com/lapce/floem"
-rev      = "31fa8f444c37f4c314f47d88c23ffdbc25f2ab53"
+path     = "vendor/floem/editor-core"
 features = ["serde"]
 
 [patch.crates-io]

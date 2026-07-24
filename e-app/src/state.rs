@@ -1102,7 +1102,7 @@ impl AppState {
             agent_wake_tx: RwSignal::new(agent_wake_tx),
             agent_wake_rx: RwSignal::new(Some(agent_wake_rx)),
             sidebar_width: RwSignal::new(240.0),
-            agent_width: RwSignal::new(460.0),
+            agent_width: RwSignal::new(600.0),
             db_width: RwSignal::new(280.0),
             term_height: RwSignal::new(320.0),
             db_open: RwSignal::new(false),

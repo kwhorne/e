@@ -115,6 +115,8 @@ fn agent_body(state: AppState) -> impl IntoView {
         layout.set_text(&text, attrs_list, None);
         layout
     })
+    // Drag to select agent output, Cmd/Ctrl+C to copy (click to resume typing).
+    .selectable()
     .style(|s| s.padding(8.0));
 
     let cursor_block = empty().style(move |s| {

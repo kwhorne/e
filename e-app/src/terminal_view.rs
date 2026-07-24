@@ -188,6 +188,8 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
         layout.set_text(&text, attrs_list, None);
         layout
     })
+    // Drag to select terminal output, Cmd/Ctrl+C to copy (click to resume typing).
+    .selectable()
     .style(|s| s.padding(8.0));
 
     // Background-colour rectangles (drawn behind the text), since the text

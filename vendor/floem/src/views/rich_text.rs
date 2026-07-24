@@ -1,8 +1,9 @@
 use std::any::Any;
+use std::mem::swap;
 
 use floem_reactive::create_effect;
 use floem_renderer::{
-    text::{Attrs, AttrsList, AttrsOwned, TextLayout},
+    text::{Attrs, AttrsList, AttrsOwned, Cursor, TextLayout},
     Renderer,
 };
 use peniko::{
@@ -12,15 +13,41 @@ use peniko::{
 };
 use smallvec::{smallvec, SmallVec};
 use taffy::tree::NodeId;
+use winit::keyboard::Key;
 
+use super::TextCommand;
 use crate::{
-    context::UpdateCx,
+    context::{PaintCx, UpdateCx},
+    event::{Event, EventPropagation},
     id::ViewId,
+    keyboard::KeyEvent,
     style::{Style, TextOverflow},
     unit::PxPct,
     view::View,
-    IntoView,
+    Clipboard, IntoView,
 };
+
+/// Default translucent highlight for selected rich text.
+const DEFAULT_SELECTION_COLOR: Color = Color::from_rgba8(0x3d, 0x6e, 0xb5, 0x66);
+
+#[derive(Debug, Clone, Copy)]
+enum SelectionState {
+    None,
+    Ready(Point),
+    Selecting(Point, Point),
+    Selected(Point, Point),
+}
+
+/// Reconstruct the plain text of a layout (logical lines joined by `\n`) so a
+/// selection can be copied and hit offsets mapped back to bytes.
+fn layout_text(layout: &TextLayout) -> String {
+    layout
+        .lines()
+        .iter()
+        .map(|l| l.text())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 pub struct RichText {
     id: ViewId,
@@ -29,22 +56,142 @@ pub struct RichText {
     text_overflow: TextOverflow,
     available_width: Option<f32>,
     available_text_layout: Option<TextLayout>,
+    // Text selection (opt-in via `RichText::selectable`).
+    text: String,
+    selectable: bool,
+    selection_state: SelectionState,
+    selection_range: Option<(Cursor, Cursor)>,
+    selection_color: Color,
+}
+
+impl RichText {
+    /// Allow the user to select and copy this text with the pointer + `Cmd/Ctrl+C`.
+    pub fn selectable(mut self) -> Self {
+        self.selectable = true;
+        self
+    }
+
+    /// Override the selection highlight color.
+    pub fn selection_color(mut self, color: Color) -> Self {
+        self.selection_color = color;
+        self
+    }
+
+    fn effective_text_layout(&self) -> &TextLayout {
+        self.available_text_layout
+            .as_ref()
+            .unwrap_or(&self.text_layout)
+    }
+
+    fn get_hit_point(&self, point: Point) -> Option<Cursor> {
+        let text_node = self.text_node?;
+        let location = self
+            .id
+            .taffy()
+            .borrow()
+            .layout(text_node)
+            .map_or(taffy::Layout::new().location, |layout| layout.location);
+        self.effective_text_layout()
+            .hit(point.x as f32 - location.x, point.y as f32 - location.y)
+    }
+
+    fn set_selection_range(&mut self) {
+        match self.selection_state {
+            SelectionState::None => {
+                self.selection_range = None;
+            }
+            SelectionState::Selecting(start, end) | SelectionState::Selected(start, end) => {
+                let Some(mut start_cursor) = self.get_hit_point(start) else {
+                    return;
+                };
+                if let Some(mut end_cursor) = self.get_hit_point(end) {
+                    if start_cursor.line > end_cursor.line
+                        || (start_cursor.line == end_cursor.line
+                            && start_cursor.index > end_cursor.index)
+                    {
+                        swap(&mut start_cursor, &mut end_cursor);
+                    }
+                    self.selection_range = Some((start_cursor, end_cursor));
+                }
+            }
+            SelectionState::Ready(_) => {}
+        }
+    }
+
+    fn copy_selection(&self) {
+        let Some((start_c, end_c)) = &self.selection_range else {
+            return;
+        };
+        let ranges = self.effective_text_layout().lines_range();
+        if start_c.line >= ranges.len() || end_c.line >= ranges.len() {
+            return;
+        }
+        let start_idx = ranges[start_c.line].start + start_c.index;
+        let end_idx = ranges[end_c.line].start + end_c.index;
+        if start_idx <= end_idx && end_idx <= self.text.len() {
+            let _ = Clipboard::set_contents(self.text[start_idx..end_idx].to_string());
+        }
+    }
+
+    fn handle_key_down(&mut self, event: &KeyEvent) -> bool {
+        if event.modifiers.is_empty() {
+            return false;
+        }
+        if let Key::Character(ref ch) = event.key.logical_key {
+            if let TextCommand::Copy = (event, ch).into() {
+                self.copy_selection();
+                return true;
+            }
+        }
+        false
+    }
+
+    fn paint_selection(&self, text_layout: &TextLayout, cx: &mut PaintCx) {
+        let Some((start_c, end_c)) = &self.selection_range else {
+            return;
+        };
+        let location = self
+            .id
+            .taffy()
+            .borrow()
+            .layout(self.text_node.unwrap())
+            .cloned()
+            .unwrap_or_default()
+            .location;
+        for run in text_layout.layout_runs() {
+            if let Some((mut start_x, width)) = run.highlight(*start_c, *end_c) {
+                start_x += location.x;
+                let end_x = width + start_x;
+                let start_y = location.y as f64 + run.line_top as f64;
+                let end_y = start_y + run.line_height as f64;
+                let rect =
+                    Rect::new(start_x.into(), start_y, end_x.into(), end_y).to_rounded_rect(2.0);
+                cx.fill(&rect, &self.selection_color, 0.0);
+            }
+        }
+    }
 }
 
 pub fn rich_text(text_layout: impl Fn() -> TextLayout + 'static) -> RichText {
     let id = ViewId::new();
-    let text = text_layout();
+    let layout = text_layout();
+    let text = layout_text(&layout);
     create_effect(move |_| {
         let new_text_layout = text_layout();
         id.update_state(new_text_layout);
     });
     RichText {
         id,
-        text_layout: text,
+        text_layout: layout,
         text_node: None,
         text_overflow: TextOverflow::Wrap,
         available_width: None,
         available_text_layout: None,
+        text,
+        selectable: false,
+        selection_state: SelectionState::None,
+        selection_range: None,
+        selection_color: DEFAULT_SELECTION_COLOR,
     }
 }
 
@@ -68,10 +215,58 @@ impl View for RichText {
     fn update(&mut self, _cx: &mut UpdateCx, state: Box<dyn Any>) {
         if let Ok(state) = state.downcast() {
             self.text_layout = *state;
+            self.text = layout_text(&self.text_layout);
             self.available_width = None;
             self.available_text_layout = None;
             self.id.request_layout();
         }
+    }
+
+    fn event_before_children(
+        &mut self,
+        _cx: &mut crate::context::EventCx,
+        event: &Event,
+    ) -> EventPropagation {
+        if !self.selectable {
+            return EventPropagation::Continue;
+        }
+        match event {
+            Event::PointerDown(pe) => {
+                self.selection_range = None;
+                self.selection_state = SelectionState::Ready(pe.pos);
+                self.id.request_layout();
+            }
+            Event::PointerMove(pme) => {
+                let (SelectionState::Selecting(start, _) | SelectionState::Ready(start)) =
+                    self.selection_state
+                else {
+                    return EventPropagation::Continue;
+                };
+                // Ignore tiny moves so a click doesn't eat pointer events.
+                if start.distance(pme.pos).abs() > 2. {
+                    self.selection_state = SelectionState::Selecting(start, pme.pos);
+                    self.id.request_active();
+                    self.id.request_focus();
+                    self.id.request_layout();
+                }
+            }
+            Event::PointerUp(_) => {
+                if let SelectionState::Selecting(start, end) = self.selection_state {
+                    self.selection_state = SelectionState::Selected(start, end);
+                } else {
+                    self.selection_state = SelectionState::None;
+                }
+                self.id.clear_active();
+                self.id.request_layout();
+            }
+            Event::KeyDown(ke) => {
+                if self.handle_key_down(ke) {
+                    return EventPropagation::Stop;
+                }
+            }
+            _ => {}
+        }
+        EventPropagation::Continue
     }
 
     fn layout(&mut self, cx: &mut crate::context::LayoutCx) -> taffy::tree::NodeId {
@@ -140,6 +335,7 @@ impl View for RichText {
             }
         }
 
+        self.set_selection_range();
         None
     }
 
@@ -154,10 +350,13 @@ impl View for RichText {
             .unwrap_or_default()
             .location;
         let point = Point::new(location.x as f64, location.y as f64);
-        if let Some(text_layout) = self.available_text_layout.as_ref() {
-            cx.draw_text(text_layout, point);
-        } else {
-            cx.draw_text(&self.text_layout, point);
+        let text_layout = self
+            .available_text_layout
+            .as_ref()
+            .unwrap_or(&self.text_layout);
+        cx.draw_text(text_layout, point);
+        if self.selectable && cx.app_state.is_focused(&self.id) {
+            self.paint_selection(text_layout, cx);
         }
     }
 }

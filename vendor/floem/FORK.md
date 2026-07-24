@@ -54,4 +54,10 @@ local changes forward. Record any local patches in this file as they land:
 
 ### Local changes on top of upstream
 
-- _(none yet — baseline import of `31fa8f44`)_
+- **`src/views/rich_text.rs`: text selection.** Added an opt-in
+  `RichText::selectable()` (+ `selection_color()`) that ports the pointer /
+  copy / highlight machinery from `Label` into `RichText`, so styled rich text
+  (bold, inline code, colors) can now be drag-selected and copied with
+  `Cmd/Ctrl+C`. Upstream `rich_text` had no selection at all — this removes the
+  “selectable *or* styled, pick one” limitation we were working around with
+  single-style labels.

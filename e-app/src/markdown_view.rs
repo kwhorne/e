@@ -71,13 +71,16 @@ fn block_view(block: Block) -> impl IntoView {
         Block::Heading(level, spans) => {
             let size = heading_size(level);
             rich_text(move || layout(&spans, size, true))
+                .selectable()
                 .style(|s| s.width_full().padding_top(8.0))
                 .into_any()
         }
         Block::Paragraph(spans) => rich_text(move || layout(&spans, 14.0, false))
+            .selectable()
             .style(|s| s.width_full())
             .into_any(),
         Block::Quote(spans) => rich_text(move || layout(&spans, 14.0, false))
+            .selectable()
             .style(|s| {
                 s.width_full()
                     .padding_left(14.0)
@@ -99,6 +102,7 @@ fn block_view(block: Block) -> impl IntoView {
             );
             let indent = depth as f64 * 16.0;
             rich_text(move || layout(&spans, 14.0, false))
+                .selectable()
                 .style(move |s| s.width_full().padding_left(indent))
                 .into_any()
         }
@@ -115,6 +119,7 @@ fn block_view(block: Block) -> impl IntoView {
                 tl.set_text(&body, AttrsList::new(attrs), None);
                 tl
             })
+            .selectable()
             .style(|s| s.width_full().padding(12.0));
 
             // Copy-to-clipboard button, top-right of the code block.
@@ -170,126 +175,18 @@ fn block_view(block: Block) -> impl IntoView {
     }
 }
 
-/// Render an arbitrary markdown string as a *selectable* column of block views,
-/// so the reader can drag-select and copy (`⌘C`) any text. Block structure
-/// (heading sizes, code boxes, list bullets) is preserved; inline emphasis
-/// within a paragraph is flattened to plain text, because floem labels are
-/// single-style (the rich [`block_view`], used by the `.md` reading preview,
-/// can't be selected). Used by the native agent transcript.
+/// Render an arbitrary markdown string as a *selectable* column of rich block
+/// views, so the reader can drag-select and copy (`⌘C`) any text while keeping
+/// inline formatting (bold, inline code, colors). Backed by our vendored Floem
+/// fork, which added text selection to `rich_text`.
 pub fn markdown_body_selectable(text: &str) -> impl IntoView {
     let blocks = markdown::parse(text);
     dyn_stack(
         move || blocks.clone().into_iter().enumerate().collect::<Vec<_>>(),
         |(i, _)| *i,
-        move |(_, block)| block_view_selectable(block),
+        move |(_, block)| block_view(block),
     )
     .style(|s| s.flex_col().width_full().gap(8.0))
-}
-
-fn plain(spans: &[Span]) -> String {
-    spans.iter().map(|s| s.text.as_str()).collect()
-}
-
-/// A selectable, wrapping text label.
-fn sel(text: String) -> floem::views::Label {
-    label(move || text.clone()).label_style(|s| s.selectable(true))
-}
-
-fn block_view_selectable(block: Block) -> impl IntoView {
-    use floem::text::Weight;
-    match block {
-        Block::Heading(level, spans) => {
-            let size = heading_size(level);
-            sel(plain(&spans))
-                .style(move |s| {
-                    s.width_full()
-                        .font_size(size)
-                        .font_weight(Weight::BOLD)
-                        .color(theme::fg())
-                        .padding_top(8.0)
-                })
-                .into_any()
-        }
-        Block::Paragraph(spans) => sel(plain(&spans))
-            .style(|s| s.width_full().font_size(14.0).color(theme::fg()))
-            .into_any(),
-        Block::Quote(spans) => sel(plain(&spans))
-            .style(|s| {
-                s.width_full()
-                    .font_size(14.0)
-                    .padding_left(14.0)
-                    .border_left(3.0)
-                    .border_color(theme::border())
-                    .color(theme::fg_dim())
-            })
-            .into_any(),
-        Block::ListItem(depth, spans) => {
-            let indent = depth as f64 * 16.0;
-            sel(format!("\u{2022}  {}", plain(&spans)))
-                .style(move |s| {
-                    s.width_full()
-                        .font_size(14.0)
-                        .color(theme::fg())
-                        .padding_left(indent)
-                })
-                .into_any()
-        }
-        Block::Code(code) => {
-            let code_text = sel(code.clone()).style(|s| {
-                s.width_full()
-                    .font_family("monospace".to_string())
-                    .font_size(13.0)
-            });
-            let copied = RwSignal::new(false);
-            let copy = label(move || {
-                if copied.get() {
-                    "Copied".to_string()
-                } else {
-                    "Copy".to_string()
-                }
-            })
-            .style(|s| {
-                s.absolute()
-                    .inset_right(8.0)
-                    .inset_top(8.0)
-                    .padding_horiz(8.0)
-                    .padding_vert(2.0)
-                    .font_size(11.0)
-                    .color(theme::fg_dim())
-                    .background(theme::bg())
-                    .border(1.0)
-                    .border_color(theme::border())
-                    .border_radius(4.0)
-                    .cursor(floem::style::CursorStyle::Pointer)
-                    .hover(|s| s.color(theme::fg()).background(theme::bg_hover()))
-            })
-            .on_click_stop(move |_| {
-                let _ = floem::Clipboard::set_contents(code.clone());
-                copied.set(true);
-                floem::action::exec_after(std::time::Duration::from_millis(1200), move |_| {
-                    copied.set(false)
-                });
-            });
-            stack((code_text, copy))
-                .style(|s| {
-                    s.width_full()
-                        .padding(12.0)
-                        .background(theme::bg_panel())
-                        .border(1.0)
-                        .border_color(theme::border())
-                        .border_radius(6.0)
-                })
-                .into_any()
-        }
-        Block::Rule => empty()
-            .style(|s| {
-                s.width_full()
-                    .height(1.0)
-                    .margin_top(8.0)
-                    .background(theme::border())
-            })
-            .into_any(),
-    }
 }
 
 fn is_markdown(state: AppState) -> bool {

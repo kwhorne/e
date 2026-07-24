@@ -175,23 +175,10 @@ fn agent_body(state: AppState) -> impl IntoView {
 /// panel (elyra RPC) rather than a terminal PTY. Reactive: recomputes when the
 /// setting or the selected agent changes.
 fn native_selected(state: AppState) -> bool {
-    if !state.settings.with(|s| s.native_agent) {
-        return false;
-    }
-    let id = state.agent_current.get();
-    let program = state
-        .agents
-        .with(|l| {
-            l.iter().find(|a| a.id == id).map(|a| {
-                a.command
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("")
-                    .to_string()
-            })
-        })
-        .unwrap_or_default();
-    id == "elyra" || program == "elyra" || program.rsplit('/').next() == Some("elyra")
+    // Disabled: the terminal (PTY) panel is used for every agent. See
+    // `AppState::use_native_agent` for the rationale and how to re-enable.
+    let _ = state;
+    false
 }
 
 pub fn agent_panel(state: AppState) -> impl IntoView {

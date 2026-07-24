@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The agent panel (⌘L) uses the terminal again for every agent, including
+  Elyra.** The native RPC-rendered chat panel introduced in 0.9.0 wasn't
+  interactive enough on the current text/input views, so Elyra now runs in the
+  same terminal panel as the other agents by default. The native rendering code
+  is kept, dormant, to revisit once we own those components.
+
 ### Added
 
 - **“Verify the fix” loop in the Runtime panel.** Click the ✓ on a captured

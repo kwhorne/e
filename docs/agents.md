@@ -6,17 +6,23 @@ next to your code.
 
 ## Opening the agent panel
 
-- **`⌘L`** toggles the agent panel on the right.
-- For **Elyra**, the panel is a [native chat](#native-chat-panel-elyra); other
-  agents launch in an embedded terminal.
+- **`⌘L`** toggles the agent panel on the right (it opens at 600px, resizable).
+- Every agent runs in an **embedded terminal** by default. Elyra can optionally
+  use an experimental [native chat panel](#native-chat-panel-elyra-experimental).
 - **`⌘W`** (while the panel is focused) closes it; the agent keeps running, so
   `⌘L` reopens the same session.
 
-## Native chat panel (Elyra)
+## Native chat panel (Elyra, experimental)
 
-Elyra runs headless over its structured RPC protocol (`elyra --mode rpc`) and the
-conversation is drawn with native views instead of a terminal, so it stays fast
-and readable no matter how long the transcript gets:
+By default the agent panel is a terminal for **every** agent, including Elyra.
+Elyra can *optionally* be rendered as a native chat panel instead: turn on
+**Settings → Agents → “Native Elyra chat”** (or set `"native_agent": true` in
+[`config.json`](configuration.md)). It is **off by default** while the underlying
+text/input views mature.
+
+When enabled, Elyra runs headless over its structured RPC protocol
+(`elyra --mode rpc`) and the conversation is drawn with native views instead of a
+terminal, so it stays fast and readable no matter how long the transcript gets:
 
 - **Streaming replies** render as formatted **markdown** — headings, lists,
   inline code, fenced code blocks and links.
@@ -29,9 +35,8 @@ and readable no matter how long the transcript gets:
   Chat** (in the header menu) starts a fresh session.
 - **Copy** buttons sit on every code block and under each reply.
 
-Other agents (Claude Code, Codex) use the terminal panel. To force the terminal
-panel for Elyra too, set `"native_agent": false` in
-[`config.json`](configuration.md).
+Other agents (Claude Code, Codex) always use the terminal panel. Turn the toggle
+back off to run Elyra in the terminal too (the default).
 
 ## Switching agents
 

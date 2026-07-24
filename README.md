@@ -74,7 +74,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Task runner** (`⌘⇧B`) — npm/Composer/Cargo/Go/artisan/Make tasks and tests
 - **Graphical settings** (`⌘,`) and **customizable keybindings**
 - **Integrated terminal** (`⌘T`) — PTY-backed with ANSI colour, multiple tabs, rename and split
-- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent beside your code. Elyra gets a **native chat** (streaming markdown, tool-call cards, an auto-growing composer, Stop/steer, copy buttons); all agents share deep editor co-op: reviewable `propose_edit` diffs, an autonomous TDD loop (`⌘⇧T`), and an activity timeline (`⌘⌥A`)
+- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent in an embedded terminal beside your code (Elyra has an experimental native chat panel too, off by default). All agents share deep editor co-op: reviewable `propose_edit` diffs, an autonomous TDD loop (`⌘⇧T`), and an activity timeline (`⌘⌥A`)
 - **Editing essentials** — comment toggle (`⌘/`), line move/duplicate/delete, indent, multi-cursor (`⌘⇧D`), column editing (`⌥⌘↑/↓`), auto-closing brackets
 - **Code actions & refactor** (`⌘.`) — LSP quick fixes and extract variable/method; **compare** the active file with any other file; **EditorConfig** support
 - **Split editor** (`⌘\`), **resizable & swappable panels**, **zoom** (`⌘±`), **word wrap** (`⌥Z`)
@@ -102,11 +102,11 @@ Language servers are launched automatically when available on your `PATH`:
 ## AI agents
 
 The right-hand **Agent panel** (`⌘L`) runs a coding agent beside your open
-project. **Elyra** renders as a native chat — streaming **markdown**, tool-call
-cards, an auto-growing multi-line composer (Enter sends, Shift+Enter for a
-newline), a real **Stop**, and **Copy** buttons on code and replies — while
-Claude Code, Codex and any other CLI agent run in an embedded terminal. Switch
-agents from the panel header, and configure them in your global settings (`⌘,`):
+project. **Elyra**, Claude Code, Codex and any other CLI agent run in an embedded
+terminal. (Elyra can optionally use an experimental native chat panel — streaming
+markdown, tool-call cards, an auto-growing composer — via **Settings → Agents →
+“Native Elyra chat”**, off by default.) Switch agents from the panel header, and
+configure them in your global settings (`⌘,`):
 
 ```jsonc
 {

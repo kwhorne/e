@@ -102,6 +102,15 @@ method, URI, status and duration, plus SQL queries with N+1 warnings, cache
 hits/misses, sent mails, and events. Click a request to expand its queries; ✨
 hands it to the agent. No Telescope or Debugbar install required.
 
+### Verify the fix (✓)
+
+Click the **✓** on a captured request to verify a change end to end. `e`
+checkpoints your working tree, replays the request and records a **baseline**
+(time, query count, N+1). Apply your fix — edit the code or ask the agent — then
+hit **Measure again**: `e` replays the request and shows a before/after
+**verdict** (Improved / No change / Regressed / Broke). Keep the change, or
+**Discard** it to revert to the checkpoint.
+
 For Inertia/VILT projects, see [Inertia & the VILT stack](inertia.md).
 
 ## Tinker scratchpad

@@ -7,13 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **The agent panel (⌘L) uses the terminal again for every agent, including
-  Elyra.** The native RPC-rendered chat panel introduced in 0.9.0 wasn't
-  interactive enough on the current text/input views, so Elyra now runs in the
-  same terminal panel as the other agents by default. The native rendering code
-  is kept, dormant, to revisit once we own those components.
+## [0.9.5] - 2026-07-24
 
 ### Added
 
@@ -24,6 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **verdict** — Improved / No change / Regressed / Broke — then **Keep** the change
   or **Discard** it (which reverts to the checkpoint). Backed by the pure,
   unit-tested `e-verify` metrics + `e_core::git` checkpoint/restore.
+- **Selectable markdown.** The `.md` reading preview is now selectable — drag
+  across headings, bold, inline code and links and copy (`⌘C`) with the
+  formatting intact. This is powered by our vendored Floem fork (below), which
+  adds text selection to rich text.
+
+### Changed
+
+- **The agent panel (⌘L) uses the terminal by default for every agent,
+  including Elyra.** The native RPC-rendered chat panel from 0.9.0 wasn't
+  interactive enough on the current text/input views, so every agent now runs in
+  the terminal panel out of the box. The native panel is still available as an
+  experimental, opt-in toggle — **Settings → Agents → “Native Elyra chat”** (off
+  by default).
+- **The agent panel opens wider** — `⌘L` now starts at 600px (still resizable
+  from 300–900px).
+- **Vendored the Floem UI toolkit** into `vendor/floem`. `e` now builds against
+  its own copy of Floem instead of a pinned git revision, so we can extend the
+  editor/text/input views ourselves (starting with selectable rich text) rather
+  than being limited by upstream. See `vendor/floem/FORK.md`.
 
 ## [0.9.4] - 2026-07-23
 

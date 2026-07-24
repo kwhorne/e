@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **“Verify the fix” loop in the Runtime panel.** Click the ✓ on a captured
+  request to take a **baseline** measurement (it checkpoints your working tree,
+  replays the request, and records time / query count / N+1). Apply a fix
+  (edit code or ask the agent), hit **Measure again**, and get a before/after
+  **verdict** — Improved / No change / Regressed / Broke — then **Keep** the change
+  or **Discard** it (which reverts to the checkpoint). Backed by the pure,
+  unit-tested `e-verify` metrics + `e_core::git` checkpoint/restore.
+
 ## [0.9.4] - 2026-07-23
 
 ### Fixed

@@ -652,6 +652,12 @@ pub struct AppState {
     pub runtime_reqs: RwSignal<Vec<RuntimeReq>>,
     pub runtime_expanded: RwSignal<Option<String>>,
     pub runtime_polling: RwSignal<bool>,
+    /// The in-progress "verify the fix" session, if any (see [`crate::verify`]).
+    pub verify_session: RwSignal<Option<crate::verify::VerifySession>>,
+    /// A verify measurement (baseline or after) is in flight.
+    pub verify_busy: RwSignal<bool>,
+    /// Whether the verify panel is open (single source of truth for visibility).
+    pub verify_open: RwSignal<bool>,
 
     // ---- Step-debugging (DAP session) ----------------------------------
     pub debug_open: RwSignal<bool>,
@@ -902,6 +908,19 @@ fn substitute_route_params(uri: &str) -> String {
         }
     }
     out
+}
+
+/// Replay a request for the "verify the fix" loop and return just the pieces the
+/// measurement core needs: `(status, duration_ms, queries)`.
+pub(crate) fn replay_for_verify(base: &str, url: &str) -> (u16, f64, Vec<(String, String)>) {
+    let rr = do_http_request(base, url);
+    let ms = rr
+        .time
+        .trim()
+        .parse::<f64>()
+        .map(|secs| secs * 1000.0)
+        .unwrap_or(0.0);
+    (rr.status.unwrap_or(0), ms, rr.queries)
 }
 
 /// Perform the request via the system `curl` (`-k` so Grove's private-CA HTTPS
@@ -1164,6 +1183,9 @@ impl AppState {
             runtime_reqs: RwSignal::new(Vec::new()),
             runtime_expanded: RwSignal::new(None),
             runtime_polling: RwSignal::new(false),
+            verify_session: RwSignal::new(None),
+            verify_busy: RwSignal::new(false),
+            verify_open: RwSignal::new(false),
             debug_open: RwSignal::new(false),
             debug_status: RwSignal::new("idle".to_string()),
             debug_thread: RwSignal::new(1),

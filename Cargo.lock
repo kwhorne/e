@@ -1275,6 +1275,7 @@ dependencies = [
  "e-db",
  "e-lsp",
  "e-term",
+ "e-verify",
  "floem",
  "floem-editor-core",
  "lsp-types",

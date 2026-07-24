@@ -91,5 +91,7 @@ mod undo_view;
 mod update_view;
 mod updater;
 mod validation;
+mod verify;
+mod verify_view;
 
 pub use app::launch;

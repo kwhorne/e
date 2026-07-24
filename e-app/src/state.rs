@@ -2441,13 +2441,17 @@ impl AppState {
     /// Whether the current agent should use the native (elyra RPC) chat panel
     /// rather than a terminal PTY. Only elyra speaks the RPC protocol today.
     pub fn use_native_agent(&self) -> bool {
-        // The native (RPC-rendered) agent panel is disabled: every agent,
-        // including Elyra, runs in the terminal (PTY) panel. Floem's current
-        // input/text views aren't interactive enough to make the native chat
-        // feel right, so until we own those components ourselves we stick to the
-        // terminal. Flip this back on (restore the setting/agent check below)
-        // once the native rendering path is ready again.
-        false
+        // Opt-in (experimental, off by default): only Elyra speaks the RPC
+        // protocol the native chat panel renders. Every other agent, and Elyra
+        // when the toggle is off, uses the terminal (PTY) panel.
+        if !self.settings.get_untracked().native_agent {
+            return false;
+        }
+        let Some(agent) = self.current_agent() else {
+            return false;
+        };
+        let program = agent.command.split_whitespace().next().unwrap_or("");
+        agent.id == "elyra" || program == "elyra" || program.rsplit('/').next() == Some("elyra")
     }
 
     /// Spawn `elyra --mode rpc` and wire its event stream into the chat state.

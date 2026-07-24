@@ -570,6 +570,22 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
 
     // 5 — Agents
     push(5, "Default agent", "", default_agent_row(s).into_any());
+    push(
+        5,
+        "Native Elyra chat (experimental)",
+        "Render Elyra as a native chat panel instead of the terminal. Off by default.",
+        toggle_row(
+            "Native Elyra chat (experimental)",
+            "Render Elyra as a native chat panel instead of the terminal. Off by default.",
+            move || s.settings.get().native_agent,
+            move |v| {
+                s.settings.update(|st| st.native_agent = v);
+                config::set_bool("native_agent", v);
+                s.restart_agent();
+            },
+        )
+        .into_any(),
+    );
 
     rows
 }

@@ -1274,6 +1274,7 @@ dependencies = [
  "e-dap",
  "e-db",
  "e-lsp",
+ "e-review",
  "e-term",
  "e-verify",
  "floem",
@@ -1344,6 +1345,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "e-review"
+version = "0.9.6"
 
 [[package]]
 name = "e-term"

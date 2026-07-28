@@ -539,6 +539,10 @@ fn app_view() -> impl IntoView {
                     crate::verify_view::verify_panel(state).into_any(),
                 ),
                 (
+                    state.review_open,
+                    crate::review_view::review_panel(state).into_any(),
+                ),
+                (
                     state.schema_diff_open,
                     crate::schema_diff::schema_diff_panel(state).into_any(),
                 ),

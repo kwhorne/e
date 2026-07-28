@@ -18,6 +18,7 @@ e-agent            = { workspace = true }
 e-core             = { workspace = true }
 e-db               = { workspace = true }
 e-verify           = { workspace = true }
+e-review           = { workspace = true }
 e-dap              = { workspace = true }
 e-lsp              = { workspace = true }
 e-term             = { workspace = true }

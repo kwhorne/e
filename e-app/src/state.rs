@@ -658,6 +658,13 @@ pub struct AppState {
     pub verify_busy: RwSignal<bool>,
     /// Whether the verify panel is open (single source of truth for visibility).
     pub verify_open: RwSignal<bool>,
+    // ---- Agent session review (see [`crate::review`]) ----
+    pub review_open: RwSignal<bool>,
+    pub review_changeset: RwSignal<e_review::Changeset>,
+    /// Commit the session started at; `None` = review everything uncommitted.
+    pub review_base: RwSignal<Option<String>>,
+    pub review_selected: RwSignal<Option<String>>,
+    pub review_busy: RwSignal<bool>,
 
     // ---- Step-debugging (DAP session) ----------------------------------
     pub debug_open: RwSignal<bool>,
@@ -1186,6 +1193,11 @@ impl AppState {
             verify_session: RwSignal::new(None),
             verify_busy: RwSignal::new(false),
             verify_open: RwSignal::new(false),
+            review_open: RwSignal::new(false),
+            review_changeset: RwSignal::new(e_review::Changeset::default()),
+            review_base: RwSignal::new(None),
+            review_selected: RwSignal::new(None),
+            review_busy: RwSignal::new(false),
             debug_open: RwSignal::new(false),
             debug_status: RwSignal::new("idle".to_string()),
             debug_thread: RwSignal::new(1),
@@ -2461,6 +2473,7 @@ impl AppState {
         let Some(agent) = self.current_agent() else {
             return;
         };
+        self.mark_review_session();
         let cwd = if agent.cwd.trim().is_empty() {
             self.root.get_untracked()
         } else {
@@ -2596,6 +2609,9 @@ impl AppState {
             eprintln!("e: no agent configured");
             return;
         };
+        // Remember where this session starts, so "Session review" can show
+        // exactly what it changed.
+        self.mark_review_session();
         let cwd = if agent.cwd.trim().is_empty() {
             self.root.get_untracked()
         } else {

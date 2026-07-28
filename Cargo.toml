@@ -14,7 +14,7 @@ name = "e"
 path = "e-app/src/bin/e.rs"
 
 [workspace]
-members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term", "e-agent", "e-verify"]
+members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term", "e-agent", "e-verify", "e-review"]
 # The vendored Floem fork (vendor/floem) is its own workspace; keep it out of
 # ours so the two don't collide. We depend on it via path below.
 exclude  = ["vendor/floem"]
@@ -44,6 +44,7 @@ self_update = { version = "0.42", default-features = false, features = ["archive
 regex       = "1"
 e-agent     = { path = "./e-agent" }
 e-verify    = { path = "./e-verify" }
+e-review    = { path = "./e-review" }
 e-core      = { path = "./e-core" }
 e-db        = { path = "./e-db" }
 e-dap       = { path = "./e-dap" }

@@ -545,6 +545,47 @@ fn untracked_files(root: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Largest untracked file inlined into a session diff before we treat it as
+/// binary (keeps a review of generated assets from exploding).
+const MAX_INLINE_UNTRACKED: usize = 256 * 1024;
+
+/// Synthesize a “new file” unified diff for an untracked path, so it shows up in
+/// a session diff without an index-mutating `git add -N`.
+fn synth_new_file_diff(root: &Path, rel: &str) -> String {
+    let Ok(bytes) = std::fs::read(root.join(rel)) else {
+        return String::new();
+    };
+    let mut s =
+        format!("diff --git a/{rel} b/{rel}\nnew file mode 100644\n--- /dev/null\n+++ b/{rel}\n");
+    if bytes.contains(&0) || bytes.len() > MAX_INLINE_UNTRACKED {
+        s.push_str(&format!("Binary files /dev/null and b/{rel} differ\n"));
+        return s;
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let lines: Vec<&str> = text.lines().collect();
+    s.push_str(&format!("@@ -0,0 +1,{} @@\n", lines.len()));
+    for l in lines {
+        s.push('+');
+        s.push_str(l);
+        s.push('\n');
+    }
+    s
+}
+
+/// The unified diff of the working tree against `head` — i.e. everything an agent
+/// session changed since its [`checkpoint`]. Tracked changes come from
+/// `git diff <head>`; untracked files are synthesized as new-file diffs.
+pub fn diff_since(root: &Path, head: &str) -> Result<String, String> {
+    let mut out = git_out(root, &["diff", head])?;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for rel in untracked_files(root) {
+        out.push_str(&synth_new_file_diff(root, &rel));
+    }
+    Ok(out)
+}
+
 /// Capture the current working tree so it can be restored later. Non-destructive
 /// (uses `git stash create`, which does not touch the working tree).
 pub fn checkpoint(root: &Path) -> Result<Checkpoint, String> {
@@ -653,6 +694,41 @@ mod tests {
             !dir.join("migration.txt").exists(),
             "agent-created untracked file should be removed"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_since_covers_tracked_and_untracked() {
+        use super::diff_since;
+        let dir = init_repo("diffsince");
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "init"]);
+
+        let cp = checkpoint(&dir).unwrap();
+
+        // A tracked edit and a brand-new (untracked) file, like an agent session.
+        std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+        std::fs::create_dir_all(dir.join("database/migrations")).unwrap();
+        std::fs::write(
+            dir.join("database/migrations/2026_add_x.php"),
+            "<?php\n// new\n",
+        )
+        .unwrap();
+
+        let d = diff_since(&dir, &cp.head).unwrap();
+
+        // Tracked modification.
+        assert!(d.contains("diff --git a/a.txt b/a.txt"), "{d}");
+        assert!(d.contains("-one") && d.contains("+two"), "{d}");
+        // Untracked file synthesized as a new-file diff.
+        assert!(
+            d.contains("diff --git a/database/migrations/2026_add_x.php"),
+            "{d}"
+        );
+        assert!(d.contains("new file mode"), "{d}");
+        assert!(d.contains("+// new"), "{d}");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -44,6 +44,7 @@ diagnostics:
 | `{"method":"open","path":"…","line":45,"col":1}` | Open the file and jump to the position |
 | `{"method":"focus","target":"terminal\|editor\|agent"}` | Focus a panel |
 | `{"method":"notify","message":"…"}` | Post a system notification |
+| `{"method":"review_summary","text":"…"}` | Hand the editor a written summary of this session's changes. It becomes the pull-request description when you ship from [session review](source-control.md#session-review-v). |
 
 Example — let the agent jump you to a definition it found:
 

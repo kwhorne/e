@@ -8,11 +8,13 @@
 
 use std::path::PathBuf;
 
-use e_review::{changeset_from_diff, ChangeKind};
+use e_review::flags::{self, Flag};
+use e_review::ship::{ship_verdict, ShipCheck, ShipVerdict, TestStatus};
+use e_review::{changeset_from_diff, commits, ChangeKind};
 use floem::ext_event::create_ext_action;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 
-use crate::state::AppState;
+use crate::state::{AppState, TddStatus};
 
 impl AppState {
     /// Remember where the current agent session started, so the review shows
@@ -59,12 +61,14 @@ impl AppState {
         let cs_sig = self.review_changeset;
         let busy = self.review_busy;
         let selected = self.review_selected;
+        let flags_sig = self.review_flags;
         let send = create_ext_action(self.cx, move |text: Result<String, String>| {
             busy.set(false);
             match text {
                 Ok(diff) => {
                     let mut fresh = changeset_from_diff(&diff);
                     cs_sig.with_untracked(|old| fresh.carry_reviewed_from(old));
+                    flags_sig.set(flags::scan_changeset(&fresh));
                     // Keep the selection if that file is still in the changeset.
                     let keep = selected
                         .get_untracked()
@@ -146,6 +150,107 @@ impl AppState {
         }
     }
 
+    // ---- Automated flags (phase 3) --------------------------------------
+
+    /// Flags for one file, most severe first.
+    pub fn review_flags_for(&self, path: &str) -> Vec<Flag> {
+        self.review_flags
+            .with(|all| all.iter().filter(|f| f.path == path).cloned().collect())
+    }
+
+    /// Ask the agent about one specific finding.
+    pub fn review_ask_flag(&self, f: &Flag) {
+        self.send_to_agent(&format!(
+            "In `{}` around line {}, a review check flagged: {} ({}). \
+             Explain whether this is intentional, and fix it if not.",
+            f.path, f.line, f.message, f.code
+        ));
+    }
+
+    // ---- Ship gate (phase 4) --------------------------------------------
+
+    /// Map the TDD panel's state onto the review gate's test status.
+    fn review_test_status(&self) -> TestStatus {
+        match self.tdd_status.get() {
+            TddStatus::Passed => TestStatus::Passing,
+            TddStatus::Failed => TestStatus::Failing,
+            TddStatus::Running => TestStatus::Running,
+            TddStatus::Idle => TestStatus::Unknown,
+        }
+    }
+
+    /// The current readiness verdict (reactive — for the panel).
+    pub fn review_ship_verdict(&self) -> ShipVerdict {
+        let (danger, warn, _) = self.review_flags.with(|f| flags::counts(f));
+        ship_verdict(&ShipCheck {
+            reviewed: self.review_changeset.with(|cs| cs.progress()),
+            danger_flags: danger,
+            warn_flags: warn,
+            tests: self.review_test_status(),
+        })
+    }
+
+    // ---- Ship it (phase 5) ----------------------------------------------
+
+    /// Create a branch, commit the changeset in logical groups, push, and open a
+    /// PR — all from the review panel.
+    pub fn review_commit_and_pr(&self, open_pr: bool) {
+        if self.review_shipping.get_untracked() {
+            return;
+        }
+        let Some(root) = self.repo_root_path() else {
+            return;
+        };
+        let cs = self.review_changeset.get_untracked();
+        if cs.is_empty() {
+            Self::notify("Nothing to commit");
+            return;
+        }
+        let groups = commits::plan_commits(&cs);
+        let branch = commits::suggest_branch(&cs);
+        let title = commits::pr_title(&cs);
+        let (danger, warn, _) = self.review_flags.with_untracked(|f| flags::counts(f));
+        let verdict = self.review_ship_verdict();
+        let tests = self.review_test_status();
+        let summary = self.review_summary.get_untracked();
+        let body = commits::pr_body(&cs, &verdict, tests, danger, warn, summary.as_deref());
+
+        self.review_shipping.set(true);
+        let state = *self;
+        let shipping = self.review_shipping;
+        let send = create_ext_action(self.cx, move |res: Result<String, String>| {
+            shipping.set(false);
+            match res {
+                Ok(url) if !url.is_empty() => {
+                    Self::notify(&format!("Pull request opened: {url}"));
+                    let _ = std::process::Command::new("open").arg(&url).spawn();
+                }
+                Ok(_) => Self::notify("Committed and pushed"),
+                Err(e) => Self::notify(&format!("Ship failed: {e}")),
+            }
+            state.refresh_git_status();
+            state.refresh_review();
+        });
+
+        std::thread::spawn(move || {
+            let res = (|| -> Result<String, String> {
+                // Start from a clean index so each group commits only its files.
+                e_core::git::unstage_all(&root)?;
+                e_core::git::checkout_new(&root, &branch)?;
+                for g in &groups {
+                    e_core::git::commit_paths(&root, &g.paths, &g.message)?;
+                }
+                e_core::git::push_new_branch(&root, &branch)?;
+                if open_pr {
+                    e_core::git::create_pr(&root, &title, &body)
+                } else {
+                    Ok(String::new())
+                }
+            })();
+            send(res);
+        });
+    }
+
     /// Ask the agent to explain its own change to this file.
     pub fn review_ask_agent(&self, path: &str) {
         self.send_to_agent(&format!(
@@ -173,7 +278,9 @@ impl AppState {
         self.send_to_agent(&format!(
             "Review the changes in this session ({summary}). Files: {paths}. \
              Summarize what changed and why, grouped logically, then flag anything \
-             risky or unintended."
+             risky or unintended. Finally send the summary back to the editor with \
+             {{\"method\":\"review_summary\",\"text\":\"...\"}} on $E_EDITOR_SOCK so it \
+             becomes the pull-request description."
         ));
     }
 }

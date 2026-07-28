@@ -146,6 +146,16 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
     let sync: Value = match method {
         "context" => context(state),
         "diagnostics" => json!({ "ok": true, "diagnostics": diagnostics(state) }),
+        // Hand the editor a written summary of this session's changes; it becomes
+        // the description when you ship the changeset from the review panel.
+        "review_summary" => {
+            let Some(text) = req.get("text").and_then(|t| t.as_str()) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing text"}));
+                return;
+            };
+            state.review_summary.set(Some(text.to_string()));
+            json!({"ok": true})
+        }
         "open" => {
             let Some(path) = req.get("path").and_then(|p| p.as_str()) else {
                 let _ = reply.send(json!({"ok": false, "error": "missing path"}));

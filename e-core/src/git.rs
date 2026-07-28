@@ -545,6 +545,41 @@ fn untracked_files(root: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Stage exactly `paths` and commit them — one logical commit out of a larger
+/// changeset. Anything already staged from other paths is left alone, so call
+/// this with a clean index (see [`unstage_all`]).
+pub fn commit_paths(root: &Path, paths: &[String], message: &str) -> Result<(), String> {
+    if paths.is_empty() {
+        return Err("nothing to commit".into());
+    }
+    for p in paths {
+        // `--` guards paths that look like flags; `-A` also stages deletions.
+        run_git(root, &["add", "-A", "--", p])?;
+    }
+    run_git(root, &["commit", "-m", message])
+}
+
+/// Push `branch` and set its upstream (for a branch that doesn't exist remotely).
+pub fn push_new_branch(root: &Path, branch: &str) -> Result<(), String> {
+    run_git(root, &["push", "-u", "origin", branch])
+}
+
+/// Open a pull request with the GitHub CLI. Returns the PR URL.
+pub fn create_pr(root: &Path, title: &str, body: &str) -> Result<String, String> {
+    let out = Command::new("gh")
+        .current_dir(root)
+        .args(["pr", "create", "--title", title, "--body", body])
+        .output()
+        .map_err(|e| format!("gh not available: {e}"))?;
+    if out.status.success() {
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        // gh prints the PR URL on the last line.
+        Ok(s.lines().last().unwrap_or(&s).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 /// Largest untracked file inlined into a session diff before we treat it as
 /// binary (keeps a review of generated assets from exploding).
 const MAX_INLINE_UNTRACKED: usize = 256 * 1024;

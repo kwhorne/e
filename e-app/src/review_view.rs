@@ -1,6 +1,8 @@
 //! The **session review** panel: a risk-ranked list of everything the agent
 //! changed, with the diff, sign-off, revert and "ask why" beside it.
 
+use e_review::flags::Severity;
+use e_review::ship::Readiness;
 use e_review::{ChangeKind, Risk};
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
@@ -21,6 +23,14 @@ fn risk_color(r: Risk) -> Color {
         Risk::High => RED,
         Risk::Medium => AMBER,
         Risk::Low => theme::fg_dim(),
+    }
+}
+
+fn severity_color(s: Severity) -> Color {
+    match s {
+        Severity::Danger => RED,
+        Severity::Warn => AMBER,
+        Severity::Info => theme::fg_dim(),
     }
 }
 
@@ -63,6 +73,8 @@ struct Row {
     removed: usize,
     reviewed: bool,
     kind: ChangeKind,
+    /// Worst flag severity on this file, if any.
+    flag: Option<Severity>,
 }
 
 fn file_row(state: AppState, r: Row) -> impl IntoView {
@@ -93,10 +105,21 @@ fn file_row(state: AppState, r: Row) -> impl IntoView {
             .border_radius(4.0)
             .color(risk_color(r.risk))
     });
+    let flag_dot = label(move || match r.flag {
+        Some(Severity::Danger) => "●".to_string(),
+        Some(Severity::Warn) => "●".to_string(),
+        Some(Severity::Info) => "○".to_string(),
+        None => String::new(),
+    })
+    .style(move |s| {
+        s.width(10.0)
+            .font_size(10.0)
+            .color(r.flag.map(severity_color).unwrap_or(theme::fg_dim()))
+    });
     let counts = label(move || format!("+{} −{}", r.added, r.removed))
         .style(|s| s.font_size(10.0).color(theme::fg_dim()).margin_left(6.0));
 
-    stack((tick, kind, name, badge, counts))
+    stack((tick, kind, name, flag_dot, badge, counts))
         .style(move |s| {
             let sel = state
                 .review_selected
@@ -175,6 +198,50 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
             .border_color(theme::border())
     });
 
+    // Findings for this file, listed above the diff.
+    let file_flags = state.review_flags_for(&path);
+    let flags_empty = file_flags.is_empty();
+    let flag_list = dyn_stack(
+        move || {
+            file_flags
+                .clone()
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, _)| *i,
+        move |(_, f)| {
+            let color = severity_color(f.severity);
+            let text = if f.line > 0 {
+                format!("{}  ({}:{})", f.message, f.code, f.line)
+            } else {
+                format!("{}  ({})", f.message, f.code)
+            };
+            let ask = f.clone();
+            stack((
+                label(move || text.clone())
+                    .style(move |s| s.flex_grow(1.0).font_size(11.0).color(color)),
+                btn("Ask", false).on_click_stop(move |_| state.review_ask_flag(&ask)),
+            ))
+            .style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .gap(8.0)
+                    .width_full()
+                    .padding_horiz(12.0)
+                    .padding_vert(3.0)
+            })
+        },
+    )
+    .style(move |s| {
+        let s = s.flex_col().width_full().padding_vert(4.0);
+        if flags_empty {
+            s.hide()
+        } else {
+            s.border_bottom(1.0).border_color(theme::border())
+        }
+    });
+
     if binary {
         return stack((
             header,
@@ -221,6 +288,7 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
 
     stack((
         header,
+        flag_list,
         scroll(body).style(|s| s.flex_grow(1.0).width_full()),
     ))
     .style(|s| s.flex_col().size_full())
@@ -285,13 +353,19 @@ pub fn review_panel(state: AppState) -> impl IntoView {
                                 removed: f.removed,
                                 reviewed: f.reviewed,
                                 kind: f.kind,
+                                flag: state.review_flags.with(|all| {
+                                    all.iter()
+                                        .filter(|x| x.path == f.path)
+                                        .map(|x| x.severity)
+                                        .max()
+                                }),
                             },
                         )
                     })
                     .collect::<Vec<_>>()
             })
         },
-        |(i, r)| (*i, r.path.clone(), r.reviewed),
+        |(i, r)| (*i, r.path.clone(), r.reviewed, r.flag),
         move |(_, r)| file_row(state, r),
     )
     .style(|s| s.flex_col().width_full());
@@ -342,9 +416,74 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().flex_grow(1.0).height_full());
 
+    // ---- Ship bar: readiness checklist + run tests + commit/PR ----------
+    let verdict_badge = label(move || match state.review_ship_verdict().readiness {
+        Readiness::Ready => "Ready".to_string(),
+        Readiness::Warn => "Notes".to_string(),
+        Readiness::Blocked => "Needs attention".to_string(),
+    })
+    .style(move |s| {
+        let color = match state.review_ship_verdict().readiness {
+            Readiness::Ready => GREEN,
+            Readiness::Warn => AMBER,
+            Readiness::Blocked => RED,
+        };
+        s.padding_horiz(8.0)
+            .padding_vert(2.0)
+            .border_radius(5.0)
+            .font_size(11.0)
+            .font_bold()
+            .color(Color::WHITE)
+            .background(color)
+    });
+    let verdict_reasons =
+        label(move || state.review_ship_verdict().reasons.join(" · ")).style(|s| {
+            s.flex_grow(1.0)
+                .margin_left(8.0)
+                .font_size(11.0)
+                .color(theme::fg_dim())
+        });
+    let run_tests = btn("Run tests", false).on_click_stop(move |_| state.run_tests());
+    let ship = label(move || {
+        if state.review_shipping.get() {
+            "Shipping…".to_string()
+        } else {
+            "Commit & PR".to_string()
+        }
+    })
+    .style(move |s| {
+        let blocked = state.review_ship_verdict().readiness == Readiness::Blocked;
+        s.padding_horiz(12.0)
+            .padding_vert(5.0)
+            .border_radius(6.0)
+            .font_size(11.0)
+            .font_bold()
+            .color(Color::WHITE)
+            .cursor(floem::style::CursorStyle::Pointer)
+            .background(if blocked { AMBER } else { theme::accent() })
+    })
+    .on_click_stop(move |_| state.review_commit_and_pr(true));
+    let ship_bar = stack((verdict_badge, verdict_reasons, run_tests, ship)).style(move |s| {
+        let s = s
+            .flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .padding_horiz(12.0)
+            .padding_vert(8.0)
+            .border_top(1.0)
+            .border_color(theme::border());
+        if state.review_changeset.with(|cs| cs.is_empty()) {
+            s.hide()
+        } else {
+            s
+        }
+    });
+
     let card = stack((
         header,
-        stack((left, right)).style(|s| s.flex_row().size_full()),
+        stack((left, right)).style(|s| s.flex_row().flex_grow(1.0).width_full()),
+        ship_bar,
     ))
     .style(|s| {
         s.flex_col()

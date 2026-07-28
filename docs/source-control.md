@@ -74,7 +74,57 @@ one place:
   agent to explain that specific change, **Revert** undoes just that file (deleting
   it if the session created it, otherwise restoring it from `HEAD`).
 - **Summarize** asks the agent to describe the whole changeset and flag anything
-  risky — a second pass over its own work.
+  risky — a second pass over its own work. The agent can send that write-up back
+  over the [sync socket](agent-sync.md) (`review_summary`), and it becomes the
+  pull-request description.
+
+### Automated flags
+
+Alongside your own reading, `e` inspects **the diff itself** and flags what an
+agent tends to leave behind — shown per file (a coloured dot in the list) and
+above the diff, each with an **Ask** button that sends the finding to the agent:
+
+| Flag | Severity | Example |
+| ---- | -------- | ------- |
+| `debug-leftover` | warn | `dd(`, `dump(`, `console.log(`, `dbg!(` |
+| `secret` | danger | a long quoted literal assigned to `token`/`password`/`api_key` |
+| `sql-injection` | danger | `DB::raw("… $id")`, `whereRaw` with interpolation |
+| `destructive-migration` | danger | `dropColumn`, `dropIfExists`, `truncate(` in a migration |
+| `env-changed` | danger | a value changed in `.env` |
+| `auth-removed` | danger | an `authorize(`/`Gate::`/`can:` line **deleted** |
+| `unsafe` | danger | `shell_exec(`, `eval(`, `unsafe {` |
+| `test-skipped` | warn | `it.only(`, `->skip(`, `#[ignore]` |
+| `verification-disabled` | warn | `rejectUnauthorized: false`, `--no-verify`, `chmod 777` |
+| `tests-removed` / `large-deletion` | warn | net test lines or a big one-sided deletion |
+| `todo-added` / `sleep` | info | `TODO`/`FIXME`, a blocking `sleep(` |
+
+The checks are call-aware, so `add(` isn't mistaken for `dd(` and `array(` isn't
+mistaken for `ray(`.
+
+### Ship it
+
+The bar along the bottom is the **ship gate** — a verdict plus the reasons
+behind it:
+
+- **Ready** — every file reviewed, tests green, no flags.
+- **Notes** — shippable, but something is loose (files unreviewed, tests not run,
+  warnings outstanding).
+- **Needs attention** — tests are failing or there are danger flags.
+
+**Run tests** runs the project's suite (the same one the [TDD panel](laravel.md)
+uses). **Commit & PR** then ships the changeset without leaving the editor:
+
+1. creates a branch (e.g. `agent/app-models`, derived from what changed),
+2. commits in **logical groups, in dependency order** — `chore(deps)`, then
+   `feat(db)`, `chore(config)`, `feat(routes)`, `feat(auth)`, `feat`, `test`,
+   `docs`, `ci` — each with a Conventional Commits subject,
+3. pushes and sets the upstream,
+4. opens a pull request via the [GitHub CLI](https://cli.github.com) (`gh`) with a
+   description containing the summary, the grouped file list, and the review
+   evidence (files reviewed, test result, flag counts).
+
+So GitHub still gets the PR as the record for your team — but the review happened
+here, where it could be run, verified and undone.
 
 The session starts at a git checkpoint taken when the agent launches. If no
 session was recorded, the panel reviews **everything uncommitted** — so it works

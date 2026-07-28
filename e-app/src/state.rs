@@ -665,6 +665,13 @@ pub struct AppState {
     pub review_base: RwSignal<Option<String>>,
     pub review_selected: RwSignal<Option<String>>,
     pub review_busy: RwSignal<bool>,
+    /// Automated diff inspections over the changeset.
+    pub review_flags: RwSignal<Vec<e_review::flags::Flag>>,
+    /// A branch/commit/PR is being created.
+    pub review_shipping: RwSignal<bool>,
+    /// The agent's written summary of the session (used as the PR description);
+    /// set over the sync socket by `{"method":"review_summary"}`.
+    pub review_summary: RwSignal<Option<String>>,
 
     // ---- Step-debugging (DAP session) ----------------------------------
     pub debug_open: RwSignal<bool>,
@@ -1198,6 +1205,9 @@ impl AppState {
             review_base: RwSignal::new(None),
             review_selected: RwSignal::new(None),
             review_busy: RwSignal::new(false),
+            review_flags: RwSignal::new(Vec::new()),
+            review_shipping: RwSignal::new(false),
+            review_summary: RwSignal::new(None),
             debug_open: RwSignal::new(false),
             debug_status: RwSignal::new("idle".to_string()),
             debug_thread: RwSignal::new(1),

@@ -13,6 +13,10 @@
 //! Everything here is pure and unit-tested; the git plumbing lives in
 //! `e_core::git` and the panel in the app.
 
+pub mod commits;
+pub mod flags;
+pub mod ship;
+
 use std::collections::HashMap;
 
 /// How a file changed.

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-07-28
+
+### Added
+
+Session review (`⌘⌥V`) grew from “read the diff” into the whole path from an
+agent's changes to a shipped pull request.
+
+- **Automated review flags.** `e` inspects the diff itself and flags what agents
+  tend to leave behind — debug statements (`dd(`, `console.log(`), hardcoded
+  secrets, interpolated raw SQL, destructive migration steps, `.env` value
+  changes, **deleted authorization checks**, `eval`/`shell_exec`/`unsafe {`,
+  skipped or focused tests, weakened safety checks (`rejectUnauthorized: false`,
+  `chmod 777`), removed tests and large one-sided deletions, plus `TODO`s and
+  blocking `sleep(`s. Findings appear as a coloured dot per file and a list above
+  the diff, each with **Ask** to send it straight to the agent. Matching is
+  call-aware, so `add(` isn't mistaken for `dd(`.
+- **Ship gate.** A verdict bar — **Ready** (all reviewed, tests green, no flags),
+  **Notes** (loose ends) or **Needs attention** (failing tests or danger flags) —
+  with the reasons spelled out, and **Run tests** to fill in the missing piece.
+- **Commit & PR.** Ship the reviewed changeset without leaving the editor: it
+  creates a branch derived from what changed, commits in **logical groups in
+  dependency order** (`chore(deps)` → `feat(db)` → `chore(config)` →
+  `feat(routes)` → `feat(auth)` → `feat` → `test` → `docs` → `ci`) with
+  Conventional Commits subjects, pushes, and opens a pull request via `gh` whose
+  description carries the summary, the grouped file list and the review evidence
+  (files reviewed, test result, flag counts).
+- **New sync-socket method `review_summary`** — the agent can hand back its own
+  write-up of the session, which becomes the pull-request description.
+
 ## [0.9.7] - 2026-07-28
 
 ### Added

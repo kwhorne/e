@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-07-24
+
+### Added
+
+- **Agent session review** (`⌘⌥V`, or *Review: Session Changes*). After an agent
+  changes a pile of files, review the whole changeset **locally** instead of
+  pushing and reviewing on GitHub:
+  - **Risk-ranked file list** — migrations, `.env`, config, routes, auth and
+    dependency manifests surface first; lockfiles, tests and docs sink to the
+    bottom. Each file shows a reason badge, `A/M/D/R`, and `+N −M`.
+  - **Sign-off flow** with a progress counter (`12/50 reviewed`) and
+    **Reviewed →** to tick a file and jump to the next one that needs attention.
+  - **Per-file actions** — **Open** (jumps to the first changed line), **Ask why**
+    (asks the agent to explain *that* file's change), and **Revert** (deletes the
+    file if the session created it, otherwise restores it from `HEAD`).
+  - **Summarize** asks the agent to describe the whole changeset and flag
+    anything risky.
+
+  The session boundary is a git checkpoint taken when the agent starts. With no
+  session recorded it reviews **everything uncommitted**, so it works just as well
+  when the agent ran in an external terminal.
+
 ## [0.9.6] - 2026-07-24
 
 ### Added

@@ -55,6 +55,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Open another project** (`⌘O`), **new file** (`⌘N`), **go to line** (`⌃G`)
 - **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search & replace** (`⌘⇧F`)
 - **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch switcher, commit history, stash, blame, merge-conflict resolution
+- **Agent session review** (`⌘⌥V`) — when an agent changes 50 files, review the changeset locally: risk-ranked (migrations/config/auth first, lockfiles/tests last), sign off file by file, ask the agent why, or revert a single file — no PR round-trip
 - **Database panel** (`⌘3`) — a full database IDE: browse & query MySQL, PostgreSQL, SQLite and ClickHouse; a real **SQL console** (highlighting, schema completion, multi-statement result tabs, query history, `:params`); **transactional editing** (stage → Submit/Revert) with production-aware safety rails; environment labels, pagination, value/JSON viewer; export CSV/JSON/SQL & CSV import; EXPLAIN + agent index migrations; views, DDL, schema relationships, snapshots, cross-table search
 - **Inline SQL in PHP** — SQL strings are syntax-highlighted; **run under cursor** (`⌘↵`), **EXPLAIN** (`⌥⌘↵`) flags full scans / missing indexes, and *Suggest Index* asks the agent for a migration
 - **Laravel intelligence** — completion, hover and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()` and `<x-…>` components, sourced from your project
@@ -74,7 +75,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Task runner** (`⌘⇧B`) — npm/Composer/Cargo/Go/artisan/Make tasks and tests
 - **Graphical settings** (`⌘,`) and **customizable keybindings**
 - **Integrated terminal** (`⌘T`) — PTY-backed with ANSI colour, multiple tabs, rename and split
-- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent in an embedded terminal beside your code (Elyra has an experimental native chat panel too, off by default). All agents share deep editor co-op: reviewable `propose_edit` diffs, an autonomous TDD loop (`⌘⇧T`), and an activity timeline (`⌘⌥A`)
+- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent in an embedded terminal beside your code (Elyra has an experimental native chat panel too, off by default). All agents share deep editor co-op: reviewable `propose_edit` diffs, a risk-ranked **session review** (`⌘⌥V`), an autonomous TDD loop (`⌘⇧T`), and an activity timeline (`⌘⌥A`)
 - **Editing essentials** — comment toggle (`⌘/`), line move/duplicate/delete, indent, multi-cursor (`⌘⇧D`), column editing (`⌥⌘↑/↓`), auto-closing brackets
 - **Code actions & refactor** (`⌘.`) — LSP quick fixes and extract variable/method; **compare** the active file with any other file; **EditorConfig** support
 - **Split editor** (`⌘\`), **resizable & swappable panels**, **zoom** (`⌘±`), **word wrap** (`⌥Z`)

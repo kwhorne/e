@@ -114,6 +114,13 @@ Two conveniences tie the panel to the editor (toggle **Settings → Agents →
 You can also **drag-select** any text in the panel and copy it with `⌘C` (click
 to resume typing).
 
+## Reviewing what the agent changed
+
+When a session has touched a lot of files, press **`⌘⌥V`** (*Review: Session
+Changes*) for a risk-ranked review of the whole changeset — sign off file by file,
+ask the agent why it made a change, or revert a single file — without pushing a PR
+first. See [Session review](source-control.md#session-review-v).
+
 ## Tips
 
 - Leave `cwd` empty so the agent operates on whatever project you have open.

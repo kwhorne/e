@@ -95,6 +95,7 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | `⌘⇧T`    | Autonomous TDD panel |
 | `⌘⌥A`    | Agent activity timeline |
 | `⌘⌥S`    | Send editor selection to the agent |
+| `⌘⌥V`    | Session review (what the agent changed) |
 
 **Schema diff** (migrations vs live DB) and **Laravel: refresh** are available
 from the command palette (`⌘⇧P`). See [Laravel](laravel.md) and

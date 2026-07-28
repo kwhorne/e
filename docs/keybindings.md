@@ -80,6 +80,7 @@ Examples: `cmd+shift+p`, `ctrl+g`, `alt+up`, `cmd+/`, `f12`, `shift+f12`.
 | `new-terminal` / `split-terminal` | — | New / split terminal |
 | `toggle-agent` / `restart-agent` | `cmd+l` / — | Agent panel / restart |
 | `agent-send-selection` | `cmd+alt+s` | Send editor selection to the agent |
+| `session-review` | `cmd+alt+v` | Review what the agent changed this session |
 | `markdown` | `cmd+shift+m` | Markdown preview |
 | `theme` | `f8` | Light / dark theme |
 | `zoom-in` / `zoom-out` / `zoom-reset` | `cmd+=` / `cmd+-` / `cmd+0` | Zoom |

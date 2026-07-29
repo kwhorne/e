@@ -29,19 +29,57 @@ and provides:
 
 ### Supported servers
 
-| Language        | Server                        |
-| --------------- | ----------------------------- |
-| PHP             | Intelephense                  |
-| Rust            | rust-analyzer                 |
-| C / C++         | clangd                        |
-| TypeScript / JS | typescript-language-server    |
-| Go              | gopls                         |
-| Python          | pyright                       |
+| Language        | Server                                    |
+| --------------- | ----------------------------------------- |
+| PHP             | Intelephense **+ laravel/lsp** (Laravel)  |
+| Blade           | laravel/lsp (Laravel)                     |
+| Rust            | rust-analyzer                             |
+| C / C++         | clangd                                    |
+| TypeScript / JS | typescript-language-server                |
+| Go              | gopls                                     |
+| Python          | pyright                                   |
 
 See [Installation](installation.md#language-servers) for install commands.
 
-A different server is launched per language, so a mixed project (e.g. PHP +
-TypeScript) gets full support for each.
+Servers are launched per language, so a mixed project (e.g. PHP + TypeScript)
+gets full support for each. A language can also run **several** servers at once —
+see below.
+
+### The Laravel language server
+
+In a Laravel project, `e` runs the official
+[`laravel/lsp`](https://github.com/laravel/lsp) **alongside** Intelephense, and
+merges their answers: Intelephense for general PHP intelligence, `laravel/lsp`
+for framework awareness. It also gives **Blade files a language server**, which
+they otherwise wouldn't have.
+
+Install it once:
+
+```sh
+composer global require laravel/lsp
+```
+
+Make sure Composer's global `vendor/bin` is on your `PATH`. If it isn't
+installed, nothing breaks — you simply keep `e`'s built-in Laravel intelligence.
+
+It adds routes, views/Blade, translations, config, environment variables,
+assets/Mix, middleware, Inertia, Livewire, auth/policies, container bindings and
+validation rules — with completions, hovers, **diagnostics** (an unknown route or
+missing view is now a squiggle) and **quick fixes**.
+
+When the server is running it owns the `route()` / `view()` / `config()` / `env()`
+contexts. Turn it off in **Settings → Laravel → “Laravel language server”** to fall
+back to `e`'s built-in helpers instead (restart to apply).
+
+#### How several servers share one file
+
+| Request | Behaviour |
+| ------- | --------- |
+| Document sync (`didOpen`/`didChange`/`didSave`/`didClose`) | sent to **every** server |
+| Completion, code actions | **merged** from all servers |
+| Hover, go to definition | the **first** server with an answer |
+| Formatting, rename | the **primary** (general-purpose) server only |
+| Diagnostics | kept **per server** and merged, so one can't erase the other's |
 
 ## Diagnostics
 

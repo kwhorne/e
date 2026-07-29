@@ -146,6 +146,7 @@ servers for the languages you use and make sure they are on your `PATH`:
 | Language        | Server                        | Install |
 | --------------- | ----------------------------- | ------- |
 | PHP             | Intelephense                  | `npm i -g intelephense` |
+| PHP / Blade (Laravel) | [laravel/lsp](https://github.com/laravel/lsp) | `composer global require laravel/lsp` |
 | Rust            | rust-analyzer                 | `rustup component add rust-analyzer` |
 | C / C++         | clangd                        | bundled with LLVM |
 | TypeScript / JS | typescript-language-server    | `npm i -g typescript-language-server typescript` |

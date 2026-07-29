@@ -29,6 +29,7 @@ and `keybindings`), which is created on first use.
   "sticky_scroll": true,   // pin enclosing scope lines at the top while scrolling
   "ai_completion": false,  // inline AI "ghost text" via a local Ollama code model
   "native_agent": false,   // experimental native chat panel for Elyra (vs. terminal); see Agents
+  "laravel_lsp": true,     // run the official laravel/lsp alongside intelephense
   "xdebug": false,         // enable Xdebug step-debugging via Grove (grove debug on)
   "sidebar_side": "left",  // explorer/Git panel side: "left" or "right"
   "agent_side": "right",   // agent panel side: "right" or "left"
@@ -50,6 +51,7 @@ and `keybindings`), which is created on first use.
 | `inlay_hints` | bool | `true` | Show LSP inlay hints |
 | `sticky_scroll` | bool | `true` | Pin enclosing scope at the top |
 | `ai_completion` | bool | `false` | Inline AI completion (ghost text) via a local Ollama code model; `Tab` accepts. Model via `E_COMPLETION_MODEL` (default `qwen2.5-coder`). Requires a running Ollama. |
+| `laravel_lsp` | bool | `true` | Run the official [laravel/lsp](https://github.com/laravel/lsp) alongside Intelephense in Laravel projects (and give Blade a language server). Off falls back to `e`'s built-in Laravel intelligence. Restart to apply. See [Languages & LSP](languages-and-lsp.md#the-laravel-language-server). |
 | `native_agent` | bool | `false` | Experimental: render Elyra as a native chat panel (streaming markdown, tool cards, composer) instead of the terminal panel. Off by default; other agents always use the terminal. See [AI Agents](agents.md). |
 | `xdebug` | bool | `false` | Toggling this runs `grove debug on`/`off` to load Xdebug for step-debugging (see [Debugging](debugging.md)) |
 | `sidebar_side` | string | `"left"` | Side of the explorer/Git sidebar (`"left"` or `"right"`) |

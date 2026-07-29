@@ -212,16 +212,19 @@ fn app_view() -> impl IntoView {
     // Bridge the LSP reader thread's diagnostics into a UI-thread signal.
     if let Some(rx) = state.diag_rx.try_update(|opt| opt.take()).flatten() {
         let notif = create_signal_from_channel(rx);
-        let diagnostics = state.diagnostics;
+        let queue = state.diag_queue.get_untracked();
         create_effect(move |_| {
-            if let Some(params) = notif.get() {
-                let uri = params.uri.to_string();
-                let diags = params.diagnostics;
-                diagnostics.update(|map| {
-                    map.insert(uri.clone(), diags.clone());
-                });
-                // Feed inline squiggles into the matching buffer.
-                state.apply_diagnostics_to_buffer(&uri, &diags);
+            if notif.get().is_none() {
+                return;
+            }
+            // Drain the whole queue: several servers publish for the same file,
+            // and a signal only keeps the last value per frame.
+            let drained: Vec<_> = match queue.lock() {
+                Ok(mut q) => q.drain(..).collect(),
+                Err(_) => return,
+            };
+            for (server_id, params) in drained {
+                state.publish_diagnostics(&server_id, params.uri.as_ref(), params.diagnostics);
             }
         });
     }

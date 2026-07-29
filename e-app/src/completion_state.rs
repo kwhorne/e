@@ -554,8 +554,9 @@ impl AppState {
             }
         };
 
-        match (self.lsp_for_active(), buf.uri.clone()) {
-            (Some(client), Some(uri)) => {
+        let clients = self.lsp_all_for_active();
+        match (clients.is_empty(), buf.uri.clone()) {
+            (false, Some(uri)) => {
                 let send =
                     create_ext_action(self.cx, move |lsp: Vec<lsp_types::CompletionItem>| {
                         let mut items = snippet_items.clone();
@@ -564,9 +565,15 @@ impl AppState {
                         show(items);
                     });
                 std::thread::spawn(move || {
-                    let items = client
-                        .completion(&uri, line as u32, col as u32)
-                        .unwrap_or_default();
+                    // Merge every server's suggestions (intelephense + laravel-lsp).
+                    let mut items = Vec::new();
+                    for client in &clients {
+                        items.extend(
+                            client
+                                .completion(&uri, line as u32, col as u32)
+                                .unwrap_or_default(),
+                        );
+                    }
                     send(items);
                 });
             }
@@ -767,9 +774,13 @@ impl AppState {
             }
         }
 
-        let (Some(client), Some(uri)) = (self.lsp_for_active(), buf.uri.clone()) else {
+        let clients = self.lsp_all_for_active();
+        let Some(uri) = buf.uri.clone() else {
             return;
         };
+        if clients.is_empty() {
+            return;
+        }
         let send = create_ext_action(self.cx, move |text: Option<String>| match text {
             Some(text) if !text.trim().is_empty() => {
                 hover.text.set(text);
@@ -778,7 +789,14 @@ impl AppState {
             _ => hover.open.set(false),
         });
         std::thread::spawn(move || {
-            let text = client.hover(&uri, line as u32, col as u32).ok().flatten();
+            // First server with something to say wins (laravel-lsp is asked last,
+            // so a framework hover only shows where general PHP has nothing).
+            let text = clients.iter().find_map(|c| {
+                c.hover(&uri, line as u32, col as u32)
+                    .ok()
+                    .flatten()
+                    .filter(|t| !t.trim().is_empty())
+            });
             send(text);
         });
     }
@@ -872,13 +890,13 @@ impl AppState {
         let Some(buf) = self.active_buffer() else {
             return;
         };
-        let (Some(client), Some(uri), Some(editor)) = (
-            self.lsp_for_active(),
-            buf.uri.clone(),
-            buf.editor.get_untracked(),
-        ) else {
+        let clients = self.lsp_all_for_active();
+        let (Some(uri), Some(editor)) = (buf.uri.clone(), buf.editor.get_untracked()) else {
             return;
         };
+        if clients.is_empty() {
+            return;
+        }
         let (line, col) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
         let app = *self;
         let send = create_ext_action(self.cx, move |loc: Option<(String, u32, u32)>| match loc {
@@ -886,10 +904,10 @@ impl AppState {
             None => eprintln!("e: no definition found"),
         });
         std::thread::spawn(move || {
-            let loc = client
-                .definition(&uri, line as u32, col as u32)
-                .ok()
-                .flatten();
+            // First server that resolves it wins.
+            let loc = clients
+                .iter()
+                .find_map(|c| c.definition(&uri, line as u32, col as u32).ok().flatten());
             send(loc);
         });
     }

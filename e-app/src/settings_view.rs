@@ -563,6 +563,21 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
     );
     push(
         4,
+        "Laravel language server",
+        "Run the official laravel/lsp alongside intelephense. Restart to apply.",
+        toggle_row(
+            "Laravel language server",
+            "Run the official laravel/lsp alongside intelephense. Restart to apply.",
+            move || s.settings.get().laravel_lsp,
+            move |v| {
+                s.settings.update(|st| st.laravel_lsp = v);
+                config::set_bool("laravel_lsp", v);
+            },
+        )
+        .into_any(),
+    );
+    push(
+        4,
         "App URL",
         "For request-replay. Empty = https://<folder>.test (Grove).",
         app_url_row(s).into_any(),

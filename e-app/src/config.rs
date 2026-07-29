@@ -28,6 +28,11 @@ pub struct Settings {
     /// Laravel-aware completion, hover and navigation (auto-enabled in Laravel
     /// projects; set to false to turn off).
     pub laravel: bool,
+    /// Run the official Laravel language server (`composer global require
+    /// laravel/lsp`) alongside intelephense in Laravel projects. When it's
+    /// running it owns route/view/config/env contexts; turn it off to use `e`'s
+    /// built-in Laravel intelligence instead.
+    pub laravel_lsp: bool,
     /// Enable Xdebug step-debugging via Grove (`grove debug on`) when toggled.
     pub xdebug: bool,
     /// Base URL for request-replay (empty = derive https://<folder>.test, Grove).
@@ -57,6 +62,7 @@ impl Default for Settings {
             native_agent: false,
             editor_integration: true,
             laravel: true,
+            laravel_lsp: true,
             xdebug: false,
             app_url: String::new(),
             sidebar_right: false,
@@ -108,6 +114,7 @@ pub fn load_settings() -> Settings {
         native_agent: bool_of("native_agent", d.native_agent),
         editor_integration: bool_of("editor_integration", d.editor_integration),
         laravel: bool_of("laravel", d.laravel),
+        laravel_lsp: bool_of("laravel_lsp", d.laravel_lsp),
         xdebug: bool_of("xdebug", d.xdebug),
         app_url: v
             .get("app_url")

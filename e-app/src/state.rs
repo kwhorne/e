@@ -36,6 +36,7 @@ use crate::config::{self, AgentConfig, Settings};
 use crate::file_ops::{copy_recursive, duplicate_name, FileOp, FileOpKind};
 use crate::find::FindState;
 use crate::laravel::{self, LaravelData};
+use crate::lsp_registry;
 use crate::outline::OutlineItem;
 use crate::picker::{Picker, PickerItem};
 use crate::rename::RenameState;
@@ -329,51 +330,11 @@ pub struct TermSession {
     pub name: RwSignal<String>,
 }
 
-/// A language server we know how to launch.
-struct ServerSpec {
-    id: &'static str,
-    program: &'static str,
-    args: &'static [&'static str],
-    language_id: &'static str,
-}
+/// Queue of diagnostics waiting to be applied on the UI thread.
+pub type DiagQueue = Arc<Mutex<VecDeque<(String, PublishDiagnosticsParams)>>>;
 
-/// The language server for a given language, if `e` knows one.
-fn server_spec(language: Language) -> Option<ServerSpec> {
-    let spec = |id, program, args, language_id| {
-        Some(ServerSpec {
-            id,
-            program,
-            args,
-            language_id,
-        })
-    };
-    match language {
-        Language::Php => spec("intelephense", "intelephense", &["--stdio"], "php"),
-        Language::Rust => spec("rust-analyzer", "rust-analyzer", &[], "rust"),
-        Language::C => spec("clangd", "clangd", &[], "c"),
-        Language::Cpp => spec("clangd", "clangd", &[], "cpp"),
-        Language::TypeScript => spec(
-            "tsserver",
-            "typescript-language-server",
-            &["--stdio"],
-            "typescript",
-        ),
-        Language::JavaScript => spec(
-            "tsserver",
-            "typescript-language-server",
-            &["--stdio"],
-            "javascript",
-        ),
-        Language::Go => spec("gopls", "gopls", &[], "go"),
-        Language::Python => spec("pyright", "pyright-langserver", &["--stdio"], "python"),
-        _ => None,
-    }
-}
-
-/// LSP `languageId` for a language, or `None` if unsupported.
-fn lsp_language_id(language: Language) -> Option<&'static str> {
-    server_spec(language).map(|s| s.language_id)
-}
+// The language-server registry lives in [`crate::lsp_registry`] (a language can
+// have several servers — PHP runs intelephense *and* laravel-lsp).
 
 /// Global editor state.
 #[derive(Clone, Copy)]
@@ -404,11 +365,22 @@ pub struct AppState {
     /// Server ids that failed to start (don't retry).
     lsp_failed: RwSignal<HashSet<String>>,
     /// Diagnostics keyed by `file://` URI.
+    /// Merged view: uri -> diagnostics from every server. Readers use this.
     pub diagnostics: RwSignal<HashMap<String, Vec<Diagnostic>>>,
+    /// Per-server storage behind [`Self::diagnostics`], keyed `(server id, uri)`,
+    /// so two servers publishing for the same file don't clobber each other.
+    pub diag_by_server: RwSignal<HashMap<(String, String), Vec<Diagnostic>>>,
+    /// Cached “is this a Laravel project?” (decides whether laravel-lsp runs).
+    laravel_project: RwSignal<Option<bool>>,
     /// Channel the LSP reader thread pushes diagnostics into.
-    diag_tx: RwSignal<Sender<PublishDiagnosticsParams>>,
+    /// Wake notification only — payloads travel in [`Self::diag_queue`], because a
+    /// signal-per-message coalesces (only the last value survives a frame) and
+    /// two servers publishing for the same file would drop one of them.
+    diag_tx: RwSignal<Sender<()>>,
+    /// Pending `(server id, params)` from the LSP reader threads.
+    pub diag_queue: RwSignal<DiagQueue>,
     /// Receiver, taken once by the UI to build a reactive signal.
-    pub diag_rx: RwSignal<Option<Receiver<PublishDiagnosticsParams>>>,
+    pub diag_rx: RwSignal<Option<Receiver<()>>>,
     /// Completion popup state.
     pub completion: Completion,
     /// Hover popup state.
@@ -1071,6 +1043,9 @@ impl AppState {
             diagnostics: RwSignal::new(HashMap::new()),
             diag_tx: RwSignal::new(tx),
             diag_rx: RwSignal::new(Some(rx)),
+            diag_queue: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
+            diag_by_server: RwSignal::new(HashMap::new()),
+            laravel_project: RwSignal::new(None),
             completion: Completion::new(),
             hover: HoverState::new(),
             signature: SignatureState::new(),
@@ -1948,10 +1923,10 @@ impl AppState {
             if buffer::write_with_encoding(path, &text, &b.encoding.get_untracked()).is_ok() {
                 b.dirty.set(false);
                 Self::refresh_disk_mtime(b);
-                if let (Some(uri), Some(client)) =
-                    (b.uri.as_ref(), self.lsp_for_language(b.file.language))
-                {
-                    client.did_save(uri, &text);
+                if let Some(uri) = b.uri.as_ref() {
+                    for client in self.lsp_clients_for(b.file.language) {
+                        client.did_save(uri, &text);
+                    }
                 }
                 self.request_inlay_hints(b.id);
             }
@@ -2336,7 +2311,7 @@ impl AppState {
         if buf.large {
             return;
         }
-        if lsp_language_id(buf.file.language).is_none() {
+        if self.lsp_language_id(buf.file.language).is_none() {
             return;
         }
         let (Some(client), Some(uri)) = (self.lsp_for_language(buf.file.language), buf.uri.clone())
@@ -2375,7 +2350,7 @@ impl AppState {
             outline.set(Vec::new());
             return;
         };
-        if lsp_language_id(buf.file.language).is_none() {
+        if self.lsp_language_id(buf.file.language).is_none() {
             outline.set(Vec::new());
             return;
         }
@@ -3810,6 +3785,13 @@ impl AppState {
     /// Offer Laravel completions if the cursor is inside a helper string.
     /// Returns true when the context was handled (so we skip the LSP).
     pub(crate) fn try_laravel_completion(&self, buffer_id: u64) -> bool {
+        // When the official Laravel server is running it owns these contexts —
+        // it's project-accurate, understands more of them (middleware, Inertia,
+        // validation rules) and is maintained upstream. Our built-in helpers stay
+        // as the fallback for when it isn't installed or is switched off.
+        if self.laravel_lsp_running() {
+            return false;
+        }
         let Some(data) = self.laravel.get() else {
             return false;
         };
@@ -3854,7 +3836,7 @@ impl AppState {
 
     /// Look up a running language server for `language` (does not start one).
     pub fn lsp_for_language(&self, language: Language) -> Option<Arc<LspClient>> {
-        let spec = server_spec(language)?;
+        let spec = lsp_registry::primary_spec(language, self.is_laravel_project())?;
         self.lsp_clients.with(|m| m.get(spec.id).cloned())
     }
 
@@ -3863,9 +3845,91 @@ impl AppState {
         self.lsp_for_language(self.active_buffer()?.file.language)
     }
 
+    /// Record one server's diagnostics for a file and rebuild the merged view.
+    /// Keyed per server, so intelephense and laravel-lsp can both report on the
+    /// same file without overwriting each other.
+    pub fn publish_diagnostics(&self, server_id: &str, uri: &str, diags: Vec<Diagnostic>) {
+        let key = (server_id.to_string(), uri.to_string());
+        self.diag_by_server.update(|m| {
+            if diags.is_empty() {
+                m.remove(&key);
+            } else {
+                m.insert(key, diags);
+            }
+        });
+        let merged: Vec<Diagnostic> = self.diag_by_server.with_untracked(|m| {
+            m.iter()
+                .filter(|((_, u), _)| u == uri)
+                .flat_map(|(_, d)| d.iter().cloned())
+                .collect()
+        });
+        self.diagnostics.update(|map| {
+            if merged.is_empty() {
+                map.remove(uri);
+            } else {
+                map.insert(uri.to_string(), merged.clone());
+            }
+        });
+        self.apply_diagnostics_to_buffer(uri, &merged);
+    }
+
+    /// Is the workspace a Laravel project? Cheap fs check, cached for the
+    /// session (opening another project spawns a new window).
+    pub(crate) fn is_laravel_project(&self) -> bool {
+        if let Some(v) = self.laravel_project.get_untracked() {
+            return v;
+        }
+        let st = self.settings.get_untracked();
+        let v = st.laravel && st.laravel_lsp && laravel::is_laravel(&self.root.get_untracked());
+        self.laravel_project.set(Some(v));
+        v
+    }
+
+    /// Is the official Laravel language server up?
+    pub(crate) fn laravel_lsp_running(&self) -> bool {
+        self.lsp_clients.with(|m| m.contains_key("laravel-lsp"))
+    }
+
+    /// The LSP `languageId` for `language`, or `None` when nothing handles it.
+    pub(crate) fn lsp_language_id(&self, language: Language) -> Option<&'static str> {
+        lsp_registry::language_id(language, self.is_laravel_project())
+    }
+
+    /// Every *running* server for `language` — requests that can merge (completion,
+    /// code actions, document sync) go to all of them.
+    pub fn lsp_clients_for(&self, language: Language) -> Vec<Arc<LspClient>> {
+        let specs = lsp_registry::server_specs(language, self.is_laravel_project());
+        self.lsp_clients.with(|m| {
+            specs
+                .iter()
+                .filter_map(|s| m.get(s.id).cloned())
+                .collect::<Vec<_>>()
+        })
+    }
+
+    /// Every running server for the active buffer's language.
+    pub fn lsp_all_for_active(&self) -> Vec<Arc<LspClient>> {
+        match self.active_buffer() {
+            Some(b) => self.lsp_clients_for(b.file.language),
+            None => Vec::new(),
+        }
+    }
+
     /// Start (or reuse) the language server for `language`.
     fn ensure_lsp(&self, language: Language) -> Option<Arc<LspClient>> {
-        let spec = server_spec(language)?;
+        let specs = lsp_registry::server_specs(language, self.is_laravel_project());
+        // Start every server this language wants; a missing optional one (e.g.
+        // laravel-lsp not installed) just means fewer features, never an error.
+        for spec in &specs {
+            self.ensure_one_lsp(spec);
+        }
+        specs
+            .first()
+            .and_then(|s| self.lsp_clients.with(|m| m.get(s.id).cloned()))
+    }
+
+    /// Start one server if it isn't already running (and hasn't already failed).
+    fn ensure_one_lsp(&self, spec: &lsp_registry::ServerSpec) -> Option<Arc<LspClient>> {
         if let Some(client) = self.lsp_clients.with(|m| m.get(spec.id).cloned()) {
             return Some(client);
         }
@@ -3873,8 +3937,15 @@ impl AppState {
             return None;
         }
         let tx = self.diag_tx.get();
+        let queue = self.diag_queue.get_untracked();
+        // Tag diagnostics with the server that produced them so two servers on
+        // the same file don't overwrite each other.
+        let server_id = spec.id.to_string();
         let handler: e_lsp::DiagnosticsHandler = Box::new(move |p| {
-            let _ = tx.send(p);
+            if let Ok(mut q) = queue.lock() {
+                q.push_back((server_id.clone(), p));
+            }
+            let _ = tx.send(());
         });
         let root = self.root.get();
         match LspClient::start(spec.program, spec.args, &root, handler) {
@@ -3971,8 +4042,10 @@ impl AppState {
         let undo_nav = Rc::new(std::cell::Cell::new(false));
 
         // Hand the document to the language server, if we have one.
-        if let (Some(lang_id), Some(uri)) = (lsp_language_id(language), uri.as_ref()) {
-            if let Some(client) = self.ensure_lsp(language) {
+        if let (Some(lang_id), Some(uri)) = (self.lsp_language_id(language), uri.as_ref()) {
+            // Starts every server for this language; each needs its own didOpen.
+            self.ensure_lsp(language);
+            for client in self.lsp_clients_for(language) {
                 client.did_open(uri, lang_id, 1, &content);
             }
         }
@@ -4021,11 +4094,14 @@ impl AppState {
                 }
                 doc.cache_rev().update(|r| *r += 1);
 
-                if let (Some(uri), Some(client)) = (uri.as_ref(), app.lsp_for_language(language)) {
-                    if lsp_language_id(language).is_some() {
+                if let Some(uri) = uri.as_ref() {
+                    let clients = app.lsp_clients_for(language);
+                    if !clients.is_empty() {
                         let v = version.get() + 1;
                         version.set(v);
-                        client.did_change_full(uri, v, &text);
+                        for client in clients {
+                            client.did_change_full(uri, v, &text);
+                        }
                     }
                 }
                 // Trigger completion (LSP + snippets + Laravel helpers).
@@ -4149,7 +4225,7 @@ impl AppState {
             self.active2.set(focus_next);
         }
         if let (Some(uri), Some(lang)) = (closed_uri, closed_lang) {
-            if let Some(client) = self.lsp_for_language(lang) {
+            for client in self.lsp_clients_for(lang) {
                 client.did_close(&uri);
             }
         }
@@ -4166,7 +4242,7 @@ impl AppState {
         let Some(buf) = self.active_buffer() else {
             return;
         };
-        if lsp_language_id(buf.file.language).is_none() {
+        if self.lsp_language_id(buf.file.language).is_none() {
             return;
         }
         let (Some(client), Some(uri), Some(editor)) = (
@@ -4207,14 +4283,14 @@ impl AppState {
         let Some(buf) = self.active_buffer() else {
             return;
         };
-        let (Some(client), Some(uri), Some(editor)) = (
-            self.lsp_for_active(),
-            buf.uri.clone(),
-            buf.editor.get_untracked(),
-        ) else {
-            Self::notify("No language server for this file");
+        let clients = self.lsp_all_for_active();
+        let (Some(uri), Some(editor)) = (buf.uri.clone(), buf.editor.get_untracked()) else {
             return;
         };
+        if clients.is_empty() {
+            Self::notify("No language server for this file");
+            return;
+        }
         let cursor = editor.cursor.get_untracked();
         let (sl, sc, el, ec) = if let CursorMode::Insert(sel) = cursor.mode.clone() {
             match sel.regions().first() {
@@ -4236,9 +4312,17 @@ impl AppState {
         let open_sig = self.code_actions_open;
         self.spawn_bg(
             move || {
-                client
-                    .code_actions(&uri, sl, sc, el, ec, &diags)
-                    .unwrap_or_default()
+                // Offer every server's fixes together (intelephense quick fixes
+                // plus laravel-lsp's framework fixes).
+                let mut list = Vec::new();
+                for client in &clients {
+                    list.extend(
+                        client
+                            .code_actions(&uri, sl, sc, el, ec, &diags)
+                            .unwrap_or_default(),
+                    );
+                }
+                list
             },
             move |list: Vec<e_lsp::CodeActionItem>| {
                 if list.is_empty() {
@@ -4357,10 +4441,10 @@ impl AppState {
                 self.load_blame(buf.id);
                 self.request_inlay_hints(buf.id);
                 eprintln!("e: saved {}", path.display());
-                if let (Some(uri), Some(client)) =
-                    (buf.uri.as_ref(), self.lsp_for_language(buf.file.language))
-                {
-                    client.did_save(uri, &text);
+                if let Some(uri) = buf.uri.as_ref() {
+                    for client in self.lsp_clients_for(buf.file.language) {
+                        client.did_save(uri, &text);
+                    }
                 }
                 self.request_outline();
             }

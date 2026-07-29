@@ -52,6 +52,7 @@ mod laravel;
 mod laravel_state;
 mod livewire;
 mod log;
+mod lsp_registry;
 mod map;
 mod markdown_view;
 mod navigation;

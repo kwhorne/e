@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-07-28
+
+### Added
+
+- **The official Laravel language server.** In a Laravel project, `e` now runs
+  [`laravel/lsp`](https://github.com/laravel/lsp) **alongside** Intelephense and
+  merges their answers — Intelephense for general PHP, `laravel/lsp` for
+  framework awareness: routes, views, translations, config, environment
+  variables, assets/Mix, middleware, Inertia, Livewire, auth/policies, container
+  bindings and validation rules, with completions, hovers, **diagnostics** (an
+  unknown route or missing view is now a squiggle) and **quick fixes**.
+  **Blade files get a language server for the first time.**
+
+  Install it once with `composer global require laravel/lsp`. If it isn't
+  installed nothing breaks — you keep `e`'s built-in Laravel intelligence. The
+  new `laravel_lsp` setting (on by default, restart to apply) switches between
+  the two.
+- **Multiple language servers per language.** The LSP client can now run several
+  servers for one file and combine them: document sync goes to all of them,
+  completions and code actions are merged, hover and go-to-definition take the
+  first answer, and formatting/rename stay with the primary server.
+
+### Fixed
+
+- **Diagnostics could be silently dropped.** The bridge from the LSP reader
+  threads kept only the last message per frame, so diagnostics published close
+  together could go missing until the next edit. They now travel through a
+  drained queue. (This would have become systematic with two servers publishing
+  for the same file.)
+
 ## [0.9.8] - 2026-07-28
 
 ### Added

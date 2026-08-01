@@ -42,7 +42,9 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Tree-sitter syntax highlighting** for 12+ languages, with file-type icons in the explorer
 - **Language Server Protocol** — diagnostics, completion, hover, go-to-definition,
   find references, document & workspace symbols, formatting, rename, code actions,
-  signature help and **inlay hints**, with per-language servers auto-selected
+  signature help and **inlay hints**. A language can run **several servers at
+  once** — in a Laravel project PHP gets Intelephense *and* the official
+  [`laravel/lsp`](https://github.com/laravel/lsp), with their answers merged
 - **Step debugging** — breakpoints, call stack, variables and step controls via
   the Debug Adapter Protocol: PHP/Xdebug (with [Grove](https://elyracode.com/grove)), plus JavaScript/TypeScript and Rust/C/C++
 - **Framework-aware completion** — Flux UI (`<flux:…>`), Livewire (`wire:`),
@@ -93,7 +95,8 @@ Language servers are launched automatically when available on your `PATH`:
 
 | Language        | Server                |
 | --------------- | --------------------- |
-| PHP             | Intelephense          |
+| PHP             | Intelephense **+ laravel/lsp** (Laravel projects) |
+| Blade           | laravel/lsp (Laravel projects) |
 | Rust            | rust-analyzer         |
 | C / C++         | clangd                |
 | TypeScript / JS | typescript-language-server |

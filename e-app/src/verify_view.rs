@@ -72,7 +72,7 @@ fn metrics_block(title: &'static str, m: &RequestMetrics) -> impl IntoView {
         metric("Queries".into(), m.query_count.to_string(), theme::fg()),
         metric("N+1".into(), n1, n1_color),
     ))
-    .style(|s| s.flex_col().gap(2.0).flex_grow(1.0))
+    .style(|s| s.flex_col().gap(2.0).flex_grow(1.0_f32))
 }
 
 fn verdict_view(state: AppState, c: &Comparison) -> impl IntoView {
@@ -179,7 +179,7 @@ pub fn verify_panel(state: AppState) -> impl IntoView {
         s.font_size(13.0)
             .font_bold()
             .color(theme::fg())
-            .flex_grow(1.0)
+            .flex_grow(1.0_f32)
     });
     let close = label(|| "✕".to_string())
         .style(|s| {

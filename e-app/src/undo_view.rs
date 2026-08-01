@@ -85,7 +85,7 @@ fn tool(text: &'static str, on: impl Fn() + 'static) -> impl IntoView {
 
 pub fn undo_tree_panel(state: AppState) -> impl IntoView {
     let title = label(|| "Undo Tree".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -151,7 +151,7 @@ pub fn undo_tree_panel(state: AppState) -> impl IntoView {
 
     let card = stack((
         header,
-        scroll(list).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(list).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

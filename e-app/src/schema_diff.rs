@@ -213,7 +213,7 @@ use floem::IntoView;
 
 pub fn schema_diff_panel(state: AppState) -> impl IntoView {
     let title = label(|| "Schema Diff — migrations vs database".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -272,7 +272,7 @@ pub fn schema_diff_panel(state: AppState) -> impl IntoView {
             let name = format!("{}.{}", row.table, row.column);
             stack((
                 label(move || name.clone()).style(|s| {
-                    s.flex_grow(1.0)
+                    s.flex_grow(1.0_f32)
                         .font_family("monospace".to_string())
                         .font_size(12.0)
                         .color(theme::fg())
@@ -304,7 +304,7 @@ pub fn schema_diff_panel(state: AppState) -> impl IntoView {
     let card = stack((
         header,
         empty_hint,
-        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

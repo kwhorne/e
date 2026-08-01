@@ -108,7 +108,7 @@ pub fn merge_conflict_bar(state: AppState) -> impl IntoView {
 
     stack((
         label(|| "Merge conflict".to_string())
-            .style(|s| s.color(theme::fg()).font_size(12.0).flex_grow(1.0)),
+            .style(|s| s.color(theme::fg()).font_size(12.0).flex_grow(1.0_f32)),
         small_btn("Accept Current").on_click_stop(move |_| state.resolve_conflict(0)),
         small_btn("Accept Incoming").on_click_stop(move |_| state.resolve_conflict(1)),
         small_btn("Accept Both").on_click_stop(move |_| state.resolve_conflict(2)),
@@ -157,7 +157,7 @@ pub fn disk_conflict_bar(state: AppState) -> impl IntoView {
 
     stack((
         label(|| "This file has changed on disk.".to_string())
-            .style(|s| s.color(theme::fg()).font_size(12.0).flex_grow(1.0)),
+            .style(|s| s.color(theme::fg()).font_size(12.0).flex_grow(1.0_f32)),
         small_btn("Reload").on_click_stop(move |_| state.reload_active_from_disk()),
         small_btn("Keep yours").on_click_stop(move |_| state.keep_active_version()),
     ))

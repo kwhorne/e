@@ -117,7 +117,7 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
             stack((
                 label(move || icon.to_string()).style(move |s| s.width(16.0).color(color)),
                 label(move || lbl.clone())
-                    .style(|s| s.color(theme::fg()).flex_grow(1.0).text_ellipsis()),
+                    .style(|s| s.color(theme::fg()).flex_grow(1.0_f32).text_ellipsis()),
                 label(move || detail.clone())
                     .style(|s| s.color(theme::fg_dim()).text_ellipsis().max_width(140.0)),
             ))

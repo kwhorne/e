@@ -68,7 +68,7 @@ fn agent_header(state: AppState) -> impl IntoView {
     let restart = icon_btn("⟳").on_click_stop(move |_| state.restart_agent());
     let close = icon_btn("×").on_click_stop(move |_| state.agent_open.set(false));
 
-    let spacer = empty().style(|s| s.flex_grow(1.0));
+    let spacer = empty().style(|s| s.flex_grow(1.0_f32));
 
     stack((title, spacer, restart, close)).style(|s| {
         s.items_center()
@@ -141,7 +141,7 @@ fn agent_body(state: AppState) -> impl IntoView {
     scroll(body)
         .style(|s| {
             s.size_full()
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .background(Color::from_rgb8(0x14, 0x16, 0x1b))
         })
         .on_resize(move |rect| {

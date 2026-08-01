@@ -263,7 +263,7 @@ fn transcript(state: AppState) -> impl IntoView {
         // composer off the bottom of the panel.
         .style(|s| {
             s.width_full()
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .flex_basis(0.0)
                 .min_height(0.0)
                 .background(theme::bg())
@@ -326,7 +326,7 @@ fn composer(state: AppState) -> impl IntoView {
         let line_h = (ed_h.line_height(0) as f64).max(16.0);
         let lines = (ed_h.last_vline().get() + 1).clamp(1, 7);
         let height = lines as f64 * line_h + 16.0; // + vertical padding
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .min_width(0.0)
             .height(height)
             .font_size(13.0)

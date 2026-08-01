@@ -16,7 +16,7 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
     let doc_run = doc.clone();
 
     let title = label(|| "Tinker".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -78,7 +78,7 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
             .color(theme::fg())
     }))
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .width_full()
             .border_top(1.0)
             .border_color(theme::border())

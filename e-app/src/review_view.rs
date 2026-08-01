@@ -93,7 +93,7 @@ fn file_row(state: AppState, r: Row) -> impl IntoView {
     let kind = label(move || kind_glyph(r.kind).to_string())
         .style(move |s| s.width(12.0).font_size(10.0).color(theme::fg_dim()));
     let name = label(move || path_text.clone()).style(move |s| {
-        s.flex_grow(1.0).font_size(12.0).color(if r.reviewed {
+        s.flex_grow(1.0_f32).font_size(12.0).color(if r.reviewed {
             theme::fg_dim()
         } else {
             theme::fg()
@@ -171,7 +171,7 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
     let title = {
         let p = path.clone();
         label(move || p.clone()).style(|s| {
-            s.flex_grow(1.0)
+            s.flex_grow(1.0_f32)
                 .font_size(12.0)
                 .font_bold()
                 .color(theme::fg())
@@ -220,7 +220,7 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
             let ask = f.clone();
             stack((
                 label(move || text.clone())
-                    .style(move |s| s.flex_grow(1.0).font_size(11.0).color(color)),
+                    .style(move |s| s.flex_grow(1.0_f32).font_size(11.0).color(color)),
                 btn("Ask", false).on_click_stop(move |_| state.review_ask_flag(&ask)),
             ))
             .style(|s| {
@@ -289,7 +289,7 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
     stack((
         header,
         flag_list,
-        scroll(body).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(body).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| s.flex_col().size_full())
     .into_any()
@@ -310,7 +310,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let all = state.review_changeset.with(|cs| cs.all_reviewed());
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .margin_left(10.0)
             .font_size(11.0)
             .color(if all { GREEN } else { theme::fg_dim() })
@@ -388,7 +388,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
 
     let left = stack((
         empty_hint,
-        scroll(list).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(list).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()
@@ -414,7 +414,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
         },
         move |(sel, _)| diff_pane(state, sel),
     )
-    .style(|s| s.flex_col().flex_grow(1.0).height_full());
+    .style(|s| s.flex_col().flex_grow(1.0_f32).height_full());
 
     // ---- Ship bar: readiness checklist + run tests + commit/PR ----------
     let verdict_badge = label(move || match state.review_ship_verdict().readiness {
@@ -438,7 +438,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     });
     let verdict_reasons =
         label(move || state.review_ship_verdict().reasons.join(" · ")).style(|s| {
-            s.flex_grow(1.0)
+            s.flex_grow(1.0_f32)
                 .margin_left(8.0)
                 .font_size(11.0)
                 .color(theme::fg_dim())
@@ -482,7 +482,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
 
     let card = stack((
         header,
-        stack((left, right)).style(|s| s.flex_row().flex_grow(1.0).width_full()),
+        stack((left, right)).style(|s| s.flex_row().flex_grow(1.0_f32).width_full()),
         ship_bar,
     ))
     .style(|s| {

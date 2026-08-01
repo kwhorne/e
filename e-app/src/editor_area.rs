@@ -465,12 +465,12 @@ pub fn editor_area(state: AppState) -> impl IntoView {
             if split {
                 stack((
                     pane(state, 0).style(|s| {
-                        s.flex_grow(1.0)
+                        s.flex_grow(1.0_f32)
                             .height_full()
                             .border_right(1.0)
                             .border_color(theme::border())
                     }),
-                    pane(state, 1).style(|s| s.flex_grow(1.0).height_full()),
+                    pane(state, 1).style(|s| s.flex_grow(1.0_f32).height_full()),
                 ))
                 .style(|s| s.flex_row().size_full().background(theme::bg()))
                 .into_any()

@@ -65,7 +65,7 @@ fn normalize(sql: &str) -> String {
 
 pub fn request_view(state: AppState) -> impl IntoView {
     let title = label(move || state.req_url.get()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(12.0)
             .font_family("monospace".to_string())
             .color(theme::fg())
@@ -220,7 +220,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
         move |(_, (sql, dur))| {
             stack((
                 label(move || sql.clone()).style(|s| {
-                    s.flex_grow(1.0)
+                    s.flex_grow(1.0_f32)
                         .font_family("monospace".to_string())
                         .font_size(11.0)
                         .color(theme::fg())
@@ -335,7 +335,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
         .style(|s| s.flex_col().width_full()),
     )
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .width_full()
             .border_top(1.0)
             .border_color(theme::border())

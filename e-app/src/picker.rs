@@ -150,7 +150,7 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
             let detail = it.detail.clone();
             stack((
                 label(move || it.label.clone())
-                    .style(|s| s.color(theme::fg()).flex_grow(1.0).text_ellipsis()),
+                    .style(|s| s.color(theme::fg()).flex_grow(1.0_f32).text_ellipsis()),
                 label(move || detail.clone()).style(|s| s.color(theme::fg_dim()).text_ellipsis()),
             ))
             .style(move |s| {
@@ -189,7 +189,7 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
         .on_enter(move || state.replace_in_workspace())
         .style(|s| {
             theme::input_colors(s)
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .height(28.0)
                 .padding_horiz(8.0)
                 .border(1.0)

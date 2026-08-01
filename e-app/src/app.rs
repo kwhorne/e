@@ -344,12 +344,12 @@ fn app_view() -> impl IntoView {
         breadcrumbs(state),
         disk_conflict_bar(state),
         merge_conflict_bar(state),
-        editor_area(state).style(|s| s.flex_grow(1.0).width_full()),
+        editor_area(state).style(|s| s.flex_grow(1.0_f32).width_full()),
         terminal_panel(state),
         problems_panel(state),
         status_bar(state),
     ))
-    .style(|s| s.flex_col().flex_grow(1.0).height_full());
+    .style(|s| s.flex_col().flex_grow(1.0_f32).height_full());
 
     // Keep the document outline in sync with the active buffer.
     create_effect(move |_| {

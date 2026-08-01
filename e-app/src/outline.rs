@@ -57,7 +57,7 @@ pub fn outline_panel(state: AppState) -> impl IntoView {
             stack((
                 label(move || icon.to_string()).style(move |s| s.width(16.0).color(color)),
                 label(move || it.name.clone())
-                    .style(|s| s.color(theme::fg()).text_ellipsis().flex_grow(1.0)),
+                    .style(|s| s.color(theme::fg()).text_ellipsis().flex_grow(1.0_f32)),
             ))
             .style(move |s| {
                 s.items_center()
@@ -82,7 +82,7 @@ pub fn outline_panel(state: AppState) -> impl IntoView {
 
     stack((
         header,
-        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(move |s| {
         let s = s

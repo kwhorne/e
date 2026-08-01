@@ -79,7 +79,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
         title,
         status,
         iter,
-        empty().style(|s| s.flex_grow(1.0)),
+        empty().style(|s| s.flex_grow(1.0_f32)),
         close,
     ))
     .style(|s| {
@@ -142,7 +142,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .padding(10.0)
             .color(theme::fg())
     }))
-    .style(|s| s.flex_grow(1.0).width_full());
+    .style(|s| s.flex_grow(1.0_f32).width_full());
 
     let card = stack((header, toolbar, output)).style(|s| {
         s.flex_col()

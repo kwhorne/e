@@ -15,7 +15,7 @@ pub fn semantic_panel(state: AppState) -> impl IntoView {
         .placeholder("Describe what you're looking for… e.g. where is the invoice email sent")
         .style(|s| {
             theme::input_colors(s)
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .font_size(13.0)
                 .padding_horiz(10.0)
                 .padding_vert(6.0)
@@ -121,7 +121,7 @@ pub fn semantic_panel(state: AppState) -> impl IntoView {
     let card = stack((
         header,
         status,
-        scroll(results).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(results).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

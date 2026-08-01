@@ -61,6 +61,12 @@ local changes forward. Record any local patches in this file as they land:
   `Cmd/Ctrl+C`. Upstream `rich_text` had no selection at all — this removes the
   “selectable *or* styled, pick one” limitation we were working around with
   single-style labels.
+- **`f32` literal suffixes (`inspector/view.rs`, `profiler.rs`, `views/resizable.rs`).**
+  Annotated 14 `flex_grow(1.0)` / `flex_grow(1.)` call sites as `1.0_f32`. Rust is
+  phasing out the `f64 → f32` inference fallback (rust-lang/rust#154024) and it
+  **will become a hard error**, so this is a forward-compatibility fix rather than
+  a style change. Note `cargo fix` gets this wrong for `1.` (it produces `1._f32`,
+  which parses as field access) — these were applied by hand.
 - **`src/views/rich_text.rs`: click offsets.** Added `RichText::on_click_offset(cb)`
   which fires on a plain click (not a drag-selection) with the byte offset of the
   hit character. Used to make file paths in terminal/agent output click-to-open.

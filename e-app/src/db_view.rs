@@ -81,7 +81,7 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
     let glyph = label(move || engine_icon(&eng).to_string());
     let name_cfg = entry.config.clone();
     let name = label(move || name_cfg.display_name()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .color(theme::fg())
             .text_ellipsis()
             .min_width(0.0)
@@ -145,7 +145,7 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
             s.flex_row()
                 .items_center()
                 .gap(6.0)
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .padding_horiz(4.0)
                 .padding_vert(4.0)
                 .min_width(0.0)
@@ -240,12 +240,16 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
                     .with(|m| m.get(&t_count).map(|n| n.to_string()))
                     .unwrap_or_default()
             })
-            .style(|s| s.color(theme::fg_dim()).font_size(10.0).flex_shrink(0.0));
+            .style(|s| {
+                s.color(theme::fg_dim())
+                    .font_size(10.0)
+                    .flex_shrink(0.0_f32)
+            });
             stack((
                 label(|| "▦".to_string()).style(|s| s.color(theme::fg_dim()).font_size(11.0)),
                 label(move || tn.clone()).style(|s| {
                     s.color(theme::fg())
-                        .flex_grow(1.0)
+                        .flex_grow(1.0_f32)
                         .text_ellipsis()
                         .min_width(0.0)
                 }),
@@ -652,7 +656,7 @@ fn add_form(state: AppState) -> impl IntoView {
 
 pub fn database_panel(state: AppState) -> impl IntoView {
     let title = label(|| "Database".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -733,7 +737,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
                 .padding_bottom(10.0)
         }),
     )
-    .style(|s| s.flex_col().flex_grow(1.0).width_full());
+    .style(|s| s.flex_col().flex_grow(1.0_f32).width_full());
 
     let empty_hint = label(|| "No connections yet.".to_string()).style(move |s| {
         let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
@@ -756,7 +760,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
 
 pub fn db_result_overlay(state: AppState) -> impl IntoView {
     let title = label(move || state.db_result_title.get()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -825,12 +829,12 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         })
         .on_click_stop(move |_| state.db_open_history());
-    let run_col = stack((run, history_btn)).style(|s| s.flex_col().gap(6.0).flex_shrink(0.0));
+    let run_col = stack((run, history_btn)).style(|s| s.flex_col().gap(6.0).flex_shrink(0.0_f32));
     let sql_wrap = floem::views::container(sql).style(move |s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .min_width(0.0)
             .height(state.db_console_height.get())
-            .flex_shrink(0.0)
+            .flex_shrink(0.0_f32)
             .border(1.0)
             .border_color(theme::border())
             .border_radius(5.0)
@@ -1073,7 +1077,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     })
     .on_click_stop(move |_| state.db_clear_filter());
 
-    let spacer = empty().style(|s| s.flex_grow(1.0));
+    let spacer = empty().style(|s| s.flex_grow(1.0_f32));
 
     // Saved queries: a popout menu to load them, and a save button + name input.
     let saved_menu = label(|| "Saved ▾".to_string())
@@ -1286,7 +1290,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         let (x, y, _) = state.db_scroll.get();
         floem::kurbo::Vec2::new(x, y)
     })
-    .style(|s| s.flex_grow(1.0).width_full())
+    .style(|s| s.flex_grow(1.0_f32).width_full())
     .keyboard_navigable()
     .request_focus(move || {
         state.db_result_open.get();
@@ -1356,7 +1360,7 @@ pub fn db_erd_panel(state: AppState) -> impl IntoView {
         .on_click_stop(move |_| state.db_erd_open.set(false));
     let header = stack((
         label(|| "Schema relationships".to_string()).style(|s| {
-            s.flex_grow(1.0)
+            s.flex_grow(1.0_f32)
                 .font_size(13.0)
                 .font_bold()
                 .color(theme::fg())
@@ -1404,7 +1408,7 @@ pub fn db_erd_panel(state: AppState) -> impl IntoView {
         }
     });
     let list = scroll(stack((rows, empty_hint)).style(|s| s.flex_col().width_full()))
-        .style(|s| s.flex_grow(1.0).width_full());
+        .style(|s| s.flex_grow(1.0_f32).width_full());
     let card = stack((header, list)).style(|s| {
         s.flex_col()
             .width(620.0)
@@ -1449,7 +1453,7 @@ pub fn db_params_dialog(state: AppState) -> impl IntoView {
             stack((
                 label(move || format!(":{label_name}")).style(|s| {
                     s.width(120.0)
-                        .flex_shrink(0.0)
+                        .flex_shrink(0.0_f32)
                         .font_family("monospace".to_string())
                         .font_size(12.0)
                         .color(theme::accent())
@@ -1457,7 +1461,7 @@ pub fn db_params_dialog(state: AppState) -> impl IntoView {
                 text_input(sig)
                     .style(|s| {
                         theme::input_colors(s)
-                            .flex_grow(1.0)
+                            .flex_grow(1.0_f32)
                             .min_width(0.0)
                             .height(28.0)
                             .font_size(12.0)
@@ -1506,7 +1510,7 @@ pub fn db_params_dialog(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_params_run());
-    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), cancel, run)).style(|s| {
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0_f32)), cancel, run)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(8.0)
@@ -1672,7 +1676,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             .cursor(floem::style::CursorStyle::Pointer)
     })
     .on_click_stop(move |_| state.db_confirm_run());
-    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), cancel, confirm)).style(|s| {
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0_f32)), cancel, confirm)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(8.0)
@@ -1749,7 +1753,7 @@ pub fn db_consent_dialog(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_consent_allow());
-    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), deny, allow))
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0_f32)), deny, allow))
         .style(|s| s.flex_row().gap(8.0).items_center().width_full());
 
     let card = stack((title, subtitle, sql, buttons)).style(|s| {
@@ -1930,7 +1934,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
 
     let buttons = stack((
         null_toggle,
-        empty().style(|s| s.flex_grow(1.0)),
+        empty().style(|s| s.flex_grow(1.0_f32)),
         cancel,
         save,
     ))
@@ -1994,14 +1998,14 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
             let is_null = f.is_null;
             let name_lbl = label(move || format!("{name}  {dt}")).style(|s| {
                 s.width(150.0)
-                    .flex_shrink(0.0)
+                    .flex_shrink(0.0_f32)
                     .font_size(11.0)
                     .text_ellipsis()
                     .color(theme::fg_dim())
             });
             let input = text_input(val).placeholder("value").style(move |s| {
                 let s = theme::input_colors(s)
-                    .flex_grow(1.0)
+                    .flex_grow(1.0_f32)
                     .min_width(0.0)
                     .height(30.0)
                     .font_size(12.0)
@@ -2022,7 +2026,7 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
             .style(move |s| {
                 let s = s
                     .width(64.0)
-                    .flex_shrink(0.0)
+                    .flex_shrink(0.0_f32)
                     .font_size(11.0)
                     .cursor(floem::style::CursorStyle::Pointer);
                 if nullable {
@@ -2074,7 +2078,7 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_commit_insert());
-    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), cancel, save)).style(|s| {
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0_f32)), cancel, save)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(8.0)
@@ -2164,7 +2168,7 @@ fn db_value_viewer(state: AppState) -> impl IntoView {
             .color(theme::fg())
             .padding(10.0)
     });
-    let body = scroll(body).style(|s| s.flex_grow(1.0).width_full());
+    let body = scroll(body).style(|s| s.flex_grow(1.0_f32).width_full());
 
     let close = label(|| "✕".to_string())
         .style(|s| {
@@ -2174,7 +2178,7 @@ fn db_value_viewer(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.db_selected_cell.set(None));
-    let head_row = stack((head.style(|s| s.flex_grow(1.0)), close)).style(|s| {
+    let head_row = stack((head.style(|s| s.flex_grow(1.0_f32)), close)).style(|s| {
         s.flex_row()
             .items_center()
             .width_full()
@@ -2187,7 +2191,7 @@ fn db_value_viewer(state: AppState) -> impl IntoView {
             .flex_col()
             .width_full()
             .height(160.0)
-            .flex_shrink(0.0)
+            .flex_shrink(0.0_f32)
             .border_top(1.0)
             .border_color(theme::border())
             .background(theme::bg_panel());
@@ -2230,7 +2234,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
         .on_click_stop(move |_| state.db_write_log_open.set(false));
     let header = stack((
         label(|| "Session write log".to_string()).style(|s| {
-            s.flex_grow(1.0)
+            s.flex_grow(1.0_f32)
                 .font_size(13.0)
                 .font_bold()
                 .color(theme::fg())
@@ -2261,7 +2265,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
                 .style(move |s| {
                     let s = s
                         .font_size(10.5)
-                        .flex_shrink(0.0)
+                        .flex_shrink(0.0_f32)
                         .padding_horiz(8.0)
                         .border_radius(4.0)
                         .border(1.0)
@@ -2282,7 +2286,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
                 });
             stack((
                 label(move || fwd.clone()).style(|s| {
-                    s.flex_grow(1.0)
+                    s.flex_grow(1.0_f32)
                         .font_family("monospace".to_string())
                         .font_size(12.0)
                         .color(theme::fg())
@@ -2312,7 +2316,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
         }
     });
     let list = scroll(stack((rows, empty_hint)).style(|s| s.flex_col().width_full()))
-        .style(|s| s.flex_grow(1.0).width_full());
+        .style(|s| s.flex_grow(1.0_f32).width_full());
     let card = stack((header, list)).style(|s| {
         s.flex_col()
             .width(680.0)
@@ -2353,7 +2357,7 @@ fn db_history_panel(state: AppState) -> impl IntoView {
         .placeholder("Search history…")
         .style(|s| {
             theme::input_colors(s)
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .height(28.0)
                 .padding_horiz(8.0)
         });
@@ -2462,7 +2466,7 @@ fn db_history_panel(state: AppState) -> impl IntoView {
         }
     });
     let list = scroll(stack((rows, empty_hint)).style(|s| s.flex_col().width_full()))
-        .style(|s| s.flex_grow(1.0).width_full());
+        .style(|s| s.flex_grow(1.0_f32).width_full());
 
     let card = stack((header, list)).style(|s| {
         s.flex_col()
@@ -2505,7 +2509,7 @@ fn pending_bar(state: AppState) -> impl IntoView {
         )
     })
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(12.0)
             .color(Color::from_rgb8(0xe5, 0xc0, 0x7b))
     });
@@ -2570,13 +2574,16 @@ fn explain_banner(state: AppState) -> impl IntoView {
         }
     })
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(11.0)
             .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
             .text_ellipsis()
     });
-    let hint = label(|| "Suggest Index → ask the agent".to_string())
-        .style(|s| s.font_size(10.5).color(theme::fg_dim()).flex_shrink(0.0));
+    let hint = label(|| "Suggest Index → ask the agent".to_string()).style(|s| {
+        s.font_size(10.5)
+            .color(theme::fg_dim())
+            .flex_shrink(0.0_f32)
+    });
     stack((issues, hint)).style(move |s| {
         let s = s
             .flex_row()
@@ -2698,7 +2705,7 @@ fn result_grid(state: AppState) -> impl IntoView {
             .style(move |s| {
                 let s = s
                     .width(180.0)
-                    .flex_shrink(0.0)
+                    .flex_shrink(0.0_f32)
                     .padding_horiz(8.0)
                     .padding_vert(5.0)
                     .font_size(11.0)
@@ -2757,7 +2764,7 @@ fn result_grid(state: AppState) -> impl IntoView {
                                 state.db_pending_deletes.with(|m| m.contains_key(&ri));
                             let s = s
                                 .width(180.0)
-                                .flex_shrink(0.0)
+                                .flex_shrink(0.0_f32)
                                 .height(26.0)
                                 .padding_horiz(8.0)
                                 .padding_vert(4.0)
@@ -2817,7 +2824,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
     let head_cell = |t: &'static str, w: f64| {
         label(move || t.to_string()).style(move |s| {
             s.width(w)
-                .flex_shrink(0.0)
+                .flex_shrink(0.0_f32)
                 .padding_horiz(8.0)
                 .padding_vert(5.0)
                 .font_size(11.0)
@@ -2855,7 +2862,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
                 label(move || t.clone()).style(move |s| {
                     let s = s
                         .width(w)
-                        .flex_shrink(0.0)
+                        .flex_shrink(0.0_f32)
                         .padding_horiz(8.0)
                         .padding_vert(4.0)
                         .font_size(12.0)
@@ -2925,7 +2932,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
             stack((
                 label(move || badge.to_string()).style(move |s| {
                     s.width(70.0)
-                        .flex_shrink(0.0)
+                        .flex_shrink(0.0_f32)
                         .padding_horiz(8.0)
                         .padding_vert(4.0)
                         .font_size(10.5)
@@ -2937,7 +2944,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
                 }),
                 label(move || name.clone()).style(|s| {
                     s.width(200.0)
-                        .flex_shrink(0.0)
+                        .flex_shrink(0.0_f32)
                         .padding_horiz(8.0)
                         .padding_vert(4.0)
                         .font_size(12.0)
@@ -2945,7 +2952,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
                         .text_ellipsis()
                 }),
                 label(move || cols.clone()).style(|s| {
-                    s.flex_grow(1.0)
+                    s.flex_grow(1.0_f32)
                         .padding_horiz(8.0)
                         .padding_vert(4.0)
                         .font_size(12.0)

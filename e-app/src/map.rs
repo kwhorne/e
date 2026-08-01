@@ -46,7 +46,7 @@ fn arrow() -> impl IntoView {
 
 pub fn laravel_map(state: AppState) -> impl IntoView {
     let title = label(|| "Laravel Map".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -280,9 +280,9 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
     let body = stack((
         filter,
         empty_hint,
-        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
-    .style(|s| s.flex_col().flex_grow(1.0).width_full());
+    .style(|s| s.flex_col().flex_grow(1.0_f32).width_full());
 
     let card_box = stack((header, body)).style(|s| {
         s.flex_col()

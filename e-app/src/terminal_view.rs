@@ -248,7 +248,7 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
     scroll(body)
         .style(|s| {
             s.size_full()
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .background(Color::from_rgb8(0x14, 0x16, 0x1b))
         })
         .on_resize(move |rect| {
@@ -305,12 +305,12 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
             if split {
                 stack((
                     term_pane(state, 0).style(|s| {
-                        s.flex_grow(1.0)
+                        s.flex_grow(1.0_f32)
                             .height_full()
                             .border_right(1.0)
                             .border_color(theme::border())
                     }),
-                    term_pane(state, 1).style(|s| s.flex_grow(1.0).height_full()),
+                    term_pane(state, 1).style(|s| s.flex_grow(1.0_f32).height_full()),
                 ))
                 .style(|s| s.flex_row().size_full())
                 .into_any()
@@ -319,7 +319,7 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
             }
         },
     )
-    .style(|s| s.flex_grow(1.0).width_full());
+    .style(|s| s.flex_grow(1.0_f32).width_full());
 
     stack((term_resize_handle(state), terminal_tabs(state), panes)).style(move |s| {
         let s = s

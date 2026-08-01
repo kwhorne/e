@@ -263,12 +263,12 @@ pub fn file_tree(state: AppState) -> impl IntoView {
 
     stack((
         header,
-        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()
             .width_full()
-            .flex_grow(1.0)
+            .flex_grow(1.0_f32)
             .min_height(0.0)
             .background(theme::bg_panel())
     })

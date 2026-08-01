@@ -82,7 +82,7 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
                 .min_width(46.0)
         }),
         label(move || uri.clone()).style(|s| {
-            s.flex_grow(1.0)
+            s.flex_grow(1.0_f32)
                 .font_size(12.0)
                 .font_family("monospace".to_string())
                 .color(theme::fg())
@@ -183,7 +183,7 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
             let explain = label(|| "EXPLAIN".to_string())
                 .style(|s| {
                     s.font_size(10.0)
-                        .flex_shrink(0.0)
+                        .flex_shrink(0.0_f32)
                         .padding_horiz(6.0)
                         .border_radius(3.0)
                         .color(theme::accent())
@@ -196,7 +196,7 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
                     s.font_size(11.0)
                         .font_family("monospace".to_string())
                         .color(theme::fg_dim())
-                        .flex_grow(1.0)
+                        .flex_grow(1.0_f32)
                         .min_width(0.0)
                         .text_ellipsis()
                 }),
@@ -231,7 +231,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
         format!("{n} captured")
     })
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .margin_left(10.0)
             .font_size(11.0)
             .color(theme::fg_dim())
@@ -286,7 +286,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
     let card = stack((
         header,
         hint,
-        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

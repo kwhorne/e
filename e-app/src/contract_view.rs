@@ -21,7 +21,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
             .unwrap_or_else(|| "Props Contract".to_string())
     })
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -229,7 +229,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
 
     let card = stack((
         header,
-        scroll(body).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(body).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

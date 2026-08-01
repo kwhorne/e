@@ -77,7 +77,7 @@ fn row_label(text: &'static str, note: &'static str, restart: bool) -> impl Into
                 .into_any(),
         );
     }
-    stack_from_iter(col).style(|s| s.flex_col().flex_grow(1.0).min_width(0.0))
+    stack_from_iter(col).style(|s| s.flex_col().flex_grow(1.0_f32).min_width(0.0))
 }
 
 /// A labelled on/off switch row.
@@ -132,7 +132,7 @@ fn app_url_row(state: AppState) -> impl IntoView {
                 theme::input_colors(s)
                     .width(200.0)
                     .min_width(0.0)
-                    .flex_shrink(1.0)
+                    .flex_shrink(1.0_f32)
                     .font_size(12.0)
                     .padding_horiz(8.0)
                     .padding_vert(4.0)
@@ -666,7 +666,7 @@ pub fn settings_view(state: AppState) -> impl IntoView {
         .placeholder("Search settings…")
         .style(|s| {
             theme::input_colors(s)
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .font_size(13.0)
                 .padding_horiz(12.0)
                 .padding_vert(7.0)
@@ -757,15 +757,15 @@ pub fn settings_view(state: AppState) -> impl IntoView {
     // a couple px of slack so rounding can never re-introduce the scrollbar.
     let content_pane =
         scroll(content.style(|s| s.width(564.0).padding_horiz(24.0).padding_vert(18.0)))
-            .style(|s| s.flex_grow(1.0).min_width(0.0).height_full());
+            .style(|s| s.flex_grow(1.0_f32).min_width(0.0).height_full());
 
     let middle = stack((sidebar, content_pane))
-        .style(|s| s.flex_row().flex_grow(1.0).min_height(0.0).width_full());
+        .style(|s| s.flex_row().flex_grow(1.0_f32).min_height(0.0).width_full());
 
     // ---- footer ----
     let footer = stack((
         label(|| "Changes are saved automatically".to_string())
-            .style(|s| s.flex_grow(1.0).color(theme::fg_dim()).font_size(12.0)),
+            .style(|s| s.flex_grow(1.0_f32).color(theme::fg_dim()).font_size(12.0)),
         label(|| "Open config.json".to_string())
             .style(|s| {
                 s.color(theme::accent())

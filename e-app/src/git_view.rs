@@ -179,7 +179,7 @@ fn file_row(state: AppState, entry: StatusEntry, staged: bool) -> impl IntoView 
     stack((
         label(move || badge.to_string()).style(move |s| s.width(16.0).color(color).font_size(12.0)),
         label(move || name.clone()).style(|s| {
-            s.flex_grow(1.0)
+            s.flex_grow(1.0_f32)
                 .color(theme::fg())
                 .text_ellipsis()
                 .min_width(0.0)
@@ -259,7 +259,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
             .unwrap_or_else(|| "Not a git repository".to_string())
     })
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .color(theme::fg())
             .font_size(12.0)
             .text_ellipsis()
@@ -304,7 +304,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
         .on_enter(move || state.git_commit())
         .style(|s| {
             theme::input_colors(s)
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .height(30.0)
                 .padding_horiz(8.0)
                 .border(1.0)
@@ -363,7 +363,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
                 .padding_horiz(10.0)
                 .items_center()
                 .justify_center()
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .border_radius(5.0)
                 .font_size(12.0)
                 .border(1.0)
@@ -381,7 +381,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
                 .padding_horiz(10.0)
                 .items_center()
                 .justify_center()
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
                 .border_radius(5.0)
                 .font_size(12.0)
                 .border(1.0)
@@ -426,7 +426,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
                     label(move || summary.clone()).style(|s| {
                         s.color(theme::fg())
                             .font_size(12.0)
-                            .flex_grow(1.0)
+                            .flex_grow(1.0_f32)
                             .text_ellipsis()
                             .min_width(0.0)
                     }),
@@ -468,7 +468,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
         ))
         .style(|s| s.flex_col().width_full()),
     )
-    .style(|s| s.flex_grow(1.0).width_full());
+    .style(|s| s.flex_grow(1.0_f32).width_full());
 
     stack((header, commit_area, lists)).style(|s| s.flex_col().width_full().height_full())
 }

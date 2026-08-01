@@ -44,7 +44,7 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
         None => String::new(),
     })
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -108,7 +108,7 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
             stack((
                 stack((
                     label(|| "Hunk".to_string())
-                        .style(|s| s.flex_grow(1.0).font_size(11.0).color(theme::fg_dim())),
+                        .style(|s| s.flex_grow(1.0_f32).font_size(11.0).color(theme::fg_dim())),
                     toggle,
                 ))
                 .style(|s| s.flex_row().items_center().width_full().padding_vert(2.0)),
@@ -129,7 +129,7 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
 
     let cancel = pill("Cancel", false, move || state.agent_edit_cancel());
     let apply = pill("Apply accepted", true, move || state.agent_edit_apply());
-    let buttons = stack((empty().style(|s| s.flex_grow(1.0)), cancel, apply)).style(|s| {
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0_f32)), cancel, apply)).style(|s| {
         s.flex_row()
             .gap(8.0)
             .items_center()
@@ -139,7 +139,7 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
 
     let card = stack((
         title,
-        scroll(hunks).style(|s| s.flex_grow(1.0).width_full().margin_vert(8.0)),
+        scroll(hunks).style(|s| s.flex_grow(1.0_f32).width_full().margin_vert(8.0)),
         buttons,
     ))
     .style(|s| {
@@ -195,7 +195,7 @@ fn pill(text: &'static str, primary: bool, on: impl Fn() + 'static) -> impl Into
 /// The agent audit timeline overlay.
 pub fn agent_log_panel(state: AppState) -> impl IntoView {
     let title = label(|| "Agent Timeline".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -236,7 +236,7 @@ pub fn agent_log_panel(state: AppState) -> impl IntoView {
                 label(move || method.clone())
                     .style(|s| s.width(120.0).color(theme::accent()).font_size(12.0)),
                 label(move || summary.clone()).style(|s| {
-                    s.flex_grow(1.0)
+                    s.flex_grow(1.0_f32)
                         .color(theme::fg())
                         .font_size(12.0)
                         .text_ellipsis()
@@ -266,7 +266,7 @@ pub fn agent_log_panel(state: AppState) -> impl IntoView {
     let card = stack((
         header,
         empty_hint,
-        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

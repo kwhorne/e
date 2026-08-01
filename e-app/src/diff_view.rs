@@ -101,7 +101,7 @@ pub fn file_diff_view(state: AppState) -> impl IntoView {
         None => String::new(),
     })
     .style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -156,7 +156,7 @@ pub fn file_diff_view(state: AppState) -> impl IntoView {
 
     let card = stack((
         header,
-        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

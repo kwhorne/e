@@ -11,7 +11,7 @@ use crate::theme;
 
 pub fn related_panel(state: AppState) -> impl IntoView {
     let title = label(|| "Related files".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -59,7 +59,7 @@ pub fn related_panel(state: AppState) -> impl IntoView {
                         .color(Color::from_rgb8(0x61, 0xaf, 0xef))
                 }),
                 label(move || rel.clone()).style(|s| {
-                    s.flex_grow(1.0)
+                    s.flex_grow(1.0_f32)
                         .font_size(12.0)
                         .font_family("monospace".to_string())
                         .color(theme::fg())
@@ -83,7 +83,7 @@ pub fn related_panel(state: AppState) -> impl IntoView {
 
     let card = stack((
         header,
-        scroll(rows).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

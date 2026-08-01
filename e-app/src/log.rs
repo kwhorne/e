@@ -41,7 +41,7 @@ fn line_color(line: &str) -> Color {
 
 pub fn laravel_log_panel(state: AppState) -> impl IntoView {
     let title = label(|| "Laravel Log".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -119,7 +119,7 @@ pub fn laravel_log_panel(state: AppState) -> impl IntoView {
     let card = stack((
         header,
         empty_hint,
-        scroll(lines).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(lines).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

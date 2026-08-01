@@ -60,7 +60,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
         label(|| "Debug".to_string()).style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
 
     let status = label(move || state.debug_status.get()).style(move |s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .margin_left(10.0)
             .font_size(11.0)
             .font_family("monospace".to_string())
@@ -179,7 +179,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
                     s.font_size(11.5)
                         .font_family("monospace".to_string())
                         .color(theme::fg())
-                        .flex_grow(1.0)
+                        .flex_grow(1.0_f32)
                         .text_ellipsis()
                 }),
             ))
@@ -261,7 +261,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
         ))
         .style(|s| s.flex_col().width_full()),
     )
-    .style(|s| s.flex_grow(1.0).width_full());
+    .style(|s| s.flex_grow(1.0_f32).width_full());
 
     let card = stack((header, controls, body)).style(|s| {
         s.flex_col()

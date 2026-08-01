@@ -71,7 +71,7 @@ pub fn capture(window_id: WindowId) {
                         _ => panic!(),
                     },
                 )
-                .style(|s| s.flex_basis(0.0).min_height(0.0).flex_grow(1.0));
+                .style(|s| s.flex_basis(0.0).min_height(0.0).flex_grow(1.0_f32));
 
                 let separator = empty().style(move |s| {
                     s.width_full()
@@ -323,7 +323,7 @@ fn capture_view(
         s.width_full()
             .flex_basis(0)
             .min_height(0)
-            .flex_grow(1.0)
+            .flex_grow(1.0_f32)
             .flex_col()
     });
 
@@ -399,7 +399,12 @@ fn capture_view(
         v_stack((header("View Tree"), search, tree)).into_view()
     };
 
-    let tree = tree.style(|s| s.height_full().min_width(0).flex_basis(0).flex_grow(1.0));
+    let tree = tree.style(|s| {
+        s.height_full()
+            .min_width(0)
+            .flex_basis(0)
+            .flex_grow(1.0_f32)
+    });
 
     let separator = empty().style(move |s| {
         s.height_full()
@@ -428,7 +433,7 @@ fn view_tree(
         )
         .style(|s| s.flex_col().min_width_full()),
     )
-    .style(|s| s.flex_grow(1.0).size_full())
+    .style(|s| s.flex_grow(1.0_f32).size_full())
     .scroll_style(|s| s.shrink_to_fit())
     .on_event_cont(EventListener::PointerLeave, move |_| {
         capture_signal_clone.highlighted.set(None)

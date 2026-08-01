@@ -131,7 +131,7 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
 
     stack((
         header,
-        scroll(list).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(list).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(move |s| {
         let s = s

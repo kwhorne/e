@@ -10,7 +10,7 @@ use crate::theme;
 
 pub fn event_graph_panel(state: AppState) -> impl IntoView {
     let title = label(|| "Event Dispatch Graph".to_string()).style(|s| {
-        s.flex_grow(1.0)
+        s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
             .color(theme::fg())
@@ -127,7 +127,7 @@ pub fn event_graph_panel(state: AppState) -> impl IntoView {
     let card = stack((
         header,
         empty,
-        scroll(nodes).style(|s| s.flex_grow(1.0).width_full()),
+        scroll(nodes).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
     .style(|s| {
         s.flex_col()

@@ -387,7 +387,7 @@ impl ResizableStack {
                         .width(new_width)
                         .min_width(20.)
                         .apply_if(!is_last, |s| s.max_width(new_width))
-                        .apply_if(is_last, |s| s.flex_grow(1.)),
+                        .apply_if(is_last, |s| s.flex_grow(1.0_f32)),
                 );
 
                 // Calculate next width based on actual applied change
@@ -403,7 +403,7 @@ impl ResizableStack {
                         .width(next_width)
                         .min_width(20.)
                         .apply_if(!is_last, |s| s.max_width(next_width))
-                        .apply_if(is_last, |s| s.flex_grow(1.)),
+                        .apply_if(is_last, |s| s.flex_grow(1.0_f32)),
                 );
             }
             FlexDirection::Column | FlexDirection::ColumnReverse => {
@@ -436,7 +436,7 @@ impl ResizableStack {
                         .height(new_height)
                         .min_height(20.)
                         .apply_if(!is_last, |s| s.max_height(new_height))
-                        .apply_if(is_last, |s| s.flex_grow(1.)),
+                        .apply_if(is_last, |s| s.flex_grow(1.0_f32)),
                 );
 
                 // Calculate next height based on actual applied change
@@ -452,7 +452,7 @@ impl ResizableStack {
                         .height(next_height)
                         .min_height(20.)
                         .apply_if(!is_last, |s| s.max_height(next_height))
-                        .apply_if(is_last, |s| s.flex_grow(1.)),
+                        .apply_if(is_last, |s| s.flex_grow(1.0_f32)),
                 );
             }
         }

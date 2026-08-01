@@ -106,7 +106,7 @@ fn profile_view(profile: &Rc<Profile>) -> impl IntoView {
             let frame = frame.clone();
             let frame_ = frame.clone();
             h_stack((
-                static_label(format!("Frame #{i}")).style(|s| s.flex_grow(1.0)),
+                static_label(format!("Frame #{i}")).style(|s| s.flex_grow(1.0_f32)),
                 static_label(format!("{:.4} ms", frame.sum.as_secs_f64() * 1000.0))
                     .style(|s| s.margin_right(16)),
             ))
@@ -159,7 +159,7 @@ fn profile_view(profile: &Rc<Profile>) -> impl IntoView {
             s.background(palette::css::WHITE)
                 .flex_basis(0)
                 .min_height(0)
-                .flex_grow(1.0)
+                .flex_grow(1.0_f32)
         }),
         header("Event"),
         event_tooltip,
@@ -214,7 +214,12 @@ fn profile_view(profile: &Rc<Profile>) -> impl IntoView {
                     v_stack_from_iter(list)
                         .style(move |s| s.min_width_pct(zoom.get() * 100.0).height_full()),
                 )
-                .style(|s| s.height_full().min_width(0).flex_basis(0).flex_grow(1.0))
+                .style(|s| {
+                    s.height_full()
+                        .min_width(0)
+                        .flex_basis(0)
+                        .flex_grow(1.0_f32)
+                })
                 .on_event(EventListener::PointerWheel, move |e| {
                     if let Event::PointerWheel(e) = e {
                         zoom.set(zoom.get() * (1.0 - e.delta.y / 400.0));
@@ -235,12 +240,12 @@ fn profile_view(profile: &Rc<Profile>) -> impl IntoView {
         s.width_full()
             .min_height(0)
             .flex_basis(0)
-            .flex_grow(1.0)
+            .flex_grow(1.0_f32)
             .background(palette::css::WHITE)
     });
 
     let timeline = v_stack((header("Timeline"), timeline))
-        .style(|s| s.min_width(0).flex_basis(0).flex_grow(1.0));
+        .style(|s| s.min_width(0).flex_basis(0).flex_grow(1.0_f32));
 
     h_stack((frames, separator, timeline)).style(|s| s.height_full().width_full().max_width_full())
 }
@@ -295,7 +300,12 @@ pub fn profiler(window_id: WindowId) -> impl IntoView {
             }
         },
     )
-    .style(|s| s.width_full().min_height(0).flex_basis(0).flex_grow(1.0));
+    .style(|s| {
+        s.width_full()
+            .min_height(0)
+            .flex_basis(0)
+            .flex_grow(1.0_f32)
+    });
 
     // FIXME: This needs an extra `container` or the `v_stack` ends up horizontal.
     container(v_stack((button, separator, lower)).style(|s| s.width_full().height_full()))

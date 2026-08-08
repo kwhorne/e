@@ -8,7 +8,22 @@ rust-version = { workspace = true }
 [dependencies]
 serde      = { workspace = true }
 serde_json = { workspace = true }
-mysql      = "25"
+# Everything in `mysql`'s default feature set except `derive`, which pulls in
+# mysql-common-derive and through it proc-macro-error2 — a crate that re-exports
+# the private `proc_macro` crate and so triggers a future-incompatibility warning
+# (rust-lang/rust#127909) on every build. e-db never derives `FromRow`; it reads
+# `mysql::Row` positionally, so the macro was compiled for nothing.
+# `minimal` is mysql's own name for `flate2/zlib`, which `default` also enables.
+mysql = { version = "25", default-features = false, features = [
+    "minimal",
+    "native-tls",
+    "bigdecimal",
+    "rust_decimal",
+    "time",
+    "frunk",
+    "binlog",
+    "buffer-pool",
+] }
 postgres   = "0.19"
 rusqlite   = { version = "0.32", features = ["bundled"] }
 ureq       = "2"

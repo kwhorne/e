@@ -1020,6 +1020,68 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
     }
 }
 
+/// Files at or below this size are re-highlighted synchronously on every edit,
+/// exactly as they always have been: the work is a few milliseconds and staying
+/// on the UI thread keeps the colours in lockstep with the caret.
+///
+/// Above it, one keystroke costs far more than a frame. Measured with
+/// `cargo test -p e-core --test highlight_cost -- --ignored`: 188 KB of Rust
+/// takes 112 ms, 118 KB of Blade 80 ms, 312 KB of PHP 770 ms. Of the Rust
+/// figure the tree-sitter parse alone is 45 ms and the query pass most of the
+/// rest, so there is no arrangement of this work that is cheap enough to keep
+/// inline — it has to leave the UI thread.
+const SYNC_HIGHLIGHT_LIMIT: usize = 64 * 1024;
+
+/// How long typing has to pause before a large file is re-highlighted. Long
+/// enough that a burst of keystrokes schedules one parse rather than dozens,
+/// short enough not to feel like the colours are lagging behind.
+const HIGHLIGHT_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// Re-highlight a large file off the UI thread, debounced.
+///
+/// `gen` is the edit this job belongs to; if `hl_gen` has moved on by the time
+/// the timer fires (or the result arrives) the work is dropped, so a slow parse
+/// can never paint colours for text the user has already changed.
+#[allow(clippy::too_many_arguments)]
+fn schedule_highlight(
+    cx: Scope,
+    gen: u64,
+    hl_gen: Rc<std::cell::Cell<u64>>,
+    language: Language,
+    text: String,
+    head_text: Option<String>,
+    highlights: Highlights,
+    git_marks: GitMarks,
+    doc: Rc<floem::views::editor::text_document::TextDocument>,
+) {
+    floem::action::exec_after(HIGHLIGHT_DEBOUNCE, move |_| {
+        if hl_gen.get() != gen {
+            return; // superseded while waiting out the debounce
+        }
+        let send = create_ext_action(
+            cx,
+            move |(spans, marks): (Vec<Vec<e_core::syntax::LineSpan>>, Option<Vec<_>>)| {
+                if hl_gen.get() != gen {
+                    return; // superseded while the worker was running
+                }
+                *highlights.borrow_mut() = spans;
+                if let Some(marks) = marks {
+                    *git_marks.borrow_mut() = marks;
+                }
+                doc.cache_rev().update(|r| *r += 1);
+            },
+        );
+        std::thread::spawn(move || {
+            let spans = highlight_lines(language, &text);
+            let marks = head_text.map(|head| {
+                let lc = text.split_inclusive('\n').count().max(1);
+                git::marks(&head, &text, lc)
+            });
+            send((spans, marks));
+        });
+    });
+}
+
 /// Wall-clock `HH:MM:SS` (UTC) for the agent audit log.
 fn now_hms() -> String {
     let secs = std::time::SystemTime::now()
@@ -4088,6 +4150,10 @@ impl AppState {
             let undo = undo.clone();
             let undo_nav = undo_nav.clone();
             let undo_path = undo_path.clone();
+            // Generation of the newest scheduled background highlight. Bumped on
+            // every edit so a job that finishes after a later keystroke is dropped
+            // instead of painting stale colours.
+            let hl_gen: Rc<std::cell::Cell<u64>> = Rc::new(std::cell::Cell::new(0));
             doc.clone().add_on_update(move |_| {
                 dirty.set(true);
                 app.last_edit.set(now_ms());
@@ -4112,10 +4178,29 @@ impl AppState {
                     }
                 }
                 if !large {
-                    *highlights.borrow_mut() = highlight_lines(language, &text);
-                    if let Some(head) = &head_text {
-                        let lc = text.split_inclusive('\n').count().max(1);
-                        *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                    if text.len() <= SYNC_HIGHLIGHT_LIMIT {
+                        *highlights.borrow_mut() = highlight_lines(language, &text);
+                        if let Some(head) = &head_text {
+                            let lc = text.split_inclusive('\n').count().max(1);
+                            *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                        }
+                    } else {
+                        // Too expensive to keep inline — see SYNC_HIGHLIGHT_LIMIT.
+                        // The previous colours stay on screen until the new ones
+                        // land, which reads as a brief lag rather than a freeze.
+                        let gen = hl_gen.get() + 1;
+                        hl_gen.set(gen);
+                        schedule_highlight(
+                            app.cx,
+                            gen,
+                            hl_gen.clone(),
+                            language,
+                            text.clone(),
+                            head_text.clone(),
+                            highlights.clone(),
+                            git_marks.clone(),
+                            doc.clone(),
+                        );
                     }
                 }
                 doc.cache_rev().update(|r| *r += 1);

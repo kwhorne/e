@@ -650,7 +650,14 @@ fn merge_spans(base: Vec<Span>, over: Vec<Span>) -> Vec<Span> {
     let mut out = over;
     for (hs, he, hk) in base {
         let mut cur = hs;
-        for &(cs, ce) in &merged {
+        // `merged` is sorted and disjoint, so jump straight to the first
+        // interval that can overlap this span instead of rescanning from the
+        // front. Rescanning made this O(base × merged): in a PHP file every
+        // `DB::select("…")` adds an interval and every token adds a base span,
+        // so cost grew with the *product* — 312 KB of PHP cost 2.4 seconds per
+        // keystroke, four times the size of a 78 KB file but eight times the time.
+        let first = merged.partition_point(|&(_, ce)| ce <= cur);
+        for &(cs, ce) in &merged[first..] {
             if ce <= cur {
                 continue;
             }
@@ -727,6 +734,128 @@ fn push_span(
 
 #[cfg(test)]
 mod tests {
+    use super::{merge_spans, Span};
+
+    /// The straightforward O(base × over) merge the fast path replaced. Kept as
+    /// the oracle: the optimisation is only allowed to change *how long* the
+    /// merge takes, never what it produces.
+    fn merge_spans_reference(base: Vec<Span>, over: Vec<Span>) -> Vec<Span> {
+        let mut iv: Vec<(usize, usize)> = over.iter().map(|(s, e, _)| (*s, *e)).collect();
+        iv.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (s, e) in iv {
+            if let Some(last) = merged.last_mut() {
+                if s <= last.1 {
+                    last.1 = last.1.max(e);
+                    continue;
+                }
+            }
+            merged.push((s, e));
+        }
+        let mut out = over;
+        for (hs, he, hk) in base {
+            let mut cur = hs;
+            for &(cs, ce) in &merged {
+                if ce <= cur {
+                    continue;
+                }
+                if cs >= he {
+                    break;
+                }
+                if cs > cur {
+                    out.push((cur, cs.min(he), hk));
+                }
+                cur = cur.max(ce);
+                if cur >= he {
+                    break;
+                }
+            }
+            if cur < he {
+                out.push((cur, he, hk));
+            }
+        }
+        out
+    }
+
+    fn normalise(mut v: Vec<Span>) -> Vec<Span> {
+        v.sort_by_key(|&(s, e, _)| (s, e));
+        v
+    }
+
+    /// Deterministic pseudo-randomness — no dev-dependency, same cases every run.
+    fn lcg(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state >> 33
+    }
+
+    #[test]
+    fn merge_spans_matches_the_reference_across_many_layouts() {
+        use HighlightKind::*;
+        let kinds = [Keyword, String, Comment, Number, Variable];
+        let mut seed = 0x5EED_1234u64;
+
+        for case in 0..300 {
+            let n_base = (lcg(&mut seed) % 40) as usize;
+            let n_over = (lcg(&mut seed) % 12) as usize;
+            let span = |seed: &mut u64| -> Span {
+                let start = (lcg(seed) % 200) as usize;
+                let len = 1 + (lcg(seed) % 15) as usize;
+                (start, start + len, kinds[(lcg(seed) % 5) as usize])
+            };
+            // Base spans arrive in document order from tree-sitter.
+            let mut base: Vec<Span> = (0..n_base).map(|_| span(&mut seed)).collect();
+            base.sort_by_key(|&(s, e, _)| (s, e));
+            let over: Vec<Span> = (0..n_over).map(|_| span(&mut seed)).collect();
+
+            assert_eq!(
+                normalise(merge_spans(base.clone(), over.clone())),
+                normalise(merge_spans_reference(base.clone(), over.clone())),
+                "case {case}: base={base:?} over={over:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_spans_edge_cases() {
+        use HighlightKind::*;
+        let cases: Vec<(Vec<Span>, Vec<Span>)> = vec![
+            // Nothing to override.
+            (vec![(0, 10, Keyword)], vec![]),
+            // Nothing underneath.
+            (vec![], vec![(2, 4, String)]),
+            // Override exactly covers the base span.
+            (vec![(0, 10, Keyword)], vec![(0, 10, String)]),
+            // Override splits a base span in two.
+            (vec![(0, 10, Keyword)], vec![(4, 6, String)]),
+            // Several overrides inside one base span.
+            (
+                vec![(0, 30, Keyword)],
+                vec![(2, 4, String), (10, 12, String), (20, 22, String)],
+            ),
+            // Overlapping overrides collapse into one interval.
+            (
+                vec![(0, 20, Keyword)],
+                vec![(2, 8, String), (5, 12, String)],
+            ),
+            // Override entirely before / after the base span.
+            (vec![(10, 20, Keyword)], vec![(0, 5, String)]),
+            (vec![(0, 5, Keyword)], vec![(10, 20, String)]),
+            // Touching but not overlapping.
+            (vec![(0, 10, Keyword)], vec![(10, 20, String)]),
+            // Zero-length base span.
+            (vec![(5, 5, Keyword)], vec![(0, 10, String)]),
+        ];
+        for (i, (base, over)) in cases.into_iter().enumerate() {
+            assert_eq!(
+                normalise(merge_spans(base.clone(), over.clone())),
+                normalise(merge_spans_reference(base.clone(), over.clone())),
+                "edge case {i}"
+            );
+        }
+    }
+
     use super::{highlight_lines, HighlightKind};
     use crate::language::Language;
 

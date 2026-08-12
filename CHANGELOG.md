@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Large files no longer freeze while you type.** Every keystroke re-parsed the
+  whole document with tree-sitter and re-diffed it against `HEAD`, synchronously
+  on the UI thread. Files over 64 KB now do that work on a worker thread,
+  debounced, keeping the previous colours on screen until the new ones land — a
+  brief lag instead of a stall. Below 64 KB nothing changes; it stays inline so
+  colours never trail the caret.
+
+  The threshold is where it is because the work cannot be made cheap enough to
+  keep inline: of the 112 ms a 188 KB Rust file costs, the tree-sitter parse
+  alone is 45 ms and the highlight query most of the rest. `cargo test -p e-core
+  --test highlight_cost -- --ignored` reproduces the measurements.
+
 ### Fixed
+
+- **Syntax highlighting cost grew with the square of the file.** Merging the
+  overlay spans (inline SQL in PHP, Tailwind classes in Blade/HTML/Vue) over the
+  base grammar's rescanned the overlay list from the front for every base span,
+  making it O(base × overlay) — so a PHP file four times the size cost eight
+  times as much. The merge now seeks to the first overlay that can apply.
+  Measured per keystroke: 312 KB of PHP **2368 ms → 778 ms**, 118 KB of Blade
+  **330 ms → 81 ms**, 78 KB of PHP **288 ms → 190 ms**.
 
 - **Workspace Replace All could rewrite your dependencies.** The walker behind
   `⌘⇧F` skipped only dot-entries, `target` and `node_modules`, so a Laravel

@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Typing could abort the editor and lose unsaved work.** A selection whose
+  offsets outlived the text they were measured against — after a reload from
+  disk, an agent edit or an undo-tree jump — reached the rope's CRDT engine as a
+  malformed delta and tripped an assertion. So did two selections in one edit
+  call that overlapped each other. Both fire inside a callback that cannot
+  unwind, so the process **aborted** rather than panicking, taking unsaved
+  changes with it. This was not theoretical; it is in `~/.config/e/crash.log`,
+  reached from ordinary keystrokes.
+
+  Edit regions are now clamped to the buffer, and a region overlapping one
+  already applied is dropped. Both paths are reproduced and pinned by tests in
+  the vendored fork, including a 2000-case sweep of degenerate selections.
+
 - **Syntax highlighting cost grew with the square of the file.** Merging the
   overlay spans (inline SQL in PHP, Tailwind classes in Blade/HTML/Vue) over the
   base grammar's rescanned the overlay list from the front for every base span,

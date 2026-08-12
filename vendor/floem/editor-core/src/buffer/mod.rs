@@ -1,6 +1,5 @@
 use std::{
     borrow::{Borrow, Cow},
-    cmp::Ordering,
     collections::BTreeSet,
     fmt::Display,
     sync::{
@@ -268,25 +267,51 @@ impl Buffer {
         E: Borrow<(S, &'a str)>,
         S: AsRef<Selection>,
     {
-        let mut builder = DeltaBuilder::new(self.len());
+        let len = self.len();
+        let mut builder = DeltaBuilder::new(len);
         let mut interval_rope = Vec::new();
         for edit in edits {
             let (selection, content) = edit.borrow();
             let rope = Rope::from(content);
             for region in selection.as_ref().regions() {
-                interval_rope.push((region.min(), region.max(), rope.clone()));
+                // Clamp to the buffer. A selection can outlive the text it was
+                // measured against — the document is reloaded from disk, an
+                // agent replaces the file, undo history jumps — and feeding
+                // out-of-range offsets to the delta builder produces a delta
+                // whose base length disagrees with the CRDT engine. That fails
+                // an assertion deep in lapce-xi-rope ("self must cover all
+                // 0-regions of other") inside a callback that cannot unwind, so
+                // the process aborts and unsaved work is lost. Editing at the
+                // clamped position is a far better outcome than that.
+                let start = region.min().min(len);
+                let end = region.max().min(len);
+                interval_rope.push((start, end, rope.clone()));
             }
         }
-        interval_rope.sort_by(|a, b| {
-            if a.0 == b.0 && a.1 == b.1 {
-                Ordering::Equal
-            } else if a.1 == b.0 {
-                Ordering::Less
-            } else {
-                a.1.cmp(&b.0)
+        // A plain total order by position. For the disjoint regions this is
+        // normally given it matches the previous comparator exactly; unlike it,
+        // it is also well-defined when regions overlap, which is what makes the
+        // de-overlapping below reliable.
+        interval_rope.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        // Drop any region that overlaps or repeats one already accepted. A
+        // single `Selection` already merges its own overlaps, but `edit` takes
+        // *several* selections and nothing reconciles them against each other;
+        // two overlapping ones reach `DeltaBuilder::replace` as conflicting
+        // intervals and panic it (`delta.rs:594`). Since the panic happens in a
+        // callback that cannot unwind, that aborts the process.
+        let mut deduped: Vec<(usize, usize, Rope)> = Vec::with_capacity(interval_rope.len());
+        for (start, end, rope) in interval_rope {
+            if let Some(&(prev_start, prev_end, _)) = deduped.last() {
+                // Sorted by (start, end), so only the previous one can clash.
+                let overlaps = start < prev_end;
+                let repeats = start == prev_start && end == prev_end;
+                if overlaps || repeats {
+                    continue;
+                }
             }
-        });
-        for (start, end, rope) in interval_rope.into_iter() {
+            deduped.push((start, end, rope));
+        }
+        for (start, end, rope) in deduped.into_iter() {
             // TODO(minor): normalizing line endings here technically has an edge-case where it
             // could be that we put a `\r` at the end of a replacement, then a `\n` at the start of
             // a replacement right after it, and then it becomes a double newline.

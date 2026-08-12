@@ -64,6 +64,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The agent sync socket was reachable by any local process.** It was named
+  `agent-<pid>.sock` in a world-listable `~/.config/e`, with no authentication —
+  so anything running on the machine could find it by globbing and call `run`
+  (arbitrary shell) or `tinker` (arbitrary PHP). The socket name now carries 96
+  bits of randomness, the directory is `0700` and the socket `0600`, and the path
+  reaches agents only through `$E_EDITOR_SOCK`. Knowing that the editor is
+  running is no longer enough to drive it.
+
+  `run` and `tinker` still execute without a per-call prompt: the autonomous
+  test-fix-rerun loop is built on them, and the fix was authenticating the
+  channel rather than interrupting a designed workflow. The limits of that are
+  now written down in
+  [docs/agent-sync.md](docs/agent-sync.md#who-can-talk-to-the-socket), which
+  previously claimed "nothing is exposed".
+
 - **Database passwords are no longer kept in a world-readable file.** Passwords,
   SSH passwords and SSH key passphrases were serialised in plaintext into
   `~/.config/e/databases.json`, which was created with the process umask — 0644

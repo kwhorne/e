@@ -34,17 +34,88 @@ use crate::state::AppState;
 type Pending = Arc<Mutex<VecDeque<(Value, Sender<Value>)>>>;
 
 /// Directory holding the per-process editor sockets.
+///
+/// Tightened to `0700`: it holds the sockets *and* `databases.json`, and the
+/// socket names are unguessable only for as long as nobody else can list them.
 fn socket_dir() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME")?;
     let dir = std::path::PathBuf::from(home).join(".config").join("e");
     let _ = std::fs::create_dir_all(&dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&dir) {
+            if meta.permissions().mode() & 0o077 != 0 {
+                let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            }
+        }
+    }
     Some(dir)
 }
 
-/// Path of the per-process editor socket.
-fn socket_path() -> Option<std::path::PathBuf> {
-    Some(socket_dir()?.join(format!("agent-{}.sock", std::process::id())))
+/// 96 bits of randomness for the socket name, base32-encoded to 20 characters.
+///
+/// `/dev/urandom` is the whole point — a predictable name would make the
+/// capability guessable. If it can't be read we say so and fall back to
+/// something merely unique, because a working editor with a weak socket name is
+/// still better than no agent sync at all.
+///
+/// Base32 rather than hex, and 96 bits rather than 128, because the *entire*
+/// socket path has to fit in `sun_path` — 104 bytes on macOS, 108 on Linux.
+/// Hex-encoded 128 bits costs 32 characters and left too little room for a long
+/// `$HOME`; this costs 20 and is still far past guessing.
+fn socket_nonce() -> String {
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let mut buf = [0u8; 12];
+    if let Err(e) = std::fs::File::open("/dev/urandom").and_then(|mut f| {
+        use std::io::Read;
+        f.read_exact(&mut buf)
+    }) {
+        eprintln!("e: could not read /dev/urandom ({e}); agent socket name is not secret");
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        buf.copy_from_slice(&nanos.to_le_bytes()[..12]);
+    }
+    // 96 bits, five at a time.
+    let bits = buf.iter().fold(0u128, |acc, &b| (acc << 8) | b as u128);
+    (0..20)
+        .map(|i| ALPHABET[((bits >> (5 * (19 - i))) & 0x1f) as usize] as char)
+        .collect()
 }
+
+/// Path of the per-process editor socket.
+///
+/// The random component is the access control: knowing the path is what lets a
+/// caller drive the editor, and the path is handed only to processes the editor
+/// spawns, via `$E_EDITOR_SOCK`. Before this, the name was `agent-<pid>.sock` in
+/// a world-listable directory, so any local process could find it by globbing
+/// and had `run` (arbitrary shell) and `tinker` (arbitrary PHP) for the taking.
+fn socket_path() -> Option<std::path::PathBuf> {
+    let dir = socket_dir()?;
+    let nonce = socket_nonce();
+    let full = dir.join(format!("agent-{}-{nonce}.sock", std::process::id()));
+    // `sun_path` is 104 bytes on macOS and 108 on Linux, and binding past it
+    // fails outright. Under a long `$HOME` the pid is the part worth dropping:
+    // nothing reads it back (the sweep tests for a listener, not a pid), it is
+    // only there to make the file legible to a human.
+    if full.as_os_str().len() < SUN_PATH_BUDGET {
+        return Some(full);
+    }
+    let short = dir.join(format!("agent-{nonce}.sock"));
+    if short.as_os_str().len() >= SUN_PATH_BUDGET {
+        eprintln!(
+            "e: {} is too long for a Unix socket path; agent sync is off",
+            dir.display()
+        );
+        return None;
+    }
+    Some(short)
+}
+
+/// Stay clear of the smaller of the two `sun_path` limits.
+const SUN_PATH_BUDGET: usize = 100;
 
 /// Sockets younger than this are left alone, so we can't delete one belonging to
 /// an editor that is starting up right now.
@@ -123,7 +194,18 @@ pub fn start(state: AppState) {
             return;
         }
     };
-    // Let spawned agents discover the socket.
+    // Owner-only. macOS honours socket permissions; several Linux filesystems
+    // do too, and where they don't the 0700 directory is what carries it. Both
+    // are belt and braces over the unguessable name.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
+            eprintln!("e: could not restrict agent socket permissions: {e}");
+        }
+    }
+    // Let spawned agents discover the socket. This variable *is* the capability:
+    // anything that inherits it can drive the editor, including `run`.
     std::env::set_var("E_EDITOR_SOCK", &path);
 
     let pending: Pending = Arc::new(Mutex::new(VecDeque::new()));
@@ -617,7 +699,9 @@ mod tests {
 
     fn scratch_dir() -> std::path::PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("e-sock-sweep-{}-{n}", std::process::id()));
+        // Not `temp_dir()`: on macOS that is a ~48-character path, and the
+        // whole socket path has to fit in `sun_path`.
+        let dir = std::path::PathBuf::from("/tmp").join(format!("e-sk-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -629,6 +713,142 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         drop(listener); // the listener goes, the file stays
         path
+    }
+
+    /// `HOME` is process-global; serialise the tests that repoint it.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeGuard {
+        previous: Option<std::ffi::OsString>,
+        dir: std::path::PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn fake_home(name: &str) -> HomeGuard {
+        let lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::path::PathBuf::from("/tmp").join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &dir);
+        HomeGuard {
+            previous,
+            dir,
+            _lock: lock,
+        }
+    }
+
+    #[test]
+    fn the_config_dir_is_made_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = fake_home(&format!("e-home-{}", std::process::id()));
+        let inner = home.dir.join(".config").join("e");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let dir = socket_dir().unwrap();
+        assert_eq!(dir, inner);
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o700,
+            "the socket names are only secret if nobody can list them"
+        );
+    }
+
+    #[test]
+    fn the_socket_path_stays_within_sun_path() {
+        let home = fake_home(&format!("e-home-len-{}", std::process::id()));
+        let path = socket_path().unwrap();
+        assert!(path.as_os_str().len() < SUN_PATH_BUDGET);
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("agent-") && name.ends_with(".sock"),
+            "{name}"
+        );
+        // Must still bind for real — the length arithmetic is the whole point.
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        assert!(std::os::unix::net::UnixStream::connect(&path).is_ok());
+        drop(listener);
+        let _ = std::fs::remove_file(&path);
+        let _ = home;
+    }
+
+    #[test]
+    fn a_long_home_drops_the_pid_rather_than_the_randomness() {
+        // Pick a $HOME length where "agent-<pid>-<nonce>.sock" overflows the
+        // budget but "agent-<nonce>.sock" still fits, computed rather than
+        // guessed so it holds whatever this process's pid happens to be.
+        let tail = "/.config/e/".len() + "agent-".len() + 20 + ".sock".len();
+        let with_pid = tail + 1 + std::process::id().to_string().len();
+        let home_len = SUN_PATH_BUDGET - with_pid + 1;
+        let name_len = home_len - "/tmp/".len();
+        let name = format!("e-home-{}", "d".repeat(name_len - "e-home-".len()));
+
+        let home = fake_home(&name);
+        assert_eq!(home.dir.as_os_str().len(), home_len);
+
+        let path = socket_path().unwrap();
+        let file = path.file_name().unwrap().to_str().unwrap();
+        assert!(
+            path.as_os_str().len() < SUN_PATH_BUDGET,
+            "{}",
+            path.display()
+        );
+        assert!(
+            !file.contains(&std::process::id().to_string()),
+            "the pid is the disposable part, the randomness is not: {file}"
+        );
+        assert_eq!(file.len(), "agent-".len() + 20 + ".sock".len());
+        // And it has to actually bind.
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        drop(listener);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_impossibly_long_home_turns_agent_sync_off_rather_than_binding_badly() {
+        let name = format!("e-home-x-{}", "d".repeat(90));
+        let _home = fake_home(&name);
+        assert!(socket_path().is_none());
+    }
+
+    #[test]
+    fn the_socket_name_carries_unguessable_randomness() {
+        let a = socket_nonce();
+        let b = socket_nonce();
+        assert_eq!(a.len(), 20, "96 bits, base32-encoded");
+        assert!(
+            a.chars()
+                .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c)),
+            "unexpected character in {a}"
+        );
+        assert_ne!(a, b, "a fixed name would make the capability guessable");
+    }
+
+    #[test]
+    fn the_sweep_still_matches_the_randomised_name() {
+        // The name gained a nonce for access control; the cleanup that keys off
+        // `agent-*.sock` has to keep recognising it.
+        let dir = scratch_dir();
+        let name = format!("agent-{}-{}.sock", 4242, socket_nonce());
+        let dead = orphan(&dir, &name);
+        assert!(dead.exists());
+        sweep_stale_sockets_with_grace(&dir, Duration::ZERO);
+        assert!(
+            !dead.exists(),
+            "randomised socket names must still be swept"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

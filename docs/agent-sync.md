@@ -121,8 +121,36 @@ reports how many hunks were applied. Accepted changes go into the open buffer
   (⌘⌥A): time, method and a short summary — so you can always answer "what did
   the agent just do?".
 
+## Who can talk to the socket
+
+**The socket path is the capability.** Anything that can reach it can drive the
+editor — including `run`, which executes shell commands. Three things guard it:
+
+- The name carries 96 bits of randomness (`agent-<pid>-<random>.sock`), so it
+  can't be found by guessing.
+- `~/.config/e` is `0700` and the socket itself `0600`, so no other account on
+  the machine can list or open it.
+- The path is handed out only through `$E_EDITOR_SOCK`, which processes inherit
+  from the editor that spawned them.
+
+So an agent you started from `e` can use the socket, and a stray process that
+merely knows `~/.config/e` exists cannot.
+
+What this does **not** protect against is code already running as you with
+access to that environment variable — a malicious postinstall script in your own
+project, say. Treat `$E_EDITOR_SOCK` the way you'd treat a shell: anything
+holding it can run commands as you.
+
+`run` and `tinker` deliberately execute without a per-call prompt; the
+autonomous test-fix-rerun loop is built on that, and a dialog per command would
+break it. `db_query` is the exception — it asks every time, because the risk
+there is your data rather than your machine. Everything the agent does is
+recorded in the **Agent Timeline** (⌘⌥A).
+
 ## Notes
 
 - The socket is local to your machine and per editor process; nothing is exposed
   over the network.
 - Available on macOS/Linux (Unix sockets). The path lives under `~/.config/e/`.
+- Sockets left behind by editors that are no longer running are cleaned up at
+  startup.

@@ -39,10 +39,12 @@ only own Floem's own crates here, not the whole dependency tree.
 ## Working in the fork
 
 - Edit freely. `cargo build -p e-app` compiles this copy.
-- `cargo clippy --workspace` and `cargo fmt --all` do **not** touch this fork
-  (it's excluded from our workspace), so upstream's own lint warnings — e.g. the
-  pre-existing `unused_assignments` in `src/animate.rs` — don't fail our CI. Keep
-  our own changes clean regardless.
+- `cargo clippy --workspace` does **not** touch this fork (it's excluded from our
+  workspace), so upstream's own lint warnings — e.g. the pre-existing
+  `unused_assignments` in `src/animate.rs` — don't fail our CI. Keep our own
+  changes clean regardless.
+- `cargo fmt --all` **does** reach files here, despite the exclusion, and CI runs
+  it with `--check`. Format anything you add.
 - Keep changes small and well-commented so a future re-sync with upstream is
   tractable. When you change a view, note *why* (which editor feature needs it).
 
@@ -53,6 +55,25 @@ There is no live git remote here. To pull newer upstream changes, clone
 local changes forward. Record any local patches in this file as they land:
 
 ### Local changes on top of upstream
+
+- **`editor-core/src/buffer/mod.rs`: `Buffer::edit` can no longer abort the
+  process.** Two shapes of input reached the CRDT engine as a malformed delta
+  and tripped an assertion — a selection whose offsets exceed the buffer
+  (`lapce-xi-rope` `multiset.rs`: *"self must cover all 0-regions of other"*),
+  and two selections in one `edit` call that overlap each other (`delta.rs:594`).
+  Both fire inside a callback that cannot unwind, so Rust aborts instead of
+  panicking and unsaved work is lost. This was not theoretical: it is in
+  `~/.config/e/crash.log`, reached from `receive_char` — ordinary typing.
+
+  Regions are now clamped to the buffer length, and a region overlapping or
+  repeating one already accepted is dropped. A single `Selection` merges its own
+  overlaps, but `edit` takes several and nothing reconciled them against each
+  other. The interval sort also became a plain total order by `(start, end)`;
+  it agrees with the old comparator for the disjoint regions that are normal,
+  and unlike it is well-defined when they are not.
+
+  Covered by `editor-core/tests/edit_robustness.rs`, including a 2000-case
+  generated sweep of degenerate selections that must not abort.
 
 - **`src/views/rich_text.rs`: text selection.** Added an opt-in
   `RichText::selectable()` (+ `selection_color()`) that ports the pointer /

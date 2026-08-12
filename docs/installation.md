@@ -44,13 +44,18 @@ Once installed, `e` keeps itself up to date — see [Updating](updating.md).
 #### Linux build dependencies
 
 On Debian/Ubuntu, install the system libraries Floem (winit + Vulkan/wgpu), the
-native file dialog and the MySQL driver need:
+native file dialog, the MySQL driver and the Secret Service client need:
 
 ```sh
 sudo apt-get install \
   clang pkg-config libssl-dev libwayland-dev libxkbcommon-x11-dev \
-  libvulkan-dev libxcb-shape0-dev libxcb-xfixes0-dev
+  libvulkan-dev libxcb-shape0-dev libxcb-xfixes0-dev libdbus-1-dev
 ```
+
+`libdbus-1-dev` is what lets `e` store database passwords in your desktop's
+keyring (GNOME Keyring, KWallet — anything implementing the Secret Service API)
+instead of in a file. If no such service is running at runtime, `e` keeps the
+secrets in `~/.config/e/databases.json` instead, written `0600`.
 
 At runtime a working Vulkan driver is required (e.g. `mesa-vulkan-drivers`).
 

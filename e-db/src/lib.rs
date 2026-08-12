@@ -19,6 +19,16 @@ pub const MAX_ROWS: usize = 1000;
 /// A saved database connection (per project).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct DbConfig {
+    /// Stable identity, assigned on first save and never reused.
+    ///
+    /// Secrets are keyed by this rather than by `label`, so renaming a
+    /// connection doesn't orphan its entry in the credential store.
+    #[serde(default)]
+    pub id: String,
+    /// Whether this connection's secrets live in the OS credential store. When
+    /// true the secret fields below are blank on disk and filled in on load.
+    #[serde(default)]
+    pub secrets_in_keychain: bool,
     /// `mysql` | `postgres` | `sqlite`.
     pub engine: String,
     #[serde(default)]
@@ -2059,6 +2069,111 @@ fn mysql_value_to_string(v: &mysql::Value) -> Option<String> {
     }
 }
 
+// ── connection secrets (OS credential store) ───
+
+/// Passwords and SSH secrets, kept in the OS credential store rather than in
+/// `databases.json`.
+///
+/// They used to be serialised straight into that file, which was created with
+/// the process umask — world-readable in practice. The askpass helper in this
+/// same crate already treated SSH secrets as something never to put on disk;
+/// the saved-connection path simply hadn't caught up.
+///
+/// When no credential store is reachable (a headless Linux box with no Secret
+/// Service, say) the secrets stay in the file, which is written 0600 either way.
+mod secrets {
+    /// Service name under which every `e` connection secret is filed.
+    const SERVICE: &str = "e-db";
+
+    /// The three secret-bearing fields of a connection.
+    pub const FIELDS: [&str; 3] = ["password", "ssh_password", "ssh_passphrase"];
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn entry(id: &str, field: &str) -> Option<keyring::Entry> {
+        keyring::Entry::new(SERVICE, &format!("{id}/{field}")).ok()
+    }
+
+    /// Store a secret. An empty secret removes the entry instead.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub fn set(id: &str, field: &str, secret: &str) -> Result<(), String> {
+        let entry = entry(id, field).ok_or("no credential store")?;
+        if secret.is_empty() {
+            return match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(e.to_string()),
+            };
+        }
+        entry.set_password(secret).map_err(|e| e.to_string())
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub fn get(id: &str, field: &str) -> Option<String> {
+        entry(id, field)?.get_password().ok()
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub fn delete(id: &str, field: &str) {
+        if let Some(entry) = entry(id, field) {
+            let _ = entry.delete_credential();
+        }
+    }
+
+    // No backend on this platform: callers fall back to the 0600 file.
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    pub fn set(_id: &str, _field: &str, _secret: &str) -> Result<(), String> {
+        Err("no credential store on this platform".into())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    pub fn get(_id: &str, _field: &str) -> Option<String> {
+        None
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    pub fn delete(_id: &str, _field: &str) {}
+}
+
+impl DbConfig {
+    /// Read one of the secret-bearing fields by name.
+    fn secret(&self, field: &str) -> &str {
+        match field {
+            "password" => &self.password,
+            "ssh_password" => &self.ssh_password,
+            "ssh_passphrase" => &self.ssh_passphrase,
+            _ => "",
+        }
+    }
+
+    fn set_secret(&mut self, field: &str, value: String) {
+        match field {
+            "password" => self.password = value,
+            "ssh_password" => self.ssh_password = value,
+            "ssh_passphrase" => self.ssh_passphrase = value,
+            _ => {}
+        }
+    }
+
+    fn clear_secrets(&mut self) {
+        for field in secrets::FIELDS {
+            self.set_secret(field, String::new());
+        }
+    }
+}
+
+/// A fresh connection id. Local uniqueness is all this needs — it only has to
+/// distinguish one saved connection from another on this machine.
+fn new_connection_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!(
+        "{nanos:x}-{:x}-{:x}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 // ── persistence (per project, in ~/.config/e/databases.json) ───
 
 fn store_path() -> Option<PathBuf> {
@@ -2072,38 +2187,154 @@ fn store_path() -> Option<PathBuf> {
 }
 
 fn read_store() -> serde_json::Value {
-    store_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+    let Some(path) = store_path() else {
+        return serde_json::json!({});
+    };
+    // A store written by an earlier version is 0644 and may still hold
+    // plaintext secrets. Its contents only move to the credential store on the
+    // next save, which might never come if the user never edits a connection —
+    // so tighten the mode the moment we touch the file, not just when we write it.
+    tighten_permissions(&path);
+    std::fs::read_to_string(&path)
+        .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
+/// Drop a file's mode to 0600 if it is looser. No-op when it doesn't exist.
+fn tighten_permissions(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(meta) = std::fs::metadata(path) else {
+            return;
+        };
+        if meta.permissions().mode() & 0o177 != 0 {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 /// Load the saved connections for a project (keyed by its root path).
+///
+/// Connections whose secrets live in the credential store come back off disk
+/// blank; their secrets are fetched here so the rest of the crate can keep
+/// treating `DbConfig` as fully populated.
 pub fn load_connections(project: &Path) -> Vec<DbConfig> {
     let store = read_store();
-    store
+    let mut conns: Vec<DbConfig> = store
         .get(project.to_string_lossy().as_ref())
         .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for conn in &mut conns {
+        if !conn.secrets_in_keychain || conn.id.is_empty() {
+            continue;
+        }
+        for field in secrets::FIELDS {
+            if let Some(secret) = secrets::get(&conn.id, field) {
+                conn.set_secret(field, secret);
+            }
+        }
+    }
+    conns
 }
 
 /// Persist the connection list for a project.
+///
+/// Secrets go to the OS credential store and are blanked before the list is
+/// serialised. If the store can't be reached they stay in the file — which is
+/// written 0600 regardless, so it is never readable by other users.
 pub fn save_connections(project: &Path, conns: &[DbConfig]) -> Result<(), String> {
+    let key = project.to_string_lossy().into_owned();
+    let previous_ids: Vec<String> = read_store()
+        .get(&key)
+        .and_then(|v| serde_json::from_value::<Vec<DbConfig>>(v.clone()).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| c.id)
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let mut on_disk = Vec::with_capacity(conns.len());
+    for conn in conns {
+        let mut conn = conn.clone();
+        if conn.id.is_empty() {
+            conn.id = new_connection_id();
+        }
+        // All-or-nothing per connection: a half-stored connection would come
+        // back with some secrets missing and no way to tell which.
+        let stored = secrets::FIELDS
+            .iter()
+            .try_for_each(|field| secrets::set(&conn.id, field, conn.secret(field)));
+        match stored {
+            Ok(()) => {
+                conn.secrets_in_keychain = true;
+                conn.clear_secrets();
+            }
+            Err(e) => {
+                if conn.secrets_in_keychain {
+                    // It used to be in the store and now isn't reachable. Say so
+                    // rather than silently writing the secret back to disk.
+                    eprintln!("e: credential store unavailable ({e}); keeping secrets in databases.json (0600)");
+                }
+                conn.secrets_in_keychain = false;
+            }
+        }
+        on_disk.push(conn);
+    }
+
+    // Drop credential-store entries for connections that were removed.
+    let live: Vec<&str> = on_disk.iter().map(|c| c.id.as_str()).collect();
+    for id in previous_ids {
+        if !live.contains(&id.as_str()) {
+            for field in secrets::FIELDS {
+                secrets::delete(&id, field);
+            }
+        }
+    }
+
     let mut store = read_store();
     let obj = store.as_object_mut().ok_or("invalid store")?;
     obj.insert(
-        project.to_string_lossy().into_owned(),
-        serde_json::to_value(conns).map_err(|e| e.to_string())?,
+        key,
+        serde_json::to_value(&on_disk).map_err(|e| e.to_string())?,
     );
     let path = store_path().ok_or("no HOME")?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(
+    write_private(
         &path,
-        serde_json::to_string_pretty(&store).map_err(|e| e.to_string())?,
+        &serde_json::to_string_pretty(&store).map_err(|e| e.to_string())?,
     )
-    .map_err(|e| e.to_string())
+}
+
+/// Write a file readable only by its owner, tightening an existing file's mode
+/// too — a `databases.json` created before this was enforced is still out there
+/// at 0644.
+fn write_private(path: &Path, contents: &str) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        // `.mode()` only applies when creating, so fix up a pre-existing file.
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        file.write_all(contents.as_bytes())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents).map_err(|e| e.to_string())
+    }
 }
 
 // ── saved queries (per project, in ~/.config/e/queries.json) ───
@@ -2296,6 +2527,211 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── connection secrets & store permissions ──────────────────────────
+    //
+    // These deliberately never touch the real credential store: hitting it
+    // would write into the developer's login keychain on every `cargo test`,
+    // and CI Linux has no Secret Service at all. What's covered here is the
+    // deterministic half — field routing, id generation, file permissions, and
+    // the on-disk fallback shape.
+
+    use std::sync::Mutex;
+
+    /// `HOME` is process-global; serialise the tests that repoint it.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    struct HomeGuard {
+        previous: Option<std::ffi::OsString>,
+        dir: PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn fake_home(tag: &str) -> HomeGuard {
+        let lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("e-db-home-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".config").join("e")).unwrap();
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &dir);
+        HomeGuard {
+            previous,
+            dir,
+            _lock: lock,
+        }
+    }
+
+    /// Opt-in: exercises the *real* OS credential store, so it is not part of
+    /// the normal suite. Run with `cargo test -p e-db keychain -- --ignored`.
+    /// Cleans up after itself.
+    #[test]
+    #[ignore]
+    fn keychain_round_trip() {
+        let id = new_connection_id();
+        for (i, field) in secrets::FIELDS.iter().enumerate() {
+            secrets::set(&id, field, &format!("secret-{i}"))
+                .unwrap_or_else(|e| panic!("no credential store available: {e}"));
+        }
+        for (i, field) in secrets::FIELDS.iter().enumerate() {
+            assert_eq!(
+                secrets::get(&id, field).as_deref(),
+                Some(&*format!("secret-{i}"))
+            );
+        }
+        // An empty secret removes the entry rather than storing "".
+        secrets::set(&id, "password", "").unwrap();
+        assert_eq!(secrets::get(&id, "password"), None);
+
+        for field in secrets::FIELDS {
+            secrets::delete(&id, field);
+        }
+        for field in secrets::FIELDS {
+            assert_eq!(secrets::get(&id, field), None, "{field} not cleaned up");
+        }
+    }
+
+    #[test]
+    fn every_secret_field_is_routed() {
+        // A missing arm in `secret`/`set_secret` would silently drop a secret,
+        // so assert all three round-trip rather than spot-checking one.
+        let mut c = DbConfig::default();
+        for (i, field) in secrets::FIELDS.iter().enumerate() {
+            c.set_secret(field, format!("value-{i}"));
+        }
+        for (i, field) in secrets::FIELDS.iter().enumerate() {
+            assert_eq!(c.secret(field), format!("value-{i}"), "field {field}");
+        }
+        assert_eq!(c.password, "value-0");
+        assert_eq!(c.ssh_password, "value-1");
+        assert_eq!(c.ssh_passphrase, "value-2");
+
+        c.clear_secrets();
+        for field in secrets::FIELDS {
+            assert!(c.secret(field).is_empty(), "field {field} not cleared");
+        }
+    }
+
+    #[test]
+    fn connection_ids_are_distinct() {
+        let ids: std::collections::HashSet<String> =
+            (0..100).map(|_| new_connection_id()).collect();
+        assert_eq!(ids.len(), 100);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_store_is_written_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("e-db-perms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("databases.json");
+
+        write_private(&path, "{}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "a new store must not be readable by anyone else"
+        );
+
+        // A store written before this was enforced is still out there at 0644.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, "{\"a\":1}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "an existing loose store must be tightened");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merely_reading_the_store_tightens_a_loose_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = fake_home("tighten");
+        let store = home.dir.join(".config").join("e").join("databases.json");
+        std::fs::write(&store, "{}").unwrap();
+        std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        // An upgrading user may never edit a connection, so the read path has
+        // to be what fixes the mode.
+        let _ = load_connections(&PathBuf::from("/tmp/anything"));
+
+        let mode = std::fs::metadata(&store).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn connections_saved_before_the_keychain_still_load() {
+        // Back-compat: files written by earlier versions have no `id`, no
+        // `secrets_in_keychain`, and the password inline. Loading must not
+        // consult the credential store for those (the flag gates it).
+        let home = fake_home("legacy");
+        let project = PathBuf::from("/tmp/some-project");
+        let fixture = serde_json::json!({
+            "/tmp/some-project": [{
+                "engine": "mysql",
+                "host": "127.0.0.1",
+                "port": 3306,
+                "database": "app",
+                "username": "root",
+                "password": "s3cret",
+                "ssh_password": "ssh-s3cret"
+            }]
+        });
+        std::fs::write(
+            home.dir.join(".config").join("e").join("databases.json"),
+            serde_json::to_string_pretty(&fixture).unwrap(),
+        )
+        .unwrap();
+
+        let conns = load_connections(&project);
+        assert_eq!(conns.len(), 1);
+        assert_eq!(conns[0].password, "s3cret");
+        assert_eq!(conns[0].ssh_password, "ssh-s3cret");
+        assert!(conns[0].id.is_empty());
+        assert!(!conns[0].secrets_in_keychain);
+    }
+
+    #[test]
+    fn a_keychain_backed_connection_reads_blank_from_disk() {
+        // The flag is set but the credential store holds nothing for this id,
+        // so the secret stays empty rather than falling back to whatever the
+        // file happens to contain.
+        let home = fake_home("keychain");
+        let project = PathBuf::from("/tmp/kc-project");
+        let fixture = serde_json::json!({
+            "/tmp/kc-project": [{
+                "id": "no-such-id-in-any-keychain",
+                "secrets_in_keychain": true,
+                "engine": "mysql",
+                "host": "127.0.0.1",
+                "database": "app",
+                "username": "root",
+                "password": ""
+            }]
+        });
+        std::fs::write(
+            home.dir.join(".config").join("e").join("databases.json"),
+            serde_json::to_string_pretty(&fixture).unwrap(),
+        )
+        .unwrap();
+
+        let conns = load_connections(&project);
+        assert_eq!(conns.len(), 1);
+        assert!(conns[0].password.is_empty());
+        assert!(conns[0].secrets_in_keychain);
+    }
 
     fn cfg(engine: &str, host: &str) -> DbConfig {
         let mut c = DbConfig::default();

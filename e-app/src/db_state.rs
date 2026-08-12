@@ -581,6 +581,8 @@ impl AppState {
     pub fn db_start_edit(&self, entry: DbEntry) {
         let c = &entry.config;
         self.db_form.set(DbForm {
+            id: c.id.clone(),
+            secrets_in_keychain: c.secrets_in_keychain,
             engine: c.engine.clone(),
             host: c.host.clone(),
             port: if c.port == 0 {

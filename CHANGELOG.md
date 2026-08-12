@@ -31,6 +31,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes under case folding.
 - The search query is matched literally, so `$user->name()` finds that text
   instead of being interpreted as a pattern.
+- **`~/.config/e` no longer fills up with dead sockets.** Every editor process
+  created an `agent-<pid>.sock` for the agent workspace sync and only ever
+  removed its own on startup, so one file accumulated per launch, forever (186
+  of them on the machine this was found on). Stale sockets are now swept at
+  startup. Liveness is decided by whether anything answers on the socket rather
+  than by whether the pid is still around, since pids get recycled; sockets
+  younger than 30 seconds are left alone so a starting editor can't be caught
+  mid-bind.
+
+### Security
+
+- **Database passwords are no longer kept in a world-readable file.** Passwords,
+  SSH passwords and SSH key passphrases were serialised in plaintext into
+  `~/.config/e/databases.json`, which was created with the process umask — 0644
+  in practice, so any account on the machine could read them. They now go to the
+  OS credential store (macOS Keychain; Secret Service on Linux), keyed by a
+  stable per-connection id so renaming a connection doesn't orphan its entry.
+  `databases.json` keeps only the non-secret fields and is written `0600`; an
+  existing file is tightened as soon as `e` reads it, not just when it next
+  writes. Where no credential store is reachable, secrets stay in the (0600)
+  file and `e` says so. Connections saved by earlier versions keep working and
+  migrate on the next save.
+
+  Building on Linux now needs `libdbus-1-dev` — see
+  [docs/installation.md](docs/installation.md#linux-build-dependencies).
 
 ## [0.9.9] - 2026-08-01
 

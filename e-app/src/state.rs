@@ -90,6 +90,11 @@ impl DbEntry {
 /// The manual add-connection form.
 #[derive(Clone, Debug)]
 pub struct DbForm {
+    /// Identity of the connection being edited, empty when adding a new one.
+    /// Carried through the form so editing a connection keeps its entry in the
+    /// OS credential store instead of re-keying it.
+    pub id: String,
+    pub secrets_in_keychain: bool,
     pub engine: String,
     pub host: String,
     pub port: String,
@@ -111,6 +116,8 @@ pub struct DbForm {
 impl Default for DbForm {
     fn default() -> Self {
         DbForm {
+            id: String::new(),
+            secrets_in_keychain: false,
             engine: "mysql".into(),
             host: "127.0.0.1".into(),
             port: "3306".into(),
@@ -134,6 +141,10 @@ impl Default for DbForm {
 impl DbForm {
     pub fn to_config(&self) -> e_db::DbConfig {
         e_db::DbConfig {
+            // Empty for a new connection; `save_connections` assigns one on
+            // first persist and moves the secrets to the credential store.
+            id: self.id.clone(),
+            secrets_in_keychain: self.secrets_in_keychain,
             engine: self.engine.clone(),
             host: self.host.clone(),
             port: self.port.parse().unwrap_or(0),

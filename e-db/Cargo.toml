@@ -27,3 +27,18 @@ mysql = { version = "25", default-features = false, features = [
 postgres   = "0.19"
 rusqlite   = { version = "0.32", features = ["bundled"] }
 ureq       = "2"
+
+# Connection secrets live in the OS credential store, not in our JSON. The
+# backend is picked per platform so neither one drags the other's system
+# libraries in: macOS uses the Security framework (no extra packages), Linux
+# talks to the Secret Service over D-Bus (needs `libdbus-1-dev` to build — see
+# docs/installation.md). Anywhere else there is no backend and e-db falls back
+# to a 0600 file.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = [
+    "sync-secret-service",
+    "crypto-rust",
+] }

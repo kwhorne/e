@@ -26,6 +26,25 @@ either a private key or a password — `e` forwards a local port through the sys
 Connections are saved per project in `~/.config/e/databases.json` — never written
 into the project folder, so nothing can be committed.
 
+### Where passwords are kept
+
+Database passwords, SSH passwords and SSH key passphrases are **not** stored in
+`databases.json`. They go to the operating system's credential store:
+
+| Platform | Store |
+| --- | --- |
+| macOS | Keychain |
+| Linux | Secret Service (GNOME Keyring, KWallet, …) |
+
+`databases.json` holds only the non-secret fields plus a reference, and is
+written `0600` (readable by your user only). If no credential store is reachable
+— a headless Linux box with no Secret Service, say — `e` falls back to keeping
+the secrets in that file, still `0600`, and says so on stderr.
+
+Connections saved by an earlier version keep working: their secrets move to the
+credential store the next time the connection list is saved, and the file's
+permissions are tightened as soon as `e` reads it.
+
 When adding manually you can press **Test** to verify the connection before
 saving.
 

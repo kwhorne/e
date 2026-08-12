@@ -369,8 +369,15 @@ fn add_form(state: AppState) -> impl IntoView {
     let ssh_key_path = create_rw_signal(f.ssh_key_path.clone());
     let ssh_passphrase = create_rw_signal(f.ssh_passphrase.clone());
 
+    // Identity isn't edited in the dialog, but it has to survive the round trip
+    // or the connection would be re-keyed in the credential store on every save.
+    let form_id = f.id.clone();
+    let form_in_keychain = f.secrets_in_keychain;
+
     let sync = std::rc::Rc::new(move || {
         state.db_form.set(DbForm {
+            id: form_id.clone(),
+            secrets_in_keychain: form_in_keychain,
             engine: engine.get_untracked(),
             host: host.get_untracked(),
             port: port.get_untracked(),

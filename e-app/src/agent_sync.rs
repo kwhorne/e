@@ -33,12 +33,74 @@ use crate::state::AppState;
 
 type Pending = Arc<Mutex<VecDeque<(Value, Sender<Value>)>>>;
 
-/// Path of the per-process editor socket.
-fn socket_path() -> Option<std::path::PathBuf> {
+/// Directory holding the per-process editor sockets.
+fn socket_dir() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME")?;
     let dir = std::path::PathBuf::from(home).join(".config").join("e");
     let _ = std::fs::create_dir_all(&dir);
-    Some(dir.join(format!("agent-{}.sock", std::process::id())))
+    Some(dir)
+}
+
+/// Path of the per-process editor socket.
+fn socket_path() -> Option<std::path::PathBuf> {
+    Some(socket_dir()?.join(format!("agent-{}.sock", std::process::id())))
+}
+
+/// Sockets younger than this are left alone, so we can't delete one belonging to
+/// an editor that is starting up right now.
+#[cfg(unix)]
+const SOCKET_GRACE: Duration = Duration::from_secs(30);
+
+/// Delete `agent-*.sock` files left behind by editors that are no longer running.
+///
+/// Every process created one at startup and nothing ever removed anyone else's,
+/// so `~/.config/e` accumulated one file per editor launch, indefinitely.
+///
+/// The liveness test is "does anything answer on this socket", not "is this pid
+/// alive": pids are recycled, so a pid check can point at an unrelated process,
+/// whereas a refused connection means nothing is serving the socket and the file
+/// is litter. This also subsumes clearing our own stale socket before binding.
+#[cfg(unix)]
+fn sweep_stale_sockets(dir: &std::path::Path) {
+    sweep_stale_sockets_with_grace(dir, SOCKET_GRACE)
+}
+
+/// [`sweep_stale_sockets`] with the grace window injected, so tests can drive
+/// both sides of it without backdating a socket's mtime (which can't be opened
+/// for writing anyway).
+#[cfg(unix)]
+fn sweep_stale_sockets_with_grace(dir: &std::path::Path, grace: Duration) {
+    use std::os::unix::net::UnixStream;
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut removed = 0usize;
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with("agent-") || !name.ends_with(".sock") {
+            continue;
+        }
+        let path = entry.path();
+        let fresh = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t.elapsed().map(|e| e < grace).unwrap_or(true))
+            .unwrap_or(false);
+        if fresh {
+            continue;
+        }
+        if UnixStream::connect(&path).is_ok() {
+            continue; // a live editor is serving this one
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        eprintln!("e: cleaned up {removed} stale agent socket(s)");
+    }
 }
 
 /// Start the agent-sync server. Safe to call once at startup; a no-op on
@@ -50,7 +112,10 @@ pub fn start(state: AppState) {
     let Some(path) = socket_path() else {
         return;
     };
-    let _ = std::fs::remove_file(&path); // clear any stale socket
+    if let Some(dir) = socket_dir() {
+        sweep_stale_sockets(&dir);
+    }
+    let _ = std::fs::remove_file(&path); // our own, if the sweep's grace window kept it
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
         Err(e) => {
@@ -540,4 +605,80 @@ fn path_to_uri(path: &str) -> String {
 
 fn uri_to_path_str(uri: &str) -> String {
     uri.strip_prefix("file://").unwrap_or(uri).to_string()
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+    use std::sync::atomic::AtomicU32;
+
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn scratch_dir() -> std::path::PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("e-sock-sweep-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A socket file with nothing serving it — what a dead editor leaves behind.
+    fn orphan(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        let listener = UnixListener::bind(&path).unwrap();
+        drop(listener); // the listener goes, the file stays
+        path
+    }
+
+    #[test]
+    fn removes_orphans_and_keeps_sockets_that_answer() {
+        let dir = scratch_dir();
+
+        // A live editor: a listener still bound and accepting.
+        let live = dir.join("agent-11111.sock");
+        let _listener = UnixListener::bind(&live).unwrap();
+
+        let dead = orphan(&dir, "agent-22222.sock");
+        let also_dead = orphan(&dir, "agent-33333.sock");
+
+        // Unrelated files in ~/.config/e must not be collateral.
+        let config = dir.join("config.json");
+        std::fs::write(&config, "{}").unwrap();
+        let db = dir.join("databases.json");
+        std::fs::write(&db, "{}").unwrap();
+
+        sweep_stale_sockets_with_grace(&dir, Duration::ZERO);
+
+        assert!(live.exists(), "a socket with a live listener must survive");
+        assert!(!dead.exists(), "an unserved socket is litter and must go");
+        assert!(!also_dead.exists());
+        assert!(config.exists(), "non-socket files must not be touched");
+        assert!(db.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_grace_window_protects_a_starting_editor() {
+        // Guards the (tiny) race against another editor between its bind() and
+        // its listen(), where a connect would be refused even though the
+        // process is very much alive.
+        let dir = scratch_dir();
+        let fresh = orphan(&dir, "agent-44444.sock");
+        sweep_stale_sockets_with_grace(&dir, Duration::from_secs(3600));
+        assert!(
+            fresh.exists(),
+            "a socket younger than the grace window must be left alone"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_directory_is_not_an_error() {
+        sweep_stale_sockets_with_grace(
+            &std::env::temp_dir().join("e-sock-sweep-does-not-exist"),
+            Duration::ZERO,
+        );
+    }
 }

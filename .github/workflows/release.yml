@@ -65,7 +65,7 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install \
             clang pkg-config libssl-dev libwayland-dev libxkbcommon-x11-dev \
-            libvulkan-dev libxcb-shape0-dev libxcb-xfixes0-dev
+            libvulkan-dev libxcb-shape0-dev libxcb-xfixes0-dev libdbus-1-dev
 
       - name: Build release binary
         run: cargo build --release --bin e --target ${{ matrix.target }}

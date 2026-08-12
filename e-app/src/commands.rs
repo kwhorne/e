@@ -136,12 +136,12 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
 /// Context-aware close (⌘W): agent panel, then terminal, then the active tab.
 fn close_focused(state: AppState) {
     // The database results overlay (and its edit popup) take priority.
-    if state.db_edit.get().is_some() {
+    if state.db.edit.get().is_some() {
         state.db_cancel_edit();
-    } else if state.db_result_open.get() {
+    } else if state.db.result_open.get() {
         state.close_db_result();
-    } else if state.agent_focused.get() {
-        state.agent_open.set(false);
+    } else if state.agent.focused.get() {
+        state.agent.open.set(false);
     } else if state.terminal_focused.get() {
         if let Some(id) = state.focused_term_id() {
             state.close_terminal(id);
@@ -153,12 +153,12 @@ fn close_focused(state: AppState) {
 
 /// Dismiss every open overlay (Escape).
 fn close_overlays(state: AppState) {
-    if state.agent_edit.get().is_some() {
+    if state.agent.edit.get().is_some() {
         state.agent_edit_cancel();
         return;
     }
-    if state.agent_log_open.get() {
-        state.agent_log_open.set(false);
+    if state.agent.log_open.get() {
+        state.agent.log_open.set(false);
         return;
     }
     if state.tdd_open.get() {
@@ -209,7 +209,7 @@ fn close_overlays(state: AppState) {
         state.debug_open.set(false);
         return;
     }
-    if state.db_edit.get().is_some() {
+    if state.db.edit.get().is_some() {
         state.db_cancel_edit();
         return;
     }

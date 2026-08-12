@@ -87,7 +87,7 @@ pub fn status_bar(state: AppState) -> impl IntoView {
     ))
     .style(|s| s.items_center().gap(14.0));
 
-    let agent_mark = label(move || match state.agent_mark.get() {
+    let agent_mark = label(move || match state.agent.mark.get() {
         Some((p, line)) => format!(
             "🤖 {}:{}",
             p.file_name()
@@ -103,7 +103,7 @@ pub fn status_bar(state: AppState) -> impl IntoView {
             .text_ellipsis()
             .max_width(240.0)
             .cursor(floem::style::CursorStyle::Pointer);
-        if state.agent_mark.get().is_some() {
+        if state.agent.mark.get().is_some() {
             s
         } else {
             s.hide()

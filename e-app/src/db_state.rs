@@ -27,9 +27,9 @@ impl AppState {
     // ---- Database panel ------------------------------------------------
 
     pub fn toggle_db_panel(&self) {
-        let open = !self.db_open.get_untracked();
-        self.db_open.set(open);
-        if open && self.db_conns.with_untracked(|c| c.is_empty()) {
+        let open = !self.db.open.get_untracked();
+        self.db.open.set(open);
+        if open && self.db.conns.with_untracked(|c| c.is_empty()) {
             self.load_databases();
         }
     }
@@ -42,8 +42,8 @@ impl AppState {
             .into_iter()
             .map(|c| DbEntry::new(self.cx, c))
             .collect();
-        self.db_conns.set(entries);
-        self.db_queries.set(e_db::load_queries(&root));
+        self.db.conns.set(entries);
+        self.db.queries.set(e_db::load_queries(&root));
     }
 
     /// Fetch the project's DB schema (from `.env`) into an in-memory cache for
@@ -53,7 +53,7 @@ impl AppState {
         let Some(cfg) = e_db::from_env(&root) else {
             return;
         };
-        let sig = self.db_schema_cache;
+        let sig = self.db.schema_cache;
         let send = create_ext_action(
             self.cx,
             move |m: std::collections::HashMap<String, Vec<e_db::ColumnInfo>>| sig.set(m),
@@ -75,20 +75,20 @@ impl AppState {
 
     /// Save the current query editor text under the typed name.
     pub fn db_save_query(&self) {
-        let name = self.db_query_name.get_untracked().trim().to_string();
-        let sql = self.db_query_text.get_untracked();
+        let name = self.db.query_name.get_untracked().trim().to_string();
+        let sql = self.db.query_text.get_untracked();
         if name.is_empty() || sql.trim().is_empty() {
-            self.db_saving_query.set(false);
+            self.db.saving_query.set(false);
             return;
         }
-        self.db_queries.update(|q| {
+        self.db.queries.update(|q| {
             q.retain(|x| x.name != name);
             q.push(e_db::SavedQuery { name, sql });
             q.sort_by(|a, b| a.name.cmp(&b.name));
         });
-        let _ = e_db::save_queries(&self.root.get_untracked(), &self.db_queries.get_untracked());
-        self.db_query_name.set(String::new());
-        self.db_saving_query.set(false);
+        let _ = e_db::save_queries(&self.root.get_untracked(), &self.db.queries.get_untracked());
+        self.db.query_name.set(String::new());
+        self.db.saving_query.set(false);
     }
 
     /// Load a saved query into the editor.
@@ -98,9 +98,9 @@ impl AppState {
 
     /// Open the query-history panel and load the most recent entries.
     pub fn db_open_history(&self) {
-        self.db_history_query.set(String::new());
+        self.db.history_query.set(String::new());
         self.db_reload_history();
-        self.db_history_open.set(true);
+        self.db.history_open.set(true);
     }
 
     /// (Re)load history entries for the current project, honouring the search box.
@@ -109,31 +109,31 @@ impl AppState {
             return;
         };
         let project = self.root.get_untracked().to_string_lossy().into_owned();
-        let needle = self.db_history_query.get_untracked();
+        let needle = self.db.history_query.get_untracked();
         let entries = if needle.trim().is_empty() {
             e_db::history::recent(&path, &project, 200)
         } else {
             e_db::history::search(&path, &project, needle.trim(), 200)
         }
         .unwrap_or_default();
-        self.db_history.set(entries);
+        self.db.history.set(entries);
     }
 
     /// Open the session write-log (undo-log) panel.
     pub fn db_open_write_log(&self) {
-        self.db_write_log_open.set(true);
+        self.db.write_log_open.set(true);
     }
 
     /// Run a logged reverse statement to undo a change (gated like any run).
     pub fn db_undo_write(&self, reverse_sql: String) {
-        self.db_write_log_open.set(false);
+        self.db.write_log_open.set(false);
         self.run_console_sql(reverse_sql);
     }
 
     /// Load a history entry's SQL back into the console and close the panel.
     pub fn db_reopen_history(&self, sql: String) {
         self.set_console_sql(sql);
-        self.db_history_open.set(false);
+        self.db.history_open.set(false);
     }
 
     /// Clear all query history for the current project.
@@ -142,7 +142,7 @@ impl AppState {
             let project = self.root.get_untracked().to_string_lossy().into_owned();
             let _ = e_db::history::clear(&path, &project);
         }
-        self.db_history.set(Vec::new());
+        self.db.history.set(Vec::new());
     }
 
     /// Set the SQL console text, keeping the `db_query_text` signal and the
@@ -150,8 +150,8 @@ impl AppState {
     /// run-under-cursor, saved/history queries) go through here so the editor
     /// reflects the change; the editor's own edits mirror back the other way.
     pub fn set_console_sql(&self, sql: String) {
-        self.db_query_text.set(sql.clone());
-        if let Some(doc) = self.db_console_doc.get_untracked() {
+        self.db.query_text.set(sql.clone());
+        if let Some(doc) = self.db.console_doc.get_untracked() {
             if doc.text().to_string() != sql {
                 let len = doc.text().len();
                 doc.edit_single(Selection::region(0, len), &sql, EditType::InsertChars);
@@ -161,14 +161,15 @@ impl AppState {
 
     #[allow(dead_code)]
     pub fn db_delete_query(&self, name: String) {
-        self.db_queries.update(|q| q.retain(|x| x.name != name));
-        let _ = e_db::save_queries(&self.root.get_untracked(), &self.db_queries.get_untracked());
+        self.db.queries.update(|q| q.retain(|x| x.name != name));
+        let _ = e_db::save_queries(&self.root.get_untracked(), &self.db.queries.get_untracked());
     }
 
     fn db_persist(&self) {
         let root = self.root.get_untracked();
         let configs: Vec<e_db::DbConfig> = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().map(|e| e.config.clone()).collect());
         let _ = e_db::save_connections(&root, &configs);
     }
@@ -186,19 +187,20 @@ impl AppState {
     fn db_add_config(&self, cfg: e_db::DbConfig) {
         let key = cfg.key();
         if self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().any(|e| e.key() == key))
         {
             return;
         }
         let entry = DbEntry::new(self.cx, cfg);
-        self.db_conns.update(|c| c.push(entry.clone()));
+        self.db.conns.update(|c| c.push(entry.clone()));
         self.db_persist();
         self.db_connect(entry);
     }
 
     pub fn db_remove(&self, key: String) {
-        self.db_conns.update(|c| c.retain(|e| e.key() != key));
+        self.db.conns.update(|c| c.retain(|e| e.key() != key));
         self.db_persist();
     }
 
@@ -302,17 +304,18 @@ impl AppState {
         if entry.conn.get_untracked().is_none() {
             return;
         }
-        self.db_result_key.set(Some(entry.key()));
-        self.db_result_table.set(Some(table.clone()));
-        self.db_result_title
+        self.db.result_key.set(Some(entry.key()));
+        self.db.result_table.set(Some(table.clone()));
+        self.db
+            .result_title
             .set(format!("{} · {}", entry.config.display_name(), table));
-        self.db_subview.set("data".into());
-        self.db_sort.set(None);
-        self.db_filter.set(None);
-        self.db_page.set(0);
-        self.db_total_rows.set(None);
-        self.db_columns.set(Vec::new());
-        self.db_result_open.set(true);
+        self.db.subview.set("data".into());
+        self.db.sort.set(None);
+        self.db.filter.set(None);
+        self.db.page.set(0);
+        self.db.total_rows.set(None);
+        self.db.columns.set(Vec::new());
+        self.db.result_open.set(true);
         self.db_load_columns(entry.clone(), table.clone());
         self.db_reload_table();
     }
@@ -320,13 +323,14 @@ impl AppState {
     /// (Re)run the browse query for the current table, sort and page.
     pub fn db_reload_table(&self) {
         let (Some(key), Some(table)) = (
-            self.db_result_key.get_untracked(),
-            self.db_result_table.get_untracked(),
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
         ) else {
             return;
         };
         let Some(entry) = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
             return;
@@ -335,21 +339,21 @@ impl AppState {
             return;
         };
         let engine = entry.config.engine.clone();
-        let page = self.db_page.get_untracked();
-        let sort = self.db_sort.get_untracked();
-        let filter = self.db_filter.get_untracked();
+        let page = self.db.page.get_untracked();
+        let sort = self.db.sort.get_untracked();
+        let filter = self.db.filter.get_untracked();
         self.set_console_sql({
             let by = sort.as_ref().map(|(c, a)| (c.as_str(), *a));
             let f = filter.as_ref().map(|(c, v)| (c.as_str(), v.as_deref()));
             e_db::browse_sql(&engine, &table, f, by, DB_PAGE, page * DB_PAGE)
         });
-        self.db_result_loading.set(true);
-        self.db_result_error.set(None);
+        self.db.result_loading.set(true);
+        self.db.result_error.set(None);
         // Total row count (with the active filter) for pagination, loaded in
         // parallel with the page.
         let send_count = create_ext_action(self.cx, {
             let state = *self;
-            move |n: i64| state.db_total_rows.set(Some(n))
+            move |n: i64| state.db.total_rows.set(Some(n))
         });
         {
             let (conn, engine, table, filter) =
@@ -374,25 +378,26 @@ impl AppState {
     /// Jump to a specific 0-based page (clamped to the known range) and reload.
     pub fn db_goto_page(&self, page: usize) {
         let max_page = self
-            .db_total_rows
+            .db
+            .total_rows
             .get_untracked()
             .map(|n| ((n.max(1) as usize).div_ceil(DB_PAGE)).saturating_sub(1))
             .unwrap_or(page);
         let target = page.min(max_page);
-        if target == self.db_page.get_untracked() {
+        if target == self.db.page.get_untracked() {
             return;
         }
-        self.db_page.set(target);
+        self.db.page.set(target);
         self.db_reload_table();
     }
 
     /// Filter the current table to the value in the cell open in the edit
     /// overlay (WHERE col = value / IS NULL), then reload.
     pub fn db_filter_to_cell(&self) {
-        let Some((row, col, column)) = self.db_edit.get_untracked() else {
+        let Some((row, col, column)) = self.db.edit.get_untracked() else {
             return;
         };
-        let value = self.db_result.with_untracked(|r| {
+        let value = self.db.result.with_untracked(|r| {
             r.as_ref().and_then(|r| {
                 r.rows
                     .get(row)
@@ -401,25 +406,25 @@ impl AppState {
                     .flatten()
             })
         });
-        self.db_edit.set(None);
-        self.db_filter.set(Some((column, value)));
-        self.db_page.set(0);
+        self.db.edit.set(None);
+        self.db.filter.set(Some((column, value)));
+        self.db.page.set(0);
         self.db_reload_table();
     }
 
     /// Clear the active data-view filter and reload.
     pub fn db_clear_filter(&self) {
-        if self.db_filter.get_untracked().is_none() {
+        if self.db.filter.get_untracked().is_none() {
             return;
         }
-        self.db_filter.set(None);
-        self.db_page.set(0);
+        self.db.filter.set(None);
+        self.db.page.set(0);
         self.db_reload_table();
     }
 
     /// Open the "insert row" dialog, one field per column of the current table.
     pub fn db_begin_insert(&self) {
-        if self.db_result_table.get_untracked().is_none() {
+        if self.db.result_table.get_untracked().is_none() {
             return;
         }
         // Block on a read-only (production) connection up front.
@@ -432,7 +437,7 @@ impl AppState {
                 return;
             }
         }
-        let fields: Vec<InsertField> = self.db_columns.with_untracked(|cols| {
+        let fields: Vec<InsertField> = self.db.columns.with_untracked(|cols| {
             cols.iter()
                 .map(|c| InsertField {
                     name: c.name.clone(),
@@ -449,12 +454,12 @@ impl AppState {
             Self::notify("Insert: no column metadata — open a table first");
             return;
         }
-        self.db_insert_fields.set(fields);
-        self.db_insert_open.set(true);
+        self.db.insert_fields.set(fields);
+        self.db.insert_open.set(true);
     }
 
     pub fn db_cancel_insert(&self) {
-        self.db_insert_open.set(false);
+        self.db.insert_open.set(false);
     }
 
     /// Insert the row built in the dialog. Columns left blank (and not marked
@@ -465,10 +470,10 @@ impl AppState {
         };
         if entry.read_only.get_untracked() {
             Self::notify("Read-only: this connection is protected from writes.");
-            self.db_insert_open.set(false);
+            self.db.insert_open.set(false);
             return;
         }
-        let values: Vec<(String, Option<String>)> = self.db_insert_fields.with_untracked(|fs| {
+        let values: Vec<(String, Option<String>)> = self.db.insert_fields.with_untracked(|fs| {
             fs.iter()
                 .filter_map(|f| {
                     if f.is_null.get_untracked() {
@@ -491,13 +496,13 @@ impl AppState {
         let state = *self;
         let send = create_ext_action(self.cx, move |res: Result<u64, String>| match res {
             Ok(_) => {
-                state.db_insert_open.set(false);
+                state.db.insert_open.set(false);
                 Self::notify("Row inserted");
                 state.db_reload_table();
             }
             Err(e) => {
-                state.db_insert_open.set(false);
-                state.db_result_error.set(Some(e));
+                state.db.insert_open.set(false);
+                state.db.result_error.set(Some(e));
             }
         });
         std::thread::spawn(move || {
@@ -507,38 +512,39 @@ impl AppState {
 
     /// Toggle the sort on a column (asc → desc → off) and reload.
     pub fn db_sort_by(&self, col: String) {
-        let next = match self.db_sort.get_untracked() {
+        let next = match self.db.sort.get_untracked() {
             Some((c, true)) if c == col => Some((col, false)),
             Some((c, false)) if c == col => None,
             _ => Some((col, true)),
         };
-        self.db_sort.set(next);
-        self.db_page.set(0);
+        self.db.sort.set(next);
+        self.db.page.set(0);
         self.db_reload_table();
     }
 
     /// Move to the next/previous page when browsing a table.
     pub fn db_page_by(&self, delta: i64) {
-        let cur = self.db_page.get_untracked() as i64;
+        let cur = self.db.page.get_untracked() as i64;
         let next = (cur + delta).max(0) as usize;
-        if next == self.db_page.get_untracked() {
+        if next == self.db.page.get_untracked() {
             return;
         }
         // Don't page past the end (a short page means we're at the last one).
         if delta > 0 {
             let len = self
-                .db_result
+                .db
+                .result
                 .with_untracked(|r| r.as_ref().map(|r| r.rows.len()).unwrap_or(0));
             if len < DB_PAGE {
                 return;
             }
         }
-        self.db_page.set(next);
+        self.db.page.set(next);
         self.db_reload_table();
     }
 
     pub fn db_set_subview(&self, view: &str) {
-        self.db_subview.set(view.to_string());
+        self.db.subview.set(view.to_string());
     }
 
     fn db_load_columns(&self, entry: DbEntry, table: String) {
@@ -548,8 +554,8 @@ impl AppState {
         let send = create_ext_action(self.cx, {
             let state = *self;
             move |(cols, idx): (Vec<e_db::ColumnInfo>, Vec<e_db::IndexInfo>)| {
-                state.db_columns.set(cols);
-                state.db_indexes.set(idx);
+                state.db.columns.set(cols);
+                state.db.indexes.set(idx);
             }
         });
         std::thread::spawn(move || {
@@ -561,12 +567,12 @@ impl AppState {
 
     /// Test the current add-form connection without saving it.
     pub fn db_test_connection(&self) {
-        let cfg = self.db_form.get_untracked().to_config();
-        self.db_test_state.set("testing".into());
+        let cfg = self.db.form.get_untracked().to_config();
+        self.db.test_state.set("testing".into());
         let send = create_ext_action(self.cx, {
             let state = *self;
             move |res: Result<(), String>| {
-                state.db_test_state.set(match res {
+                state.db.test_state.set(match res {
                     Ok(()) => "ok".into(),
                     Err(e) => e,
                 });
@@ -580,7 +586,7 @@ impl AppState {
     /// Begin editing an existing connection (load it into the form).
     pub fn db_start_edit(&self, entry: DbEntry) {
         let c = &entry.config;
-        self.db_form.set(DbForm {
+        self.db.form.set(DbForm {
             id: c.id.clone(),
             secrets_in_keychain: c.secrets_in_keychain,
             engine: c.engine.clone(),
@@ -612,34 +618,35 @@ impl AppState {
             ssh_key_path: c.ssh_key_path.clone(),
             ssh_passphrase: c.ssh_passphrase.clone(),
         });
-        self.db_editing_key.set(Some(entry.key()));
-        self.db_test_state.set(String::new());
-        self.db_adding.set(true);
+        self.db.editing_key.set(Some(entry.key()));
+        self.db.test_state.set(String::new());
+        self.db.adding.set(true);
     }
 
     /// Save the add/edit form: either add a new connection or replace one.
     pub fn db_submit_form(&self) {
-        let cfg = self.db_form.get_untracked().to_config();
-        if let Some(old_key) = self.db_editing_key.get_untracked() {
-            self.db_conns.update(|c| c.retain(|e| e.key() != old_key));
-            self.db_editing_key.set(None);
+        let cfg = self.db.form.get_untracked().to_config();
+        if let Some(old_key) = self.db.editing_key.get_untracked() {
+            self.db.conns.update(|c| c.retain(|e| e.key() != old_key));
+            self.db.editing_key.set(None);
         }
-        self.db_form.set(DbForm::default());
-        self.db_adding.set(false);
-        self.db_test_state.set(String::new());
+        self.db.form.set(DbForm::default());
+        self.db.adding.set(false);
+        self.db.test_state.set(String::new());
         self.db_add_config(cfg);
     }
 
     /// Export the current result grid to a file in the given format.
     pub fn db_export(&self, fmt: crate::db_export::Format) {
-        let Some(result) = self.db_result.get_untracked() else {
+        let Some(result) = self.db.result.get_untracked() else {
             return;
         };
         if result.columns.is_empty() {
             return;
         }
         let table = self
-            .db_result_table
+            .db
+            .result_table
             .get_untracked()
             .unwrap_or_else(|| "results".into());
         let ext = fmt.extension();
@@ -728,13 +735,14 @@ impl AppState {
     /// (through Tinker). Local connections only (uses the app's configured DB).
     pub fn db_seed_table(&self, count: usize) {
         let (Some(key), Some(table)) = (
-            self.db_result_key.get_untracked(),
-            self.db_result_table.get_untracked(),
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
         ) else {
             return;
         };
         let local = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| {
                 c.iter()
                     .find(|e| e.key() == key)
@@ -762,7 +770,7 @@ impl AppState {
     /// Load the active database's foreign-key relationships and open the schema-
     /// relationships (ERD) panel (DB-207). Works for tables without models.
     pub fn db_show_erd(&self) {
-        let Some(entry) = self.db_conns.with_untracked(|cs| {
+        let Some(entry) = self.db.conns.with_untracked(|cs| {
             cs.iter()
                 .find(|e| e.conn.get_untracked().is_some())
                 .cloned()
@@ -773,8 +781,8 @@ impl AppState {
         let Some(conn) = entry.conn.get_untracked() else {
             return;
         };
-        self.db_erd_open.set(true);
-        let sig = self.db_erd;
+        self.db.erd_open.set(true);
+        let sig = self.db.erd;
         let send = create_ext_action(self.cx, move |fks: Vec<e_db::ForeignKey>| sig.set(fks));
         std::thread::spawn(move || {
             send(e_db::foreign_keys(&conn).unwrap_or_default());
@@ -784,11 +792,11 @@ impl AppState {
     /// Search every table's text columns for a value, showing one result tab per
     /// table that matches (DB-805). Cancellable via the run generation.
     pub fn db_search_all(&self) {
-        let needle = self.db_search_query.get_untracked().trim().to_string();
+        let needle = self.db.search_query.get_untracked().trim().to_string();
         if needle.is_empty() {
             return;
         }
-        let Some(entry) = self.db_conns.with_untracked(|cs| {
+        let Some(entry) = self.db.conns.with_untracked(|cs| {
             cs.iter()
                 .find(|e| e.conn.get_untracked().is_some())
                 .cloned()
@@ -801,18 +809,18 @@ impl AppState {
         };
         let engine = entry.config.engine.clone();
         let key = entry.key();
-        self.db_result_key.set(Some(key.clone()));
-        self.db_result_title.set(format!(
+        self.db.result_key.set(Some(key.clone()));
+        self.db.result_title.set(format!(
             "{} · search “{needle}”",
             entry.config.display_name()
         ));
-        self.db_result_loading.set(true);
-        self.db_result_open.set(true);
-        self.db_run_gen.update(|g| *g += 1);
-        let gen = self.db_run_gen.get_untracked();
+        self.db.result_loading.set(true);
+        self.db.result_open.set(true);
+        self.db.run_gen.update(|g| *g += 1);
+        let gen = self.db.run_gen.get_untracked();
         let state = *self;
         let send = create_ext_action(self.cx, move |hits: Vec<(String, e_db::QueryResult)>| {
-            if state.db_run_gen.get_untracked() != gen {
+            if state.db.run_gen.get_untracked() != gen {
                 return;
             }
             state.db_show_search_results(key.clone(), hits);
@@ -824,10 +832,10 @@ impl AppState {
 
     /// Show cross-table search hits as read-only result tabs (one per table).
     fn db_show_search_results(&self, key: String, hits: Vec<(String, e_db::QueryResult)>) {
-        self.db_result_loading.set(false);
+        self.db.result_loading.set(false);
         if hits.is_empty() {
-            self.db_result_tabs.set(Vec::new());
-            self.db_result.set(None);
+            self.db.result_tabs.set(Vec::new());
+            self.db.result.set(None);
             Self::notify("No matches in any table");
             return;
         }
@@ -841,16 +849,16 @@ impl AppState {
                 key: Some(key.clone()),
             })
             .collect();
-        self.db_result_table.set(None);
-        self.db_columns.set(Vec::new());
-        self.db_result_tabs.set(tabs);
+        self.db.result_table.set(None);
+        self.db.columns.set(Vec::new());
+        self.db.result_tabs.set(tabs);
         self.db_activate_tab(0);
     }
 
     /// Generate a Laravel migration scaffold for structure changes to the
     /// current table and open it, instead of running DDL directly (DB-803).
     pub fn db_new_migration_for_table(&self) {
-        let Some(table) = self.db_result_table.get_untracked() else {
+        let Some(table) = self.db.result_table.get_untracked() else {
             return;
         };
         if !crate::codegen::valid_table(&table) {
@@ -876,13 +884,14 @@ impl AppState {
     /// Copy the current table's CREATE DDL to the clipboard (DB-204).
     pub fn db_copy_ddl(&self) {
         let (Some(key), Some(table)) = (
-            self.db_result_key.get_untracked(),
-            self.db_result_table.get_untracked(),
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
         ) else {
             return;
         };
         let Some(entry) = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
             return;
@@ -908,14 +917,15 @@ impl AppState {
     /// transaction).
     pub fn db_import_csv(&self) {
         let (Some(key), Some(table)) = (
-            self.db_result_key.get_untracked(),
-            self.db_result_table.get_untracked(),
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
         ) else {
             Self::notify("Import: open a table first");
             return;
         };
         let Some(entry) = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
             return;
@@ -923,7 +933,8 @@ impl AppState {
         let engine = entry.config.engine.clone();
         let env = entry.config.environment();
         let columns: Vec<String> = self
-            .db_columns
+            .db
+            .columns
             .with_untracked(|cols| cols.iter().map(|c| c.name.clone()).collect());
         if columns.is_empty() {
             Self::notify("Import: table columns not loaded yet");
@@ -942,7 +953,7 @@ impl AppState {
             let rows = crate::db_import::parse_csv(&text);
             match crate::db_import::build_inserts(&engine, &table, &rows, &columns) {
                 Ok(stmts) => {
-                    state.db_confirm.set(Some(crate::state::DbConfirm {
+                    state.db.confirm.set(Some(crate::state::DbConfirm {
                         verb: "Import".into(),
                         statements: stmts.clone(),
                         env,
@@ -958,14 +969,15 @@ impl AppState {
 
     /// Copy the current result to the clipboard in the given format.
     pub fn db_copy_result(&self, fmt: crate::db_export::Format) {
-        let Some(result) = self.db_result.get_untracked() else {
+        let Some(result) = self.db.result.get_untracked() else {
             return;
         };
         if result.columns.is_empty() {
             return;
         }
         let table = self
-            .db_result_table
+            .db
+            .result_table
             .get_untracked()
             .unwrap_or_else(|| "results".into());
         let text = crate::db_export::format(&result, fmt, &table);
@@ -978,29 +990,31 @@ impl AppState {
         if entry.conn.get_untracked().is_none() {
             self.db_connect(entry.clone());
         }
-        self.db_result_key.set(Some(entry.key()));
-        self.db_result_title
+        self.db.result_key.set(Some(entry.key()));
+        self.db
+            .result_title
             .set(format!("{} · query", entry.config.display_name()));
-        self.db_result.set(None);
-        self.db_result_error.set(None);
-        if self.db_query_text.with_untracked(|q| q.trim().is_empty()) {
+        self.db.result.set(None);
+        self.db.result_error.set(None);
+        if self.db.query_text.with_untracked(|q| q.trim().is_empty()) {
             self.set_console_sql("SELECT 1".into());
         }
-        self.db_result_open.set(true);
+        self.db.result_open.set(true);
     }
 
     /// Run the SQL currently in the query editor against the bound connection.
     /// Run the whole console (all statements).
     pub fn db_run_query(&self) {
-        self.run_console_sql(self.db_query_text.get_untracked());
+        self.run_console_sql(self.db.query_text.get_untracked());
     }
 
     /// Run just the selected text, or — with no selection — the statement under
     /// the cursor. Falls back to the whole console if neither resolves.
     pub fn run_console_under_cursor(&self) {
-        let text = self.db_query_text.get_untracked();
+        let text = self.db.query_text.get_untracked();
         let sql = self
-            .db_console_editor
+            .db
+            .console_editor
             .get_untracked()
             .and_then(|editor| {
                 let cursor = editor.cursor.get_untracked();
@@ -1033,7 +1047,7 @@ impl AppState {
         // Prompt for named parameters if any are present.
         let params = e_db::find_params(&sql);
         if !params.is_empty() {
-            let last = self.db_param_last.get_untracked();
+            let last = self.db.param_last.get_untracked();
             let fields = params
                 .into_iter()
                 .map(|p| {
@@ -1041,12 +1055,14 @@ impl AppState {
                     (p, self.cx.create_rw_signal(init))
                 })
                 .collect();
-            self.db_params
+            self.db
+                .params
                 .set(Some(crate::state::DbParams { sql, fields }));
             return;
         }
-        let Some(entry) = self.db_result_key.get_untracked().and_then(|key| {
-            self.db_conns
+        let Some(entry) = self.db.result_key.get_untracked().and_then(|key| {
+            self.db
+                .conns
                 .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         }) else {
             return;
@@ -1067,7 +1083,7 @@ impl AppState {
         if flagged.is_empty() {
             self.execute_console_sql(sql);
         } else {
-            self.db_confirm.set(Some(crate::state::DbConfirm {
+            self.db.confirm.set(Some(crate::state::DbConfirm {
                 verb: "Run".into(),
                 statements: flagged,
                 env,
@@ -1080,37 +1096,37 @@ impl AppState {
 
     /// Fill parameters, remember them, and run the substituted SQL.
     pub fn db_params_run(&self) {
-        let Some(p) = self.db_params.get_untracked() else {
+        let Some(p) = self.db.params.get_untracked() else {
             return;
         };
         let mut values = std::collections::HashMap::new();
         for (name, sig) in &p.fields {
             values.insert(name.clone(), sig.get_untracked());
         }
-        self.db_param_last.update(|m| {
+        self.db.param_last.update(|m| {
             for (k, v) in &values {
                 m.insert(k.clone(), v.clone());
             }
         });
-        self.db_params.set(None);
+        self.db.params.set(None);
         let sql = e_db::substitute_params(&p.sql, &values);
         self.run_console_sql(sql);
     }
 
     pub fn db_params_cancel(&self) {
-        self.db_params.set(None);
+        self.db.params.set(None);
     }
 
     /// Confirm and run the pending action (console SQL or a submit transaction).
     pub fn db_confirm_run(&self) {
-        let Some(c) = self.db_confirm.get_untracked() else {
+        let Some(c) = self.db.confirm.get_untracked() else {
             return;
         };
         if c.needs_ack && !c.ack.get_untracked() {
             Self::notify("Tick the acknowledgement to proceed");
             return;
         }
-        self.db_confirm.set(None);
+        self.db.confirm.set(None);
         match c.run {
             crate::state::ConfirmRun::Console(sql) => self.execute_console_sql(sql),
             crate::state::ConfirmRun::Transaction(stmts) => self.execute_submit(stmts),
@@ -1119,24 +1135,25 @@ impl AppState {
 
     /// Dismiss the confirmation dialog without running.
     pub fn db_confirm_cancel(&self) {
-        self.db_confirm.set(None);
+        self.db.confirm.set(None);
     }
 
     /// Run `sql` (which may contain multiple statements) against the active
     /// connection, one result tab per statement. Assumes confirmation (if any)
     /// has already been given.
     fn execute_console_sql(&self, sql: String) {
-        let Some(key) = self.db_result_key.get_untracked() else {
+        let Some(key) = self.db.result_key.get_untracked() else {
             return;
         };
         let Some(entry) = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
             return;
         };
         let Some(conn) = entry.conn.get_untracked() else {
-            self.db_result_error.set(Some("Not connected".into()));
+            self.db.result_error.set(Some("Not connected".into()));
             return;
         };
         // Split into individual statements so each gets its own result tab.
@@ -1144,12 +1161,12 @@ impl AppState {
         if statements.is_empty() {
             return;
         }
-        self.db_result_loading.set(true);
-        self.db_result_error.set(None);
+        self.db.result_loading.set(true);
+        self.db.result_error.set(None);
         // Bump the run generation so any prior in-flight query (or a cancel) is
         // ignored when it returns.
-        self.db_run_gen.update(|g| *g += 1);
-        let gen = self.db_run_gen.get_untracked();
+        self.db.run_gen.update(|g| *g += 1);
+        let gen = self.db.run_gen.get_untracked();
         // Metadata for the query-history log (written off the UI thread).
         let project = self.root.get_untracked().to_string_lossy().into_owned();
         let conn_label = entry.config.display_name();
@@ -1159,7 +1176,7 @@ impl AppState {
             let state = *self;
             move |results: Vec<Result<e_db::QueryResult, String>>| {
                 // Discard if cancelled or superseded by a newer run.
-                if state.db_run_gen.get_untracked() != gen {
+                if state.db.run_gen.get_untracked() != gen {
                     return;
                 }
                 state.db_build_console_tabs(key.clone(), results);
@@ -1201,9 +1218,10 @@ impl AppState {
     /// Build console result tabs from a multi-statement run: keep pinned tabs,
     /// replace unpinned ones with the new results, and activate the first new tab.
     fn db_build_console_tabs(&self, key: String, results: Vec<Result<e_db::QueryResult, String>>) {
-        self.db_result_loading.set(false);
+        self.db.result_loading.set(false);
         let mut tabs: Vec<crate::state::ResultTab> = self
-            .db_result_tabs
+            .db
+            .result_tabs
             .get_untracked()
             .into_iter()
             .filter(|t| t.pinned)
@@ -1222,10 +1240,10 @@ impl AppState {
                 key: Some(key.clone()),
             });
         }
-        self.db_result_tabs.set(tabs);
+        self.db.result_tabs.set(tabs);
         // Console results aren't tied to a table, so they're read-only.
-        self.db_result_table.set(None);
-        self.db_columns.set(Vec::new());
+        self.db.result_table.set(None);
+        self.db.columns.set(Vec::new());
         self.db_activate_tab(first_new);
     }
 
@@ -1233,27 +1251,27 @@ impl AppState {
     /// when it eventually returns. (The query itself runs to completion in the
     /// background — server-side KILL is a future refinement.)
     pub fn db_cancel_query(&self) {
-        self.db_run_gen.update(|g| *g += 1);
-        self.db_result_loading.set(false);
+        self.db.run_gen.update(|g| *g += 1);
+        self.db.result_loading.set(false);
         Self::notify("Query cancelled");
     }
 
     /// Show the result stored in tab `i` in the grid.
     pub fn db_activate_tab(&self, i: usize) {
-        let tabs = self.db_result_tabs.get_untracked();
+        let tabs = self.db.result_tabs.get_untracked();
         let Some(tab) = tabs.get(i) else {
             return;
         };
-        self.db_active_tab.set(i);
-        self.db_result_key.set(tab.key.clone());
-        self.db_result.set(tab.result.clone());
-        self.db_result_error.set(tab.error.clone());
-        self.db_selected_cell.set(None);
+        self.db.active_tab.set(i);
+        self.db.result_key.set(tab.key.clone());
+        self.db.result.set(tab.result.clone());
+        self.db.result_error.set(tab.error.clone());
+        self.db.selected_cell.set(None);
     }
 
     /// Toggle whether tab `i` is pinned (survives the next run).
     pub fn db_toggle_pin(&self, i: usize) {
-        self.db_result_tabs.update(|tabs| {
+        self.db.result_tabs.update(|tabs| {
             if let Some(t) = tabs.get_mut(i) {
                 t.pinned = !t.pinned;
             }
@@ -1262,18 +1280,18 @@ impl AppState {
 
     /// Close result tab `i`.
     pub fn db_close_tab(&self, i: usize) {
-        self.db_result_tabs.update(|tabs| {
+        self.db.result_tabs.update(|tabs| {
             if i < tabs.len() {
                 tabs.remove(i);
             }
         });
-        let len = self.db_result_tabs.with_untracked(|t| t.len());
+        let len = self.db.result_tabs.with_untracked(|t| t.len());
         if len == 0 {
-            self.db_result.set(None);
-            self.db_result_error.set(None);
-            self.db_active_tab.set(0);
+            self.db.result.set(None);
+            self.db.result_error.set(None);
+            self.db.active_tab.set(0);
         } else {
-            let active = self.db_active_tab.get_untracked().min(len - 1);
+            let active = self.db.active_tab.get_untracked().min(len - 1);
             self.db_activate_tab(active);
         }
     }
@@ -1302,7 +1320,7 @@ impl AppState {
         if sql.is_empty() {
             return None;
         }
-        let Some(entry) = self.db_conns.with_untracked(|cs| {
+        let Some(entry) = self.db.conns.with_untracked(|cs| {
             cs.iter()
                 .find(|e| e.conn.get_untracked().is_some())
                 .cloned()
@@ -1317,15 +1335,15 @@ impl AppState {
         let Some((entry, sql)) = self.sql_and_conn_under_cursor() else {
             return;
         };
-        self.db_result_key.set(Some(entry.key()));
-        self.db_result_title.set(format!(
+        self.db.result_key.set(Some(entry.key()));
+        self.db.result_title.set(format!(
             "{} · query under cursor",
             entry.config.display_name()
         ));
         self.set_console_sql(sql);
-        self.db_result.set(None);
-        self.db_result_error.set(None);
-        self.db_result_open.set(true);
+        self.db.result.set(None);
+        self.db.result_error.set(None);
+        self.db.result_open.set(true);
         self.db_run_query();
     }
 
@@ -1346,14 +1364,15 @@ impl AppState {
             return;
         };
         let engine = entry.config.engine.clone();
-        self.db_result_key.set(Some(entry.key()));
-        self.db_result_title
+        self.db.result_key.set(Some(entry.key()));
+        self.db
+            .result_title
             .set(format!("{} · EXPLAIN", entry.config.display_name()));
-        self.db_result.set(None);
-        self.db_result_error.set(None);
-        self.db_result_loading.set(true);
-        self.db_open.set(true);
-        self.db_result_open.set(true);
+        self.db.result.set(None);
+        self.db.result_error.set(None);
+        self.db.result_loading.set(true);
+        self.db.open.set(true);
+        self.db.result_open.set(true);
         let state = *self;
         let send = create_ext_action(self.cx, move |res: Result<e_db::QueryResult, String>| {
             let issues = match &res {
@@ -1362,7 +1381,7 @@ impl AppState {
             };
             state.db_apply_result(res);
             // Show the findings as a persistent banner (db_apply_result cleared it).
-            state.db_explain_issues.set(issues);
+            state.db.explain_issues.set(issues);
         });
         std::thread::spawn(move || send(e_db::explain(&conn, &sql)));
     }
@@ -1370,7 +1389,7 @@ impl AppState {
     /// EXPLAIN a query observed in the runtime panel: pick the first connected
     /// database and show its plan in the DB panel (DB-604).
     pub fn db_explain_from_runtime(&self, sql: String) {
-        let entry = self.db_conns.with_untracked(|cs| {
+        let entry = self.db.conns.with_untracked(|cs| {
             cs.iter()
                 .find(|e| e.conn.get_untracked().is_some())
                 .cloned()
@@ -1415,38 +1434,38 @@ impl AppState {
     }
 
     fn db_apply_result(&self, res: Result<e_db::QueryResult, String>) {
-        self.db_result_loading.set(false);
-        self.db_selected_cell.set(None);
+        self.db.result_loading.set(false);
+        self.db.selected_cell.set(None);
         // Browsing a table is a single result; drop any console result tabs.
-        self.db_result_tabs.set(Vec::new());
-        self.db_explain_issues.set(Vec::new());
+        self.db.result_tabs.set(Vec::new());
+        self.db.explain_issues.set(Vec::new());
         // Pending edits are keyed by row/col of the *current* result, which just
         // changed — clear them so we never write against stale indices.
-        self.db_pending_edits.update(|m| m.clear());
-        self.db_pending_deletes.update(|m| m.clear());
+        self.db.pending_edits.update(|m| m.clear());
+        self.db.pending_deletes.update(|m| m.clear());
         match res {
             Ok(r) => {
-                self.db_result_error.set(None);
-                self.db_result.set(Some(r));
+                self.db.result_error.set(None);
+                self.db.result.set(Some(r));
             }
             Err(e) => {
-                self.db_result.set(None);
-                self.db_result_error.set(Some(e));
+                self.db.result.set(None);
+                self.db.result_error.set(Some(e));
             }
         }
     }
 
     pub fn close_db_result(&self) {
-        self.db_result_open.set(false);
-        self.db_edit.set(None);
+        self.db.result_open.set(false);
+        self.db.edit.set(None);
     }
 
     /// The user approved an agent-proposed query: run it and reply.
     pub fn db_consent_allow(&self) {
-        let Some(c) = self.db_consent.get_untracked() else {
+        let Some(c) = self.db.consent.get_untracked() else {
             return;
         };
-        self.db_consent.set(None);
+        self.db.consent.set(None);
         std::thread::spawn(move || {
             let resp = match e_db::query(&c.conn, &c.sql, e_db::MAX_ROWS) {
                 Ok(r) => serde_json::json!({
@@ -1465,8 +1484,8 @@ impl AppState {
 
     /// The user rejected an agent-proposed query.
     pub fn db_consent_deny(&self) {
-        if let Some(c) = self.db_consent.get_untracked() {
-            self.db_consent.set(None);
+        if let Some(c) = self.db.consent.get_untracked() {
+            self.db.consent.set(None);
             let _ = c
                 .reply
                 .send(serde_json::json!({"ok": false, "error": "denied by user"}));
@@ -1476,10 +1495,11 @@ impl AppState {
     /// Whether the current results grid supports inline editing (a browsed table
     /// in data view, with a known primary key).
     pub fn db_editable(&self) -> bool {
-        self.db_result_table.get_untracked().is_some()
-            && self.db_subview.get_untracked() == "data"
+        self.db.result_table.get_untracked().is_some()
+            && self.db.subview.get_untracked() == "data"
             && self
-                .db_columns
+                .db
+                .columns
                 .with_untracked(|c| c.iter().any(|c| c.key == "PRI"))
     }
 
@@ -1488,20 +1508,20 @@ impl AppState {
         if !self.db_editable() {
             return;
         }
-        let Some(result) = self.db_result.get_untracked() else {
+        let Some(result) = self.db.result.get_untracked() else {
             return;
         };
         let Some(cell) = result.rows.get(row).and_then(|r| r.get(col)) else {
             return;
         };
         let column = result.columns.get(col).cloned().unwrap_or_default();
-        self.db_edit_null.set(cell.is_none());
-        self.db_edit_value.set(cell.clone().unwrap_or_default());
-        self.db_edit.set(Some((row, col, column)));
+        self.db.edit_null.set(cell.is_none());
+        self.db.edit_value.set(cell.clone().unwrap_or_default());
+        self.db.edit.set(Some((row, col, column)));
     }
 
     pub fn db_cancel_edit(&self) {
-        self.db_edit.set(None);
+        self.db.edit.set(None);
     }
 
     /// Toggle write protection for a connection (production defaults to on).
@@ -1517,17 +1537,18 @@ impl AppState {
 
     /// Write the edited cell back to the database.
     pub fn db_commit_edit(&self) {
-        let Some((row, col, column)) = self.db_edit.get_untracked() else {
+        let Some((row, col, column)) = self.db.edit.get_untracked() else {
             return;
         };
         let (Some(key), Some(table)) = (
-            self.db_result_key.get_untracked(),
-            self.db_result_table.get_untracked(),
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
         ) else {
             return;
         };
         let Some(entry) = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
             return;
@@ -1541,21 +1562,21 @@ impl AppState {
                 "Read-only: this connection is protected from writes (looks like production). \
                  Toggle read-only off in the Database panel to edit.",
             );
-            self.db_edit.set(None);
+            self.db.edit.set(None);
             return;
         }
-        let Some(result) = self.db_result.get_untracked() else {
+        let Some(result) = self.db.result.get_untracked() else {
             return;
         };
         let _ = table;
         // Primary key of this row (from its current values).
         let Some(pk) = self.db_row_pk_full(row, &result) else {
             Self::notify("Edit: table has no primary key — cannot edit safely");
-            self.db_edit.set(None);
+            self.db.edit.set(None);
             return;
         };
-        let is_null = self.db_edit_null.get_untracked();
-        let value = self.db_edit_value.get_untracked();
+        let is_null = self.db.edit_null.get_untracked();
+        let value = self.db.edit_value.get_untracked();
         let new = if is_null { None } else { Some(value.clone()) };
         let old = result
             .rows
@@ -1566,14 +1587,14 @@ impl AppState {
 
         // Stage the edit (transactional): reflect it in the grid and record it as
         // pending; the write happens on Submit.
-        self.db_result.update(|r| {
+        self.db.result.update(|r| {
             if let Some(r) = r {
                 if let Some(cell) = r.rows.get_mut(row).and_then(|row| row.get_mut(col)) {
                     *cell = new.clone();
                 }
             }
         });
-        self.db_pending_edits.update(|m| {
+        self.db.pending_edits.update(|m| {
             m.insert(
                 (row, col),
                 crate::state::PendingEdit {
@@ -1584,7 +1605,7 @@ impl AppState {
                 },
             );
         });
-        self.db_edit.set(None);
+        self.db.edit.set(None);
     }
 
     /// Primary-key `(name, value)` pairs for `row`, using the result's columns.
@@ -1593,7 +1614,7 @@ impl AppState {
         row: usize,
         result: &e_db::QueryResult,
     ) -> Option<Vec<(String, Option<String>)>> {
-        let pk_names: Vec<String> = self.db_columns.with_untracked(|cols| {
+        let pk_names: Vec<String> = self.db.columns.with_untracked(|cols| {
             cols.iter()
                 .filter(|c| c.key == "PRI")
                 .map(|c| c.name.clone())
@@ -1615,13 +1636,14 @@ impl AppState {
     /// read-only guard. Shared by row delete / FK-hop.
     fn db_edit_target(&self) -> Option<(DbEntry, Arc<e_db::Conn>, String, String)> {
         let (Some(key), Some(table)) = (
-            self.db_result_key.get_untracked(),
-            self.db_result_table.get_untracked(),
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
         ) else {
             return None;
         };
         let entry = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())?;
         let conn = entry.conn.get_untracked()?;
         let engine = entry.config.engine.clone();
@@ -1630,10 +1652,10 @@ impl AppState {
 
     /// Primary-key `(name, value)` pairs for `row` in the current result grid.
     fn db_row_pk(&self, row: usize) -> Vec<(String, Option<String>)> {
-        let Some(result) = self.db_result.get_untracked() else {
+        let Some(result) = self.db.result.get_untracked() else {
             return Vec::new();
         };
-        let pk_names: Vec<String> = self.db_columns.with_untracked(|cols| {
+        let pk_names: Vec<String> = self.db.columns.with_untracked(|cols| {
             cols.iter()
                 .filter(|c| c.key == "PRI")
                 .map(|c| c.name.clone())
@@ -1650,7 +1672,7 @@ impl AppState {
 
     /// Delete the row currently open in the edit overlay.
     pub fn db_delete_row(&self) {
-        let Some((row, _, _)) = self.db_edit.get_untracked() else {
+        let Some((row, _, _)) = self.db.edit.get_untracked() else {
             return;
         };
         let Some((entry, ..)) = self.db_edit_target() else {
@@ -1661,7 +1683,7 @@ impl AppState {
                 "Read-only: this connection is protected from writes (looks like production). \
                  Toggle read-only off in the Database panel to delete.",
             );
-            self.db_edit.set(None);
+            self.db.edit.set(None);
             return;
         }
         let pk = self.db_row_pk(row);
@@ -1671,18 +1693,18 @@ impl AppState {
         }
         // Stage the deletion (transactional): mark the row pending; the DELETE
         // runs on Submit. Toggling again un-marks it.
-        self.db_pending_deletes.update(|m| {
+        self.db.pending_deletes.update(|m| {
             if m.remove(&row).is_none() {
                 m.insert(row, pk);
             }
         });
-        self.db_edit.set(None);
+        self.db.edit.set(None);
     }
 
     /// Discard all staged changes and reload the table from the database.
     pub fn db_revert_changes(&self) {
-        self.db_pending_edits.update(|m| m.clear());
-        self.db_pending_deletes.update(|m| m.clear());
+        self.db.pending_edits.update(|m| m.clear());
+        self.db.pending_deletes.update(|m| m.clear());
         self.db_reload_table();
     }
 
@@ -1690,13 +1712,14 @@ impl AppState {
     /// transaction. Builds UPDATE/DELETE statements from the pending sets.
     pub fn db_submit_changes(&self) {
         let (Some(key), Some(table)) = (
-            self.db_result_key.get_untracked(),
-            self.db_result_table.get_untracked(),
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
         ) else {
             return;
         };
         let Some(entry) = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
             return;
@@ -1704,7 +1727,7 @@ impl AppState {
         let engine = entry.config.engine.clone();
         let mut stmts: Vec<String> = Vec::new();
         let mut log: Vec<crate::state::WriteLogEntry> = Vec::new();
-        self.db_pending_edits.with_untracked(|edits| {
+        self.db.pending_edits.with_untracked(|edits| {
             for e in edits.values() {
                 let fwd = e_db::update_sql(&engine, &table, &e.column, e.new.as_deref(), &e.pk);
                 // Reverse: set the column back to its old value.
@@ -1716,7 +1739,7 @@ impl AppState {
                 });
             }
         });
-        self.db_pending_deletes.with_untracked(|dels| {
+        self.db.pending_deletes.with_untracked(|dels| {
             for pk in dels.values() {
                 let fwd = e_db::delete_sql(&engine, &table, pk);
                 stmts.push(fwd.clone());
@@ -1730,9 +1753,9 @@ impl AppState {
         if stmts.is_empty() {
             return;
         }
-        self.db_pending_log.set(log);
+        self.db.pending_log.set(log);
         let env = entry.config.environment();
-        self.db_confirm.set(Some(crate::state::DbConfirm {
+        self.db.confirm.set(Some(crate::state::DbConfirm {
             verb: "Submit".into(),
             statements: stmts.clone(),
             env,
@@ -1744,11 +1767,12 @@ impl AppState {
 
     /// Run the staged statements as one transaction, then refresh.
     fn execute_submit(&self, stmts: Vec<String>) {
-        let Some(key) = self.db_result_key.get_untracked() else {
+        let Some(key) = self.db.result_key.get_untracked() else {
             return;
         };
         let Some(entry) = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
             return;
@@ -1756,22 +1780,22 @@ impl AppState {
         let Some(conn) = entry.conn.get_untracked() else {
             return;
         };
-        self.db_result_loading.set(true);
+        self.db.result_loading.set(true);
         let state = *self;
         let send = create_ext_action(self.cx, move |res: Result<u64, String>| {
-            state.db_result_loading.set(false);
+            state.db.result_loading.set(false);
             match res {
                 Ok(n) => {
-                    state.db_pending_edits.update(|m| m.clear());
-                    state.db_pending_deletes.update(|m| m.clear());
+                    state.db.pending_edits.update(|m| m.clear());
+                    state.db.pending_deletes.update(|m| m.clear());
                     // Record the executed writes in the session undo-log.
-                    let entries = state.db_pending_log.get_untracked();
-                    state.db_write_log.update(|log| log.extend(entries));
-                    state.db_pending_log.set(Vec::new());
+                    let entries = state.db.pending_log.get_untracked();
+                    state.db.write_log.update(|log| log.extend(entries));
+                    state.db.pending_log.set(Vec::new());
                     Self::notify(&format!("Submitted — {n} row(s) affected"));
                     state.db_reload_table();
                 }
-                Err(e) => state.db_result_error.set(Some(e)),
+                Err(e) => state.db.result_error.set(Some(e)),
             }
         });
         std::thread::spawn(move || {
@@ -1783,17 +1807,18 @@ impl AppState {
     /// Uses the current table's primary key value; opens the first referencing
     /// table filtered to it.
     pub fn db_show_related(&self) {
-        let Some((row, _, _)) = self.db_edit.get_untracked() else {
+        let Some((row, _, _)) = self.db.edit.get_untracked() else {
             return;
         };
         let (Some(key), Some(table)) = (
-            self.db_result_key.get_untracked(),
-            self.db_result_table.get_untracked(),
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
         ) else {
             return;
         };
         let Some(entry) = self
-            .db_conns
+            .db
+            .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
             return;
@@ -1801,7 +1826,7 @@ impl AppState {
         let Some(conn) = entry.conn.get_untracked() else {
             return;
         };
-        let Some(result) = self.db_result.get_untracked() else {
+        let Some(result) = self.db.result.get_untracked() else {
             return;
         };
         let Some(pk) = self.db_row_pk_full(row, &result) else {
@@ -1818,16 +1843,16 @@ impl AppState {
                 Self::notify("No tables reference this row");
                 return;
             };
-            state.db_edit.set(None);
-            state.db_result_key.set(Some(key.clone()));
-            state.db_result_table.set(Some(child_table.clone()));
-            state.db_result_title.set(format!("{disp} · {child_table}"));
-            state.db_subview.set("data".into());
-            state.db_sort.set(None);
-            state.db_filter.set(Some((child_col, Some(pk_val.clone()))));
-            state.db_page.set(0);
-            state.db_total_rows.set(None);
-            state.db_columns.set(Vec::new());
+            state.db.edit.set(None);
+            state.db.result_key.set(Some(key.clone()));
+            state.db.result_table.set(Some(child_table.clone()));
+            state.db.result_title.set(format!("{disp} · {child_table}"));
+            state.db.subview.set("data".into());
+            state.db.sort.set(None);
+            state.db.filter.set(Some((child_col, Some(pk_val.clone()))));
+            state.db.page.set(0);
+            state.db.total_rows.set(None);
+            state.db.columns.set(Vec::new());
             state.db_load_columns(entry.clone(), child_table);
             state.db_reload_table();
             if refs.len() > 1 {
@@ -1845,13 +1870,13 @@ impl AppState {
     /// Hop to the foreign-key target of the column open in the edit overlay,
     /// filtered to the current cell's value.
     pub fn db_hop_fk(&self) {
-        let Some((row, col, column)) = self.db_edit.get_untracked() else {
+        let Some((row, col, column)) = self.db.edit.get_untracked() else {
             return;
         };
         let Some((entry, conn, table, engine)) = self.db_edit_target() else {
             return;
         };
-        let value = self.db_result.with_untracked(|r| {
+        let value = self.db.result.with_untracked(|r| {
             r.as_ref().and_then(|r| {
                 r.rows
                     .get(row)
@@ -1870,15 +1895,15 @@ impl AppState {
             move |out: Option<(String, Result<e_db::QueryResult, String>)>| match out {
                 None => Self::notify("No foreign key on this column"),
                 Some((ref_table, res)) => {
-                    state.db_edit.set(None);
-                    state.db_result_key.set(Some(key.clone()));
-                    state.db_result_table.set(Some(ref_table.clone()));
-                    state.db_result_title.set(format!("{disp} · {ref_table}"));
-                    state.db_subview.set("data".into());
-                    state.db_sort.set(None);
-                    state.db_filter.set(None);
-                    state.db_page.set(0);
-                    state.db_columns.set(Vec::new());
+                    state.db.edit.set(None);
+                    state.db.result_key.set(Some(key.clone()));
+                    state.db.result_table.set(Some(ref_table.clone()));
+                    state.db.result_title.set(format!("{disp} · {ref_table}"));
+                    state.db.subview.set("data".into());
+                    state.db.sort.set(None);
+                    state.db.filter.set(None);
+                    state.db.page.set(0);
+                    state.db.columns.set(Vec::new());
                     state.db_load_columns(entry.clone(), ref_table);
                     state.db_apply_result(res);
                 }

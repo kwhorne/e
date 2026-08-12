@@ -28,12 +28,12 @@ use crate::theme;
 
 /// Build the syntax-highlighted SQL console editor for the database panel.
 pub fn sql_console(state: AppState) -> impl IntoView {
-    let initial = state.db_query_text.get_untracked();
+    let initial = state.db.query_text.get_untracked();
 
     // Dedicated SQL document (a real TextDocument, so the builder's `.update()`
     // and `.pre_command()` hooks attach correctly).
     let doc = Rc::new(TextDocument::new(state.cx, initial.clone()));
-    state.db_console_doc.set(Some(doc.clone()));
+    state.db.console_doc.set(Some(doc.clone()));
 
     // Highlights recomputed on every edit; SyntaxStyling reads them per line.
     let highlights: Highlights = Rc::new(RefCell::new(e_core::syntax::highlight_lines(
@@ -104,7 +104,7 @@ pub fn sql_console(state: AppState) -> impl IntoView {
         let text = doc_for_update.text().to_string();
         *hl.borrow_mut() = e_core::syntax::highlight_lines(Language::Sql, &text);
         doc_for_update.cache_rev().update(|r| *r += 1);
-        state.db_query_text.set(text);
+        state.db.query_text.set(text);
     })
     .pre_command(move |pre| {
         let comp = state.completion;
@@ -140,6 +140,6 @@ pub fn sql_console(state: AppState) -> impl IntoView {
     });
 
     // Store the editor handle + track its window origin (for popup placement).
-    state.db_console_editor.set(Some(te.editor().clone()));
-    te.on_move(move |p| state.db_console_win.set(p))
+    state.db.console_editor.set(Some(te.editor().clone()));
+    te.on_move(move |p| state.db.console_win.set(p))
 }

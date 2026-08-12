@@ -245,10 +245,10 @@ fn app_view() -> impl IntoView {
     // Bridge the native agent's event stream into the chat state. The wake
     // channel only notifies; we drain the whole shared queue on each wake so no
     // streaming delta is ever coalesced away.
-    if let Some(wake_rx) = state.agent_wake_rx.try_update(|opt| opt.take()).flatten() {
+    if let Some(wake_rx) = state.agent.wake_rx.try_update(|opt| opt.take()).flatten() {
         let notif = create_signal_from_channel(wake_rx);
-        let queue = state.agent_events.get_untracked();
-        let chat = state.agent_chat;
+        let queue = state.agent.events.get_untracked();
+        let chat = state.agent.chat;
         create_effect(move |_| {
             if notif.get().is_none() {
                 return;
@@ -443,12 +443,12 @@ fn app_view() -> impl IntoView {
     let database = crate::db_view::database_panel(state)
         .style(move |s| {
             let s = s
-                .width(state.db_width.get())
+                .width(state.db.width.get())
                 .height_full()
                 .border_left(1.0)
                 .border_right(1.0)
                 .border_color(theme::border());
-            if state.db_open.get() {
+            if state.db.open.get() {
                 s
             } else {
                 s.hide()
@@ -494,8 +494,8 @@ fn app_view() -> impl IntoView {
         resize_handle(
             state,
             agent_handle_side,
-            state.agent_width,
-            state.agent_open,
+            state.agent.width,
+            state.agent.open,
             300.0,
             900.0,
         )
@@ -505,8 +505,8 @@ fn app_view() -> impl IntoView {
         resize_handle(
             state,
             db_handle_side,
-            state.db_width,
-            state.db_open,
+            state.db.width,
+            state.db.open,
             220.0,
             800.0,
         )

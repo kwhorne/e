@@ -26,7 +26,7 @@ fn code_block(text: String, color: Color, bg: Color) -> impl IntoView {
 
 /// The hunk-by-hunk review overlay for an agent-proposed edit.
 pub fn agent_edit_review(state: AppState) -> impl IntoView {
-    let title = label(move || match state.agent_edit.get() {
+    let title = label(move || match state.agent.edit.get() {
         Some(e) => {
             let n = e
                 .segs
@@ -52,7 +52,7 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
 
     let hunks = dyn_stack(
         move || -> Vec<(usize, String, String, RwSignal<bool>)> {
-            match state.agent_edit.get() {
+            match state.agent.edit.get() {
                 Some(e) => e
                     .segs
                     .iter()
@@ -161,7 +161,7 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.agent_edit.get().is_some() {
+        if state.agent.edit.get().is_some() {
             s
         } else {
             s.hide()
@@ -207,7 +207,7 @@ pub fn agent_log_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.agent_log_open.set(false));
+        .on_click_stop(move |_| state.agent.log_open.set(false));
     let header = stack((title, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -221,7 +221,8 @@ pub fn agent_log_panel(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state
-                .agent_log
+                .agent
+                .log
                 .get()
                 .into_iter()
                 .rev()
@@ -256,7 +257,7 @@ pub fn agent_log_panel(state: AppState) -> impl IntoView {
 
     let empty_hint = label(|| "No agent activity yet.".to_string()).style(move |s| {
         let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
-        if state.agent_log.with(|l| l.is_empty()) {
+        if state.agent.log.with(|l| l.is_empty()) {
             s
         } else {
             s.hide()
@@ -286,7 +287,7 @@ pub fn agent_log_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.agent_log_open.get() {
+        if state.agent.log_open.get() {
             s
         } else {
             s.hide()

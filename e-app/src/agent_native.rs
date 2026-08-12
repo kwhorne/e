@@ -27,7 +27,7 @@ use crate::theme;
 /// Total characters currently in the transcript — used to drive auto-scroll so
 /// the view follows streaming text (not just newly-added items).
 fn transcript_size(state: AppState) -> usize {
-    state.agent_chat.with(|c| {
+    state.agent.chat.with(|c| {
         c.items
             .iter()
             .map(|it| match it {
@@ -45,7 +45,7 @@ fn transcript_size(state: AppState) -> usize {
 
 /// A reactive getter for the text of item `i`, given its variant is stable.
 fn item_text(state: AppState, i: usize) -> String {
-    state.agent_chat.with(|c| match c.items.get(i) {
+    state.agent.chat.with(|c| match c.items.get(i) {
         Some(ChatItem::User { text })
         | Some(ChatItem::Assistant { text, .. })
         | Some(ChatItem::Reasoning { text, .. })
@@ -55,7 +55,7 @@ fn item_text(state: AppState, i: usize) -> String {
 }
 
 fn is_streaming(state: AppState, i: usize) -> bool {
-    state.agent_chat.with(|c| {
+    state.agent.chat.with(|c| {
         matches!(
             c.items.get(i),
             Some(ChatItem::Assistant {
@@ -73,7 +73,7 @@ fn is_streaming(state: AppState, i: usize) -> bool {
 /// (the reducer only appends items or mutates their fields), so we pick the
 /// layout once and read the mutable text/status reactively.
 fn render_item(state: AppState, i: usize) -> impl IntoView {
-    let variant = state.agent_chat.with_untracked(|c| c.items.get(i).cloned());
+    let variant = state.agent.chat.with_untracked(|c| c.items.get(i).cloned());
 
     match variant {
         Some(ChatItem::User { .. }) => label(move || item_text(state, i))
@@ -184,7 +184,7 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
 /// and a dimmed monospace preview of the result.
 fn tool_card(state: AppState, i: usize) -> impl IntoView {
     let header = label(move || {
-        state.agent_chat.with(|c| match c.items.get(i) {
+        state.agent.chat.with(|c| match c.items.get(i) {
             Some(ChatItem::Tool(tc)) => {
                 let glyph = match tc.status {
                     ToolStatus::Running => "\u{25cf}", // ●
@@ -201,7 +201,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
         })
     })
     .style(move |s| {
-        let color = state.agent_chat.with(|c| match c.items.get(i) {
+        let color = state.agent.chat.with(|c| match c.items.get(i) {
             Some(ChatItem::Tool(tc)) => match tc.status {
                 ToolStatus::Running => theme::accent(),
                 ToolStatus::Done => theme::fg_dim(),
@@ -215,7 +215,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
     });
 
     let result = label(move || {
-        state.agent_chat.with(|c| match c.items.get(i) {
+        state.agent.chat.with(|c| match c.items.get(i) {
             Some(ChatItem::Tool(tc)) => {
                 let r = tc.result.clone().unwrap_or_default();
                 // Show only the first few lines to keep cards compact.
@@ -251,7 +251,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
 /// The scrollable transcript.
 fn transcript(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
-        move || 0..state.agent_chat.with(|c| c.items.len()),
+        move || 0..state.agent.chat.with(|c| c.items.len()),
         |i| *i,
         move |i| render_item(state, i),
     )
@@ -284,7 +284,7 @@ fn composer(state: AppState) -> impl IntoView {
     // all mutation is deferred out of the key handler (see send_composer), which
     // is what previously aborted on Enter.
     let doc = Rc::new(TextDocument::new(state.cx, String::new()));
-    state.agent_composer_doc.set(Some(doc.clone()));
+    state.agent.composer_doc.set(Some(doc.clone()));
 
     let te = text_editor_keys("", move |editor_sig, kp, mods| {
         if let KeyInput::Keyboard(key, _) = &kp.key {
@@ -341,9 +341,9 @@ fn composer(state: AppState) -> impl IntoView {
     // Focus the field when the panel opens / the agent (re)starts. The focusable
     // is the editor's *inner* content view, so request focus on its view id
     // rather than the wrapper (a plain .request_focus() focuses the wrong view).
-    state.agent_composer_editor.set(Some(ed.clone()));
+    state.agent.composer_editor.set(Some(ed.clone()));
     create_effect(move |_| {
-        state.agent_focus_pulse.get();
+        state.agent.focus_pulse.get();
         if let Some(vid) = ed.editor_view_id.get_untracked() {
             vid.request_focus();
         }
@@ -353,14 +353,14 @@ fn composer(state: AppState) -> impl IntoView {
     // Stop while running, Send otherwise — sits to the *right* of the input on
     // the same row so it never gets pushed below the window edge.
     let action_btn = label(move || {
-        if state.agent_chat.with(|c| c.running) {
+        if state.agent.chat.with(|c| c.running) {
             "Stop".to_string()
         } else {
             "Send".to_string()
         }
     })
     .style(move |s| {
-        let running = state.agent_chat.with(|c| c.running);
+        let running = state.agent.chat.with(|c| c.running);
         let bg = if running {
             Color::from_rgb8(0x6a, 0x3a, 0x3a)
         } else {
@@ -385,7 +385,7 @@ fn composer(state: AppState) -> impl IntoView {
             })
     })
     .on_click_stop(move |_| {
-        if state.agent_chat.with_untracked(|c| c.running) {
+        if state.agent.chat.with_untracked(|c| c.running) {
             state.native_agent_abort();
         } else {
             state.send_composer();

@@ -96,7 +96,7 @@ impl AppState {
         let (prefix, wants_tables) = sql_prefix_and_context(&text[rs..offset]);
         let start = offset - prefix.len();
 
-        let schema = self.db_schema_cache.get_untracked();
+        let schema = self.db.schema_cache.get_untracked();
         if schema.is_empty() {
             return false;
         }
@@ -130,8 +130,8 @@ impl AppState {
             }
         };
         let (Some(editor), Some(doc)) = (
-            self.db_console_editor.get_untracked(),
-            self.db_console_doc.get_untracked(),
+            self.db.console_editor.get_untracked(),
+            self.db.console_doc.get_untracked(),
         ) else {
             return;
         };
@@ -147,7 +147,7 @@ impl AppState {
             close_if_ours();
             return;
         }
-        let schema = self.db_schema_cache.get_untracked();
+        let schema = self.db.schema_cache.get_untracked();
         if schema.is_empty() {
             close_if_ours();
             return;
@@ -160,7 +160,7 @@ impl AppState {
         let start = offset - prefix.len();
         let (_, below) = editor.points_of_offset(start, cursor.affinity);
         let vp = editor.viewport.get_untracked();
-        let win = self.db_console_win.get_untracked();
+        let win = self.db.console_win.get_untracked();
         comp.anchor
             .set(Point::new(win.x + below.x - vp.x0, win.y + below.y - vp.y0));
         comp.buffer_id.set(Some(CONSOLE_COMP_ID));
@@ -187,8 +187,8 @@ impl AppState {
             .clone()
             .unwrap_or_else(|| items[sel].label.clone());
         let (Some(editor), Some(doc)) = (
-            self.db_console_editor.get_untracked(),
-            self.db_console_doc.get_untracked(),
+            self.db.console_editor.get_untracked(),
+            self.db.console_doc.get_untracked(),
         ) else {
             return false;
         };
@@ -386,7 +386,7 @@ impl AppState {
                             })
                             .collect()
                     } else {
-                        self.db_schema_cache.with_untracked(|schema| {
+                        self.db.schema_cache.with_untracked(|schema| {
                             schema
                                 .get(&target.table)
                                 .map(|cols| {
@@ -538,7 +538,7 @@ impl AppState {
             &text,
             offset,
             &self.root.get_untracked(),
-            &self.db_schema_cache.get_untracked(),
+            &self.db.schema_cache.get_untracked(),
         ) {
             builtin_items.extend(cols);
         }

@@ -83,6 +83,117 @@ pub fn close_confirm_dialog(state: AppState) -> impl IntoView {
         .on_click_stop(move |_| state.cancel_close())
 }
 
+/// "Replace N matches across M files?" — the preview shown before a
+/// workspace-wide replace writes anything.
+pub fn replace_confirm_dialog(state: AppState) -> impl IntoView {
+    let headline = move || {
+        state.replace_confirm.with(|pending| {
+            pending
+                .as_ref()
+                .map(|p| {
+                    let matches = p.plan.total_matches;
+                    let files = p.plan.file_count();
+                    format!(
+                        "Replace {matches} {} in {files} {}?",
+                        if matches == 1 { "match" } else { "matches" },
+                        if files == 1 { "file" } else { "files" },
+                    )
+                })
+                .unwrap_or_default()
+        })
+    };
+
+    let terms = move || {
+        state.replace_confirm.with(|pending| {
+            pending
+                .as_ref()
+                .map(|p| {
+                    let case = if p.opts.case_sensitive {
+                        "matching case"
+                    } else {
+                        "ignoring case"
+                    };
+                    format!("“{}” → “{}” ({case})", p.query, p.replacement)
+                })
+                .unwrap_or_default()
+        })
+    };
+
+    // Name the files it will touch — "12 files" is not something you can judge.
+    let files = move || {
+        state.replace_confirm.with(|pending| {
+            let Some(p) = pending.as_ref() else {
+                return String::new();
+            };
+            let root = state.root.get_untracked();
+            let shown: Vec<String> = p
+                .plan
+                .files
+                .iter()
+                .take(8)
+                .map(|(path, count)| {
+                    let name = path.strip_prefix(&root).unwrap_or(path).display();
+                    format!("{name}  ({count})")
+                })
+                .collect();
+            let mut text = shown.join("\n");
+            if p.plan.file_count() > shown.len() {
+                text.push_str(&format!(
+                    "\n… and {} more",
+                    p.plan.file_count() - shown.len()
+                ));
+            }
+            text
+        })
+    };
+
+    let box_ = stack((
+        label(headline).style(|s| s.color(theme::fg()).font_size(15.0)),
+        label(terms).style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_top(4.0)),
+        label(files).style(|s| {
+            s.color(theme::fg_dim())
+                .font_size(12.0)
+                .font_family("monospace".to_string())
+                .margin_top(12.0)
+        }),
+        label(|| "This rewrites files on disk and cannot be undone.".to_string())
+            .style(|s| s.color(theme::fg_dim()).font_size(12.0).margin_top(12.0)),
+        stack((
+            button("Replace All", true)
+                .on_click_stop(move |_| state.confirm_replace_in_workspace()),
+            button("Cancel", false).on_click_stop(move |_| state.cancel_replace_in_workspace()),
+        ))
+        .style(|s| s.gap(8.0).margin_top(18.0)),
+    ))
+    .style(|s| {
+        s.flex_col()
+            .width(520.0)
+            .padding(24.0)
+            .background(theme::bg_panel())
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(12.0)
+    })
+    .on_click_stop(|_| {});
+
+    container(box_)
+        .style(move |s| {
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .items_center()
+                .justify_center()
+                .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
+            if state.replace_confirm.with(Option::is_some) {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.cancel_replace_in_workspace())
+}
+
 /// A bar shown when the caret is inside a git merge-conflict block, offering
 /// to accept the current, incoming, or both sides.
 pub fn merge_conflict_bar(state: AppState) -> impl IntoView {

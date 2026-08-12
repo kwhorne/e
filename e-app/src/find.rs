@@ -10,7 +10,11 @@ use crate::state::AppState;
 use crate::theme;
 
 /// A small square toggle button (Aa / \b / .*) for a search option.
-fn opt_toggle(glyph: &'static str, sig: RwSignal<bool>, tip: &'static str) -> impl IntoView {
+pub(crate) fn opt_toggle(
+    glyph: &'static str,
+    sig: RwSignal<bool>,
+    tip: &'static str,
+) -> impl IntoView {
     let _ = tip;
     label(move || glyph.to_string())
         .style(move |s| {

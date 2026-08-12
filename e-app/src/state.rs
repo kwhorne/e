@@ -209,6 +209,18 @@ pub struct PendingEdit {
     pub old: Option<String>,
 }
 
+/// A workspace-wide replace that has been planned but not yet written.
+///
+/// Replace All walks the workspace twice: once to build this (a preview), and
+/// again to apply it once the user has said yes.
+#[derive(Clone)]
+pub struct ReplaceConfirm {
+    pub query: String,
+    pub replacement: String,
+    pub opts: crate::workspace_search::SearchOpts,
+    pub plan: crate::workspace_search::ReplacePlan,
+}
+
 /// One executed write in the session log: the statement, and its reverse when
 /// one can be generated.
 #[derive(Clone)]
@@ -391,6 +403,8 @@ pub struct AppState {
     pub laravel: RwSignal<Option<Rc<LaravelData>>>,
     /// References / symbol-search picker.
     pub picker: Picker,
+    /// A planned workspace replace awaiting confirmation (`Some` shows the dialog).
+    pub replace_confirm: RwSignal<Option<ReplaceConfirm>>,
     /// Integrated terminal session (lazily spawned).
     /// All open terminal sessions, in tab order.
     pub terminals: RwSignal<Vec<TermSession>>,
@@ -1051,6 +1065,7 @@ impl AppState {
             signature: SignatureState::new(),
             laravel: RwSignal::new(None),
             picker: Picker::new(),
+            replace_confirm: RwSignal::new(None),
             terminals: RwSignal::new(Vec::new()),
             active_terminal: RwSignal::new(None),
             active_terminal2: RwSignal::new(None),
@@ -4647,51 +4662,6 @@ fn find_conflict(text: &str, cursor: usize) -> Option<(usize, usize, String, Str
     None
 }
 
-/// Replace every occurrence of `query` with `replace` in text files under
-/// `root` (skipping dot-dirs, `target`, `node_modules`, and large/binary files).
-/// Returns the number of files changed.
-pub(crate) fn replace_in_dir(root: &std::path::Path, query: &str, replace: &str) -> usize {
-    let mut changed = 0;
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(read) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in read.filter_map(|e| e.ok()) {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with('.') || name == "target" || name == "node_modules" {
-                continue;
-            }
-            let path = entry.path();
-            match entry.file_type() {
-                Ok(t) if t.is_dir() => stack.push(path),
-                Ok(_) => {
-                    if entry
-                        .metadata()
-                        .map(|m| m.len() > 2_000_000)
-                        .unwrap_or(true)
-                    {
-                        continue;
-                    }
-                    let Ok(content) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
-                    if content.contains(query) {
-                        let new = content.replace(query, replace);
-                        if new != content {
-                            let _ = std::fs::write(&path, new);
-                            changed += 1;
-                        }
-                    }
-                }
-                Err(_) => {}
-            }
-        }
-    }
-    changed
-}
-
 /// Remove duplicate completion items, keeping the first of each label.
 pub(crate) fn dedup_by_label(
     items: Vec<lsp_types::CompletionItem>,
@@ -4968,63 +4938,31 @@ pub(crate) fn line_of(starts: &[usize], byte: usize) -> usize {
     starts.partition_point(|&s| s <= byte).saturating_sub(1)
 }
 
-/// Walk the workspace and collect lines matching `query` (case-insensitive).
-pub(crate) fn grep_workspace(root: &std::path::Path, query: &str, max: usize) -> Vec<PickerItem> {
-    let needle = query.to_lowercase();
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if out.len() >= max {
-            break;
-        }
-        let Ok(read) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in read.filter_map(|e| e.ok()) {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with('.') || name == "target" || name == "node_modules" {
-                continue;
+/// Walk the workspace and collect lines matching `query`.
+///
+/// A thin adaptor over [`crate::workspace_search`] — the same walker and
+/// matcher that Replace All uses, so the list shown here is exactly the set
+/// that would be rewritten.
+pub(crate) fn grep_workspace(
+    roots: &[PathBuf],
+    query: &str,
+    opts: crate::workspace_search::SearchOpts,
+    max: usize,
+) -> Vec<PickerItem> {
+    let display_root = roots.first().cloned().unwrap_or_default();
+    crate::workspace_search::search(roots, query, opts, max)
+        .into_iter()
+        .map(|hit| {
+            let uri = path_to_uri(&hit.path);
+            PickerItem {
+                detail: format!("{}:{}", rel_uri(&uri, &display_root), hit.line + 1),
+                label: hit.text,
+                uri,
+                line: hit.line,
+                char: hit.col,
             }
-            let path = entry.path();
-            match entry.file_type() {
-                Ok(t) if t.is_dir() => stack.push(path),
-                Ok(_) => {
-                    // Skip large files; read the rest as UTF-8 (binaries fail).
-                    if entry
-                        .metadata()
-                        .map(|m| m.len() > 2_000_000)
-                        .unwrap_or(true)
-                    {
-                        continue;
-                    }
-                    let Ok(content) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
-                    for (li, line) in content.lines().enumerate() {
-                        if let Some(col) = line.to_lowercase().find(&needle) {
-                            out.push(PickerItem {
-                                label: line.trim_start().chars().take(120).collect(),
-                                detail: format!(
-                                    "{}:{}",
-                                    rel_uri(&path_to_uri(&path), root),
-                                    li + 1
-                                ),
-                                uri: path_to_uri(&path),
-                                line: li as u32,
-                                char: col as u32,
-                            });
-                            if out.len() >= max {
-                                return out;
-                            }
-                        }
-                    }
-                }
-                Err(_) => {}
-            }
-        }
-    }
-    out
+        })
+        .collect()
 }
 
 /// Display a `file://` URI relative to the workspace root.

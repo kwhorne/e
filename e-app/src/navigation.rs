@@ -15,7 +15,8 @@ use floem::views::editor::text::Document;
 use e_lsp::uri_to_path;
 
 use crate::picker::{PickerItem, PickerMode};
-use crate::state::{grep_workspace, rel_uri, replace_in_dir, AppState};
+use crate::state::{grep_workspace, rel_uri, AppState, ReplaceConfirm};
+use crate::workspace_search::{self, SearchOpts};
 
 impl AppState {
     // ---- References & symbol search ------------------------------------
@@ -41,20 +42,78 @@ impl AppState {
         p.open.set(true);
     }
 
-    /// Replace every occurrence of the search query across the workspace.
+    /// Search options currently set in the picker.
+    pub fn search_opts(&self) -> SearchOpts {
+        SearchOpts {
+            case_sensitive: self.picker.case_sensitive.get_untracked(),
+        }
+    }
+
+    /// Stage a workspace-wide replace: work out what it *would* rewrite and put
+    /// that in front of the user. Nothing is written until they confirm — this
+    /// used to write straight to disk with no preview and no undo.
     pub fn replace_in_workspace(&self) {
         let query = self.picker.query.get_untracked();
-        let replace = self.picker.replace.get_untracked();
+        let replacement = self.picker.replace.get_untracked();
         if query.is_empty() {
             return;
         }
-        let root = self.root.get_untracked();
-        let files = replace_in_dir(&root, &query, &replace);
-        eprintln!("e: replaced in {files} file(s)");
-        self.fs_rev.update(|r| *r += 1);
-        // Reload affected open buffers and refresh the result list.
-        self.check_external_changes();
-        self.request_search(query);
+        let opts = self.search_opts();
+        let roots = self.roots.get_untracked();
+        let confirm = self.replace_confirm;
+        let planned_query = query.clone();
+        let send = create_ext_action(self.cx, move |plan: workspace_search::ReplacePlan| {
+            if plan.is_empty() {
+                eprintln!("e: nothing to replace");
+                return;
+            }
+            confirm.set(Some(ReplaceConfirm {
+                query: query.clone(),
+                replacement: replacement.clone(),
+                opts,
+                plan,
+            }));
+        });
+        std::thread::spawn(move || {
+            send(workspace_search::plan_replace(&roots, &planned_query, opts));
+        });
+    }
+
+    /// Carry out the staged replace after the user confirmed it.
+    pub fn confirm_replace_in_workspace(&self) {
+        let Some(pending) = self.replace_confirm.get_untracked() else {
+            return;
+        };
+        self.replace_confirm.set(None);
+        let roots = self.roots.get_untracked();
+        let state = *self;
+        let query = pending.query.clone();
+        let send = create_ext_action(self.cx, move |outcome: workspace_search::ReplaceOutcome| {
+            eprintln!(
+                "e: replaced {} match(es) in {} file(s)",
+                outcome.matches_replaced, outcome.files_changed
+            );
+            for (path, err) in &outcome.failures {
+                eprintln!("e: could not write {}: {err}", path.display());
+            }
+            state.fs_rev.update(|r| *r += 1);
+            // Reload affected open buffers and refresh the result list.
+            state.check_external_changes();
+            state.request_search(query.clone());
+        });
+        std::thread::spawn(move || {
+            send(workspace_search::apply_replace(
+                &roots,
+                &pending.query,
+                pending.opts,
+                &pending.replacement,
+            ));
+        });
+    }
+
+    /// Discard the staged replace.
+    pub fn cancel_replace_in_workspace(&self) {
+        self.replace_confirm.set(None);
     }
 
     /// Dispatch a picker query to the right backend for the current mode.
@@ -76,6 +135,7 @@ impl AppState {
         let gen = p.gen.get_untracked() + 1;
         p.gen.set(gen);
         let roots = self.roots.get();
+        let opts = self.search_opts();
         let send = create_ext_action(self.cx, move |(g, items): (u64, Vec<PickerItem>)| {
             if g == p.gen.get_untracked() {
                 p.items.set(items);
@@ -83,15 +143,7 @@ impl AppState {
             }
         });
         std::thread::spawn(move || {
-            let mut items = Vec::new();
-            for root in &roots {
-                items.extend(grep_workspace(root, &query, 300));
-                if items.len() >= 300 {
-                    items.truncate(300);
-                    break;
-                }
-            }
-            send((gen, items));
+            send((gen, grep_workspace(&roots, &query, opts, 300)));
         });
     }
 

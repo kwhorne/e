@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Workspace Replace All could rewrite your dependencies.** The walker behind
+  `⌘⇧F` skipped only dot-entries, `target` and `node_modules`, so a Laravel
+  `vendor/`, `storage/` or `public/build/` was fair game — Replace All would
+  edit Composer packages and build output. Search and replace now honour
+  `.gitignore`, the global gitignore and `.git/info/exclude`. A `vendor/` you
+  actually track (like this repo's vendored Floem) stays searchable.
+- **Search and Replace All disagreed about what matched.** Search matched
+  case-insensitively and reported only the *first* hit per line; replace matched
+  case-sensitively and rewrote *every* occurrence. So the list you were shown
+  and the edit you got were different sets, and the "replaced in N files" count
+  quietly undercounted. Both now run through one walker and one matcher, and the
+  results list shows every occurrence. A new **Aa** toggle in the search picker
+  governs both at once.
+- **Replace All now shows what it will do before it does it** — how many
+  matches, in how many files, which files, under which case setting — and writes
+  nothing until you confirm. It previously wrote straight to disk with no
+  preview and no undo.
+- Workspace search hit positions are derived from the original text rather than
+  a lowercased copy, so the caret lands correctly on lines whose byte length
+  changes under case folding.
+- The search query is matched literally, so `$user->name()` finds that text
+  instead of being interpreted as a pattern.
+
 ## [0.9.9] - 2026-08-01
 
 ### Added

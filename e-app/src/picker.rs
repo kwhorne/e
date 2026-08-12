@@ -34,6 +34,9 @@ pub struct Picker {
     pub selected: RwSignal<usize>,
     /// Replacement text for workspace replace (Search mode).
     pub replace: RwSignal<String>,
+    /// Match case. Governs the hit list *and* Replace All — one setting, so the
+    /// two can't disagree about what matches.
+    pub case_sensitive: RwSignal<bool>,
     /// Generation counter to drop stale async symbol results.
     pub gen: RwSignal<u64>,
 }
@@ -47,6 +50,7 @@ impl Picker {
             items: RwSignal::new(Vec::new()),
             selected: RwSignal::new(0),
             replace: RwSignal::new(String::new()),
+            case_sensitive: RwSignal::new(false),
             gen: RwSignal::new(0),
         }
     }
@@ -66,6 +70,8 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
     create_effect(move |_| {
         if p.open.get() && matches!(p.mode.get(), PickerMode::Symbols | PickerMode::Search) {
             let q = p.query.get();
+            // Tracked so flipping Match Case re-runs the search.
+            let _ = p.case_sensitive.get();
             state.run_picker_query(q);
         }
     });
@@ -104,11 +110,10 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
         .on_enter(accept)
         .style(|s| {
             theme::input_colors(s)
-                .width_full()
+                .flex_grow(1.0_f32)
                 .height(36.0)
                 .padding_horiz(10.0)
                 .border(0.0)
-                .border_bottom(1.0)
         })
         .request_focus(move || {
             focus_pulse.get();
@@ -183,6 +188,23 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
         })
         .style(|s| s.max_height(360.0).width_full());
 
+    // Match Case applies to the hit list and to Replace All alike — it's the
+    // one setting both read.
+    let case_toggle =
+        crate::find::opt_toggle("Aa", p.case_sensitive, "Match case").style(move |s| {
+            if p.mode.get() == PickerMode::Search {
+                s.margin_right(8.0)
+            } else {
+                s.hide()
+            }
+        });
+    let query_row = stack((input, case_toggle)).style(|s| {
+        s.items_center()
+            .width_full()
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+
     // Replace row — only for workspace search.
     let replace_input = text_input(p.replace)
         .placeholder("Replace…")
@@ -225,7 +247,7 @@ pub fn picker_overlay(state: AppState) -> impl IntoView {
         }
     });
 
-    let box_ = stack((input, replace_row, rows_scroll))
+    let box_ = stack((query_row, replace_row, rows_scroll))
         .style(|s| {
             s.flex_col()
                 .width(620.0)

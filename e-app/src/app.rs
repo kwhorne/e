@@ -16,7 +16,9 @@ use crate::agent_view::agent_panel;
 use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
-use crate::dialogs::{close_confirm_dialog, disk_conflict_bar, merge_conflict_bar};
+use crate::dialogs::{
+    close_confirm_dialog, disk_conflict_bar, merge_conflict_bar, replace_confirm_dialog,
+};
 use crate::diff_view::diff_view;
 use crate::editing::goto_bar;
 use crate::editor_area::editor_area;
@@ -606,6 +608,7 @@ fn app_view() -> impl IntoView {
         stack((
             goto_bar(state),
             close_confirm_dialog(state),
+            replace_confirm_dialog(state),
             recent_palette(state),
             task_palette(state),
             settings_view(state),
@@ -615,6 +618,7 @@ fn app_view() -> impl IntoView {
             let s = s.absolute().inset(0.0).size_full();
             if state.goto.open.get()
                 || state.close_confirm.get().is_some()
+                || state.replace_confirm.with(Option::is_some)
                 || state.recent.open.get()
                 || state.task.open.get()
                 || state.settings_open.get()

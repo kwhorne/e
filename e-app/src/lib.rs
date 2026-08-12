@@ -97,5 +97,6 @@ mod updater;
 mod validation;
 mod verify;
 mod verify_view;
+mod workspace_search;
 
 pub use app::launch;

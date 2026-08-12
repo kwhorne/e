@@ -31,3 +31,4 @@ serde_json         = { workspace = true }
 ureq               = { version = "2", features = ["json"] }
 self_update        = { workspace = true }
 regex              = { workspace = true }
+ignore = "0.4.30"

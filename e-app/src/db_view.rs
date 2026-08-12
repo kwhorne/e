@@ -25,7 +25,7 @@ fn env_color(env: e_db::Environment) -> Color {
 /// Nudge the results-grid scroll by `(dx, dy)`; the tick makes each call a
 /// distinct signal value so the `scroll_delta` effect always re-fires.
 fn db_scroll(state: AppState, dx: f64, dy: f64) {
-    state.db_scroll.update(|(x, y, t)| {
+    state.db.scroll.update(|(x, y, t)| {
         *x = dx;
         *y = dy;
         *t = t.wrapping_add(1);
@@ -351,7 +351,7 @@ fn form_field(
 
 fn add_form(state: AppState) -> impl IntoView {
     // Bind the form struct's fields to local signals, syncing back on change.
-    let f = state.db_form.get_untracked();
+    let f = state.db.form.get_untracked();
     let engine = create_rw_signal(f.engine.clone());
     let host = create_rw_signal(f.host.clone());
     let port = create_rw_signal(f.port.clone());
@@ -375,7 +375,7 @@ fn add_form(state: AppState) -> impl IntoView {
     let form_in_keychain = f.secrets_in_keychain;
 
     let sync = std::rc::Rc::new(move || {
-        state.db_form.set(DbForm {
+        state.db.form.set(DbForm {
             id: form_id.clone(),
             secrets_in_keychain: form_in_keychain,
             engine: engine.get_untracked(),
@@ -457,9 +457,9 @@ fn add_form(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| {
-            state.db_editing_key.set(None);
+            state.db.editing_key.set(None);
             state.db_add_from_env();
-            state.db_adding.set(false);
+            state.db.adding.set(false);
         });
 
     // Connection fields — sqlite shows just a path; others show host/port/etc.
@@ -593,14 +593,14 @@ fn add_form(state: AppState) -> impl IntoView {
             sync_test();
             state.db_test_connection();
         });
-    let test_status = label(move || match state.db_test_state.get().as_str() {
+    let test_status = label(move || match state.db.test_state.get().as_str() {
         "" => String::new(),
         "testing" => "testing…".to_string(),
         "ok" => "✓ OK".to_string(),
         _ => "✗ failed".to_string(),
     })
     .style(move |s| {
-        let st = state.db_test_state.get();
+        let st = state.db.test_state.get();
         let s = s.font_size(11.0).items_center();
         match st.as_str() {
             "ok" => s.color(Color::from_rgb8(0x9e, 0xce, 0x6a)),
@@ -611,7 +611,7 @@ fn add_form(state: AppState) -> impl IntoView {
     let test_row = stack((test, test_status)).style(|s| s.flex_row().gap(8.0).items_center());
 
     let connect = label(move || {
-        if state.db_editing_key.get().is_some() {
+        if state.db.editing_key.get().is_some() {
             "Save & reconnect".to_string()
         } else {
             "Connect & save".to_string()
@@ -679,7 +679,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.db_adding.update(|a| *a = !*a));
+        .on_click_stop(move |_| state.db.adding.update(|a| *a = !*a));
     let rel = label(|| "⇄".to_string())
         .style(|s| {
             s.padding_horiz(8.0)
@@ -702,7 +702,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
             .width_full()
     });
     // Search across all tables' text columns (DB-805); Enter runs it.
-    let search_all = text_input(state.db_search_query)
+    let search_all = text_input(state.db.search_query)
         .placeholder("Search all data…")
         .style(|s| {
             theme::input_colors(s)
@@ -721,7 +721,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
 
     let form = dyn_stack(
         move || {
-            if state.db_adding.get() {
+            if state.db.adding.get() {
                 vec![0]
             } else {
                 vec![]
@@ -733,7 +733,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
 
     let list = scroll(
         dyn_stack(
-            move || state.db_conns.get(),
+            move || state.db.conns.get(),
             |e| e.key(),
             move |e| conn_row(state, e),
         )
@@ -748,7 +748,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
 
     let empty_hint = label(|| "No connections yet.".to_string()).style(move |s| {
         let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
-        if state.db_conns.with(|c| c.is_empty()) && !state.db_adding.get() {
+        if state.db.conns.with(|c| c.is_empty()) && !state.db.adding.get() {
             s
         } else {
             s.hide()
@@ -766,7 +766,7 @@ pub fn database_panel(state: AppState) -> impl IntoView {
 // ---- Results overlay ------------------------------------------------------
 
 pub fn db_result_overlay(state: AppState) -> impl IntoView {
-    let title = label(move || state.db_result_title.get()).style(|s| {
+    let title = label(move || state.db.result_title.get()).style(|s| {
         s.flex_grow(1.0_f32)
             .font_size(13.0)
             .font_bold()
@@ -783,8 +783,8 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     // Environment dot for the active connection (green/amber/red), so it's always
     // clear which database's data you're looking at (DB-104).
     let env_dot = label(|| "●".to_string()).style(move |s| {
-        let env = state.db_result_key.get().and_then(|key| {
-            state.db_conns.with(|c| {
+        let env = state.db.result_key.get().and_then(|key| {
+            state.db.conns.with(|c| {
                 c.iter()
                     .find(|e| e.key() == key)
                     .map(|e| e.config.environment())
@@ -840,7 +840,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     let sql_wrap = floem::views::container(sql).style(move |s| {
         s.flex_grow(1.0_f32)
             .min_width(0.0)
-            .height(state.db_console_height.get())
+            .height(state.db.console_height.get())
             .flex_shrink(0.0_f32)
             .border(1.0)
             .border_color(theme::border())
@@ -872,9 +872,10 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             if let floem::event::Event::PointerMove(pe) = e {
                 if let Some(start) = drag_start.get_untracked() {
                     let delta = pe.pos.y - start;
-                    let cur = state.db_console_height.get_untracked();
+                    let cur = state.db.console_height.get_untracked();
                     state
-                        .db_console_height
+                        .db
+                        .console_height
                         .set((cur + delta).clamp(60.0, 600.0));
                 }
             }
@@ -895,11 +896,11 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
 
     // Status / error line.
     let status = label(move || {
-        if state.db_result_loading.get() {
+        if state.db.result_loading.get() {
             "Running…".to_string()
-        } else if let Some(e) = state.db_result_error.get() {
+        } else if let Some(e) = state.db.result_error.get() {
             e
-        } else if let Some(r) = state.db_result.get() {
+        } else if let Some(r) = state.db.result.get() {
             if r.is_select {
                 let t = if r.truncated { " (truncated)" } else { "" };
                 format!("{} rows · {} ms{}", r.rows.len(), r.elapsed_ms, t)
@@ -916,7 +917,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let s = s.padding_horiz(12.0).padding_vert(4.0).font_size(11.0);
-        if state.db_result_error.get().is_some() {
+        if state.db.result_error.get().is_some() {
             s.color(Color::from_rgb8(0xf7, 0x76, 0x8e))
         } else {
             s.color(theme::fg_dim())
@@ -934,15 +935,15 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .color(theme::accent())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()));
-            if state.db_result_error.get().is_some() {
+            if state.db.result_error.get().is_some() {
                 s
             } else {
                 s.hide()
             }
         })
         .on_click_stop(move |_| {
-            if let Some(err) = state.db_result_error.get_untracked() {
-                let sql = state.db_query_text.get_untracked();
+            if let Some(err) = state.db.result_error.get_untracked() {
+                let sql = state.db.query_text.get_untracked();
                 state.send_to_agent(&format!(
                     "This SQL failed with an error. Explain the error and give a corrected query.\nSQL:\n{sql}\nError:\n{err}"
                 ));
@@ -959,7 +960,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()));
-            if state.db_result_loading.get() {
+            if state.db.result_loading.get() {
                 s
             } else {
                 s.hide()
@@ -972,7 +973,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     let chip = move |id: &'static str, name: &'static str| {
         label(move || name.to_string())
             .style(move |s| {
-                let active = state.db_subview.get() == id;
+                let active = state.db.subview.get() == id;
                 let s = s
                     .padding_horiz(10.0)
                     .padding_vert(2.0)
@@ -991,7 +992,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     let subview_chips =
         stack((chip("data", "Data"), chip("structure", "Structure"))).style(move |s| {
             let s = s.flex_row().gap(4.0).items_center();
-            if state.db_result_table.get().is_some() {
+            if state.db.result_table.get().is_some() {
                 s
             } else {
                 s.hide()
@@ -1014,8 +1015,8 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     let prev = toolbar_btn("‹ Prev", Box::new(move || state.db_page_by(-1)));
     let next = toolbar_btn("Next ›", Box::new(move || state.db_page_by(1)));
     let page_lbl = label(move || {
-        let page = state.db_page.get() + 1;
-        match state.db_total_rows.get() {
+        let page = state.db.page.get() + 1;
+        match state.db.total_rows.get() {
             Some(total) => {
                 let pages = (total.max(1) as usize).div_ceil(crate::db_state::DB_PAGE);
                 format!("p{page}/{pages} · {total} rows")
@@ -1049,7 +1050,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         );
     let pager = stack((prev, page_lbl, next, jump_box)).style(move |s| {
         let s = s.flex_row().gap(4.0).items_center();
-        if state.db_result_table.get().is_some() && state.db_subview.get() == "data" {
+        if state.db.result_table.get().is_some() && state.db.subview.get() == "data" {
             s
         } else {
             s.hide()
@@ -1058,7 +1059,8 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
 
     let filter_chip = label(move || {
         state
-            .db_filter
+            .db
+            .filter
             .get()
             .map(|(c, v)| match v {
                 Some(v) => format!("⚑ {c} = {v}  ✕"),
@@ -1076,7 +1078,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             .color(theme::fg())
             .cursor(floem::style::CursorStyle::Pointer)
             .hover(|s| s.color(theme::fg_dim()));
-        if state.db_filter.get().is_some() && state.db_subview.get() == "data" {
+        if state.db.filter.get().is_some() && state.db.subview.get() == "data" {
             s
         } else {
             s.hide()
@@ -1099,7 +1101,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         })
         .popout_menu(move || {
             use floem::menu::{Menu, MenuItem};
-            let queries = state.db_queries.get_untracked();
+            let queries = state.db.queries.get_untracked();
             if queries.is_empty() {
                 return Menu::new("").entry(MenuItem::new("(no saved queries)"));
             }
@@ -1118,11 +1120,11 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     let save_btn = toolbar_btn(
         "💾",
         Box::new(move || {
-            state.db_query_name.set(String::new());
-            state.db_saving_query.set(true);
+            state.db.query_name.set(String::new());
+            state.db.saving_query.set(true);
         }),
     );
-    let name_input = text_input(state.db_query_name)
+    let name_input = text_input(state.db.query_name)
         .placeholder("query name — ↵ to save")
         .style(move |s| {
             let s = theme::input_colors(s)
@@ -1130,7 +1132,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .font_size(11.0)
                 .padding_horiz(6.0)
                 .padding_vert(2.0);
-            if state.db_saving_query.get() {
+            if state.db.saving_query.get() {
                 s
             } else {
                 s.width(0.0).hide()
@@ -1144,10 +1146,10 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         .on_key_down(
             floem::keyboard::Key::Named(floem::keyboard::NamedKey::Escape),
             |_| true,
-            move |_| state.db_saving_query.set(false),
+            move |_| state.db.saving_query.set(false),
         )
         .request_focus(move || {
-            state.db_saving_query.get();
+            state.db.saving_query.get();
         });
     let export_csv = toolbar_btn(
         "CSV",
@@ -1194,7 +1196,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .color(theme::fg_dim())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
-            if state.db_result_table.get().is_some() && state.db_subview.get() == "data" {
+            if state.db.result_table.get().is_some() && state.db.subview.get() == "data" {
                 s
             } else {
                 s.hide()
@@ -1211,7 +1213,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .color(theme::fg_dim())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
-            if state.db_result_table.get().is_some() && state.db_subview.get() == "data" {
+            if state.db.result_table.get().is_some() && state.db.subview.get() == "data" {
                 s
             } else {
                 s.hide()
@@ -1229,14 +1231,14 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
             // Local tables only (factory seeding runs through Tinker/the app DB).
-            let local = state.db_result_key.get().and_then(|key| {
-                state.db_conns.with(|c| {
+            let local = state.db.result_key.get().and_then(|key| {
+                state.db.conns.with(|c| {
                     c.iter()
                         .find(|e| e.key() == key)
                         .map(|e| e.config.environment().is_local())
                 })
             });
-            if local == Some(true) && state.db_subview.get() == "data" {
+            if local == Some(true) && state.db.subview.get() == "data" {
                 s
             } else {
                 s.hide()
@@ -1272,7 +1274,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
 
     let grid = scroll(
         dyn_container(
-            move || state.db_subview.get(),
+            move || state.db.subview.get(),
             move |v| {
                 if v == "structure" {
                     structure_grid(state).into_any()
@@ -1282,11 +1284,12 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             },
         )
         .style(move |s| {
-            let w = if state.db_subview.get() == "structure" {
+            let w = if state.db.subview.get() == "structure" {
                 520.0
             } else {
                 let n = state
-                    .db_result
+                    .db
+                    .result
                     .with(|r| r.as_ref().map(|r| r.columns.len()).unwrap_or(0));
                 (n.max(1) as f64) * 180.0
             };
@@ -1294,13 +1297,13 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         }),
     )
     .scroll_delta(move || {
-        let (x, y, _) = state.db_scroll.get();
+        let (x, y, _) = state.db.scroll.get();
         floem::kurbo::Vec2::new(x, y)
     })
     .style(|s| s.flex_grow(1.0_f32).width_full())
     .keyboard_navigable()
     .request_focus(move || {
-        state.db_result_open.get();
+        state.db.result_open.get();
     })
     .on_key_down(
         floem::keyboard::Key::Named(floem::keyboard::NamedKey::ArrowRight),
@@ -1345,7 +1348,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             .size_full()
             .flex_col()
             .background(theme::bg());
-        if state.db_result_open.get() {
+        if state.db.result_open.get() {
             s
         } else {
             s.hide()
@@ -1364,7 +1367,7 @@ pub fn db_erd_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.db_erd_open.set(false));
+        .on_click_stop(move |_| state.db.erd_open.set(false));
     let header = stack((
         label(|| "Schema relationships".to_string()).style(|s| {
             s.flex_grow(1.0_f32)
@@ -1384,7 +1387,7 @@ pub fn db_erd_panel(state: AppState) -> impl IntoView {
     });
     let rows = dyn_stack(
         move || {
-            let mut fks = state.db_erd.get();
+            let mut fks = state.db.erd.get();
             fks.sort_by(|a, b| a.table.cmp(&b.table).then(a.column.cmp(&b.column)));
             fks.into_iter().enumerate().collect::<Vec<_>>()
         },
@@ -1408,7 +1411,7 @@ pub fn db_erd_panel(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col().width_full());
     let empty_hint = label(|| "No foreign keys in this database.".to_string()).style(move |s| {
         let s = s.padding(16.0).font_size(12.0).color(theme::fg_dim());
-        if state.db_erd.with(|f| f.is_empty()) {
+        if state.db.erd.with(|f| f.is_empty()) {
             s
         } else {
             s.hide()
@@ -1433,7 +1436,7 @@ pub fn db_erd_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.db_erd_open.get() {
+        if state.db.erd_open.get() {
             s
         } else {
             s.hide()
@@ -1446,7 +1449,8 @@ pub fn db_params_dialog(state: AppState) -> impl IntoView {
     let fields = dyn_stack(
         move || {
             state
-                .db_params
+                .db
+                .params
                 .get()
                 .map(|p| p.fields)
                 .unwrap_or_default()
@@ -1552,7 +1556,7 @@ pub fn db_params_dialog(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.db_params.get().is_some() {
+        if state.db.params.get().is_some() {
             s
         } else {
             s.hide()
@@ -1562,13 +1566,14 @@ pub fn db_params_dialog(state: AppState) -> impl IntoView {
 
 /// Confirmation dialog for destructive or non-local console runs (DB-702/703).
 pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
-    let title = label(move || match state.db_confirm.get() {
+    let title = label(move || match state.db.confirm.get() {
         Some(c) => format!("{} on {}?", c.verb, c.env.label().to_uppercase()),
         None => String::new(),
     })
     .style(move |s| {
         let color = state
-            .db_confirm
+            .db
+            .confirm
             .get()
             .map(|c| env_color(c.env))
             .unwrap_or(theme::fg());
@@ -1577,7 +1582,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             .color(color)
             .margin_bottom(6.0)
     });
-    let subtitle = label(move || match state.db_confirm.get() {
+    let subtitle = label(move || match state.db.confirm.get() {
         Some(c) => format!(
             "{} statement(s) will run on this database. Review them:",
             c.statements.len()
@@ -1589,7 +1594,8 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
     let list = dyn_stack(
         move || {
             state
-                .db_confirm
+                .db
+                .confirm
                 .get()
                 .map(|c| c.statements)
                 .unwrap_or_default()
@@ -1620,7 +1626,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             .background(theme::bg())
     });
 
-    let ack = label(move || match state.db_confirm.get() {
+    let ack = label(move || match state.db.confirm.get() {
         Some(c) => format!(
             "{}  I understand this affects {}",
             if c.ack.get() { "☑" } else { "☐" },
@@ -1635,7 +1641,8 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             .margin_top(10.0)
             .cursor(floem::style::CursorStyle::Pointer);
         if state
-            .db_confirm
+            .db
+            .confirm
             .with(|c| c.as_ref().map(|c| c.needs_ack).unwrap_or(false))
         {
             s
@@ -1644,7 +1651,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
         }
     })
     .on_click_stop(move |_| {
-        if let Some(c) = state.db_confirm.get_untracked() {
+        if let Some(c) = state.db.confirm.get_untracked() {
             c.ack.update(|a| *a = !*a);
         }
     });
@@ -1663,13 +1670,14 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         })
         .on_click_stop(move |_| state.db_confirm_cancel());
-    let confirm = label(move || match state.db_confirm.get() {
+    let confirm = label(move || match state.db.confirm.get() {
         Some(c) => format!("{} {} statement(s)", c.verb, c.statements.len()),
         None => "Run".to_string(),
     })
     .style(move |s| {
         let color = state
-            .db_confirm
+            .db
+            .confirm
             .get()
             .map(|c| env_color(c.env))
             .unwrap_or(theme::accent());
@@ -1708,7 +1716,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 130));
-        if state.db_confirm.get().is_some() {
+        if state.db.confirm.get().is_some() {
             s
         } else {
             s.hide()
@@ -1719,13 +1727,13 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
 pub fn db_consent_dialog(state: AppState) -> impl IntoView {
     let title = label(|| "Agent wants to run a query".to_string())
         .style(|s| s.font_size(14.0).font_bold().color(theme::fg()));
-    let subtitle = label(move || match state.db_consent.get() {
+    let subtitle = label(move || match state.db.consent.get() {
         Some(c) => format!("on “{}” — allow?", c.db_name),
         None => String::new(),
     })
     .style(|s| s.font_size(12.0).color(theme::fg_dim()).margin_bottom(8.0));
 
-    let sql = label(move || state.db_consent.get().map(|c| c.sql).unwrap_or_default()).style(|s| {
+    let sql = label(move || state.db.consent.get().map(|c| c.sql).unwrap_or_default()).style(|s| {
         theme::input_colors(s)
             .width_full()
             .font_family("monospace".to_string())
@@ -1781,7 +1789,7 @@ pub fn db_consent_dialog(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 140));
-        if state.db_consent.get().is_some() {
+        if state.db.consent.get().is_some() {
             s
         } else {
             s.hide()
@@ -1791,7 +1799,7 @@ pub fn db_consent_dialog(state: AppState) -> impl IntoView {
 
 /// The inline cell-edit popup (double-click a cell in a browsed table).
 fn db_edit_popup(state: AppState) -> impl IntoView {
-    let title = label(move || match state.db_edit.get() {
+    let title = label(move || match state.db.edit.get() {
         Some((_, _, col)) => format!("Edit  {col}"),
         None => String::new(),
     })
@@ -1802,7 +1810,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             .margin_bottom(8.0)
     });
 
-    let input = text_input(state.db_edit_value)
+    let input = text_input(state.db.edit_value)
         .placeholder("value")
         .style(move |s| {
             let s = theme::input_colors(s)
@@ -1812,7 +1820,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
                 .font_size(13.0)
                 .padding_horiz(8.0)
                 .padding_vert(6.0);
-            if state.db_edit_null.get() {
+            if state.db.edit_null.get() {
                 s.color(theme::fg_dim())
             } else {
                 s
@@ -1829,11 +1837,11 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             move |_| state.db_cancel_edit(),
         )
         .request_focus(move || {
-            state.db_edit.get();
+            state.db.edit.get();
         });
 
     let null_toggle = label(move || {
-        if state.db_edit_null.get() {
+        if state.db.edit_null.get() {
             "☑ NULL".to_string()
         } else {
             "☐ NULL".to_string()
@@ -1845,7 +1853,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             .cursor(floem::style::CursorStyle::Pointer)
             .hover(|s| s.color(theme::fg()))
     })
-    .on_click_stop(move |_| state.db_edit_null.update(|n| *n = !*n));
+    .on_click_stop(move |_| state.db.edit_null.update(|n| *n = !*n));
 
     let save = label(|| "Save  ⌘↵".to_string())
         .style(|s| {
@@ -1971,7 +1979,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.db_edit.get().is_some() {
+        if state.db.edit.get().is_some() {
             s
         } else {
             s.hide()
@@ -1984,7 +1992,7 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
     let title = label(move || {
         format!(
             "Insert row · {}",
-            state.db_result_table.get().unwrap_or_default()
+            state.db.result_table.get().unwrap_or_default()
         )
     })
     .style(|s| {
@@ -1995,7 +2003,7 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
     });
 
     let fields = dyn_stack(
-        move || state.db_insert_fields.get(),
+        move || state.db.insert_fields.get(),
         |f| f.name.clone(),
         move |f| {
             let name = f.name.clone();
@@ -2111,7 +2119,7 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.db_insert_open.get() {
+        if state.db.insert_open.get() {
             s
         } else {
             s.hide()
@@ -2136,9 +2144,9 @@ pub(crate) fn pretty_value(s: &str) -> String {
 /// A read-only inspector for the selected cell (full value, pretty-printed JSON)
 /// docked at the bottom of the result panel — like PhpStorm's value viewer.
 fn db_value_viewer(state: AppState) -> impl IntoView {
-    let head = label(move || match state.db_selected_cell.get() {
+    let head = label(move || match state.db.selected_cell.get() {
         Some((r, c)) => {
-            let col = state.db_result.with(|res| {
+            let col = state.db.result.with(|res| {
                 res.as_ref()
                     .and_then(|res| res.columns.get(c).cloned())
                     .unwrap_or_default()
@@ -2157,8 +2165,8 @@ fn db_value_viewer(state: AppState) -> impl IntoView {
             .border_color(theme::border())
     });
 
-    let body = label(move || match state.db_selected_cell.get() {
-        Some((r, c)) => state.db_result.with(|res| {
+    let body = label(move || match state.db.selected_cell.get() {
+        Some((r, c)) => state.db.result.with(|res| {
             res.as_ref()
                 .and_then(|res| res.rows.get(r).and_then(|row| row.get(c)))
                 .map(|cell| match cell {
@@ -2184,7 +2192,7 @@ fn db_value_viewer(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.db_selected_cell.set(None));
+        .on_click_stop(move |_| state.db.selected_cell.set(None));
     let head_row = stack((head.style(|s| s.flex_grow(1.0_f32)), close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -2202,7 +2210,7 @@ fn db_value_viewer(state: AppState) -> impl IntoView {
             .border_top(1.0)
             .border_color(theme::border())
             .background(theme::bg_panel());
-        if state.db_selected_cell.get().is_some() {
+        if state.db.selected_cell.get().is_some() {
             s
         } else {
             s.hide()
@@ -2238,7 +2246,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.db_write_log_open.set(false));
+        .on_click_stop(move |_| state.db.write_log_open.set(false));
     let header = stack((
         label(|| "Session write log".to_string()).style(|s| {
             s.flex_grow(1.0_f32)
@@ -2259,7 +2267,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             // Newest first.
-            let mut v = state.db_write_log.get();
+            let mut v = state.db.write_log.get();
             v.reverse();
             v.into_iter().enumerate().collect::<Vec<_>>()
         },
@@ -2316,7 +2324,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col().width_full());
     let empty_hint = label(|| "No writes this session.".to_string()).style(move |s| {
         let s = s.padding(16.0).font_size(12.0).color(theme::fg_dim());
-        if state.db_write_log.with(|l| l.is_empty()) {
+        if state.db.write_log.with(|l| l.is_empty()) {
             s
         } else {
             s.hide()
@@ -2341,7 +2349,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.db_write_log_open.get() {
+        if state.db.write_log_open.get() {
             s
         } else {
             s.hide()
@@ -2354,13 +2362,13 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
 fn db_history_panel(state: AppState) -> impl IntoView {
     // Reload the list whenever the search text changes (while open).
     create_effect(move |_| {
-        let _ = state.db_history_query.get();
-        if state.db_history_open.get_untracked() {
+        let _ = state.db.history_query.get();
+        if state.db.history_open.get_untracked() {
             state.db_reload_history();
         }
     });
 
-    let search = text_input(state.db_history_query)
+    let search = text_input(state.db.history_query)
         .placeholder("Search history…")
         .style(|s| {
             theme::input_colors(s)
@@ -2389,7 +2397,7 @@ fn db_history_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.db_history_open.set(false));
+        .on_click_stop(move |_| state.db.history_open.set(false));
     let header = stack((
         label(|| "Query History".to_string())
             .style(|s| s.font_size(13.0).font_bold().color(theme::fg())),
@@ -2410,7 +2418,8 @@ fn db_history_panel(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state
-                .db_history
+                .db
+                .history
                 .get()
                 .into_iter()
                 .enumerate()
@@ -2466,7 +2475,7 @@ fn db_history_panel(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col().width_full());
     let empty_hint = label(|| "No queries yet.".to_string()).style(move |s| {
         let s = s.padding(16.0).font_size(12.0).color(theme::fg_dim());
-        if state.db_history.with(|h| h.is_empty()) {
+        if state.db.history.with(|h| h.is_empty()) {
             s
         } else {
             s.hide()
@@ -2492,7 +2501,7 @@ fn db_history_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.db_history_open.get() {
+        if state.db.history_open.get() {
             s
         } else {
             s.hide()
@@ -2505,8 +2514,8 @@ fn db_history_panel(state: AppState) -> impl IntoView {
 /// confirmation dialog) and Revert.
 fn pending_bar(state: AppState) -> impl IntoView {
     let summary = label(move || {
-        let e = state.db_pending_edits.with(|m| m.len());
-        let d = state.db_pending_deletes.with(|m| m.len());
+        let e = state.db.pending_edits.with(|m| m.len());
+        let d = state.db.pending_deletes.with(|m| m.len());
         let total = e + d;
         format!(
             "⚠ {total} pending change{}  ·  {e} update{}, {d} delete{}",
@@ -2557,8 +2566,8 @@ fn pending_bar(state: AppState) -> impl IntoView {
             .border_top(1.0)
             .border_color(theme::border())
             .background(theme::bg_panel());
-        let any = state.db_pending_edits.with(|m| !m.is_empty())
-            || state.db_pending_deletes.with(|m| !m.is_empty());
+        let any = state.db.pending_edits.with(|m| !m.is_empty())
+            || state.db.pending_deletes.with(|m| !m.is_empty());
         if any {
             s
         } else {
@@ -2573,7 +2582,7 @@ fn pending_bar(state: AppState) -> impl IntoView {
 /// current plan, with a hint to ask the agent for an index migration (DB-602).
 fn explain_banner(state: AppState) -> impl IntoView {
     let issues = label(move || {
-        let list = state.db_explain_issues.get();
+        let list = state.db.explain_issues.get();
         if list.is_empty() {
             String::new()
         } else {
@@ -2602,7 +2611,7 @@ fn explain_banner(state: AppState) -> impl IntoView {
             .border_bottom(1.0)
             .border_color(theme::border())
             .background(Color::from_rgba8(0xe0, 0x6c, 0x75, 24));
-        if state.db_explain_issues.with(|i| i.is_empty()) {
+        if state.db.explain_issues.with(|i| i.is_empty()) {
             s.hide()
         } else {
             s
@@ -2614,7 +2623,8 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
     let tabs = dyn_stack(
         move || {
             state
-                .db_result_tabs
+                .db
+                .result_tabs
                 .get()
                 .into_iter()
                 .enumerate()
@@ -2654,7 +2664,7 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
                 .on_click_stop(move |_| state.db_close_tab(i));
             stack((pin, name, close))
                 .style(move |s| {
-                    let active = state.db_active_tab.get() == i;
+                    let active = state.db.active_tab.get() == i;
                     let s = s
                         .flex_row()
                         .items_center()
@@ -2681,7 +2691,7 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
             .border_bottom(1.0)
             .border_color(theme::border())
             .background(theme::bg_hover());
-        if state.db_result_tabs.with(|t| t.is_empty()) {
+        if state.db.result_tabs.with(|t| t.is_empty()) {
             s.hide()
         } else {
             s
@@ -2692,19 +2702,20 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
 fn result_grid(state: AppState) -> impl IntoView {
     // Header row.
     let header = dyn_stack(
-        move || state.db_result.get().map(|r| r.columns).unwrap_or_default(),
+        move || state.db.result.get().map(|r| r.columns).unwrap_or_default(),
         |c| c.clone(),
         move |c| {
             let col = c.clone();
             let col2 = c.clone();
             label(move || {
-                let arrow = match state.db_sort.get() {
+                let arrow = match state.db.sort.get() {
                     Some((sc, true)) if sc == col2 => " ▲",
                     Some((sc, false)) if sc == col2 => " ▼",
                     _ => "",
                 };
                 let pk = state
-                    .db_columns
+                    .db
+                    .columns
                     .with(|cols| cols.iter().any(|c| c.name == col2 && c.key == "PRI"));
                 let key = if pk { "🔑 " } else { "" };
                 format!("{key}{col2}{arrow}")
@@ -2721,7 +2732,7 @@ fn result_grid(state: AppState) -> impl IntoView {
                     .color(theme::fg_dim())
                     .border_right(1.0)
                     .border_color(theme::border());
-                if state.db_result_table.get().is_some() {
+                if state.db.result_table.get().is_some() {
                     s.cursor(floem::style::CursorStyle::Pointer)
                         .hover(|s| s.color(theme::fg()))
                 } else {
@@ -2729,7 +2740,7 @@ fn result_grid(state: AppState) -> impl IntoView {
                 }
             })
             .on_click_stop(move |_| {
-                if state.db_result_table.get_untracked().is_some() {
+                if state.db.result_table.get_untracked().is_some() {
                     state.db_sort_by(col.clone());
                 }
             })
@@ -2746,7 +2757,8 @@ fn result_grid(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state
-                .db_result
+                .db
+                .result
                 .get()
                 .map(|r| r.rows.into_iter().enumerate().collect::<Vec<_>>())
                 .unwrap_or_default()
@@ -2764,11 +2776,11 @@ fn result_grid(state: AppState) -> impl IntoView {
                     };
                     label(move || text.clone())
                         .style(move |s| {
-                            let selected = state.db_selected_cell.get() == Some((ri, ci));
+                            let selected = state.db.selected_cell.get() == Some((ri, ci));
                             let pending_edit =
-                                state.db_pending_edits.with(|m| m.contains_key(&(ri, ci)));
+                                state.db.pending_edits.with(|m| m.contains_key(&(ri, ci)));
                             let pending_del =
-                                state.db_pending_deletes.with(|m| m.contains_key(&ri));
+                                state.db.pending_deletes.with(|m| m.contains_key(&ri));
                             let s = s
                                 .width(180.0)
                                 .flex_shrink(0.0_f32)
@@ -2802,7 +2814,7 @@ fn result_grid(state: AppState) -> impl IntoView {
                             }
                         })
                         // Single click selects (→ value viewer); double click edits.
-                        .on_click_stop(move |_| state.db_selected_cell.set(Some((ri, ci))))
+                        .on_click_stop(move |_| state.db.selected_cell.set(Some((ri, ci))))
                         .on_double_click_stop(move |_| state.db_begin_edit(ri, ci))
                 },
             )
@@ -2820,7 +2832,8 @@ fn result_grid(state: AppState) -> impl IntoView {
 
     stack((header, rows)).style(move |s| {
         let n = state
-            .db_result
+            .db
+            .result
             .with(|r| r.as_ref().map(|r| r.columns.len()).unwrap_or(0));
         s.flex_col().width((n.max(1) as f64) * 180.0)
     })
@@ -2857,7 +2870,8 @@ fn structure_grid(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state
-                .db_columns
+                .db
+                .columns
                 .get()
                 .into_iter()
                 .enumerate()
@@ -2916,7 +2930,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
             .padding_horiz(8.0)
             .padding_top(12.0)
             .padding_bottom(4.0);
-        if state.db_indexes.with(|i| i.is_empty()) {
+        if state.db.indexes.with(|i| i.is_empty()) {
             s.hide()
         } else {
             s
@@ -2925,7 +2939,8 @@ fn structure_grid(state: AppState) -> impl IntoView {
     let idx_rows = dyn_stack(
         move || {
             state
-                .db_indexes
+                .db
+                .indexes
                 .get()
                 .into_iter()
                 .enumerate()

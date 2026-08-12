@@ -245,15 +245,15 @@ impl AppState {
     /// Type `msg` into the agent input without submitting, so the user can add
     /// their question, and focus the panel.
     fn insert_into_agent(&self, msg: &str) {
-        if !self.agent_open.get_untracked() {
-            self.agent_open.set(true);
+        if !self.agent.open.get_untracked() {
+            self.agent.open.set(true);
         }
         if self.use_native_agent() {
-            self.agent_composer.update(|c| c.push_str(msg));
-            self.agent_focus_pulse.update(|x| *x += 1);
+            self.agent.composer.update(|c| c.push_str(msg));
+            self.agent.focus_pulse.update(|x| *x += 1);
             return;
         }
-        let just_started = self.agent_term.get_untracked().is_none();
+        let just_started = self.agent.term.get_untracked().is_none();
         if just_started {
             self.start_agent();
         }
@@ -262,7 +262,7 @@ impl AppState {
         let delay = if just_started { 700 } else { 60 };
         floem::action::exec_after(Duration::from_millis(delay), move |_| {
             state.agent_input(&bytes);
-            state.agent_focus_pulse.update(|x| *x += 1);
+            state.agent.focus_pulse.update(|x| *x += 1);
         });
     }
 }

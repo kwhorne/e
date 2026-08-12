@@ -346,7 +346,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 .unwrap_or("editor")
             {
                 "terminal" if !state.terminal_open.get_untracked() => state.toggle_terminal(),
-                "agent" if !state.agent_open.get_untracked() => state.toggle_agent(),
+                "agent" if !state.agent.open.get_untracked() => state.toggle_agent(),
                 "editor" => {
                     if let Some(id) = state.focused_active_id() {
                         state.focus_buffer(id);
@@ -423,7 +423,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
         // ---- Database schema (async, read-only) ---------------------------
         "db_schema" => {
             let name = req.get("connection").and_then(|c| c.as_str());
-            let picked = state.db_conns.with_untracked(|conns| {
+            let picked = state.db.conns.with_untracked(|conns| {
                 conns
                     .iter()
                     .filter(|e| e.conn.get_untracked().is_some())
@@ -447,7 +447,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 return;
             };
             let name = req.get("connection").and_then(|c| c.as_str());
-            let picked = state.db_conns.with_untracked(|conns| {
+            let picked = state.db.conns.with_untracked(|conns| {
                 conns
                     .iter()
                     .filter(|e| e.conn.get_untracked().is_some())
@@ -459,7 +459,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 return;
             };
             // Ask the user before touching their database.
-            state.db_consent.set(Some(crate::state::DbConsent {
+            state.db.consent.set(Some(crate::state::DbConsent {
                 sql,
                 db_name,
                 conn,

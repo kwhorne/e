@@ -20,7 +20,7 @@ use crate::theme;
 /// Header: agent selector (popout menu) + restart button.
 fn agent_header(state: AppState) -> impl IntoView {
     let title = label(move || {
-        let id = state.agent_current.get();
+        let id = state.agent.current.get();
         let name = state
             .agents
             .with(|list| list.iter().find(|a| a.id == id).map(|a| a.name.clone()))
@@ -37,7 +37,7 @@ fn agent_header(state: AppState) -> impl IntoView {
             .hover(|s| s.background(theme::bg_hover()))
     })
     .popout_menu(move || {
-        let current = state.agent_current.get_untracked();
+        let current = state.agent.current.get_untracked();
         let mut menu = Menu::new("");
         for a in state.agents.get_untracked() {
             let id = a.id.clone();
@@ -66,7 +66,7 @@ fn agent_header(state: AppState) -> impl IntoView {
     };
 
     let restart = icon_btn("⟳").on_click_stop(move |_| state.restart_agent());
-    let close = icon_btn("×").on_click_stop(move |_| state.agent_open.set(false));
+    let close = icon_btn("×").on_click_stop(move |_| state.agent.open.set(false));
 
     let spacer = empty().style(|s| s.flex_grow(1.0_f32));
 
@@ -152,13 +152,13 @@ fn agent_body(state: AppState) -> impl IntoView {
         })
         .keyboard_navigable()
         .request_focus(move || {
-            state.agent_focus_pulse.get();
+            state.agent.focus_pulse.get();
         })
         .on_event_cont(EventListener::FocusGained, move |_| {
-            state.agent_focused.set(true)
+            state.agent.focused.set(true)
         })
         .on_event_cont(EventListener::FocusLost, move |_| {
-            state.agent_focused.set(false)
+            state.agent.focused.set(false)
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
@@ -185,7 +185,7 @@ fn native_selected(state: AppState) -> bool {
     if !state.settings.with(|s| s.native_agent) {
         return false;
     }
-    let id = state.agent_current.get();
+    let id = state.agent.current.get();
     let program = state
         .agents
         .with(|l| {
@@ -216,11 +216,11 @@ pub fn agent_panel(state: AppState) -> impl IntoView {
     stack((agent_header(state), body)).style(move |s| {
         let s = s
             .flex_col()
-            .width(state.agent_width.get())
+            .width(state.agent.width.get())
             .height_full()
             .border_left(1.0)
             .border_color(theme::border());
-        if state.agent_open.get() {
+        if state.agent.open.get() {
             s
         } else {
             s.hide()

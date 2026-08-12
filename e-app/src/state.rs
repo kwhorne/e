@@ -359,6 +359,255 @@ pub type DiagQueue = Arc<Mutex<VecDeque<(String, PublishDiagnosticsParams)>>>;
 // The language-server registry lives in [`crate::lsp_registry`] (a language can
 // have several servers — PHP runs intelephense *and* laravel-lsp).
 
+/// State of the AI agent panel (`⌘L`).
+///
+/// The second group lifted out of `AppState` after [`DbPanel`], and the reason
+/// that split is a pattern rather than a one-off: the panel's terminal, native
+/// chat client, composer and audit log belong together and to nothing else.
+#[derive(Clone, Copy)]
+pub struct AgentPanel {
+    /// Whether the agent panel is visible (toggled with ⌘L).
+    pub open: RwSignal<bool>,
+    /// The currently selected agent id.
+    pub current: RwSignal<String>,
+    /// The running agent PTY, if started.
+    pub term: RwSignal<Option<Rc<RefCell<Terminal>>>>,
+    /// Whether the agent panel currently has keyboard focus.
+    pub focused: RwSignal<bool>,
+    /// Pulsed on open so the panel grabs focus without re-grabbing on close.
+    pub focus_pulse: RwSignal<u64>,
+    /// The running native RPC client, if started.
+    pub native_client: RwSignal<Option<Rc<e_agent::AgentClient>>>,
+    /// The folded conversation rendered by the native chat panel.
+    pub chat: RwSignal<e_agent::ChatState>,
+    /// Current text in the native composer.
+    pub composer: RwSignal<String>,
+    /// Backing document for the multi-line composer editor.
+    pub composer_doc: RwSignal<Option<Rc<TextDocument>>>,
+    /// The composer editor handle (to reset its cursor after clearing).
+    pub composer_editor: RwSignal<Option<Editor>>,
+    /// Shared queue of decoded events (fed by the reader-forwarder thread,
+    /// drained on the UI thread). Never coalesced, so no delta is lost.
+    pub events: RwSignal<Arc<Mutex<VecDeque<e_agent::AgentEvent>>>>,
+    /// Sender half of the wake channel, handed to the reader-forwarder thread.
+    pub(crate) wake_tx: RwSignal<std::sync::mpsc::Sender<()>>,
+    /// Taken once at startup to build the UI-thread drain bridge.
+    pub wake_rx: RwSignal<Option<std::sync::mpsc::Receiver<()>>>,
+    pub width: RwSignal<f64>,
+    /// Timeline of everything the agent did over the socket `(time, method, summary)`.
+    pub log: RwSignal<Vec<(String, String, String)>>,
+    pub log_open: RwSignal<bool>,
+    /// Where the agent is currently "looking" `(path, line0)` — a ghost marker.
+    pub mark: RwSignal<Option<(PathBuf, usize)>>,
+    /// A pending edit the agent proposed, awaiting per-hunk review.
+    pub edit: RwSignal<Option<AgentEdit>>,
+}
+
+impl AgentPanel {
+    /// Both halves of the wake channel are taken together: the panel owns the
+    /// pairing, rather than the sender living on `AppState` and the receiver
+    /// here.
+    fn new(wake_tx: std::sync::mpsc::Sender<()>, wake_rx: std::sync::mpsc::Receiver<()>) -> Self {
+        AgentPanel {
+            wake_tx: RwSignal::new(wake_tx),
+            open: RwSignal::new(false),
+            current: RwSignal::new(config::load_default_agent()),
+            term: RwSignal::new(None),
+            focused: RwSignal::new(false),
+            focus_pulse: RwSignal::new(0),
+            native_client: RwSignal::new(None),
+            chat: RwSignal::new(e_agent::ChatState::new()),
+            composer: RwSignal::new(String::new()),
+            composer_doc: RwSignal::new(None),
+            composer_editor: RwSignal::new(None),
+            events: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
+            wake_rx: RwSignal::new(Some(wake_rx)),
+            width: RwSignal::new(600.0),
+            log: RwSignal::new(Vec::new()),
+            log_open: RwSignal::new(false),
+            mark: RwSignal::new(None),
+            edit: RwSignal::new(None),
+        }
+    }
+}
+
+/// State of the database panel (`⌘3`).
+///
+/// Split out of `AppState`, which had grown to 206 fields. These 56 were its
+/// largest cohesive group — the whole database IDE, from the connection list to
+/// the SQL console's result tabs — and nothing outside the panel needs them
+/// individually. `AppState` keeps one field, `db`.
+///
+/// `Copy`, like `AppState` itself: every field is a signal or a handle, so this
+/// is a bundle of pointers rather than the data.
+#[derive(Clone, Copy)]
+pub struct DbPanel {
+    pub width: RwSignal<f64>,
+    /// Whether the Database panel is visible (toggled with ⌘3).
+    pub open: RwSignal<bool>,
+    /// Saved connections for the current project.
+    pub conns: RwSignal<Vec<DbEntry>>,
+    /// Whether the add-connection form is showing.
+    pub adding: RwSignal<bool>,
+    /// The manual-connection form contents.
+    pub form: RwSignal<DbForm>,
+    /// Results overlay (table browse / query).
+    pub result_open: RwSignal<bool>,
+    pub result: RwSignal<Option<e_db::QueryResult>>,
+    pub result_title: RwSignal<String>,
+    pub result_error: RwSignal<Option<String>>,
+    pub result_loading: RwSignal<bool>,
+    /// The connection the results view runs queries against.
+    pub result_key: RwSignal<Option<String>>,
+    /// The SQL editor text in query mode.
+    pub query_text: RwSignal<String>,
+    /// The SQL console's backing document, so programmatic SQL (browse queries,
+    /// run-under-cursor, saved/history queries) can be pushed into the editor.
+    pub console_doc: RwSignal<Option<Rc<TextDocument>>>,
+    /// Height (px) of the SQL console editor; drag the handle below it to resize.
+    pub console_height: RwSignal<f64>,
+    /// The SQL console's editor handle + window origin, for schema completion.
+    pub console_editor: RwSignal<Option<Editor>>,
+    pub console_win: RwSignal<Point>,
+    /// Query-history panel: open state, current (searched) entries, search text.
+    pub history_open: RwSignal<bool>,
+    pub history: RwSignal<Vec<e_db::history::HistoryEntry>>,
+    pub history_query: RwSignal<String>,
+    /// SQL console result tabs (one per statement of the last run + pinned ones).
+    pub result_tabs: RwSignal<Vec<ResultTab>>,
+    pub active_tab: RwSignal<usize>,
+    /// Run generation: bumped on each run and on cancel, so a cancelled/superseded
+    /// query's result is discarded when it finally returns.
+    pub run_gen: RwSignal<u64>,
+    /// Total row count of the current browsed table (with filter), for paging.
+    pub total_rows: RwSignal<Option<i64>>,
+    /// EXPLAIN findings (full scans / missing indexes) for the current plan.
+    pub explain_issues: RwSignal<Vec<String>>,
+    /// The "search all tables" input.
+    pub search_query: RwSignal<String>,
+    /// Foreign-key relationships of the active DB (for the schema-relationships
+    /// view), and whether that panel is open.
+    pub erd: RwSignal<Vec<e_db::ForeignKey>>,
+    pub erd_open: RwSignal<bool>,
+    /// Session undo-log of executed writes (newest last), and the panel's state.
+    pub write_log: RwSignal<Vec<WriteLogEntry>>,
+    pub write_log_open: RwSignal<bool>,
+    /// Log entries for the in-flight submit, appended to the log on success.
+    pub pending_log: RwSignal<Vec<WriteLogEntry>>,
+    /// A destructive / non-local / submit action awaiting confirmation, if any.
+    pub confirm: RwSignal<Option<DbConfirm>>,
+    /// A `:param` prompt awaiting values, and the last-entered values to prefill.
+    pub params: RwSignal<Option<DbParams>>,
+    pub param_last: RwSignal<HashMap<String, String>>,
+    /// Staged cell edits `(row, col) -> edit` and staged row deletions
+    /// `row -> pk`, for transactional editing (Submit / Revert).
+    pub pending_edits: RwSignal<HashMap<(usize, usize), PendingEdit>>,
+    pub pending_deletes: RwSignal<HashMap<usize, RowPk>>,
+    /// The table being browsed (None in free-query mode).
+    pub result_table: RwSignal<Option<String>>,
+    /// Results subview: `data` or `structure`.
+    pub subview: RwSignal<String>,
+    /// Structure (column) metadata for the browsed table.
+    pub columns: RwSignal<Vec<e_db::ColumnInfo>>,
+    /// Indexes of the currently-inspected table (Structure subview).
+    pub indexes: RwSignal<Vec<e_db::IndexInfo>>,
+    /// Active sort: `(column, ascending)`.
+    pub sort: RwSignal<Option<(String, bool)>>,
+    /// Active data-view filter: `(column, Some(value) | None for IS NULL)`.
+    pub filter: RwSignal<Option<(String, Option<String>)>>,
+    /// Current page (0-based) when browsing a table.
+    pub page: RwSignal<usize>,
+    /// Test-connection state for the add form: ``/`testing`/`ok`/error.
+    pub test_state: RwSignal<String>,
+    /// The connection key being edited (None when adding a new one).
+    pub editing_key: RwSignal<Option<String>>,
+    /// Pending scroll delta for the results grid `(dx, dy, tick)`; the tick
+    /// makes every key press a distinct value so the scroll effect re-fires.
+    pub scroll: RwSignal<(f64, f64, u64)>,
+    /// An agent-proposed query awaiting the user's consent.
+    pub consent: RwSignal<Option<DbConsent>>,
+    /// Cached live DB schema `table -> columns`, for Eloquent completion.
+    pub schema_cache: RwSignal<std::collections::HashMap<String, Vec<e_db::ColumnInfo>>>,
+    /// The cell currently being edited `(row, col, column_name)`.
+    pub edit: RwSignal<Option<(usize, usize, String)>>,
+    pub edit_value: RwSignal<String>,
+    pub edit_null: RwSignal<bool>,
+    /// The cell (row, col) selected in the data grid, shown in the value viewer.
+    pub selected_cell: RwSignal<Option<(usize, usize)>>,
+    /// "Insert row" dialog: whether it's open, and one field per column.
+    pub insert_open: RwSignal<bool>,
+    pub insert_fields: RwSignal<Vec<InsertField>>,
+    /// Saved queries for the current project.
+    pub queries: RwSignal<Vec<e_db::SavedQuery>>,
+    /// Whether the "name this query" input is showing.
+    pub saving_query: RwSignal<bool>,
+    /// The name being typed for the query about to be saved.
+    pub query_name: RwSignal<String>,
+}
+
+impl DbPanel {
+    fn new() -> Self {
+        DbPanel {
+            width: RwSignal::new(280.0),
+            open: RwSignal::new(false),
+            conns: RwSignal::new(Vec::new()),
+            adding: RwSignal::new(false),
+            form: RwSignal::new(DbForm::default()),
+            result_open: RwSignal::new(false),
+            result: RwSignal::new(None),
+            result_title: RwSignal::new(String::new()),
+            result_error: RwSignal::new(None),
+            result_loading: RwSignal::new(false),
+            result_key: RwSignal::new(None),
+            query_text: RwSignal::new(String::new()),
+            console_doc: RwSignal::new(None),
+            console_height: RwSignal::new(120.0),
+            console_editor: RwSignal::new(None),
+            console_win: RwSignal::new(Point::ZERO),
+            history_open: RwSignal::new(false),
+            history: RwSignal::new(Vec::new()),
+            history_query: RwSignal::new(String::new()),
+            result_tabs: RwSignal::new(Vec::new()),
+            active_tab: RwSignal::new(0),
+            run_gen: RwSignal::new(0),
+            total_rows: RwSignal::new(None),
+            explain_issues: RwSignal::new(Vec::new()),
+            search_query: RwSignal::new(String::new()),
+            erd: RwSignal::new(Vec::new()),
+            erd_open: RwSignal::new(false),
+            write_log: RwSignal::new(Vec::new()),
+            write_log_open: RwSignal::new(false),
+            pending_log: RwSignal::new(Vec::new()),
+            confirm: RwSignal::new(None),
+            params: RwSignal::new(None),
+            param_last: RwSignal::new(HashMap::new()),
+            pending_edits: RwSignal::new(HashMap::new()),
+            pending_deletes: RwSignal::new(HashMap::new()),
+            result_table: RwSignal::new(None),
+            subview: RwSignal::new("data".into()),
+            columns: RwSignal::new(Vec::new()),
+            indexes: RwSignal::new(Vec::new()),
+            sort: RwSignal::new(None),
+            filter: RwSignal::new(None),
+            page: RwSignal::new(0),
+            test_state: RwSignal::new(String::new()),
+            editing_key: RwSignal::new(None),
+            scroll: RwSignal::new((0.0, 0.0, 0)),
+            consent: RwSignal::new(None),
+            schema_cache: RwSignal::new(std::collections::HashMap::new()),
+            edit: RwSignal::new(None),
+            edit_value: RwSignal::new(String::new()),
+            edit_null: RwSignal::new(false),
+            selected_cell: RwSignal::new(None),
+            insert_open: RwSignal::new(false),
+            insert_fields: RwSignal::new(Vec::new()),
+            queries: RwSignal::new(Vec::new()),
+            saving_query: RwSignal::new(false),
+            query_name: RwSignal::new(String::new()),
+        }
+    }
+}
+
 /// Global editor state.
 #[derive(Clone, Copy)]
 pub struct AppState {
@@ -463,136 +712,22 @@ pub struct AppState {
     /// Whether the About dialog is open.
     pub about_open: RwSignal<bool>,
 
-    // ---- Agent panel (right side) --------------------------------------
-    /// Whether the agent panel is visible (toggled with ⌘L).
-    pub agent_open: RwSignal<bool>,
     /// The configured agents (from config.json or built-in defaults).
     pub agents: RwSignal<Vec<AgentConfig>>,
-    /// The currently selected agent id.
-    pub agent_current: RwSignal<String>,
-    /// The running agent PTY, if started.
-    pub agent_term: RwSignal<Option<Rc<RefCell<Terminal>>>>,
-    /// Whether the agent panel currently has keyboard focus.
-    pub agent_focused: RwSignal<bool>,
-    /// Pulsed on open so the panel grabs focus without re-grabbing on close.
-    pub agent_focus_pulse: RwSignal<u64>,
 
-    // ---- Native agent (elyra RPC) --------------------------------------
-    /// The running native RPC client, if started.
-    pub agent_native_client: RwSignal<Option<Rc<e_agent::AgentClient>>>,
-    /// The folded conversation rendered by the native chat panel.
-    pub agent_chat: RwSignal<e_agent::ChatState>,
-    /// Current text in the native composer.
-    pub agent_composer: RwSignal<String>,
-    /// Backing document for the multi-line composer editor.
-    pub agent_composer_doc: RwSignal<Option<Rc<TextDocument>>>,
-    /// The composer editor handle (to reset its cursor after clearing).
-    pub agent_composer_editor: RwSignal<Option<Editor>>,
-    /// Shared queue of decoded events (fed by the reader-forwarder thread,
-    /// drained on the UI thread). Never coalesced, so no delta is lost.
-    pub agent_events: RwSignal<Arc<Mutex<VecDeque<e_agent::AgentEvent>>>>,
     /// Wake sender cloned into each forwarder thread to nudge the UI drain.
-    pub(crate) agent_wake_tx: RwSignal<std::sync::mpsc::Sender<()>>,
-    /// Taken once at startup to build the UI-thread drain bridge.
-    pub agent_wake_rx: RwSignal<Option<std::sync::mpsc::Receiver<()>>>,
 
     /// Draggable panel widths (pixels).
     pub sidebar_width: RwSignal<f64>,
-    pub agent_width: RwSignal<f64>,
-    pub db_width: RwSignal<f64>,
     /// Height of the bottom terminal panel (drag-resizable).
     pub term_height: RwSignal<f64>,
 
-    // ---- Database panel -------------------------------------------------
-    /// Whether the Database panel is visible (toggled with ⌘3).
-    pub db_open: RwSignal<bool>,
-    /// Saved connections for the current project.
-    pub db_conns: RwSignal<Vec<DbEntry>>,
-    /// Whether the add-connection form is showing.
-    pub db_adding: RwSignal<bool>,
-    /// The manual-connection form contents.
-    pub db_form: RwSignal<DbForm>,
-    /// Results overlay (table browse / query).
-    pub db_result_open: RwSignal<bool>,
-    pub db_result: RwSignal<Option<e_db::QueryResult>>,
-    pub db_result_title: RwSignal<String>,
-    pub db_result_error: RwSignal<Option<String>>,
-    pub db_result_loading: RwSignal<bool>,
-    /// The connection the results view runs queries against.
-    pub db_result_key: RwSignal<Option<String>>,
-    /// The SQL editor text in query mode.
-    pub db_query_text: RwSignal<String>,
-    /// The SQL console's backing document, so programmatic SQL (browse queries,
-    /// run-under-cursor, saved/history queries) can be pushed into the editor.
-    pub db_console_doc: RwSignal<Option<Rc<TextDocument>>>,
-    /// Height (px) of the SQL console editor; drag the handle below it to resize.
-    pub db_console_height: RwSignal<f64>,
-    /// The SQL console's editor handle + window origin, for schema completion.
-    pub db_console_editor: RwSignal<Option<Editor>>,
-    pub db_console_win: RwSignal<Point>,
-    /// Query-history panel: open state, current (searched) entries, search text.
-    pub db_history_open: RwSignal<bool>,
-    pub db_history: RwSignal<Vec<e_db::history::HistoryEntry>>,
-    pub db_history_query: RwSignal<String>,
-    /// SQL console result tabs (one per statement of the last run + pinned ones).
-    pub db_result_tabs: RwSignal<Vec<ResultTab>>,
-    pub db_active_tab: RwSignal<usize>,
-    /// Run generation: bumped on each run and on cancel, so a cancelled/superseded
-    /// query's result is discarded when it finally returns.
-    pub db_run_gen: RwSignal<u64>,
-    /// Total row count of the current browsed table (with filter), for paging.
-    pub db_total_rows: RwSignal<Option<i64>>,
-    /// EXPLAIN findings (full scans / missing indexes) for the current plan.
-    pub db_explain_issues: RwSignal<Vec<String>>,
-    /// The "search all tables" input.
-    pub db_search_query: RwSignal<String>,
     /// File-comparison panel: `(left name, right name, diff lines)` when open.
     pub file_diff: RwSignal<Option<(String, String, Vec<e_core::git::DiffLine>)>>,
     /// LSP code actions (quick fixes / refactors) offered at the cursor, and
     /// whether the picker is open.
     pub code_actions: RwSignal<Vec<e_lsp::CodeActionItem>>,
     pub code_actions_open: RwSignal<bool>,
-    /// Foreign-key relationships of the active DB (for the schema-relationships
-    /// view), and whether that panel is open.
-    pub db_erd: RwSignal<Vec<e_db::ForeignKey>>,
-    pub db_erd_open: RwSignal<bool>,
-    /// Session undo-log of executed writes (newest last), and the panel's state.
-    pub db_write_log: RwSignal<Vec<WriteLogEntry>>,
-    pub db_write_log_open: RwSignal<bool>,
-    /// Log entries for the in-flight submit, appended to the log on success.
-    pub db_pending_log: RwSignal<Vec<WriteLogEntry>>,
-    /// A destructive / non-local / submit action awaiting confirmation, if any.
-    pub db_confirm: RwSignal<Option<DbConfirm>>,
-    /// A `:param` prompt awaiting values, and the last-entered values to prefill.
-    pub db_params: RwSignal<Option<DbParams>>,
-    pub db_param_last: RwSignal<HashMap<String, String>>,
-    /// Staged cell edits `(row, col) -> edit` and staged row deletions
-    /// `row -> pk`, for transactional editing (Submit / Revert).
-    pub db_pending_edits: RwSignal<HashMap<(usize, usize), PendingEdit>>,
-    pub db_pending_deletes: RwSignal<HashMap<usize, RowPk>>,
-    /// The table being browsed (None in free-query mode).
-    pub db_result_table: RwSignal<Option<String>>,
-    /// Results subview: `data` or `structure`.
-    pub db_subview: RwSignal<String>,
-    /// Structure (column) metadata for the browsed table.
-    pub db_columns: RwSignal<Vec<e_db::ColumnInfo>>,
-    /// Indexes of the currently-inspected table (Structure subview).
-    pub db_indexes: RwSignal<Vec<e_db::IndexInfo>>,
-    /// Active sort: `(column, ascending)`.
-    pub db_sort: RwSignal<Option<(String, bool)>>,
-    /// Active data-view filter: `(column, Some(value) | None for IS NULL)`.
-    pub db_filter: RwSignal<Option<(String, Option<String>)>>,
-    /// Current page (0-based) when browsing a table.
-    pub db_page: RwSignal<usize>,
-    /// Test-connection state for the add form: ``/`testing`/`ok`/error.
-    pub db_test_state: RwSignal<String>,
-    /// The connection key being edited (None when adding a new one).
-    pub db_editing_key: RwSignal<Option<String>>,
-    /// Pending scroll delta for the results grid `(dx, dy, tick)`; the tick
-    /// makes every key press a distinct value so the scroll effect re-fires.
-    pub db_scroll: RwSignal<(f64, f64, u64)>,
-    /// An agent-proposed query awaiting the user's consent.
-    pub db_consent: RwSignal<Option<DbConsent>>,
 
     // ---- Tinker scratchpad ---------------------------------------------
     pub tinker_open: RwSignal<bool>,
@@ -602,15 +737,6 @@ pub struct AppState {
     // ---- Laravel architecture map --------------------------------------
     pub map_open: RwSignal<bool>,
     pub map_query: RwSignal<String>,
-
-    // ---- Agent socket: audit log, live marker, edit proposals ----------
-    /// Timeline of everything the agent did over the socket `(time, method, summary)`.
-    pub agent_log: RwSignal<Vec<(String, String, String)>>,
-    pub agent_log_open: RwSignal<bool>,
-    /// Where the agent is currently "looking" `(path, line0)` — a ghost marker.
-    pub agent_mark: RwSignal<Option<(PathBuf, usize)>>,
-    /// A pending edit the agent proposed, awaiting per-hunk review.
-    pub agent_edit: RwSignal<Option<AgentEdit>>,
 
     // ---- Semantic search -----------------------------------------------
     pub sem_open: RwSignal<bool>,
@@ -688,8 +814,6 @@ pub struct AppState {
     // ---- Laravel log tail ----------------------------------------------
     pub log_open: RwSignal<bool>,
     pub log_lines: RwSignal<Vec<String>>,
-    /// Cached live DB schema `table -> columns`, for Eloquent completion.
-    pub db_schema_cache: RwSignal<std::collections::HashMap<String, Vec<e_db::ColumnInfo>>>,
 
     // ---- Request replay (from the architecture map) --------------------
     pub req_open: RwSignal<bool>,
@@ -711,21 +835,6 @@ pub struct AppState {
     pub tdd_iteration: RwSignal<usize>,
     /// When true, a failing run asks the agent to fix and re-runs on apply.
     pub tdd_loop: RwSignal<bool>,
-    /// The cell currently being edited `(row, col, column_name)`.
-    pub db_edit: RwSignal<Option<(usize, usize, String)>>,
-    pub db_edit_value: RwSignal<String>,
-    pub db_edit_null: RwSignal<bool>,
-    /// The cell (row, col) selected in the data grid, shown in the value viewer.
-    pub db_selected_cell: RwSignal<Option<(usize, usize)>>,
-    /// "Insert row" dialog: whether it's open, and one field per column.
-    pub db_insert_open: RwSignal<bool>,
-    pub db_insert_fields: RwSignal<Vec<InsertField>>,
-    /// Saved queries for the current project.
-    pub db_queries: RwSignal<Vec<e_db::SavedQuery>>,
-    /// Whether the "name this query" input is showing.
-    pub db_saving_query: RwSignal<bool>,
-    /// The name being typed for the query about to be saved.
-    pub db_query_name: RwSignal<String>,
 
     // ---- Auto-update ----------------------------------------------------
     /// The available update, if GitHub reports a newer release.
@@ -776,6 +885,10 @@ pub struct AppState {
     pub nav_fwd_stack: RwSignal<Vec<(PathBuf, usize, usize)>>,
     /// Bumped when blame data finishes loading, to refresh the status bar.
     pub blame_rev: RwSignal<u64>,
+    /// Everything behind the database panel (⌘3).
+    pub db: DbPanel,
+    /// Everything behind the AI agent panel (⌘L).
+    pub agent: AgentPanel,
 }
 
 /// Extract the request path (`/foo/bar`) from a full replay URL.
@@ -1164,81 +1277,17 @@ impl AppState {
             file_op: FileOp::new(),
             fs_rev: RwSignal::new(0),
             about_open: RwSignal::new(false),
-            agent_open: RwSignal::new(false),
             agents: RwSignal::new(config::load_agents()),
-            agent_current: RwSignal::new(config::load_default_agent()),
-            agent_term: RwSignal::new(None),
-            agent_focused: RwSignal::new(false),
-            agent_focus_pulse: RwSignal::new(0),
-            agent_native_client: RwSignal::new(None),
-            agent_chat: RwSignal::new(e_agent::ChatState::new()),
-            agent_composer: RwSignal::new(String::new()),
-            agent_composer_doc: RwSignal::new(None),
-            agent_composer_editor: RwSignal::new(None),
-            agent_events: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
-            agent_wake_tx: RwSignal::new(agent_wake_tx),
-            agent_wake_rx: RwSignal::new(Some(agent_wake_rx)),
             sidebar_width: RwSignal::new(240.0),
-            agent_width: RwSignal::new(600.0),
-            db_width: RwSignal::new(280.0),
             term_height: RwSignal::new(320.0),
-            db_open: RwSignal::new(false),
-            db_conns: RwSignal::new(Vec::new()),
-            db_adding: RwSignal::new(false),
-            db_form: RwSignal::new(DbForm::default()),
-            db_result_open: RwSignal::new(false),
-            db_result: RwSignal::new(None),
-            db_result_title: RwSignal::new(String::new()),
-            db_result_error: RwSignal::new(None),
-            db_result_loading: RwSignal::new(false),
-            db_result_key: RwSignal::new(None),
-            db_query_text: RwSignal::new(String::new()),
-            db_console_doc: RwSignal::new(None),
-            db_console_height: RwSignal::new(120.0),
-            db_console_editor: RwSignal::new(None),
-            db_console_win: RwSignal::new(Point::ZERO),
-            db_history_open: RwSignal::new(false),
-            db_history: RwSignal::new(Vec::new()),
-            db_history_query: RwSignal::new(String::new()),
-            db_result_tabs: RwSignal::new(Vec::new()),
-            db_active_tab: RwSignal::new(0),
-            db_run_gen: RwSignal::new(0),
-            db_total_rows: RwSignal::new(None),
-            db_explain_issues: RwSignal::new(Vec::new()),
-            db_search_query: RwSignal::new(String::new()),
             file_diff: RwSignal::new(None),
             code_actions: RwSignal::new(Vec::new()),
             code_actions_open: RwSignal::new(false),
-            db_erd: RwSignal::new(Vec::new()),
-            db_erd_open: RwSignal::new(false),
-            db_write_log: RwSignal::new(Vec::new()),
-            db_write_log_open: RwSignal::new(false),
-            db_pending_log: RwSignal::new(Vec::new()),
-            db_confirm: RwSignal::new(None),
-            db_params: RwSignal::new(None),
-            db_param_last: RwSignal::new(HashMap::new()),
-            db_pending_edits: RwSignal::new(HashMap::new()),
-            db_pending_deletes: RwSignal::new(HashMap::new()),
-            db_result_table: RwSignal::new(None),
-            db_subview: RwSignal::new("data".into()),
-            db_columns: RwSignal::new(Vec::new()),
-            db_indexes: RwSignal::new(Vec::new()),
-            db_sort: RwSignal::new(None),
-            db_filter: RwSignal::new(None),
-            db_page: RwSignal::new(0),
-            db_test_state: RwSignal::new(String::new()),
-            db_editing_key: RwSignal::new(None),
-            db_scroll: RwSignal::new((0.0, 0.0, 0)),
-            db_consent: RwSignal::new(None),
             tinker_open: RwSignal::new(false),
             tinker_output: RwSignal::new(String::new()),
             tinker_running: RwSignal::new(false),
             map_open: RwSignal::new(false),
             map_query: RwSignal::new(String::new()),
-            agent_log: RwSignal::new(Vec::new()),
-            agent_log_open: RwSignal::new(false),
-            agent_mark: RwSignal::new(None),
-            agent_edit: RwSignal::new(None),
             sem_open: RwSignal::new(false),
             sem_query: RwSignal::new(String::new()),
             sem_status: RwSignal::new(String::new()),
@@ -1282,7 +1331,6 @@ impl AppState {
             ghost_gen: RwSignal::new(0),
             log_open: RwSignal::new(false),
             log_lines: RwSignal::new(Vec::new()),
-            db_schema_cache: RwSignal::new(std::collections::HashMap::new()),
             req_open: RwSignal::new(false),
             req_url: RwSignal::new(String::new()),
             req_status: RwSignal::new(None),
@@ -1297,15 +1345,6 @@ impl AppState {
             tdd_output: RwSignal::new(String::new()),
             tdd_iteration: RwSignal::new(0),
             tdd_loop: RwSignal::new(false),
-            db_edit: RwSignal::new(None),
-            db_edit_value: RwSignal::new(String::new()),
-            db_edit_null: RwSignal::new(false),
-            db_selected_cell: RwSignal::new(None),
-            db_insert_open: RwSignal::new(false),
-            db_insert_fields: RwSignal::new(Vec::new()),
-            db_queries: RwSignal::new(Vec::new()),
-            db_saving_query: RwSignal::new(false),
-            db_query_name: RwSignal::new(String::new()),
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
@@ -1329,6 +1368,8 @@ impl AppState {
             nav_back_stack: RwSignal::new(Vec::new()),
             nav_fwd_stack: RwSignal::new(Vec::new()),
             blame_rev: RwSignal::new(0),
+            db: DbPanel::new(),
+            agent: AgentPanel::new(agent_wake_tx, agent_wake_rx),
         }
     }
 
@@ -2493,7 +2534,7 @@ impl AppState {
 
     /// The currently selected agent's config.
     pub fn current_agent(&self) -> Option<AgentConfig> {
-        let id = self.agent_current.get_untracked();
+        let id = self.agent.current.get_untracked();
         self.agents
             .with_untracked(|list| list.iter().find(|a| a.id == id).cloned())
             .or_else(|| self.agents.with_untracked(|l| l.first().cloned()))
@@ -2501,25 +2542,25 @@ impl AppState {
 
     /// Toggle the agent panel, launching the agent on first open.
     pub fn toggle_agent(&self) {
-        let open = self.agent_open.get_untracked();
+        let open = self.agent.open.get_untracked();
         if open {
-            self.agent_open.set(false);
+            self.agent.open.set(false);
         } else {
-            self.agent_open.set(true);
+            self.agent.open.set(true);
             if self.use_native_agent() {
-                if self.agent_native_client.get_untracked().is_none() {
+                if self.agent.native_client.get_untracked().is_none() {
                     self.start_native_agent();
                 }
                 // Focus the composer once the panel has actually become visible
                 // (a synchronous focus request while still hidden is dropped).
                 let st = *self;
                 floem::action::exec_after(std::time::Duration::from_millis(30), move |_| {
-                    st.agent_focus_pulse.update(|x| *x += 1);
+                    st.agent.focus_pulse.update(|x| *x += 1);
                 });
-            } else if self.agent_term.get_untracked().is_none() {
+            } else if self.agent.term.get_untracked().is_none() {
                 self.start_agent();
             }
-            self.agent_focus_pulse.update(|x| *x += 1);
+            self.agent.focus_pulse.update(|x| *x += 1);
         }
     }
 
@@ -2562,9 +2603,9 @@ impl AppState {
 
         match AgentClient::spawn(&shell, &shell_args, &cwd, &[]) {
             Ok((client, rx)) => {
-                self.agent_chat.set(ChatState::new());
-                let queue = self.agent_events.get_untracked();
-                let wake = self.agent_wake_tx.get_untracked();
+                self.agent.chat.set(ChatState::new());
+                let queue = self.agent.events.get_untracked();
+                let wake = self.agent.wake_tx.get_untracked();
                 std::thread::Builder::new()
                     .name("e-agent-forward".into())
                     .spawn(move || {
@@ -2578,11 +2619,11 @@ impl AppState {
                         }
                     })
                     .ok();
-                self.agent_native_client.set(Some(Rc::new(client)));
+                self.agent.native_client.set(Some(Rc::new(client)));
             }
             Err(e) => {
                 eprintln!("e: native agent failed: {e:#}");
-                self.agent_chat.update(|c| {
+                self.agent.chat.update(|c| {
                     c.apply(e_agent::AgentEvent::Error {
                         message: format!("Could not start the agent: {e:#}"),
                     })
@@ -2598,29 +2639,29 @@ impl AppState {
         if text.is_empty() {
             return;
         }
-        if self.agent_native_client.get_untracked().is_none() {
+        if self.agent.native_client.get_untracked().is_none() {
             self.start_native_agent();
         }
         // Capture whether a turn was already running *before* we add this
         // message (push_user flips `running` on).
-        let busy = self.agent_chat.with_untracked(|c| c.running);
+        let busy = self.agent.chat.with_untracked(|c| c.running);
         // Always show the user's message, even if the agent isn't available.
-        self.agent_chat.update(|c| c.push_user(text));
-        let Some(client) = self.agent_native_client.get_untracked() else {
-            self.agent_chat.update(|c| {
+        self.agent.chat.update(|c| c.push_user(text));
+        let Some(client) = self.agent.native_client.get_untracked() else {
+            self.agent.chat.update(|c| {
                 c.apply(e_agent::AgentEvent::Error {
                     message: "The agent isn't running — check that `elyra` is installed and on your PATH."
                         .to_string(),
                 })
             });
-            self.agent_composer.set(String::new());
+            self.agent.composer.set(String::new());
             return;
         };
         let streaming = busy.then_some(Streaming::Steer);
         if let Err(e) = client.prompt(text, streaming) {
             eprintln!("e: agent prompt failed: {e:#}");
         }
-        self.agent_composer.set(String::new());
+        self.agent.composer.set(String::new());
     }
 
     /// Send the composer's contents and clear it. Both the network send and the
@@ -2628,7 +2669,7 @@ impl AppState {
     /// document from inside its own key handler is a reentrant borrow and aborts
     /// across the objc FFI boundary.
     pub fn send_composer(&self) {
-        let Some(doc) = self.agent_composer_doc.get_untracked() else {
+        let Some(doc) = self.agent.composer_doc.get_untracked() else {
             return;
         };
         let text = doc.text().to_string();
@@ -2650,7 +2691,7 @@ impl AppState {
                 // this the cursor keeps its old offset, past the end of the
                 // cleared buffer, and the next keystroke's delta aborts in
                 // xi-rope's Subset::transform.
-                if let Some(editor) = st.agent_composer_editor.get_untracked() {
+                if let Some(editor) = st.agent.composer_editor.get_untracked() {
                     editor.cursor.set(Cursor::new(
                         CursorMode::Insert(Selection::caret(0)),
                         None,
@@ -2663,17 +2704,17 @@ impl AppState {
 
     /// Abort the current native agent turn.
     pub fn native_agent_abort(&self) {
-        if let Some(client) = self.agent_native_client.get_untracked() {
+        if let Some(client) = self.agent.native_client.get_untracked() {
             let _ = client.abort();
         }
     }
 
     /// Restart the native agent in a fresh session.
     pub fn native_agent_new_session(&self) {
-        if let Some(client) = self.agent_native_client.get_untracked() {
+        if let Some(client) = self.agent.native_client.get_untracked() {
             let _ = client.new_session();
         }
-        self.agent_chat.set(ChatState::new());
+        self.agent.chat.set(ChatState::new());
     }
 
     /// (Re)start the selected agent in a fresh PTY.
@@ -2695,45 +2736,45 @@ impl AppState {
             let _ = tx.send(());
         });
         match Terminal::spawn_command(&agent.command, &cwd, 30, 100, on_update) {
-            Ok(t) => self.agent_term.set(Some(Rc::new(RefCell::new(t)))),
+            Ok(t) => self.agent.term.set(Some(Rc::new(RefCell::new(t)))),
             Err(e) => eprintln!("e: agent '{}' failed: {e:#}", agent.name),
         }
     }
 
     /// Switch to a different agent and restart the panel with it.
     pub fn select_agent(&self, id: &str) {
-        self.agent_current.set(id.to_string());
+        self.agent.current.set(id.to_string());
         config::save_default_agent(id);
         // Tear down whichever backend was running for the previous agent.
-        if let Some(client) = self.agent_native_client.get_untracked() {
+        if let Some(client) = self.agent.native_client.get_untracked() {
             client.shutdown();
         }
-        self.agent_native_client.set(None);
-        self.agent_term.set(None);
+        self.agent.native_client.set(None);
+        self.agent.term.set(None);
         if self.use_native_agent() {
             self.start_native_agent();
         } else {
             self.start_agent();
         }
-        self.agent_focus_pulse.update(|x| *x += 1);
+        self.agent.focus_pulse.update(|x| *x += 1);
     }
 
     pub fn restart_agent(&self) {
         if self.use_native_agent() {
-            if let Some(client) = self.agent_native_client.get_untracked() {
+            if let Some(client) = self.agent.native_client.get_untracked() {
                 client.shutdown();
             }
-            self.agent_native_client.set(None);
+            self.agent.native_client.set(None);
             self.start_native_agent();
         } else {
-            self.agent_term.set(None);
+            self.agent.term.set(None);
             self.start_agent();
         }
-        self.agent_focus_pulse.update(|x| *x += 1);
+        self.agent.focus_pulse.update(|x| *x += 1);
     }
 
     pub fn agent_input(&self, bytes: &[u8]) {
-        if let Some(t) = self.agent_term.get_untracked() {
+        if let Some(t) = self.agent.term.get_untracked() {
             t.borrow_mut().write(bytes);
         }
     }
@@ -2742,16 +2783,16 @@ impl AppState {
     /// focus it. Used by "Explain with agent" / "Fix with AI" affordances.
     pub fn send_to_agent(&self, prompt: &str) {
         if self.use_native_agent() {
-            if !self.agent_open.get_untracked() {
-                self.agent_open.set(true);
+            if !self.agent.open.get_untracked() {
+                self.agent.open.set(true);
             }
             self.send_native_prompt(prompt);
-            self.agent_focus_pulse.update(|x| *x += 1);
+            self.agent.focus_pulse.update(|x| *x += 1);
             return;
         }
-        let just_started = self.agent_term.get_untracked().is_none();
-        if !self.agent_open.get_untracked() {
-            self.agent_open.set(true);
+        let just_started = self.agent.term.get_untracked().is_none();
+        if !self.agent.open.get_untracked() {
+            self.agent.open.set(true);
         }
         if just_started {
             self.start_agent();
@@ -2762,25 +2803,27 @@ impl AppState {
         let delay = if just_started { 700 } else { 60 };
         floem::action::exec_after(std::time::Duration::from_millis(delay), move |_| {
             state.agent_input(text.as_bytes());
-            state.agent_focus_pulse.update(|x| *x += 1);
+            state.agent.focus_pulse.update(|x| *x += 1);
         });
     }
 
     pub fn agent_runs(&self) -> Vec<Vec<e_term::Run>> {
-        self.agent_term
+        self.agent
+            .term
             .get_untracked()
             .map(|t| t.borrow().snapshot_runs())
             .unwrap_or_default()
     }
 
     pub fn agent_cursor(&self) -> Option<(usize, usize)> {
-        self.agent_term
+        self.agent
+            .term
             .get_untracked()
             .and_then(|t| t.borrow().cursor())
     }
 
     pub fn resize_agent(&self, rows: usize, cols: usize) {
-        if let Some(t) = self.agent_term.get_untracked() {
+        if let Some(t) = self.agent.term.get_untracked() {
             t.borrow().resize(rows, cols);
         }
     }
@@ -3387,7 +3430,7 @@ impl AppState {
     /// Append an entry to the agent audit timeline (capped).
     pub fn agent_log_push(&self, method: &str, summary: String) {
         let entry = (now_hms(), method.to_string(), summary);
-        self.agent_log.update(|v| {
+        self.agent.log.update(|v| {
             v.push(entry);
             let len = v.len();
             if len > 500 {
@@ -3397,16 +3440,16 @@ impl AppState {
     }
 
     pub fn toggle_agent_log(&self) {
-        self.agent_log_open.update(|o| *o = !*o);
+        self.agent.log_open.update(|o| *o = !*o);
     }
 
     /// Record where the agent is currently looking (a ghost marker).
     pub fn set_agent_mark(&self, path: PathBuf, line: usize) {
-        self.agent_mark.set(Some((path, line)));
+        self.agent.mark.set(Some((path, line)));
     }
 
     pub fn jump_to_agent_mark(&self) {
-        if let Some((path, line)) = self.agent_mark.get_untracked() {
+        if let Some((path, line)) = self.agent.mark.get_untracked() {
             self.jump_to(&path_to_uri(&path), line, 0);
         }
     }
@@ -3446,15 +3489,15 @@ impl AppState {
             let _ = reply.send(serde_json::json!({"ok": true, "applied": 0, "note": "no changes"}));
             return;
         }
-        self.agent_edit.set(Some(AgentEdit { path, segs, reply }));
+        self.agent.edit.set(Some(AgentEdit { path, segs, reply }));
     }
 
     /// Apply the accepted hunks of the current proposal.
     pub fn agent_edit_apply(&self) {
-        let Some(edit) = self.agent_edit.get_untracked() else {
+        let Some(edit) = self.agent.edit.get_untracked() else {
             return;
         };
-        self.agent_edit.set(None);
+        self.agent.edit.set(None);
         let mut out = String::new();
         let mut applied = 0u32;
         for seg in &edit.segs {
@@ -3609,7 +3652,7 @@ impl AppState {
     /// Generate an Eloquent model from the table currently open in the database
     /// panel — fillable, casts, and relationships from the live schema + FKs.
     pub fn generate_model_from_table(&self) {
-        let Some(table) = self.db_result_table.get_untracked() else {
+        let Some(table) = self.db.result_table.get_untracked() else {
             Self::notify("Open a table in the database panel first");
             return;
         };
@@ -3667,7 +3710,8 @@ impl AppState {
         };
         let table = crate::eloquent::model_table(&root, &name);
         let cols = self
-            .db_schema_cache
+            .db
+            .schema_cache
             .with_untracked(|m| m.get(&table).cloned());
         let Some(cols) = cols.filter(|c| !c.is_empty()) else {
             Self::notify(&format!("No live schema for table `{table}`"));
@@ -3730,7 +3774,7 @@ impl AppState {
             return;
         };
         let src = buf.doc.text().to_string();
-        let schema = self.db_schema_cache.get_untracked();
+        let schema = self.db.schema_cache.get_untracked();
         let shared = crate::inertia::shared_props(&root);
         let routes: Vec<(String, String)> = self
             .laravel
@@ -3760,7 +3804,7 @@ impl AppState {
         let Some(c) = self.contract.get_untracked() else {
             return;
         };
-        let schema = self.db_schema_cache.get_untracked();
+        let schema = self.db.schema_cache.get_untracked();
         let ts = crate::contract::generate_ts(&c, &schema);
         let root = self.root.get_untracked();
         let dir = root.join("resources/js/types");
@@ -3862,8 +3906,8 @@ impl AppState {
     }
 
     pub fn agent_edit_cancel(&self) {
-        if let Some(edit) = self.agent_edit.get_untracked() {
-            self.agent_edit.set(None);
+        if let Some(edit) = self.agent.edit.get_untracked() {
+            self.agent.edit.set(None);
             let _ = edit
                 .reply
                 .send(serde_json::json!({"ok": true, "applied": 0, "cancelled": true}));
@@ -4591,7 +4635,7 @@ impl AppState {
         let root = self.root.get_untracked();
         let text = buf.doc.text().to_string();
         let mut diags: Vec<Diagnostic> = Vec::new();
-        self.db_schema_cache.with_untracked(|schema| {
+        self.db.schema_cache.with_untracked(|schema| {
             if schema.is_empty() {
                 return;
             }

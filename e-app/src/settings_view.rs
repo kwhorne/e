@@ -225,7 +225,7 @@ fn segmented_row(
 /// Default-agent picker built from the configured agents.
 fn default_agent_row(state: AppState) -> impl IntoView {
     let menu = label(move || {
-        let id = state.agent_current.get();
+        let id = state.agent.current.get();
         state
             .agents
             .with(|list| {
@@ -248,7 +248,7 @@ fn default_agent_row(state: AppState) -> impl IntoView {
             .hover(|s| s.background(theme::bg_hover()))
     })
     .popout_menu(move || {
-        let cur = state.agent_current.get_untracked();
+        let cur = state.agent.current.get_untracked();
         let mut m = floem::menu::Menu::new("");
         for a in state.agents.get_untracked() {
             let id = a.id.clone();

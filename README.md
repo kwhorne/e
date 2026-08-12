@@ -55,10 +55,10 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Multi-root workspaces**, **drag & drop** files to open, **select all occurrences** (`⌘⇧L`)
 - **Fuzzy file finder** (`⌘P`), **command palette** (`⌘⇧P`), **recent files** (`⌘E`)
 - **Open another project** (`⌘O`), **new file** (`⌘N`), **go to line** (`⌃G`)
-- **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search & replace** (`⌘⇧F`)
+- **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search & replace** (`⌘⇧F`) that honours your `.gitignore` and previews every file it would rewrite before touching disk
 - **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch switcher, commit history, stash, blame, merge-conflict resolution
 - **Agent session review** (`⌘⌥V`) — when an agent changes 50 files, review the changeset locally instead of on GitHub: risk-ranked (migrations/config/auth first, lockfiles/tests last), **automated flags** (leftover `dd(`, hardcoded secrets, interpolated raw SQL, destructive migrations, deleted authorization checks), sign off file by file, ask the agent why, revert a single file — then a **ship gate** (reviewed? tests green? flags?) and **Commit & PR** that branches, commits in logical groups and opens the PR via `gh`
-- **Database panel** (`⌘3`) — a full database IDE: browse & query MySQL, PostgreSQL, SQLite and ClickHouse; a real **SQL console** (highlighting, schema completion, multi-statement result tabs, query history, `:params`); **transactional editing** (stage → Submit/Revert) with production-aware safety rails; environment labels, pagination, value/JSON viewer; export CSV/JSON/SQL & CSV import; EXPLAIN + agent index migrations; views, DDL, schema relationships, snapshots, cross-table search
+- **Database panel** (`⌘3`) — a full database IDE: browse & query MySQL, PostgreSQL, SQLite and ClickHouse; a real **SQL console** (highlighting, schema completion, multi-statement result tabs, query history, `:params`); **transactional editing** (stage → Submit/Revert) with production-aware safety rails; environment labels, pagination, value/JSON viewer; export CSV/JSON/SQL & CSV import; EXPLAIN + agent index migrations; views, DDL, schema relationships, snapshots, cross-table search. Passwords live in the OS keychain, never in a config file
 - **Inline SQL in PHP** — SQL strings are syntax-highlighted; **run under cursor** (`⌘↵`), **EXPLAIN** (`⌥⌘↵`) flags full scans / missing indexes, and *Suggest Index* asks the agent for a migration
 - **Laravel intelligence** — completion, hover and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()` and `<x-…>` components, sourced from your project
 - **Eloquent completion** — `$model->` suggests real table columns from the live database schema, merged with the language server
@@ -189,7 +189,7 @@ Full user documentation also lives in [`docs/`](docs/README.md):
   (e.g. `intelephense`, `rust-analyzer`, `clangd`)
 - **Linux:** the system libraries listed under
   [Linux build dependencies](docs/installation.md#linux-build-dependencies)
-  (Wayland/X11 + Vulkan), and a Vulkan driver at runtime
+  (Wayland/X11 + Vulkan, and D-Bus for the keyring), and a Vulkan driver at runtime
 
 Pre-built releases are published for **macOS** (Apple Silicon + Intel) and
 **Linux** (x86_64 + arm64) on the

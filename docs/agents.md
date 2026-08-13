@@ -92,7 +92,9 @@ The agent isn't just a terminal — it gets a local Unix socket
 - **Propose edits you review** — the agent sends a new version of a file and you
   accept or reject each hunk before anything is written. No blind writes.
 - **Autonomous TDD** (`⌘⇧T`) — run the test suite and let the agent iterate on
-  failures (proposing edits you review) until the tests pass.
+  failures (proposing edits you review) until the tests pass. The panel lists
+  each failing test with its first assertion line; click one to open the file at
+  the failing line. See [Test results](laravel.md#test-results).
 - **Timeline** (`⌘⌥A`) — an audit log of everything the agent did over the
   socket, with a 🤖 marker showing where it's looking.
 

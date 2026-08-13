@@ -222,3 +222,21 @@ under the wrong token.
 If PHPStan itself fails — a broken config, a path that doesn't exist — the error
 is reported rather than swallowed. A run that never looked at your code must not
 be mistaken for a clean one.
+
+## Test results
+
+Press `⌘⇧T` for the test panel, or **Run tests** from the
+[ship gate](source-control.md#ship-it).
+
+Where the runner can write JUnit XML — `php artisan test`, Pest, PHPUnit,
+Vitest — the panel lists each failing test with its first assertion line, and
+clicking one opens the file at the failing line. The toolbar shows
+`12 passed · 2 failed · 1 skipped`, because *the suite failed* and *two of ninety
+tests failed* are different news.
+
+Runners that can't produce a report are run exactly as before, with their plain
+output. Nothing is passed a flag it doesn't take.
+
+> PHPUnit reports a failure's location only in the message text, not as an
+> attribute, so a failure it can't describe that way is listed without a link
+> rather than pointed somewhere wrong.

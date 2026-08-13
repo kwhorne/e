@@ -75,6 +75,38 @@ protocol.
    php artisan ...
    ```
 
+## PHP in Docker or Laravel Sail
+
+When PHP runs in a container, Xdebug reports the paths *it* sees —
+`/var/www/html/app/Models/User.php` — which exist nowhere on your machine. The
+adapter has to translate them back, or breakpoints simply never bind: no error,
+no stop, nothing.
+
+`e` reads `docker-compose.yml` (or `docker-compose.yaml` / `compose.yml`) and
+finds the bind mount of your project root, so a stock Laravel Sail setup works
+with no configuration:
+
+```yaml
+services:
+    laravel.test:
+        volumes:
+            - '.:/var/www/html'      # ← found automatically
+```
+
+Named volumes and unrelated bind mounts are ignored; only a mount of the project
+root itself is used. Both the short syntax above and the long
+`source:`/`target:` form are understood.
+
+For anything that can't be inferred — a remote interpreter over SSH, a mount
+defined outside compose — set the mapping yourself as JSON, remote path first:
+
+```sh
+E_PHP_PATH_MAPPINGS='{"/srv/app":"/Users/you/code/app"}' e .
+```
+
+A project with no compose file gets no mapping, which is correct for a native
+interpreter.
+
 ## Adapter discovery
 
 `e` finds adapters from installed VS Code / Cursor extensions automatically. To

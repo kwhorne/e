@@ -193,3 +193,32 @@ AI panel.
   refactors — point it at your project and let it work alongside you.
 - Use [workspace search](find-and-replace.md) (`⌘⇧F`) to find usages across
   Blade views and PHP classes at once.
+
+## Pint and PHPStan
+
+Both are picked up from `vendor/bin` — a project that doesn't use them gets
+nothing, with no configuration and no behaviour change.
+
+**Pint** becomes the formatter for PHP files. When the project ships
+`vendor/bin/pint` it takes precedence over the language server, because a
+Laravel project's formatting is whatever Pint says it is — that's what CI
+enforces, and letting Intelephense format to its own taste would only produce a
+diff for Pint to undo. It respects your `pint.json`: the buffer is formatted
+through a temporary file *beside the original*, so a preset scoped to `app/`
+sees the file as being in `app/`.
+
+**PHPStan** runs on save, over the file you just saved rather than the whole
+project, and its findings appear as warnings alongside the language server's.
+Each carries PHPStan's rule identifier (`variable.undefined`) as the diagnostic
+code, so you can look it up or baseline it. Larastan works too — it ships the
+same binary.
+
+It only runs when the project has both `vendor/bin/phpstan` and a config
+(`phpstan.neon`, `phpstan.neon.dist` or `phpstan.dist.neon`), since PHPStan
+needs the config to know its level and paths. Findings cover the whole line:
+PHPStan reports a line but no column, and guessing a span would put the squiggle
+under the wrong token.
+
+If PHPStan itself fails — a broken config, a path that doesn't exist — the error
+is reported rather than swallowed. A run that never looked at your code must not
+be mistaken for a clean one.

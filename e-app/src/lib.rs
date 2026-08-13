@@ -59,6 +59,7 @@ mod markdown_view;
 mod navigation;
 mod outline;
 mod palette;
+mod phptools;
 mod picker;
 mod policies;
 mod problems;

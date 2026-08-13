@@ -764,6 +764,12 @@ fn compose_mount_in(text: &str, root: &Path) -> Option<String> {
 mod path_mapping_tests {
     use super::*;
 
+    /// `E_PHP_PATH_MAPPINGS` is process-global, and Rust runs tests in parallel.
+    /// Without this, the test that sets it can be observed by the one that
+    /// asserts a project maps nothing — which is exactly how it failed on CI:
+    /// green on macOS, red on Linux, purely by scheduling.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn root() -> PathBuf {
         PathBuf::from("/Users/dev/shop")
     }
@@ -927,6 +933,7 @@ services:
 
     #[test]
     fn a_project_without_compose_maps_nothing() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Native `php artisan serve` needs no mapping, and inventing one would
         // break the case that already worked.
         let dir = std::env::temp_dir().join(format!("e-nocompose-{}", std::process::id()));
@@ -938,6 +945,7 @@ services:
 
     #[test]
     fn an_explicit_override_beats_detection() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("e-override-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -961,6 +969,8 @@ services:
 
     #[test]
     fn a_detected_mount_points_the_container_path_at_the_real_one() {
+        // Also reads the env var, so it takes the same lock.
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("e-sail-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Step debugging now works when PHP runs in a container.** The Xdebug launch
+  config sent an empty `pathMappings`, so the adapter had no way to turn the
+  `/var/www/html/...` paths Xdebug reports into files on disk — breakpoints
+  simply never bound, with no error to explain why. Debugging worked for a native
+  `php artisan serve` and not at all under Laravel Sail, which is how a large
+  share of Laravel projects run.
+
+  `e` now reads the project's `docker-compose.yml` and maps the bind mount of the
+  project root, so a stock Sail setup needs no configuration. Named volumes and
+  unrelated mounts are ignored, and `E_PHP_PATH_MAPPINGS` takes a JSON object for
+  setups that can't be inferred. A project without a compose file gets no
+  mapping, exactly as before.
+
 ## [0.9.11] - 2026-08-13
 
 ### Added

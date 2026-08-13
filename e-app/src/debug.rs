@@ -465,7 +465,7 @@ fn adapter_spec(
                 launch: json!({
                     "name": "Listen for Xdebug", "type": "php", "request": "launch",
                     "hostname": "127.0.0.1", "port": 9003, "stopOnEntry": false,
-                    "cwd": cwd, "pathMappings": {},
+                    "cwd": cwd, "pathMappings": php_path_mappings(root),
                 }),
             })
         }
@@ -661,4 +661,321 @@ fn php_debug_adapter_js() -> Option<PathBuf> {
         }
     }
     scan_extensions(|name| name.contains("php-debug"), &["out/phpDebug.js"])
+}
+
+// ---- Xdebug path mappings -------------------------------------------------
+
+/// Where the project lives *inside* the container, mapped back to disk.
+///
+/// Xdebug reports the paths the interpreter sees. Under Docker that is
+/// `/var/www/html/app/Models/User.php`, which exists nowhere on the developer's
+/// machine, so the adapter cannot match it to a file and every breakpoint
+/// silently fails to bind. The adapter wants `{ remote: local }` to bridge that.
+///
+/// This used to be sent empty, which is why step debugging worked for a native
+/// `php artisan serve` and not at all under Laravel Sail — the setup a large
+/// share of Laravel projects use.
+///
+/// Resolved in order:
+/// 1. `E_PHP_PATH_MAPPINGS`, a JSON object, for setups this cannot infer.
+/// 2. A bind mount of the project root in `docker-compose.yml`.
+/// 3. Nothing — which is correct for a native interpreter, and leaves the
+///    previous behaviour untouched.
+pub(crate) fn php_path_mappings(root: &Path) -> serde_json::Map<String, serde_json::Value> {
+    if let Some(explicit) = std::env::var("E_PHP_PATH_MAPPINGS")
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.as_object().cloned())
+    {
+        return explicit;
+    }
+    let mut out = serde_json::Map::new();
+    if let Some(remote) = compose_project_mount(root) {
+        out.insert(
+            remote,
+            serde_json::Value::String(root.to_string_lossy().into_owned()),
+        );
+    }
+    out
+}
+
+/// The container path the project root is bind-mounted to, from a compose file.
+fn compose_project_mount(root: &Path) -> Option<String> {
+    let text = ["docker-compose.yml", "docker-compose.yaml", "compose.yml"]
+        .iter()
+        .find_map(|f| std::fs::read_to_string(root.join(f)).ok())?;
+    compose_mount_in(&text, root)
+}
+
+/// Parse the bind mount of the project root out of a compose file.
+///
+/// Deliberately a line scan rather than a YAML parse: the shape being looked for
+/// is one entry, `- '.:/var/www/html'`, and pulling in a YAML dependency to read
+/// it would be a poor trade. The long form (`source:`/`target:`) is handled too,
+/// since that is what `docker compose config` emits.
+fn compose_mount_in(text: &str, root: &Path) -> Option<String> {
+    let root_str = root.to_string_lossy();
+    let is_project = |s: &str| {
+        let s = s.trim().trim_matches(['\'', '"']);
+        s == "." || s == "./" || s == "${PWD}" || s == "$PWD" || s == root_str
+    };
+
+    let mut pending_source: Option<bool> = None;
+    for line in text.lines() {
+        let t = line.trim();
+
+        // Long syntax, over two lines: `source: .` then `target: /var/www/html`.
+        if let Some(v) = t.strip_prefix("source:") {
+            pending_source = Some(is_project(v));
+            continue;
+        }
+        if let Some(v) = t.strip_prefix("target:") {
+            let target = v.trim().trim_matches(['\'', '"']);
+            if pending_source == Some(true) && target.starts_with('/') {
+                return Some(target.to_string());
+            }
+            pending_source = None;
+            continue;
+        }
+
+        // Short syntax: `- '.:/var/www/html'`, optionally with `:cached` etc.
+        let Some(entry) = t.strip_prefix('-') else {
+            continue;
+        };
+        let entry = entry.trim().trim_matches(['\'', '"']);
+        // Split off the source at the first `:` that starts an absolute target.
+        let Some(idx) = entry.find(":/") else {
+            continue;
+        };
+        let (source, rest) = entry.split_at(idx);
+        if !is_project(source) {
+            continue;
+        }
+        // `rest` is `:/var/www/html` or `:/var/www/html:cached`.
+        let target = rest[1..].split(':').next().unwrap_or("");
+        if target.starts_with('/') && target.len() > 1 {
+            return Some(target.trim_end_matches('/').to_string());
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod path_mapping_tests {
+    use super::*;
+
+    fn root() -> PathBuf {
+        PathBuf::from("/Users/dev/shop")
+    }
+
+    #[test]
+    fn laravel_sail_is_recognised() {
+        // The compose file Sail publishes, trimmed to what matters.
+        let yml = "\
+services:
+    laravel.test:
+        image: 'sail-8.4/app'
+        ports:
+            - '${APP_PORT:-80}:80'
+        volumes:
+            - '.:/var/www/html'
+        networks:
+            - sail
+";
+        assert_eq!(
+            compose_mount_in(yml, &root()).as_deref(),
+            Some("/var/www/html")
+        );
+    }
+
+    #[test]
+    fn a_whole_sail_compose_file_with_all_its_noise() {
+        // The trimmed fixtures above prove the parse; this proves it survives a
+        // real file — build contexts, port ranges, a named volume on another
+        // service, and a top-level `volumes:` block that also contains colons.
+        let yml = "\
+services:
+    laravel.test:
+        build:
+            context: './vendor/laravel/sail/runtimes/8.4'
+            dockerfile: Dockerfile
+        image: 'sail-8.4/app'
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+        ports:
+            - '${APP_PORT:-80}:80'
+            - '${VITE_PORT:-5173}:${VITE_PORT:-5173}'
+        environment:
+            XDEBUG_MODE: '${SAIL_XDEBUG_MODE:-off}'
+        volumes:
+            - '.:/var/www/html'
+        networks:
+            - sail
+        depends_on:
+            - mysql
+            - redis
+    mysql:
+        image: 'mysql/mysql-server:8.0'
+        ports:
+            - '${FORWARD_DB_PORT:-3306}:3306'
+        volumes:
+            - 'sail-mysql:/var/lib/mysql'
+            - './vendor/laravel/sail/database/mysql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh'
+        networks:
+            - sail
+networks:
+    sail:
+        driver: bridge
+volumes:
+    sail-mysql:
+        driver: local
+";
+        assert_eq!(
+            compose_mount_in(yml, &root()).as_deref(),
+            Some("/var/www/html"),
+            "the project mount must be found among everything else"
+        );
+    }
+
+    #[test]
+    fn mount_options_and_quoting_do_not_confuse_it() {
+        for entry in [
+            "            - '.:/var/www/html:cached'",
+            "            - \"./:/var/www/html\"",
+            "            - .:/var/www/html",
+            "            - ${PWD}:/var/www/html",
+            "            - '/Users/dev/shop:/var/www/html'",
+        ] {
+            let yml = format!("services:\n  app:\n    volumes:\n{entry}\n");
+            assert_eq!(
+                compose_mount_in(&yml, &root()).as_deref(),
+                Some("/var/www/html"),
+                "entry {entry}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_long_syntax_docker_compose_config_emits_is_handled() {
+        let yml = "\
+services:
+  app:
+    volumes:
+      - type: bind
+        source: .
+        target: /var/www/html
+        bind:
+          create_host_path: true
+";
+        assert_eq!(
+            compose_mount_in(yml, &root()).as_deref(),
+            Some("/var/www/html")
+        );
+    }
+
+    #[test]
+    fn volumes_that_are_not_the_project_are_ignored() {
+        // Named volumes and unrelated bind mounts must not be mistaken for the
+        // source tree — mapping those would send the debugger to the wrong file.
+        let yml = "\
+services:
+  app:
+    volumes:
+      - 'sail-mysql:/var/lib/mysql'
+      - './docker/php.ini:/usr/local/etc/php/conf.d/php.ini'
+      - '/etc/localtime:/etc/localtime:ro'
+volumes:
+  sail-mysql:
+    driver: local
+";
+        assert_eq!(compose_mount_in(yml, &root()), None);
+    }
+
+    #[test]
+    fn the_first_project_mount_wins_over_a_later_one() {
+        let yml = "\
+services:
+  app:
+    volumes:
+      - '.:/var/www/html'
+  worker:
+    volumes:
+      - '.:/app'
+";
+        assert_eq!(
+            compose_mount_in(yml, &root()).as_deref(),
+            Some("/var/www/html")
+        );
+    }
+
+    /// Opt-in: point at a real project on disk and print what would be sent.
+    /// `E_MAP_ROOT=/path/to/project cargo test -p e-app real_compose -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_compose_file() {
+        let Ok(root) = std::env::var("E_MAP_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let m = php_path_mappings(&root);
+        println!(
+            "pathMappings = {}",
+            serde_json::to_string_pretty(&m).unwrap()
+        );
+        assert!(!m.is_empty(), "expected a mapping for {}", root.display());
+    }
+
+    #[test]
+    fn a_project_without_compose_maps_nothing() {
+        // Native `php artisan serve` needs no mapping, and inventing one would
+        // break the case that already worked.
+        let dir = std::env::temp_dir().join(format!("e-nocompose-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(php_path_mappings(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_explicit_override_beats_detection() {
+        let dir = std::env::temp_dir().join(format!("e-override-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("docker-compose.yml"),
+            "services:\n  app:\n    volumes:\n      - '.:/var/www/html'\n",
+        )
+        .unwrap();
+
+        std::env::set_var("E_PHP_PATH_MAPPINGS", r#"{"/srv/app":"/elsewhere"}"#);
+        let m = php_path_mappings(&dir);
+        std::env::remove_var("E_PHP_PATH_MAPPINGS");
+
+        assert_eq!(m.len(), 1);
+        assert_eq!(
+            m.get("/srv/app").and_then(|v| v.as_str()),
+            Some("/elsewhere")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_detected_mount_points_the_container_path_at_the_real_one() {
+        let dir = std::env::temp_dir().join(format!("e-sail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("docker-compose.yml"),
+            "services:\n  laravel.test:\n    volumes:\n      - '.:/var/www/html'\n",
+        )
+        .unwrap();
+
+        let m = php_path_mappings(&dir);
+        assert_eq!(
+            m.get("/var/www/html").and_then(|v| v.as_str()),
+            Some(dir.to_string_lossy().as_ref()),
+            "the adapter maps remote -> local, in that direction"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

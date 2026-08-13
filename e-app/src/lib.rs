@@ -39,6 +39,7 @@ mod eloquent;
 mod emmet;
 mod events;
 mod events_view;
+mod evidence;
 mod file_ops;
 mod file_tree;
 mod find;

@@ -23,7 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   route that started failing is called out the same way. If the stash
   can't be taken the after-measurement still lands, labelled as such, and
   if it can't be restored `e` says so loudly and tells you where your work
-  is. Reachable from the ship gate next to **Run tests**.
+  is — and it no longer mistakes a clean tree for lost work. Where the
+  changeset carries a migration the section says so outright, because
+  stashing restores code but not the database, and a baseline measured
+  against the migrated schema produces numbers that look fine and aren't.
+  Reachable from the ship gate next to **Run tests**.
 
   Attribution is conservative on purpose. A route is only claimed when a
   controller it dispatches to changed, or when a routes file changed *and* the

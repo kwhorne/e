@@ -326,7 +326,7 @@ mod tests {
             metrics: Some(metrics(200, 95.0, 4, false)),
             note: None,
         }];
-        let md = evidence_markdown(&rows, 0);
+        let md = evidence_markdown(&rows, 0, &[]);
         assert!(md.contains("| Verdict |"), "{md}");
         assert!(md.contains("340 → 95 ms"), "{md}");
         assert!(md.contains("42 → 4"), "{md}");
@@ -345,7 +345,7 @@ mod tests {
             metrics: Some(metrics(200, 350.0, 40, true)),
             note: None,
         }];
-        let md = evidence_markdown(&rows, 0);
+        let md = evidence_markdown(&rows, 0, &[]);
         assert!(md.contains("**introduced**"), "{md}");
         assert!(md.contains("**regressed**"), "{md}");
     }
@@ -358,7 +358,7 @@ mod tests {
             metrics: Some(metrics(500, 5.0, 0, false)),
             note: None,
         }];
-        let md = evidence_markdown(&rows, 0);
+        let md = evidence_markdown(&rows, 0, &[]);
         assert!(md.contains("200 → 500"), "{md}");
         assert!(md.contains("**broke**"), "{md}");
     }
@@ -381,7 +381,7 @@ mod tests {
                 note: Some("added by this change".into()),
             },
         ];
-        let md = evidence_markdown(&rows, 0);
+        let md = evidence_markdown(&rows, 0, &[]);
         assert!(md.contains("`GET /new-page`"), "{md}");
         assert!(md.contains("added by this change"), "{md}");
         assert!(md.contains("Measured 2 of 2"), "{md}");
@@ -424,7 +424,7 @@ mod tests {
                 note: Some("not replayed: would write".into()),
             },
         ];
-        let md = evidence_markdown(&rows, 3);
+        let md = evidence_markdown(&rows, 3, &[]);
         assert!(
             md.contains("| `GET /orders` | 200 | 95 ms | 4 | no |"),
             "{md}"
@@ -442,7 +442,7 @@ mod tests {
             baseline: None,
             note: None,
         }];
-        assert!(evidence_markdown(&rows, 0).contains("**yes**"));
+        assert!(evidence_markdown(&rows, 0, &[]).contains("**yes**"));
     }
 
     #[test]
@@ -453,19 +453,37 @@ mod tests {
             baseline: None,
             note: None,
         }];
-        assert!(evidence_markdown(&rows, 0).contains("| 500 |"));
+        assert!(evidence_markdown(&rows, 0, &[]).contains("| 500 |"));
     }
 
     #[test]
     fn nothing_traced_says_so_rather_than_going_quiet() {
-        let md = evidence_markdown(&[], 7);
+        let md = evidence_markdown(&[], 7, &[]);
         assert!(md.contains("No route could be traced"), "{md}");
         assert!(md.contains("7 changed file(s)"), "{md}");
     }
 
     #[test]
+    fn a_caveat_is_stated_next_to_the_numbers() {
+        let rows = vec![RouteEvidence {
+            label: "GET /orders".into(),
+            baseline: Some(metrics(200, 340.0, 42, true)),
+            metrics: Some(metrics(200, 95.0, 4, false)),
+            note: None,
+        }];
+        let md = evidence_markdown(
+            &rows,
+            0,
+            &["the changeset includes a migration".to_string()],
+        );
+        assert!(md.contains("> the changeset includes a migration"), "{md}");
+        // After the table, so it qualifies numbers the reader has already seen.
+        assert!(md.find("340 → 95").unwrap() < md.find("> the changeset").unwrap());
+    }
+
+    #[test]
     fn no_changes_at_all_produces_no_section() {
-        assert_eq!(evidence_markdown(&[], 0), "");
+        assert_eq!(evidence_markdown(&[], 0, &[]), "");
     }
 
     use super::*;
@@ -686,7 +704,11 @@ fn verdict_word(v: Verdict) -> &'static str {
 /// assertion. Routes that were *not* measured stay in the table with their
 /// reason rather than being dropped, and `unattributed` is stated outright:
 /// "we measured 3 routes" reads very differently when 40 files went untraced.
-pub fn evidence_markdown(rows: &[RouteEvidence], unattributed: usize) -> String {
+pub fn evidence_markdown(
+    rows: &[RouteEvidence],
+    unattributed: usize,
+    caveats: &[String],
+) -> String {
     if rows.is_empty() && unattributed == 0 {
         return String::new();
     }
@@ -769,5 +791,10 @@ pub fn evidence_markdown(rows: &[RouteEvidence], unattributed: usize) -> String 
         ));
     }
     s.push_str(".\n");
+    // Anything that makes the numbers less trustworthy is stated next to them,
+    // not left for the reader to work out.
+    for c in caveats {
+        s.push_str(&format!("\n> {c}\n"));
+    }
     s
 }

@@ -190,6 +190,111 @@ impl AppState {
         })
     }
 
+    // ---- Evidence: which routes this changeset touches, and what they cost --
+
+    /// The project's route table, reduced to what attribution needs.
+    fn review_route_table(&self) -> Vec<e_review::routes::Route> {
+        self.laravel
+            .get_untracked()
+            .map(|d| {
+                d.routes
+                    .iter()
+                    .map(|r| e_review::routes::Route {
+                        name: r.name.clone(),
+                        uri: r.uri.clone(),
+                        methods: r.methods.clone(),
+                        action: r.action.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Which routes the current changeset reaches, and why.
+    pub fn review_attribution(&self) -> e_review::routes::Attribution {
+        let routes = self.review_route_table();
+        self.review_changeset
+            .with_untracked(|cs| e_review::routes::attribute(&cs.files, &routes))
+    }
+
+    /// Replay every affected route that can be replayed safely, and record what
+    /// it cost. This is what turns the pull request from a description of the
+    /// change into a measurement of it.
+    ///
+    /// Write routes are listed but never replayed — firing a PATCH at the app to
+    /// see how fast it is would change data.
+    pub fn review_measure_evidence(&self) {
+        if self.review_evidence_busy.get_untracked() {
+            return;
+        }
+        let attribution = self.review_attribution();
+        if attribution.affected.is_empty() {
+            self.review_evidence.set(Some(Vec::new()));
+            return;
+        }
+        let base = self.app_base();
+        let plan: Vec<(String, String, bool)> = attribution
+            .affected
+            .iter()
+            .map(|a| {
+                let method = a.route.methods.split('|').next().unwrap_or("GET").trim();
+                (
+                    format!("{method} /{}", a.route.uri.trim_start_matches('/')),
+                    a.route.uri.clone(),
+                    a.route.is_safe_to_replay(),
+                )
+            })
+            .collect();
+
+        self.review_evidence_busy.set(true);
+        let busy = self.review_evidence_busy;
+        let out = self.review_evidence;
+        let send = create_ext_action(self.cx, move |rows: Vec<e_verify::RouteEvidence>| {
+            busy.set(false);
+            out.set(Some(rows));
+        });
+        std::thread::spawn(move || {
+            let rows = plan
+                .into_iter()
+                .map(|(label, uri, safe)| {
+                    if !safe {
+                        return e_verify::RouteEvidence {
+                            label,
+                            metrics: None,
+                            note: Some("not replayed: would write".into()),
+                        };
+                    }
+                    // A URI with parameters has no value to substitute, and
+                    // guessing one would measure a 404 and call it evidence.
+                    if uri.contains('{') {
+                        return e_verify::RouteEvidence {
+                            label,
+                            metrics: None,
+                            note: Some("not replayed: needs parameters".into()),
+                        };
+                    }
+                    let url = crate::verify::replay_url(&base, &uri);
+                    let (status, ms, queries) = crate::state::replay_for_verify(&base, &url);
+                    let sample = crate::verify::sample_from_replay(status, ms, &queries);
+                    e_verify::RouteEvidence {
+                        label,
+                        metrics: Some(e_verify::metrics_of(&sample)),
+                        note: None,
+                    }
+                })
+                .collect();
+            send(rows);
+        });
+    }
+
+    /// The "## Evidence" block for the pull request, if anything was measured.
+    fn review_evidence_markdown(&self) -> Option<String> {
+        let rows = self.review_evidence.get_untracked()?;
+        let unattributed = self.review_attribution().unattributed.len();
+        let md = e_verify::evidence_markdown(&rows, unattributed);
+        (!md.is_empty()).then_some(md)
+    }
+
     // ---- Ship it (phase 5) ----------------------------------------------
 
     /// Create a branch, commit the changeset in logical groups, push, and open a
@@ -213,7 +318,16 @@ impl AppState {
         let verdict = self.review_ship_verdict();
         let tests = self.review_test_status();
         let summary = self.review_summary.get_untracked();
-        let body = commits::pr_body(&cs, &verdict, tests, danger, warn, summary.as_deref());
+        let evidence = self.review_evidence_markdown();
+        let body = commits::pr_body(
+            &cs,
+            &verdict,
+            tests,
+            danger,
+            warn,
+            summary.as_deref(),
+            evidence.as_deref(),
+        );
 
         self.review_shipping.set(true);
         let state = *self;

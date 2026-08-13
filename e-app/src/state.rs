@@ -795,6 +795,10 @@ pub struct AppState {
     /// The agent's written summary of the session (used as the PR description);
     /// set over the sync socket by `{"method":"review_summary"}`.
     pub review_summary: RwSignal<Option<String>>,
+    /// Measured evidence for the routes this changeset touches, once replayed.
+    /// `None` until someone asks for it — replaying hits the running app.
+    pub review_evidence: RwSignal<Option<Vec<e_verify::RouteEvidence>>>,
+    pub review_evidence_busy: RwSignal<bool>,
 
     // ---- Step-debugging (DAP session) ----------------------------------
     pub debug_open: RwSignal<bool>,
@@ -1320,6 +1324,8 @@ impl AppState {
             review_flags: RwSignal::new(Vec::new()),
             review_shipping: RwSignal::new(false),
             review_summary: RwSignal::new(None),
+            review_evidence: RwSignal::new(None),
+            review_evidence_busy: RwSignal::new(false),
             debug_open: RwSignal::new(false),
             debug_status: RwSignal::new("idle".to_string()),
             debug_thread: RwSignal::new(1),

@@ -178,6 +178,10 @@ pub fn pr_body(
     danger: usize,
     warn: usize,
     summary: Option<&str>,
+    // A pre-rendered "## Evidence" block from `e_verify::evidence_markdown`.
+    // Taken as text so this crate stays independent of the measurement crate;
+    // each half is tested where it lives.
+    evidence: Option<&str>,
 ) -> String {
     let mut s = String::from("## Summary\n\n");
     match summary {
@@ -198,6 +202,14 @@ pub fn pr_body(
             s.push_str(&format!("- `{p}`\n"));
         }
         s.push('\n');
+    }
+
+    if let Some(e) = evidence {
+        let e = e.trim();
+        if !e.is_empty() {
+            s.push_str(e);
+            s.push_str("\n\n");
+        }
     }
 
     let (done, total) = cs.progress();
@@ -309,6 +321,7 @@ mod tests {
             0,
             1,
             Some("Renamed email."),
+            None,
         );
 
         assert!(body.starts_with("## Summary\n\nRenamed email."), "{body}");
@@ -321,6 +334,42 @@ mod tests {
     }
 
     #[test]
+    fn pr_body_carries_evidence_between_changes_and_review() {
+        let cs = changeset_from_diff(&diff_of(&["app/Http/Controllers/OrderController.php"]));
+        let verdict = ship_verdict(&ShipCheck {
+            reviewed: cs.progress(),
+            danger_flags: 0,
+            warn_flags: 0,
+            tests: TestStatus::Passing,
+        });
+        let ev = "## Evidence\n\n| Route | Status |\n| --- | --- |\n| `GET /orders` | 200 |\n";
+        let body = pr_body(&cs, &verdict, TestStatus::Passing, 0, 0, None, Some(ev));
+        let changes = body.find("## Changes").unwrap();
+        let evidence = body.find("## Evidence").unwrap();
+        let review = body.find("## Review").unwrap();
+        assert!(changes < evidence && evidence < review, "{body}");
+        assert!(body.contains("`GET /orders`"));
+
+        // Without it the body is the same minus that section.
+        let plain = pr_body(&cs, &verdict, TestStatus::Passing, 0, 0, None, None);
+        assert!(!plain.contains("## Evidence"));
+        assert_eq!(plain, body.replace(&format!("{ev}\n"), ""));
+    }
+
+    #[test]
+    fn an_empty_evidence_block_adds_no_heading() {
+        let cs = changeset_from_diff(&diff_of(&["a.rs"]));
+        let verdict = ship_verdict(&ShipCheck {
+            reviewed: cs.progress(),
+            danger_flags: 0,
+            warn_flags: 0,
+            tests: TestStatus::Unknown,
+        });
+        let body = pr_body(&cs, &verdict, TestStatus::Unknown, 0, 0, None, Some(""));
+        assert!(!body.contains("## Evidence"));
+    }
+
+    #[test]
     fn pr_body_falls_back_to_auto_summary() {
         let cs = changeset_from_diff(&diff_of(&["app/A.php"]));
         let verdict = ship_verdict(&ShipCheck {
@@ -329,7 +378,7 @@ mod tests {
             warn_flags: 0,
             tests: TestStatus::Unknown,
         });
-        let body = pr_body(&cs, &verdict, TestStatus::Unknown, 0, 0, None);
+        let body = pr_body(&cs, &verdict, TestStatus::Unknown, 0, 0, None, None);
         assert!(body.contains("1 file · +"), "{body}");
     }
 

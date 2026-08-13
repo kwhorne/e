@@ -296,6 +296,84 @@ pub fn skeleton(sql: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{evidence_markdown, RouteEvidence};
+
+    fn metrics(status: u16, ms: f64, queries: usize, n1: bool) -> super::RequestMetrics {
+        let sample = super::RequestSample {
+            status,
+            duration_ms: ms,
+            queries: (0..queries)
+                .map(|i| super::Query {
+                    // All the same shape when we want an N+1, distinct otherwise.
+                    sql: if n1 {
+                        "select * from items where id = 1".into()
+                    } else {
+                        format!("select * from t{i}")
+                    },
+                    duration_ms: 1.0,
+                })
+                .collect(),
+            response_shape: None,
+        };
+        super::metrics_of(&sample)
+    }
+
+    #[test]
+    fn evidence_reports_what_was_measured_and_what_was_not() {
+        let rows = vec![
+            RouteEvidence {
+                label: "GET /orders".into(),
+                metrics: Some(metrics(200, 95.0, 4, false)),
+                note: None,
+            },
+            RouteEvidence {
+                label: "PATCH /orders/{order}".into(),
+                metrics: None,
+                note: Some("not replayed: would write".into()),
+            },
+        ];
+        let md = evidence_markdown(&rows, 3);
+        assert!(
+            md.contains("| `GET /orders` | 200 | 95 ms | 4 | no |"),
+            "{md}"
+        );
+        assert!(md.contains("not replayed: would write"), "{md}");
+        assert!(md.contains("Measured 1 of 2 attributed route(s)"), "{md}");
+        assert!(md.contains("3 changed file(s) could not be traced"), "{md}");
+    }
+
+    #[test]
+    fn an_n_plus_one_is_called_out() {
+        let rows = vec![RouteEvidence {
+            label: "GET /orders".into(),
+            metrics: Some(metrics(200, 340.0, 42, true)),
+            note: None,
+        }];
+        assert!(evidence_markdown(&rows, 0).contains("**yes**"));
+    }
+
+    #[test]
+    fn a_broken_route_shows_its_status() {
+        let rows = vec![RouteEvidence {
+            label: "GET /orders".into(),
+            metrics: Some(metrics(500, 12.0, 0, false)),
+            note: None,
+        }];
+        assert!(evidence_markdown(&rows, 0).contains("| 500 |"));
+    }
+
+    #[test]
+    fn nothing_traced_says_so_rather_than_going_quiet() {
+        let md = evidence_markdown(&[], 7);
+        assert!(md.contains("No route could be traced"), "{md}");
+        assert!(md.contains("7 changed file(s)"), "{md}");
+    }
+
+    #[test]
+    fn no_changes_at_all_produces_no_section() {
+        assert_eq!(evidence_markdown(&[], 0), "");
+    }
+
     use super::*;
 
     fn q(sql: &str, ms: f64) -> Query {
@@ -460,4 +538,66 @@ mod tests {
         assert_eq!(s.queries.len(), 2);
         assert_eq!(s.queries[1].duration_ms, 3.0);
     }
+}
+
+// ── evidence for a changeset ────────────────────────────────────────────
+
+/// What one route measured, for the record attached to a pull request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RouteEvidence {
+    /// `GET /orders`, as a reviewer would recognise it.
+    pub label: String,
+    /// The measurement, absent when the route was attributed but not replayed.
+    pub metrics: Option<RequestMetrics>,
+    /// Why it wasn't measured, when it wasn't.
+    pub note: Option<String>,
+}
+
+/// Render measured routes as the "Evidence" section of a pull request.
+///
+/// The point of the section is that a reviewer can tell measurement from
+/// assertion. Routes that were *not* measured stay in the table with their
+/// reason rather than being dropped, and `unattributed` is stated outright:
+/// "we measured 3 routes" reads very differently when 40 files went untraced.
+pub fn evidence_markdown(rows: &[RouteEvidence], unattributed: usize) -> String {
+    if rows.is_empty() && unattributed == 0 {
+        return String::new();
+    }
+    let mut s = String::from("## Evidence\n\n");
+    if rows.is_empty() {
+        s.push_str("No route could be traced to these changes, so nothing was measured.\n");
+    } else {
+        s.push_str(
+            "| Route | Status | Time | Queries | N+1 |\n| --- | ---: | ---: | ---: | --- |\n",
+        );
+        for r in rows {
+            match &r.metrics {
+                Some(m) => s.push_str(&format!(
+                    "| `{}` | {} | {:.0} ms | {} | {} |\n",
+                    r.label,
+                    m.status,
+                    m.ms,
+                    m.query_count,
+                    if m.has_n_plus_one() { "**yes**" } else { "no" },
+                )),
+                None => s.push_str(&format!(
+                    "| `{}` | — | — | — | {} |\n",
+                    r.label,
+                    r.note.as_deref().unwrap_or("not measured"),
+                )),
+            }
+        }
+    }
+    let measured = rows.iter().filter(|r| r.metrics.is_some()).count();
+    s.push_str(&format!(
+        "\nMeasured {measured} of {} attributed route(s)",
+        rows.len()
+    ));
+    if unattributed > 0 {
+        s.push_str(&format!(
+            "; {unattributed} changed file(s) could not be traced to a route"
+        ));
+    }
+    s.push_str(".\n");
+    s
 }

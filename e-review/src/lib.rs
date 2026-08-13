@@ -15,6 +15,7 @@
 
 pub mod commits;
 pub mod flags;
+pub mod routes;
 pub mod ship;
 
 use std::collections::HashMap;

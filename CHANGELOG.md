@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were none" are different claims. Reachable from the ship gate next to
   **Run tests**.
 
+  Each pass waits out PHP's opcache before measuring. `artisan serve` runs
+  the cli-server SAPI, where `opcache.revalidate_freq` applies — replaying
+  straight after stashing executes the *previous* bytecode, and a change
+  that removed a 25-query N+1 reports as `4 → 4 queries, regressed`. A
+  plausible number that is entirely an artefact of measuring too soon.
+
   Attribution is conservative on purpose. A route is only claimed when a
   controller it dispatches to changed, or when a routes file changed *and* the
   diff mentions that route — touching `routes/web.php` does not make every route

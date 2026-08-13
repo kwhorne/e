@@ -18,6 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Runners that can't produce a report are run exactly as before, with the plain
   output. Nothing is passed a flag it doesn't take.
+- **Pint and PHPStan.** The two tools a modern Laravel project's CI enforces,
+  which the editor previously knew nothing about. Both are picked up from
+  `vendor/bin`, so a project that doesn't use them is unaffected.
+
+  Pint becomes the formatter for PHP where the project ships it, taking
+  precedence over the language server — a Laravel project's formatting is
+  whatever Pint says it is, and letting Intelephense format to its own taste
+  only produces a diff for Pint to undo. `pint.json` is respected.
+
+  PHPStan runs on save over the saved file, and its findings show up as warnings
+  next to the language server's, each carrying the rule identifier
+  (`variable.undefined`) as its code. It needs a `phpstan.neon`, since that is
+  what sets the level and paths. When PHPStan itself fails — a broken config, a
+  missing path — the error is reported rather than swallowed, because a run that
+  never looked at your code must not read as a clean one.
 
 ### Fixed
 

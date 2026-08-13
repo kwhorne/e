@@ -333,6 +333,9 @@ pub struct Buffer {
     pub encoding: RwSignal<String>,
     /// Laravel query-builder lint diagnostics (unknown columns), merged with LSP.
     pub lint: Rc<RefCell<Vec<Diagnostic>>>,
+    /// PHPStan findings for this file, merged with LSP. Kept apart from `lint`
+    /// so a run of one never erases the other's results.
+    pub analysis: Rc<RefCell<Vec<Diagnostic>>>,
     /// Branching undo history (see [`e_core::undotree`]).
     pub undo: Rc<RefCell<e_core::undotree::UndoTree>>,
     /// When set, a text change is caused by undo-tree navigation, so it must
@@ -2931,6 +2934,7 @@ impl AppState {
             large: false,
             encoding: RwSignal::new("UTF-8".to_string()),
             lint: Rc::new(RefCell::new(Vec::new())),
+            analysis: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
             tab_width: self.settings.get_untracked().tab_width,
@@ -4324,6 +4328,7 @@ impl AppState {
             large,
             encoding: RwSignal::new(encoding),
             lint: Rc::new(RefCell::new(Vec::new())),
+            analysis: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
             tab_width: ec_tab,
@@ -4412,11 +4417,44 @@ impl AppState {
             .with(|bs| bs.iter().find(|b| b.id == active).cloned())
     }
 
-    /// Format the active buffer in place via the language server (PHP only).
+    /// Format through the project's Pint, if it has one. Returns whether it ran.
+    fn format_active_with_pint(&self, buf: &Buffer) -> bool {
+        if !matches!(buf.file.language, Language::Php) {
+            return false;
+        }
+        let Some(path) = buf.file.path.clone() else {
+            return false;
+        };
+        let root = self.root.get_untracked();
+        let text = buf.doc.text().to_string();
+        let Some(formatted) = crate::phptools::pint_format(&root, &path, &text) else {
+            return false;
+        };
+        // One whole-document edit, so it lands in the undo tree as a single step.
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let end = text.len();
+        editor.doc().edit_single(
+            floem::views::editor::core::selection::Selection::region(0, end),
+            &formatted,
+            floem_editor_core::editor::EditType::Other,
+        );
+        true
+    }
+
+    /// Format the active buffer in place.
+    ///
+    /// A Laravel project's formatting is whatever Pint says it is — that is what
+    /// CI enforces — so when the project ships Pint it wins over the language
+    /// server, which formats PHP to its own taste and would fight it.
     pub fn format_active(&self) {
         let Some(buf) = self.active_buffer() else {
             return;
         };
+        if self.format_active_with_pint(&buf) {
+            return;
+        }
         if self.lsp_language_id(buf.file.language).is_none() {
             return;
         }
@@ -4614,6 +4652,8 @@ impl AppState {
                 Self::refresh_disk_mtime(&buf);
                 self.fs_rev.update(|r| *r += 1);
                 self.load_blame(buf.id);
+                // PHPStan reads the file, so it can only run once it is written.
+                self.run_phpstan(buf.id);
                 self.request_inlay_hints(buf.id);
                 eprintln!("e: saved {}", path.display());
                 if let Some(uri) = buf.uri.as_ref() {
@@ -4639,8 +4679,69 @@ impl AppState {
         // Merge the LSP diagnostics with our Laravel query lint.
         let mut all = diags.to_vec();
         all.extend(buf.lint.borrow().iter().cloned());
+        all.extend(buf.analysis.borrow().iter().cloned());
         *buf.diag_lines.borrow_mut() = build_diag_lines(&all, &text);
         buf.doc.cache_rev().update(|r| *r += 1);
+    }
+
+    /// Run PHPStan over one file and attach its findings to the buffer.
+    ///
+    /// Off the UI thread, and a no-op unless the project actually ships PHPStan
+    /// with a config — analysing a project that never opted in would be slow and
+    /// wrong. Analysing the single saved file rather than the whole project
+    /// keeps it to something worth doing on every save.
+    pub fn run_phpstan(&self, buffer_id: u64) {
+        let Some(buf) = self.buffer_by_id(buffer_id) else {
+            return;
+        };
+        if !matches!(buf.file.language, Language::Php) {
+            return;
+        }
+        let (Some(path), Some(uri)) = (buf.file.path.clone(), buf.uri.clone()) else {
+            return;
+        };
+        let root = self.root.get_untracked();
+        let (Some(bin), true) = (
+            crate::phptools::phpstan_binary(&root),
+            crate::phptools::has_phpstan_config(&root),
+        ) else {
+            return;
+        };
+
+        let app = *self;
+        let send = create_ext_action(self.cx, move |diags: Vec<Diagnostic>| {
+            let Some(buf) = app
+                .buffers
+                .with_untracked(|bs| bs.iter().find(|b| b.uri.as_deref() == Some(&uri)).cloned())
+            else {
+                return;
+            };
+            if *buf.analysis.borrow() == diags {
+                return;
+            }
+            *buf.analysis.borrow_mut() = diags;
+            let lsp = app
+                .diagnostics
+                .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
+            app.apply_diagnostics_to_buffer(&uri, &lsp);
+        });
+
+        std::thread::spawn(move || {
+            let out = std::process::Command::new(&bin)
+                .args(["analyse", "--error-format=json", "--no-progress"])
+                .arg(&path)
+                .current_dir(&root)
+                .output();
+            let Ok(out) = out else { return };
+            let text = String::from_utf8_lossy(&out.stdout);
+            let Some(report) = crate::phptools::parse_phpstan(&text) else {
+                return;
+            };
+            for e in &report.errors {
+                eprintln!("e: phpstan: {e}");
+            }
+            send(crate::phptools::diagnostics_for(&report, &path));
+        });
     }
 
     /// Recompute Laravel query-builder lint (unknown columns) for a buffer and

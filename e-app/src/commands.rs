@@ -81,6 +81,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "agent-log" => state.toggle_agent_log(),
         "agent-send-selection" => state.send_selection_to_agent(),
         "session-review" => state.toggle_review(),
+        "review-measure-evidence" => state.review_measure_evidence(),
         "run-tests" => state.toggle_tdd(),
         "laravel-log" => state.toggle_laravel_log(),
         "runtime" => state.toggle_runtime(),

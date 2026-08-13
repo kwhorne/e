@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pull requests can now carry measurement instead of description.** The
+  session review knew *what* changed and the runtime capture knew what a request
+  *costs*, but nothing joined them. It does now: `Review: Measure Affected
+  Routes` works out which routes the changeset actually reaches, replays the
+  ones that are safe to replay, and puts the result — status, time, query count,
+  N+1 — into the pull-request body as an **Evidence** section.
+
+  Attribution is conservative on purpose. A route is only claimed when a
+  controller it dispatches to changed, or when a routes file changed *and* the
+  diff mentions that route — touching `routes/web.php` does not make every route
+  in the app suspect. Every claim carries the reason it was made, write routes
+  are listed but never replayed, routes needing URL parameters say so rather
+  than measuring a 404, and files that could not be traced to any route are
+  counted in the output rather than quietly dropped.
+
 ## [0.9.10] - 2026-08-12
 
 ### Changed

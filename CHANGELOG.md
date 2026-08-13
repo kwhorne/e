@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-08-13
+
 ### Added
 
 - **Pull requests can carry measurement instead of description.** The session
@@ -1158,7 +1160,8 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.10...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.11...HEAD
+[0.9.11]: https://github.com/kwhorne/e/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/kwhorne/e/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/kwhorne/e/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/kwhorne/e/compare/v0.9.7...v0.9.8

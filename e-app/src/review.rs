@@ -239,98 +239,78 @@ impl AppState {
         }
         let base = self.app_base();
         let root = self.root.get_untracked();
-        let plan: Vec<(String, String, Option<String>)> = attribution
+        let plan: Vec<crate::evidence::Planned> = attribution
             .affected
             .iter()
             .map(|a| {
                 let method = a.route.methods.split('|').next().unwrap_or("GET").trim();
-                let label = format!("{method} /{}", a.route.uri.trim_start_matches('/'));
-                let skip = if !a.route.is_safe_to_replay() {
-                    Some("not replayed: would write".to_string())
-                } else if a.route.uri.contains('{') {
-                    // Guessing a parameter would measure a 404 and call it evidence.
-                    Some("not replayed: needs parameters".to_string())
-                } else {
-                    None
-                };
-                (label, a.route.uri.clone(), skip)
+                crate::evidence::Planned {
+                    label: format!("{method} /{}", a.route.uri.trim_start_matches('/')),
+                    skip: if !a.route.is_safe_to_replay() {
+                        Some("not replayed: would write".to_string())
+                    } else if a.route.uri.contains('{') {
+                        // Guessing a parameter would measure a 404 and call it evidence.
+                        Some("not replayed: needs parameters".to_string())
+                    } else {
+                        None
+                    },
+                    uri: a.route.uri.clone(),
+                }
             })
             .collect();
 
         self.review_evidence_busy.set(true);
         let busy = self.review_evidence_busy;
         let out = self.review_evidence;
-        let state = *self;
-        let send = create_ext_action(
-            self.cx,
-            move |(rows, warning): (Vec<e_verify::RouteEvidence>, Option<String>)| {
-                busy.set(false);
-                out.set(Some(rows));
-                if let Some(w) = warning {
-                    AppState::notify(&w);
-                    eprintln!("e: {w}");
-                }
-                let _ = state;
-            },
-        );
+        let send = create_ext_action(self.cx, move |m: crate::evidence::Measured| {
+            busy.set(false);
+            out.set(Some(m.rows));
+            if let Some(w) = m.tree.warning() {
+                AppState::notify(&w);
+                eprintln!("e: {w}");
+            }
+        });
 
         std::thread::spawn(move || {
-            let measure = |uri: &str| {
+            let measured = crate::evidence::measure_before_and_after(&root, &plan, |uri| {
                 let url = crate::verify::replay_url(&base, uri);
                 let (status, ms, queries) = crate::state::replay_for_verify(&base, &url);
                 e_verify::metrics_of(&crate::verify::sample_from_replay(status, ms, &queries))
-            };
-
-            // 1. The change is in the tree: measure "after" first.
-            let after: Vec<Option<e_verify::RequestMetrics>> = plan
-                .iter()
-                .map(|(_, uri, skip)| skip.is_none().then(|| measure(uri)))
-                .collect();
-
-            // 2. Stash it away to expose the pre-change code.
-            let mut warning = None;
-            let mut before: Vec<Option<e_verify::RequestMetrics>> = vec![None; plan.len()];
-            match e_core::git::stash_push(&root) {
-                Ok(()) => {
-                    for (i, (_, uri, skip)) in plan.iter().enumerate() {
-                        if skip.is_none() {
-                            before[i] = Some(measure(uri));
-                        }
-                    }
-                    // 3. Put the change back. This is the step that must not be
-                    //    allowed to fail quietly: the user's work is in there.
-                    if let Err(e) = e_core::git::stash_pop(&root) {
-                        warning = Some(format!(
-                            "could not restore your changes after measuring ({e}) \u{2014}                              they are in `git stash`; run `git stash pop`"
-                        ));
-                    }
-                }
-                Err(e) => {
-                    warning = Some(format!(
-                        "measured the current state only: could not stash to get a baseline ({e})"
-                    ));
-                }
-            }
-
-            let rows = plan
-                .into_iter()
-                .enumerate()
-                .map(|(i, (label, _, skip))| e_verify::RouteEvidence {
-                    label,
-                    metrics: after[i].clone(),
-                    baseline: before[i].clone(),
-                    note: skip,
-                })
-                .collect();
-            send((rows, warning));
+            });
+            send(measured);
         });
+    }
+
+    /// Reasons the measurement should be read with care.
+    ///
+    /// Stashing moves the *code* out of the way; it does nothing to the
+    /// database. So when a changeset carries a migration, the baseline runs the
+    /// old code against the new schema — which produces numbers that look
+    /// perfectly plausible and are not a fair comparison. Silence there would be
+    /// worse than no evidence at all.
+    fn review_evidence_caveats(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let migrations = self.review_changeset.with_untracked(|cs| {
+            cs.files
+                .iter()
+                .filter(|f| f.path.contains("database/migrations/"))
+                .count()
+        });
+        if migrations > 0 {
+            out.push(format!(
+                "This changeset includes {migrations} migration(s). Stashing restores the \
+                 code but not the database, so the baseline ran the old code against the \
+                 migrated schema — treat the before column with suspicion."
+            ));
+        }
+        out
     }
 
     /// The "## Evidence" block for the pull request, if anything was measured.
     fn review_evidence_markdown(&self) -> Option<String> {
         let rows = self.review_evidence.get_untracked()?;
         let unattributed = self.review_attribution().unattributed.len();
-        let md = e_verify::evidence_markdown(&rows, unattributed);
+        let md = e_verify::evidence_markdown(&rows, unattributed, &self.review_evidence_caveats());
         (!md.is_empty()).then_some(md)
     }
 

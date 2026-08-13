@@ -991,6 +991,8 @@ fn offset_to_lc(text: &str, off: usize) -> (u32, u32) {
 }
 
 struct RequestResult {
+    /// Whether the app exposed Clockwork, i.e. whether `queries` is meaningful.
+    clockwork: bool,
     status: Option<u16>,
     time: String,
     body: String,
@@ -1040,7 +1042,11 @@ fn substitute_route_params(uri: &str) -> String {
 
 /// Replay a request for the "verify the fix" loop and return just the pieces the
 /// measurement core needs: `(status, duration_ms, queries)`.
-pub(crate) fn replay_for_verify(base: &str, url: &str) -> (u16, f64, Vec<(String, String)>) {
+/// Replay a request. The final flag reports whether query data was *visible* —
+/// false means the app has no Clockwork, so an empty query list means "we could
+/// not see" rather than "there were none". Conflating those two turns the
+/// evidence table into a confident lie.
+pub(crate) fn replay_for_verify(base: &str, url: &str) -> (u16, f64, Vec<(String, String)>, bool) {
     let rr = do_http_request(base, url);
     let ms = rr
         .time
@@ -1048,7 +1054,7 @@ pub(crate) fn replay_for_verify(base: &str, url: &str) -> (u16, f64, Vec<(String
         .parse::<f64>()
         .map(|secs| secs * 1000.0)
         .unwrap_or(0.0);
-    (rr.status.unwrap_or(0), ms, rr.queries)
+    (rr.status.unwrap_or(0), ms, rr.queries, rr.clockwork)
 }
 
 /// Perform the request via the system `curl` (`-k` so Grove's private-CA HTTPS
@@ -1075,6 +1081,7 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
         Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
         Err(e) => {
             return RequestResult {
+                clockwork: false,
                 status: None,
                 time: String::new(),
                 body: String::new(),
@@ -1096,6 +1103,7 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
 
     // Clockwork query capture, if the app has laravel/clockwork.
     let mut queries = Vec::new();
+    let mut clockwork = false;
     if let Ok(headers) = std::fs::read_to_string(&hdr) {
         let id = headers.lines().find_map(|l| {
             let (k, v) = l.split_once(':')?;
@@ -1106,6 +1114,7 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
             }
         });
         if let Some(id) = id {
+            clockwork = true;
             let cw = std::process::Command::new("curl")
                 .args(["-sk", "--max-time", "10"])
                 .arg(format!("{base}/__clockwork/{id}"))
@@ -1128,6 +1137,7 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
     let _ = std::fs::remove_file(&hdr);
     let inertia = extract_inertia(&body);
     RequestResult {
+        clockwork,
         status,
         time,
         body,

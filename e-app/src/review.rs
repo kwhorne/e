@@ -274,8 +274,11 @@ impl AppState {
         std::thread::spawn(move || {
             let measured = crate::evidence::measure_before_and_after(&root, &plan, |uri| {
                 let url = crate::verify::replay_url(&base, uri);
-                let (status, ms, queries) = crate::state::replay_for_verify(&base, &url);
-                e_verify::metrics_of(&crate::verify::sample_from_replay(status, ms, &queries))
+                let (status, ms, queries, visible) = crate::state::replay_for_verify(&base, &url);
+                (
+                    e_verify::metrics_of(&crate::verify::sample_from_replay(status, ms, &queries)),
+                    visible,
+                )
             });
             send(measured);
         });
@@ -290,6 +293,26 @@ impl AppState {
     /// worse than no evidence at all.
     fn review_evidence_caveats(&self) -> Vec<String> {
         let mut out = Vec::new();
+        // Query counts come from Clockwork. Without it the replay still reports
+        // status and timing, but the query and N+1 columns are blank rather than
+        // zero — say why, or a reader will read the blanks as "nothing to see".
+        let blind = self
+            .review_evidence
+            .with_untracked(|e| {
+                e.as_ref().map(|rows| {
+                    rows.iter()
+                        .any(|r| r.metrics.is_some() && !r.queries_visible)
+                })
+            })
+            .unwrap_or(false);
+        if blind {
+            out.push(
+                "This project exposes no Clockwork, so query counts and N+1 detection were \
+                 unavailable — only status and timing were measured. Install \
+                 `itsgoingd/clockwork` to get the rest."
+                    .to_string(),
+            );
+        }
         let migrations = self.review_changeset.with_untracked(|cs| {
             cs.files
                 .iter()

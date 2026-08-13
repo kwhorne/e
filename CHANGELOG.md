@@ -27,7 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changeset carries a migration the section says so outright, because
   stashing restores code but not the database, and a baseline measured
   against the migrated schema produces numbers that look fine and aren't.
-  Reachable from the ship gate next to **Run tests**.
+  Where the project exposes no Clockwork the query and N+1 columns read
+  *not visible* rather than zero, because "we could not see" and "there
+  were none" are different claims. Reachable from the ship gate next to
+  **Run tests**.
+
+  Each pass waits out PHP's opcache before measuring. `artisan serve` runs
+  the cli-server SAPI, where `opcache.revalidate_freq` applies — replaying
+  straight after stashing executes the *previous* bytecode, and a change
+  that removed a 25-query N+1 reports as `4 → 4 queries, regressed`. A
+  plausible number that is entirely an artefact of measuring too soon.
 
   Attribution is conservative on purpose. A route is only claimed when a
   controller it dispatches to changed, or when a routes file changed *and* the

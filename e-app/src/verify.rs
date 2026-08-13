@@ -178,7 +178,7 @@ impl AppState {
         });
         std::thread::spawn(move || {
             let cp = e_core::git::checkpoint(&root).ok();
-            let (status, ms, queries) = crate::state::replay_for_verify(&base, &url);
+            let (status, ms, queries, _visible) = crate::state::replay_for_verify(&base, &url);
             send((cp, sample_from_replay(status, ms, &queries)));
         });
     }
@@ -207,7 +207,7 @@ impl AppState {
             });
         });
         std::thread::spawn(move || {
-            let (status, ms, queries) = crate::state::replay_for_verify(&base, &url);
+            let (status, ms, queries, _visible) = crate::state::replay_for_verify(&base, &url);
             send(sample_from_replay(status, ms, &queries));
         });
     }

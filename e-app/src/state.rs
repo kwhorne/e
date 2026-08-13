@@ -836,6 +836,9 @@ pub struct AppState {
     pub tdd_open: RwSignal<bool>,
     pub tdd_status: RwSignal<TddStatus>,
     pub tdd_output: RwSignal<String>,
+    /// Parsed per-test results from the last run, when the runner could produce
+    /// them. Empty for runners that can't write JUnit XML.
+    pub tdd_results: RwSignal<crate::testrun::TestRun>,
     pub tdd_iteration: RwSignal<usize>,
     /// When true, a failing run asks the agent to fix and re-runs on apply.
     pub tdd_loop: RwSignal<bool>,
@@ -1359,6 +1362,7 @@ impl AppState {
             tdd_open: RwSignal::new(false),
             tdd_status: RwSignal::new(TddStatus::Idle),
             tdd_output: RwSignal::new(String::new()),
+            tdd_results: RwSignal::new(Default::default()),
             tdd_iteration: RwSignal::new(0),
             tdd_loop: RwSignal::new(false),
             update_info: RwSignal::new(None),

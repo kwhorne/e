@@ -90,6 +90,7 @@ mod tdd;
 mod tdd_state;
 mod terminal_state;
 mod terminal_view;
+mod testrun;
 mod theme;
 mod tinker;
 mod undo_view;

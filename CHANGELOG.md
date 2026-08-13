@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Test failures you can click.** Running the suite reported an exit code and
+  left you to find the failure by eye. Where the runner can write JUnit XML —
+  `php artisan test`, Pest, PHPUnit, Vitest — the TDD panel (`⌘⇧T`) now lists
+  each failure with its first assertion line, and clicking one opens the file at
+  the failing line. The toolbar shows `12 passed · 2 failed · 1 skipped`, since
+  "the suite failed" and "two of ninety tests failed" are different news.
+
+  Runners that can't produce a report are run exactly as before, with the plain
+  output. Nothing is passed a flag it doesn't take.
+
 ### Fixed
 
 - **Step debugging now works when PHP runs in a container.** The Xdebug launch

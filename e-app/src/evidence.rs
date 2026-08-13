@@ -73,16 +73,25 @@ pub struct Measured {
 /// leaves a longer window where the user's work is not in their tree.
 pub fn measure_before_and_after<M>(root: &Path, plan: &[Planned], mut measure: M) -> Measured
 where
-    M: FnMut(&str) -> RequestMetrics,
+    M: FnMut(&str) -> (RequestMetrics, bool),
 {
-    let measure_all = |m: &mut M| -> Vec<Option<RequestMetrics>> {
+    let mut queries_visible = vec![true; plan.len()];
+    let measure_all = |m: &mut M, vis: &mut Vec<bool>| -> Vec<Option<RequestMetrics>> {
         plan.iter()
-            .map(|p| p.skip.is_none().then(|| m(&p.uri)))
+            .enumerate()
+            .map(|(i, p)| {
+                p.skip.is_none().then(|| {
+                    let (metrics, visible) = m(&p.uri);
+                    // Either pass being blind makes the pair unusable.
+                    vis[i] &= visible;
+                    metrics
+                })
+            })
             .collect()
     };
 
     // 1. With the change.
-    let after = measure_all(&mut measure);
+    let after = measure_all(&mut measure, &mut queries_visible);
 
     // 2. Without it.
     let mut before: Vec<Option<RequestMetrics>> = vec![None; plan.len()];
@@ -96,7 +105,7 @@ where
             TreeOutcome::NothingToStash
         }
         Ok(()) => {
-            before = measure_all(&mut measure);
+            before = measure_all(&mut measure, &mut queries_visible);
             // 3. Put the change back. The step that must never fail quietly.
             match e_core::git::stash_pop(root) {
                 Ok(()) => TreeOutcome::Restored,
@@ -112,6 +121,7 @@ where
             label: p.label.clone(),
             metrics: after[i].clone(),
             baseline: before[i].clone(),
+            queries_visible: queries_visible[i],
             note: p.skip.clone(),
         })
         .collect();
@@ -179,10 +189,10 @@ mod tests {
     /// The measurement reads the working tree, so before/after genuinely differ
     /// by what the stash exposed — exactly as a replay against the running app
     /// would.
-    fn measure_from_tree(root: &Path) -> impl FnMut(&str) -> RequestMetrics + '_ {
+    fn measure_from_tree(root: &Path) -> impl FnMut(&str) -> (RequestMetrics, bool) + '_ {
         move |_uri| {
             let body = std::fs::read_to_string(root.join("app.php")).unwrap_or_default();
-            metrics(body.trim().parse().unwrap_or(0))
+            (metrics(body.trim().parse().unwrap_or(0)), true)
         }
     }
 
@@ -262,6 +272,22 @@ mod tests {
     }
 
     #[test]
+    fn one_blind_pass_makes_the_pair_blind() {
+        // If only one of the two measurements could see queries, the pair cannot
+        // be compared on queries at all — claiming otherwise would compare a
+        // real count against a phantom zero.
+        let root = repo("40\n");
+        std::fs::write(root.join("app.php"), "4\n").unwrap();
+        let mut call = 0;
+        let out = measure_before_and_after(&root, &plan(&["orders"]), |_| {
+            call += 1;
+            (metrics(call), call == 1) // visible on "after", blind on "before"
+        });
+        assert!(!out.rows[0].queries_visible);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn skipped_routes_are_never_replayed() {
         let root = repo("40\n");
         std::fs::write(root.join("app.php"), "4\n").unwrap();
@@ -280,7 +306,7 @@ mod tests {
         let mut hit: Vec<String> = Vec::new();
         let out = measure_before_and_after(&root, &plan, |uri| {
             hit.push(uri.to_string());
-            metrics(1)
+            (metrics(1), true)
         });
         assert_eq!(hit, ["orders", "orders"], "once after, once before");
         assert!(out.rows[1].metrics.is_none());
@@ -300,9 +326,9 @@ mod tests {
         let mut seen: Vec<usize> = Vec::new();
         let mut read = measure_from_tree(&root);
         measure_before_and_after(&root, &plan(&["orders"]), |uri| {
-            let m = read(uri);
+            let (m, visible) = read(uri);
             seen.push(m.query_count);
-            m
+            (m, visible)
         });
         assert_eq!(seen, [4, 40], "after (changed) first, then before");
         let _ = std::fs::remove_dir_all(&root);

@@ -324,6 +324,7 @@ mod tests {
             label: "GET /orders".into(),
             baseline: Some(metrics(200, 340.0, 42, true)),
             metrics: Some(metrics(200, 95.0, 4, false)),
+            queries_visible: true,
             note: None,
         }];
         let md = evidence_markdown(&rows, 0, &[]);
@@ -343,6 +344,7 @@ mod tests {
             label: "GET /orders".into(),
             baseline: Some(metrics(200, 90.0, 4, false)),
             metrics: Some(metrics(200, 350.0, 40, true)),
+            queries_visible: true,
             note: None,
         }];
         let md = evidence_markdown(&rows, 0, &[]);
@@ -356,6 +358,7 @@ mod tests {
             label: "GET /orders".into(),
             baseline: Some(metrics(200, 90.0, 4, false)),
             metrics: Some(metrics(500, 5.0, 0, false)),
+            queries_visible: true,
             note: None,
         }];
         let md = evidence_markdown(&rows, 0, &[]);
@@ -372,12 +375,14 @@ mod tests {
                 label: "GET /orders".into(),
                 baseline: Some(metrics(200, 340.0, 42, true)),
                 metrics: Some(metrics(200, 95.0, 4, false)),
+                queries_visible: true,
                 note: None,
             },
             RouteEvidence {
                 label: "GET /new-page".into(),
                 baseline: None,
                 metrics: Some(metrics(200, 20.0, 2, false)),
+                queries_visible: true,
                 note: Some("added by this change".into()),
             },
         ];
@@ -393,6 +398,7 @@ mod tests {
             label: "x".into(),
             baseline: Some(metrics(200, 100.0, 10, false)),
             metrics: Some(metrics(200, 50.0, 5, false)),
+            queries_visible: true,
             note: None,
         };
         assert_eq!(
@@ -403,6 +409,7 @@ mod tests {
             label: "x".into(),
             baseline: None,
             metrics: Some(metrics(200, 50.0, 5, false)),
+            queries_visible: true,
             note: None,
         };
         assert!(after_only.comparison().is_none());
@@ -415,12 +422,14 @@ mod tests {
                 label: "GET /orders".into(),
                 metrics: Some(metrics(200, 95.0, 4, false)),
                 baseline: None,
+                queries_visible: true,
                 note: None,
             },
             RouteEvidence {
                 label: "PATCH /orders/{order}".into(),
                 metrics: None,
                 baseline: None,
+                queries_visible: true,
                 note: Some("not replayed: would write".into()),
             },
         ];
@@ -440,6 +449,7 @@ mod tests {
             label: "GET /orders".into(),
             metrics: Some(metrics(200, 340.0, 42, true)),
             baseline: None,
+            queries_visible: true,
             note: None,
         }];
         assert!(evidence_markdown(&rows, 0, &[]).contains("**yes**"));
@@ -451,6 +461,7 @@ mod tests {
             label: "GET /orders".into(),
             metrics: Some(metrics(500, 12.0, 0, false)),
             baseline: None,
+            queries_visible: true,
             note: None,
         }];
         assert!(evidence_markdown(&rows, 0, &[]).contains("| 500 |"));
@@ -464,11 +475,47 @@ mod tests {
     }
 
     #[test]
+    fn invisible_queries_are_blank_not_zero() {
+        // Without Clockwork the replay sees no queries. Printing "42 → 0" or
+        // "N+1: no" would be a confident lie about data we never had.
+        let rows = vec![RouteEvidence {
+            label: "GET /orders".into(),
+            baseline: Some(metrics(200, 340.0, 0, false)),
+            metrics: Some(metrics(200, 95.0, 0, false)),
+            queries_visible: false,
+            note: None,
+        }];
+        let md = evidence_markdown(&rows, 0, &[]);
+        assert!(md.contains("340 → 95 ms"), "timing is still real: {md}");
+        assert!(md.contains("| — |"), "query cell must be blank: {md}");
+        assert!(md.contains("not visible"), "{md}");
+        assert!(
+            !md.contains("0 → 0"),
+            "must not report a count it never had: {md}"
+        );
+    }
+
+    #[test]
+    fn invisible_queries_are_blank_in_the_after_only_table_too() {
+        let rows = vec![RouteEvidence {
+            label: "GET /orders".into(),
+            baseline: None,
+            metrics: Some(metrics(200, 95.0, 0, false)),
+            queries_visible: false,
+            note: None,
+        }];
+        let md = evidence_markdown(&rows, 0, &[]);
+        assert!(md.contains("not visible"), "{md}");
+        assert!(!md.contains("| 0 |"), "{md}");
+    }
+
+    #[test]
     fn a_caveat_is_stated_next_to_the_numbers() {
         let rows = vec![RouteEvidence {
             label: "GET /orders".into(),
             baseline: Some(metrics(200, 340.0, 42, true)),
             metrics: Some(metrics(200, 95.0, 4, false)),
+            queries_visible: true,
             note: None,
         }];
         let md = evidence_markdown(
@@ -667,6 +714,11 @@ pub struct RouteEvidence {
     /// which is what turns "this route costs 95 ms" into "this change took it
     /// from 340 ms to 95 ms".
     pub baseline: Option<RequestMetrics>,
+    /// Whether query data was visible at all. False means the app exposed no
+    /// Clockwork, so an empty query list means "we could not see" rather than
+    /// "there were none" — and the query and N+1 columns must say so instead of
+    /// reporting a confident zero.
+    pub queries_visible: bool,
     /// Why it wasn't measured, when it wasn't.
     pub note: Option<String>,
 }
@@ -725,7 +777,7 @@ pub fn evidence_markdown(
                 (Some(b), Some(a)) => {
                     let c = compare(b, a);
                     s.push_str(&format!(
-                        "| `{}` | {} | {:.0} → {:.0} ms | {} → {} | {} | {} |\n",
+                        "| `{}` | {} | {:.0} → {:.0} ms | {} | {} | {} |\n",
                         r.label,
                         if c.status_changed {
                             format!("{} → {}", b.status, a.status)
@@ -734,9 +786,16 @@ pub fn evidence_markdown(
                         },
                         b.ms,
                         a.ms,
-                        b.query_count,
-                        a.query_count,
-                        n1_cell(c.n1_before, c.n1_after),
+                        if r.queries_visible {
+                            format!("{} → {}", b.query_count, a.query_count)
+                        } else {
+                            "—".into()
+                        },
+                        if r.queries_visible {
+                            n1_cell(c.n1_before, c.n1_after).to_string()
+                        } else {
+                            "not visible".into()
+                        },
                         verdict_word(c.verdict),
                     ));
                 }
@@ -747,8 +806,16 @@ pub fn evidence_markdown(
                     r.label,
                     a.status,
                     a.ms,
-                    a.query_count,
-                    if a.has_n_plus_one() { "**yes**" } else { "no" },
+                    if r.queries_visible {
+                        a.query_count.to_string()
+                    } else {
+                        "—".into()
+                    },
+                    if r.queries_visible {
+                        if a.has_n_plus_one() { "**yes**" } else { "no" }.to_string()
+                    } else {
+                        "not visible".into()
+                    },
                     r.note.as_deref().unwrap_or("after only"),
                 )),
                 _ => s.push_str(&format!(
@@ -769,8 +836,16 @@ pub fn evidence_markdown(
                     r.label,
                     m.status,
                     m.ms,
-                    m.query_count,
-                    if m.has_n_plus_one() { "**yes**" } else { "no" },
+                    if r.queries_visible {
+                        m.query_count.to_string()
+                    } else {
+                        "—".into()
+                    },
+                    if r.queries_visible {
+                        if m.has_n_plus_one() { "**yes**" } else { "no" }.to_string()
+                    } else {
+                        "not visible".into()
+                    },
                 )),
                 None => s.push_str(&format!(
                     "| `{}` | — | — | — | {} |\n",

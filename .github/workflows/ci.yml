@@ -36,6 +36,12 @@ jobs:
         run: cargo build --workspace
       - name: Test
         run: cargo test --workspace
+      # `vendor/floem` is excluded from our workspace, so `--workspace` never
+      # reaches it — including the tests that hold our own fixes there in place
+      # (editor-core/tests/edit_robustness.rs pins two ways `Buffer::edit` could
+      # abort the process). editor-core has no GUI dependencies, so this is cheap.
+      - name: Test the vendored fork
+        run: cargo test --manifest-path vendor/floem/editor-core/Cargo.toml
 
   build-linux:
     name: Build & Test (Linux)
@@ -58,6 +64,12 @@ jobs:
         run: cargo build --workspace
       - name: Test
         run: cargo test --workspace
+      # `vendor/floem` is excluded from our workspace, so `--workspace` never
+      # reaches it — including the tests that hold our own fixes there in place
+      # (editor-core/tests/edit_robustness.rs pins two ways `Buffer::edit` could
+      # abort the process). editor-core has no GUI dependencies, so this is cheap.
+      - name: Test the vendored fork
+        run: cargo test --manifest-path vendor/floem/editor-core/Cargo.toml
 
   corpus:
     name: Parser corpus (real Laravel projects)

@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ones that are safe to replay, and puts the result — status, time, query count,
   N+1 — into the pull-request body as an **Evidence** section.
 
+  Each route is measured **twice**: once with the change, then again with
+  the working tree stashed, so the section reports what the change *did*
+  rather than where things currently stand — `340 → 95 ms`, `42 → 4`
+  queries, N+1 **removed**, verdict *improved*. An N+1 introduced or a
+  route that started failing is called out the same way. If the stash
+  can't be taken the after-measurement still lands, labelled as such, and
+  if it can't be restored `e` says so loudly and tells you where your work
+  is. Reachable from the ship gate next to **Run tests**.
+
   Attribution is conservative on purpose. A route is only claimed when a
   controller it dispatches to changed, or when a routes file changed *and* the
   diff mentions that route — touching `routes/web.php` does not make every route

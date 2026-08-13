@@ -319,16 +319,108 @@ mod tests {
     }
 
     #[test]
+    fn a_before_and_after_row_shows_the_change_not_the_state() {
+        let rows = vec![RouteEvidence {
+            label: "GET /orders".into(),
+            baseline: Some(metrics(200, 340.0, 42, true)),
+            metrics: Some(metrics(200, 95.0, 4, false)),
+            note: None,
+        }];
+        let md = evidence_markdown(&rows, 0);
+        assert!(md.contains("| Verdict |"), "{md}");
+        assert!(md.contains("340 → 95 ms"), "{md}");
+        assert!(md.contains("42 → 4"), "{md}");
+        assert!(
+            md.contains("**removed**"),
+            "n+1 removal must be called out: {md}"
+        );
+        assert!(md.contains("improved"), "{md}");
+    }
+
+    #[test]
+    fn a_regression_and_an_introduced_n1_are_called_out() {
+        let rows = vec![RouteEvidence {
+            label: "GET /orders".into(),
+            baseline: Some(metrics(200, 90.0, 4, false)),
+            metrics: Some(metrics(200, 350.0, 40, true)),
+            note: None,
+        }];
+        let md = evidence_markdown(&rows, 0);
+        assert!(md.contains("**introduced**"), "{md}");
+        assert!(md.contains("**regressed**"), "{md}");
+    }
+
+    #[test]
+    fn a_route_that_started_failing_shows_both_statuses_and_breaks() {
+        let rows = vec![RouteEvidence {
+            label: "GET /orders".into(),
+            baseline: Some(metrics(200, 90.0, 4, false)),
+            metrics: Some(metrics(500, 5.0, 0, false)),
+            note: None,
+        }];
+        let md = evidence_markdown(&rows, 0);
+        assert!(md.contains("200 → 500"), "{md}");
+        assert!(md.contains("**broke**"), "{md}");
+    }
+
+    #[test]
+    fn a_route_with_no_baseline_stays_in_the_before_after_table() {
+        // One route measured both ways, one only after: the second must not be
+        // dropped just because the table gained a Verdict column.
+        let rows = vec![
+            RouteEvidence {
+                label: "GET /orders".into(),
+                baseline: Some(metrics(200, 340.0, 42, true)),
+                metrics: Some(metrics(200, 95.0, 4, false)),
+                note: None,
+            },
+            RouteEvidence {
+                label: "GET /new-page".into(),
+                baseline: None,
+                metrics: Some(metrics(200, 20.0, 2, false)),
+                note: Some("added by this change".into()),
+            },
+        ];
+        let md = evidence_markdown(&rows, 0);
+        assert!(md.contains("`GET /new-page`"), "{md}");
+        assert!(md.contains("added by this change"), "{md}");
+        assert!(md.contains("Measured 2 of 2"), "{md}");
+    }
+
+    #[test]
+    fn comparison_is_available_when_both_halves_exist() {
+        let both = RouteEvidence {
+            label: "x".into(),
+            baseline: Some(metrics(200, 100.0, 10, false)),
+            metrics: Some(metrics(200, 50.0, 5, false)),
+            note: None,
+        };
+        assert_eq!(
+            both.comparison().map(|c| c.verdict),
+            Some(Verdict::Improved)
+        );
+        let after_only = RouteEvidence {
+            label: "x".into(),
+            baseline: None,
+            metrics: Some(metrics(200, 50.0, 5, false)),
+            note: None,
+        };
+        assert!(after_only.comparison().is_none());
+    }
+
+    #[test]
     fn evidence_reports_what_was_measured_and_what_was_not() {
         let rows = vec![
             RouteEvidence {
                 label: "GET /orders".into(),
                 metrics: Some(metrics(200, 95.0, 4, false)),
+                baseline: None,
                 note: None,
             },
             RouteEvidence {
                 label: "PATCH /orders/{order}".into(),
                 metrics: None,
+                baseline: None,
                 note: Some("not replayed: would write".into()),
             },
         ];
@@ -347,6 +439,7 @@ mod tests {
         let rows = vec![RouteEvidence {
             label: "GET /orders".into(),
             metrics: Some(metrics(200, 340.0, 42, true)),
+            baseline: None,
             note: None,
         }];
         assert!(evidence_markdown(&rows, 0).contains("**yes**"));
@@ -357,6 +450,7 @@ mod tests {
         let rows = vec![RouteEvidence {
             label: "GET /orders".into(),
             metrics: Some(metrics(500, 12.0, 0, false)),
+            baseline: None,
             note: None,
         }];
         assert!(evidence_markdown(&rows, 0).contains("| 500 |"));
@@ -547,10 +641,43 @@ mod tests {
 pub struct RouteEvidence {
     /// `GET /orders`, as a reviewer would recognise it.
     pub label: String,
-    /// The measurement, absent when the route was attributed but not replayed.
+    /// The measurement with the change applied. Absent when the route was
+    /// attributed but not replayed.
     pub metrics: Option<RequestMetrics>,
+    /// The same route measured *without* the change. Present only when the
+    /// working tree could be stashed and restored around a second replay —
+    /// which is what turns "this route costs 95 ms" into "this change took it
+    /// from 340 ms to 95 ms".
+    pub baseline: Option<RequestMetrics>,
     /// Why it wasn't measured, when it wasn't.
     pub note: Option<String>,
+}
+
+impl RouteEvidence {
+    /// The before/after verdict, when both halves were measured.
+    pub fn comparison(&self) -> Option<Comparison> {
+        Some(compare(self.baseline.as_ref()?, self.metrics.as_ref()?))
+    }
+}
+
+/// How the N+1 column reads when both sides were measured.
+fn n1_cell(before: bool, after: bool) -> &'static str {
+    match (before, after) {
+        (true, false) => "**removed**",
+        (false, true) => "**introduced**",
+        (true, true) => "yes",
+        (false, false) => "no",
+    }
+}
+
+/// One word for a verdict, for the table.
+fn verdict_word(v: Verdict) -> &'static str {
+    match v {
+        Verdict::Improved => "improved",
+        Verdict::NoChange => "no change",
+        Verdict::Regressed => "**regressed**",
+        Verdict::Broke => "**broke**",
+    }
 }
 
 /// Render measured routes as the "Evidence" section of a pull request.
@@ -566,6 +693,49 @@ pub fn evidence_markdown(rows: &[RouteEvidence], unattributed: usize) -> String 
     let mut s = String::from("## Evidence\n\n");
     if rows.is_empty() {
         s.push_str("No route could be traced to these changes, so nothing was measured.\n");
+    } else if rows.iter().any(|r| r.baseline.is_some()) {
+        // Before/after: here the *change* is the subject, not the current state.
+        s.push_str(
+            "| Route | Status | Time | Queries | N+1 | Verdict |\n| --- | ---: | ---: | ---: | --- | --- |\n",
+        );
+        for r in rows {
+            match (&r.baseline, &r.metrics) {
+                (Some(b), Some(a)) => {
+                    let c = compare(b, a);
+                    s.push_str(&format!(
+                        "| `{}` | {} | {:.0} → {:.0} ms | {} → {} | {} | {} |\n",
+                        r.label,
+                        if c.status_changed {
+                            format!("{} → {}", b.status, a.status)
+                        } else {
+                            a.status.to_string()
+                        },
+                        b.ms,
+                        a.ms,
+                        b.query_count,
+                        a.query_count,
+                        n1_cell(c.n1_before, c.n1_after),
+                        verdict_word(c.verdict),
+                    ));
+                }
+                // Measured after the change but not before — the stash failed,
+                // or this route was added by the change and has no "before".
+                (None, Some(a)) => s.push_str(&format!(
+                    "| `{}` | {} | {:.0} ms | {} | {} | {} |\n",
+                    r.label,
+                    a.status,
+                    a.ms,
+                    a.query_count,
+                    if a.has_n_plus_one() { "**yes**" } else { "no" },
+                    r.note.as_deref().unwrap_or("after only"),
+                )),
+                _ => s.push_str(&format!(
+                    "| `{}` | — | — | — | — | {} |\n",
+                    r.label,
+                    r.note.as_deref().unwrap_or("not measured"),
+                )),
+            }
+        }
     } else {
         s.push_str(
             "| Route | Status | Time | Queries | N+1 |\n| --- | ---: | ---: | ---: | --- |\n",

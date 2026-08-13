@@ -444,6 +444,40 @@ pub fn review_panel(state: AppState) -> impl IntoView {
                 .color(theme::fg_dim())
         });
     let run_tests = btn("Run tests", false).on_click_stop(move |_| state.run_tests());
+    // Sits next to the tests because it answers the neighbouring question: the
+    // tests say the change is correct, this says what it did.
+    let measure = label(move || {
+        if state.review_evidence_busy.get() {
+            "Measuring…".to_string()
+        } else {
+            match state.review_evidence.with(|e| e.as_ref().map(|r| r.len())) {
+                Some(0) => "No routes".to_string(),
+                Some(n) => format!("Measured {n}"),
+                None => "Measure routes".to_string(),
+            }
+        }
+    })
+    .style(move |s| {
+        let s = s
+            .padding_horiz(10.0)
+            .height(26.0)
+            .items_center()
+            .font_size(12.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(4.0)
+            .color(theme::fg())
+            .cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.background(theme::bg_hover()));
+        // Nothing to measure unless routes were attributed to the changeset.
+        if state.review_attribution().affected.is_empty() {
+            s.color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Default)
+        } else {
+            s
+        }
+    })
+    .on_click_stop(move |_| state.review_measure_evidence());
     let ship = label(move || {
         if state.review_shipping.get() {
             "Shipping…".to_string()
@@ -463,22 +497,23 @@ pub fn review_panel(state: AppState) -> impl IntoView {
             .background(if blocked { AMBER } else { theme::accent() })
     })
     .on_click_stop(move |_| state.review_commit_and_pr(true));
-    let ship_bar = stack((verdict_badge, verdict_reasons, run_tests, ship)).style(move |s| {
-        let s = s
-            .flex_row()
-            .items_center()
-            .gap(8.0)
-            .width_full()
-            .padding_horiz(12.0)
-            .padding_vert(8.0)
-            .border_top(1.0)
-            .border_color(theme::border());
-        if state.review_changeset.with(|cs| cs.is_empty()) {
-            s.hide()
-        } else {
-            s
-        }
-    });
+    let ship_bar =
+        stack((verdict_badge, verdict_reasons, measure, run_tests, ship)).style(move |s| {
+            let s = s
+                .flex_row()
+                .items_center()
+                .gap(8.0)
+                .width_full()
+                .padding_horiz(12.0)
+                .padding_vert(8.0)
+                .border_top(1.0)
+                .border_color(theme::border());
+            if state.review_changeset.with(|cs| cs.is_empty()) {
+                s.hide()
+            } else {
+                s
+            }
+        });
 
     let card = stack((
         header,

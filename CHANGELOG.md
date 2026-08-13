@@ -9,42 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Pull requests can now carry measurement instead of description.** The
-  session review knew *what* changed and the runtime capture knew what a request
-  *costs*, but nothing joined them. It does now: `Review: Measure Affected
-  Routes` works out which routes the changeset actually reaches, replays the
-  ones that are safe to replay, and puts the result — status, time, query count,
-  N+1 — into the pull-request body as an **Evidence** section.
+- **Pull requests can carry measurement instead of description.** The session
+  review knew *what* changed and the runtime capture knew what a request
+  *costs*; nothing joined them. **Measure routes**, in the ship gate next to
+  *Run tests*, works out which routes the changeset actually reaches, replays
+  each one with the change and again with your working tree stashed, and puts
+  the result in the pull-request body:
 
-  Each route is measured **twice**: once with the change, then again with
-  the working tree stashed, so the section reports what the change *did*
-  rather than where things currently stand — `340 → 95 ms`, `42 → 4`
-  queries, N+1 **removed**, verdict *improved*. An N+1 introduced or a
-  route that started failing is called out the same way. If the stash
-  can't be taken the after-measurement still lands, labelled as such, and
-  if it can't be restored `e` says so loudly and tells you where your work
-  is — and it no longer mistakes a clean tree for lost work. Where the
-  changeset carries a migration the section says so outright, because
-  stashing restores code but not the database, and a baseline measured
-  against the migrated schema produces numbers that look fine and aren't.
-  Where the project exposes no Clockwork the query and N+1 columns read
-  *not visible* rather than zero, because "we could not see" and "there
-  were none" are different claims. Reachable from the ship gate next to
-  **Run tests**.
+  | Route | Status | Time | Queries | N+1 | Verdict |
+  | --- | ---: | ---: | ---: | --- | --- |
+  | `GET /orders` | 200 | 340 → 95 ms | 42 → 4 | **removed** | improved |
+  | `GET /reports` | 200 → 500 | 90 → 5 ms | 4 → 0 | no | **broke** |
+  | `PATCH /orders/{order}` | — | — | — | — | not replayed: would write |
 
-  Each pass waits out PHP's opcache before measuring. `artisan serve` runs
-  the cli-server SAPI, where `opcache.revalidate_freq` applies — replaying
-  straight after stashing executes the *previous* bytecode, and a change
-  that removed a 25-query N+1 reports as `4 → 4 queries, regressed`. A
-  plausible number that is entirely an artefact of measuring too soon.
+  An N+1 you introduced, a route that started failing, and a regression are
+  called out as plainly as a win.
 
-  Attribution is conservative on purpose. A route is only claimed when a
+  **Attribution is conservative on purpose.** A route is claimed only when a
   controller it dispatches to changed, or when a routes file changed *and* the
-  diff mentions that route — touching `routes/web.php` does not make every route
-  in the app suspect. Every claim carries the reason it was made, write routes
-  are listed but never replayed, routes needing URL parameters say so rather
-  than measuring a 404, and files that could not be traced to any route are
-  counted in the output rather than quietly dropped.
+  diff mentions that route — editing `routes/web.php` does not make every route
+  in the app suspect. Every claim carries the reason it was made, and changed
+  files that trace to no route are counted under the table rather than dropped:
+  *measured 3 routes* means something different when forty files went untraced.
+
+  **What it will not pretend to know.** Write routes and routes needing URL
+  parameters are listed but never replayed — firing a `PATCH` at your app would
+  change data, and guessing a parameter would measure a 404 and call it
+  evidence. Without Clockwork the query and N+1 columns read *not visible*
+  rather than zero, because "we could not see" and "there were none" are
+  different claims. Where the changeset carries a migration, the section says so
+  outright: stashing restores code but not your database, so the baseline ran
+  old code against the new schema.
+
+  **Your uncommitted work** is stashed and restored around the baseline. If the
+  restore fails `e` says so and tells you the work is in `git stash`; a clean
+  tree is no longer mistaken for lost work. Each pass also waits out PHP's
+  opcache, which serves the previous bytecode for a couple of seconds after a
+  file changes — without that the baseline silently measures the code that was
+  just stashed away, and a change that removed a 25-query N+1 reports as
+  `4 → 4 queries, regressed`.
 
 ## [0.9.10] - 2026-08-12
 

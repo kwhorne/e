@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.12] - 2026-08-13
+
 ### Added
 
 - **Test failures you can click.** Running the suite reported an exit code and
@@ -1202,7 +1204,8 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.11...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.12...HEAD
+[0.9.12]: https://github.com/kwhorne/e/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/kwhorne/e/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/kwhorne/e/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/kwhorne/e/compare/v0.9.8...v0.9.9

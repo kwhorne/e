@@ -217,9 +217,14 @@ impl AppState {
             .with_untracked(|cs| e_review::routes::attribute(&cs.files, &routes))
     }
 
-    /// Replay every affected route that can be replayed safely, and record what
-    /// it cost. This is what turns the pull request from a description of the
-    /// change into a measurement of it.
+    /// Replay every affected route, with and without the change, and record
+    /// what each one cost. This is what turns the pull request from a
+    /// description of the change into a measurement of it.
+    ///
+    /// The change is already in the working tree, so "after" is measured first;
+    /// the tree is then stashed to expose the pre-change code, "before" is
+    /// measured, and the stash is popped. PHP is re-read per request, so no
+    /// rebuild is needed between the two.
     ///
     /// Write routes are listed but never replayed — firing a PATCH at the app to
     /// see how fast it is would change data.
@@ -233,57 +238,91 @@ impl AppState {
             return;
         }
         let base = self.app_base();
-        let plan: Vec<(String, String, bool)> = attribution
+        let root = self.root.get_untracked();
+        let plan: Vec<(String, String, Option<String>)> = attribution
             .affected
             .iter()
             .map(|a| {
                 let method = a.route.methods.split('|').next().unwrap_or("GET").trim();
-                (
-                    format!("{method} /{}", a.route.uri.trim_start_matches('/')),
-                    a.route.uri.clone(),
-                    a.route.is_safe_to_replay(),
-                )
+                let label = format!("{method} /{}", a.route.uri.trim_start_matches('/'));
+                let skip = if !a.route.is_safe_to_replay() {
+                    Some("not replayed: would write".to_string())
+                } else if a.route.uri.contains('{') {
+                    // Guessing a parameter would measure a 404 and call it evidence.
+                    Some("not replayed: needs parameters".to_string())
+                } else {
+                    None
+                };
+                (label, a.route.uri.clone(), skip)
             })
             .collect();
 
         self.review_evidence_busy.set(true);
         let busy = self.review_evidence_busy;
         let out = self.review_evidence;
-        let send = create_ext_action(self.cx, move |rows: Vec<e_verify::RouteEvidence>| {
-            busy.set(false);
-            out.set(Some(rows));
-        });
+        let state = *self;
+        let send = create_ext_action(
+            self.cx,
+            move |(rows, warning): (Vec<e_verify::RouteEvidence>, Option<String>)| {
+                busy.set(false);
+                out.set(Some(rows));
+                if let Some(w) = warning {
+                    AppState::notify(&w);
+                    eprintln!("e: {w}");
+                }
+                let _ = state;
+            },
+        );
+
         std::thread::spawn(move || {
+            let measure = |uri: &str| {
+                let url = crate::verify::replay_url(&base, uri);
+                let (status, ms, queries) = crate::state::replay_for_verify(&base, &url);
+                e_verify::metrics_of(&crate::verify::sample_from_replay(status, ms, &queries))
+            };
+
+            // 1. The change is in the tree: measure "after" first.
+            let after: Vec<Option<e_verify::RequestMetrics>> = plan
+                .iter()
+                .map(|(_, uri, skip)| skip.is_none().then(|| measure(uri)))
+                .collect();
+
+            // 2. Stash it away to expose the pre-change code.
+            let mut warning = None;
+            let mut before: Vec<Option<e_verify::RequestMetrics>> = vec![None; plan.len()];
+            match e_core::git::stash_push(&root) {
+                Ok(()) => {
+                    for (i, (_, uri, skip)) in plan.iter().enumerate() {
+                        if skip.is_none() {
+                            before[i] = Some(measure(uri));
+                        }
+                    }
+                    // 3. Put the change back. This is the step that must not be
+                    //    allowed to fail quietly: the user's work is in there.
+                    if let Err(e) = e_core::git::stash_pop(&root) {
+                        warning = Some(format!(
+                            "could not restore your changes after measuring ({e}) \u{2014}                              they are in `git stash`; run `git stash pop`"
+                        ));
+                    }
+                }
+                Err(e) => {
+                    warning = Some(format!(
+                        "measured the current state only: could not stash to get a baseline ({e})"
+                    ));
+                }
+            }
+
             let rows = plan
                 .into_iter()
-                .map(|(label, uri, safe)| {
-                    if !safe {
-                        return e_verify::RouteEvidence {
-                            label,
-                            metrics: None,
-                            note: Some("not replayed: would write".into()),
-                        };
-                    }
-                    // A URI with parameters has no value to substitute, and
-                    // guessing one would measure a 404 and call it evidence.
-                    if uri.contains('{') {
-                        return e_verify::RouteEvidence {
-                            label,
-                            metrics: None,
-                            note: Some("not replayed: needs parameters".into()),
-                        };
-                    }
-                    let url = crate::verify::replay_url(&base, &uri);
-                    let (status, ms, queries) = crate::state::replay_for_verify(&base, &url);
-                    let sample = crate::verify::sample_from_replay(status, ms, &queries);
-                    e_verify::RouteEvidence {
-                        label,
-                        metrics: Some(e_verify::metrics_of(&sample)),
-                        note: None,
-                    }
+                .enumerate()
+                .map(|(i, (label, _, skip))| e_verify::RouteEvidence {
+                    label,
+                    metrics: after[i].clone(),
+                    baseline: before[i].clone(),
+                    note: skip,
                 })
                 .collect();
-            send(rows);
+            send((rows, warning));
         });
     }
 

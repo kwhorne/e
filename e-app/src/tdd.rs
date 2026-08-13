@@ -2,8 +2,8 @@
 //! iterate fixes until green.
 
 use floem::peniko::Color;
-use floem::reactive::{SignalGet, SignalUpdate};
-use floem::views::{container, empty, label, scroll, stack, Decorators};
+use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::views::{container, dyn_stack, empty, label, scroll, stack, Decorators};
 use floem::IntoView;
 
 use crate::state::{AppState, TddStatus};
@@ -126,7 +126,31 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             state.tdd_fix_to_green();
         }
     });
-    let toolbar = stack((run, fix)).style(|s| {
+    // `12 passed · 2 failed`, from the parsed report rather than the exit code —
+    // "the suite failed" and "two of ninety tests failed" are different news.
+    let tally = label(move || {
+        state.tdd_results.with(|r| {
+            if r.is_empty() {
+                String::new()
+            } else {
+                r.summary()
+            }
+        })
+    })
+    .style(move |s| {
+        let s = s
+            .flex_grow(1.0_f32)
+            .items_center()
+            .font_size(12.0)
+            .color(theme::fg_dim());
+        if state.tdd_results.with(|r| r.failed() > 0) {
+            s.color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+        } else {
+            s
+        }
+    });
+
+    let toolbar = stack((run, fix, tally)).style(|s| {
         s.flex_row()
             .gap(8.0)
             .padding_horiz(12.0)
@@ -134,6 +158,83 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .width_full()
             .border_bottom(1.0)
             .border_color(theme::border())
+    });
+
+    // The failures, first and clickable. Reading a wall of runner output to find
+    // out which test broke is the thing this panel existed to make you do.
+    let failures = dyn_stack(
+        move || {
+            state
+                .tdd_results
+                .get()
+                .problems()
+                .cloned()
+                .enumerate()
+                .collect::<Vec<_>>()
+        },
+        |(i, c): &(usize, crate::testrun::TestCase)| (*i, c.full_name()),
+        move |(_, case): (usize, crate::testrun::TestCase)| {
+            let target = case.file.clone().map(|f| (f, case.line.unwrap_or(1)));
+            let locatable = target.is_some();
+            let name = case.full_name();
+            let detail = case
+                .message
+                .as_deref()
+                .unwrap_or("")
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            let errored = case.outcome == crate::testrun::Outcome::Errored;
+
+            stack((
+                label(move || if errored { "!" } else { "\u{00d7}" }.to_string()).style(move |s| {
+                    s.width(14.0)
+                        .font_size(12.0)
+                        .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                }),
+                stack((
+                    label(move || name.clone()).style(|s| s.font_size(12.0).color(theme::fg())),
+                    label(move || detail.clone()).style(|s| {
+                        s.font_size(11.0)
+                            .color(theme::fg_dim())
+                            .font_family("monospace".to_string())
+                    }),
+                ))
+                .style(|s| s.flex_col().gap(1.0).flex_grow(1.0_f32)),
+            ))
+            .style(move |s| {
+                let s = s
+                    .items_start()
+                    .gap(6.0)
+                    .width_full()
+                    .padding_horiz(12.0)
+                    .padding_vert(5.0);
+                // Only the ones we can locate are worth a pointer.
+                if locatable {
+                    s.cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.background(theme::bg_hover()))
+                } else {
+                    s
+                }
+            })
+            .on_click_stop(move |_| {
+                if let Some((file, line)) = target.clone() {
+                    // JUnit lines are 1-based; the editor counts from zero.
+                    let uri = format!("file://{}", file.display());
+                    state.jump_to(&uri, (line as usize).saturating_sub(1), 0);
+                    state.tdd_open.set(false);
+                }
+            })
+        },
+    )
+    .style(move |s| {
+        let s = s.flex_col().width_full();
+        if state.tdd_results.with(|r| r.failed() == 0) {
+            s.hide()
+        } else {
+            s.border_bottom(1.0).border_color(theme::border())
+        }
     });
 
     let output = scroll(label(move || state.tdd_output.get()).style(|s| {
@@ -144,7 +245,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
     }))
     .style(|s| s.flex_grow(1.0_f32).width_full());
 
-    let card = stack((header, toolbar, output)).style(|s| {
+    let card = stack((header, toolbar, failures, output)).style(|s| {
         s.flex_col()
             .width(820.0)
             .height(560.0)

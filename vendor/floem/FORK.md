@@ -45,6 +45,9 @@ only own Floem's own crates here, not the whole dependency tree.
   changes clean regardless.
 - `cargo fmt --all` **does** reach files here, despite the exclusion, and CI runs
   it with `--check`. Format anything you add.
+- CI runs `cargo test --manifest-path vendor/floem/editor-core/Cargo.toml` as its
+  own step, because `--workspace` cannot see this tree. Tests covering our own
+  changes to the fork belong there and will be run.
 - Keep changes small and well-commented so a future re-sync with upstream is
   tractable. When you change a view, note *why* (which editor feature needs it).
 

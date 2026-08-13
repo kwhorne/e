@@ -107,6 +107,11 @@ E_PHP_PATH_MAPPINGS='{"/srv/app":"/Users/you/code/app"}' e .
 A project with no compose file gets no mapping, which is correct for a native
 interpreter.
 
+> Verified against a container: Xdebug reports
+> `file:///var/www/html/app/Models/User.php`, a path that exists only inside
+> the container. The mapping is what turns it back into the file you have
+> open.
+
 ## Adapter discovery
 
 `e` finds adapters from installed VS Code / Cursor extensions automatically. To

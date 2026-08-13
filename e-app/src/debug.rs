@@ -908,6 +908,23 @@ services:
         );
     }
 
+    /// Opt-in: point at a real project on disk and print what would be sent.
+    /// `E_MAP_ROOT=/path/to/project cargo test -p e-app real_compose -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_compose_file() {
+        let Ok(root) = std::env::var("E_MAP_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let m = php_path_mappings(&root);
+        println!(
+            "pathMappings = {}",
+            serde_json::to_string_pretty(&m).unwrap()
+        );
+        assert!(!m.is_empty(), "expected a mapping for {}", root.display());
+    }
+
     #[test]
     fn a_project_without_compose_maps_nothing() {
         // Native `php artisan serve` needs no mapping, and inventing one would

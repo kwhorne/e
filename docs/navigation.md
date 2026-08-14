@@ -1,12 +1,42 @@
 # Navigation
 
-## Fuzzy file finder (`⌘P`)
+## Search (`⌘P`)
 
-Type part of a file name or path to jump to any file in the workspace. Matching
-is fuzzy (`wbp` finds `welcome.blade.php`) and ranked — file-name matches and
-shorter paths rank highest. The index is built in the background, so the finder
-opens instantly even on a large folder. Use `↑` / `↓` to select and `Enter` to
-open.
+One dialog for four things, with tabs across the top:
+
+| Tab | Searches |
+| --- | --- |
+| **Files** | every file in the workspace (the default) |
+| **Symbols** | workspace symbols, from the language server |
+| **Actions** | every command, the same list as `⌘⇧P` |
+| **Text** | the contents of the project |
+
+`Tab` moves to the next source, `⇧Tab` back, or click one. `↑` / `↓` select and
+`Enter` acts — open the file, jump to the symbol or line, run the command.
+
+### Matching
+
+Matching is fuzzy and, more usefully, it can see where words begin. Typing the
+capitals of a name finds it:
+
+```
+oc    → app/Http/Controllers/OrderController.php
+prlc  → app/Http/Controllers/PasswordResetLinkController.php
+cot   → database/migrations/…_create_orders_table.php
+```
+
+Boundaries count at `/`, `_`, `-`, `.` and at a lower→upper transition inside a
+name, so CamelCase, snake_case and kebab-case all work the same way. Typing in
+capitals is a hint, not a filter: `OC` and `oc` both match, but an exact-case hit
+ranks higher.
+
+The file name outranks its directory — searching `order` finds `Order.php`
+before everything under `orders/` — and shorter, shallower paths win ties.
+
+Files and Actions list everything when the box is empty, so `⌘P` then `Enter`
+still does something. Symbols and Text need something to search for, and say so.
+The file index is built in the background, so the dialog opens instantly even on
+a large folder.
 
 ## Recent files (`⌘E`)
 

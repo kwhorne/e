@@ -56,7 +56,7 @@ e path/to/file # open a file
 | Action | Shortcut |
 | ------ | -------- |
 | New file | `⌘N` |
-| Open a file by name | `⌘P` |
+| Search files, symbols, actions, text | `⌘P` |
 | Run any command | `⌘⇧P` |
 | Save (Save As… for new files) | `⌘S` |
 | Find in file | `⌘F` |

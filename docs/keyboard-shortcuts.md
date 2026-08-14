@@ -9,7 +9,7 @@ Every shortcut below is also available by name from the command palette (`⌘⇧
 | Shortcut | Action |
 | -------- | ------ |
 | `⌘N`     | New file |
-| `⌘P`     | Find file (fuzzy) |
+| `⌘P`     | Search: files, symbols, actions, text |
 | `⌘E`     | Recent files (most recently used) |
 | `⌘O`     | Open folder / project (new window) |
 | `⌘⇧P`    | Command palette |

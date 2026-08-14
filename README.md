@@ -53,7 +53,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Built-in completion** — keywords and buffer words, with or without a language server
 - **Inline AI completion** — optional grey "ghost text" from a local Ollama code model, `Tab` to accept (fully local, opt-in)
 - **Multi-root workspaces**, **drag & drop** files to open, **select all occurrences** (`⌘⇧L`)
-- **Fuzzy file finder** (`⌘P`), **command palette** (`⌘⇧P`), **recent files** (`⌘E`)
+- **Search** (`⌘P`) — one dialog with tabs for files, symbols, actions and text; fuzzy matching that reads word boundaries, so `oc` finds `OrderController.php`. Also **command palette** (`⌘⇧P`) and **recent files** (`⌘E`)
 - **Open another project** (`⌘O`), **new file** (`⌘N`), **go to line** (`⌃G`)
 - **Find & Replace** (`⌘F` / `⌥⌘F`) with case, whole-word and regex; **workspace search & replace** (`⌘⇧F`) that honours your `.gitignore` and previews every file it would rewrite before touching disk
 - **Source Control panel** (`⌘2`) — stage, commit, push/pull, branch switcher, commit history, stash, blame, merge-conflict resolution
@@ -144,7 +144,7 @@ A selection — see [the full list](docs/keyboard-shortcuts.md).
 
 | Shortcut   | Action                       | Shortcut | Action |
 | ---------- | ---------------------------- | -------- | ------ |
-| `⌘P`       | Find file                    | `⌘N`     | New file |
+| `⌘P`       | Search (files/symbols/…)     | `⌘N`     | New file |
 | `⌘E`       | Recent files                 | `⌘O`     | Open folder / project |
 | `⌘⇧P`      | Command palette              | `⌘,`     | Open settings |
 | `⌘F` / `⌥⌘F` | Find / Replace in file     | `⌘⇧F`    | Search in files |

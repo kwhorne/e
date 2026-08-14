@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Move a class, and everything that points at it.** *Refactor: Move Class…*
+  takes the active file's fully-qualified name, asks for a new one, and shows
+  what it would do before doing it: where the file goes, and every other file
+  whose `use` or fully-qualified reference changes. PSR-4 decides the
+  destination, so `App\Domain\Order` lands in `app/Domain/Order.php` — and a
+  namespace with no PSR-4 mapping is refused rather than written somewhere
+  Composer will never autoload.
+
+  Matching is whole-name: moving `App\Models\Order` leaves
+  `App\Models\OrderItem` alone, and `Legacy\App\Models\Order` is a different
+  class. Aliased imports keep their alias, and a leading `\` is preserved.
+  Renaming the class in the same move updates its declaration and self-references
+  too, without touching a method that happens to share the name.
+
 - **Rename asks the language server, and shows you what it will do.** `F2`
   replaced whole-word matches in the active buffer and wrote them straight in —
   so it renamed inside strings and comments, missed every other file, and gave

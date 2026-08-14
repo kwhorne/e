@@ -80,6 +80,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "laravel-map" => state.toggle_laravel_map(),
         "agent-log" => state.toggle_agent_log(),
         "agent-send-selection" => state.send_selection_to_agent(),
+        "move-class" => state.open_move_class(),
         "session-review" => state.toggle_review(),
         "review-measure-evidence" => state.review_measure_evidence(),
         "run-tests" => state.toggle_tdd(),

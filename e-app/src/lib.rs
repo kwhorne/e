@@ -70,6 +70,7 @@ mod relatedfiles;
 mod relations;
 mod relations_view;
 mod rename;
+mod rename_preview;
 mod request;
 mod review;
 mod review_view;

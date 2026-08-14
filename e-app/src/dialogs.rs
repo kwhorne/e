@@ -194,6 +194,109 @@ pub fn replace_confirm_dialog(state: AppState) -> impl IntoView {
         .on_click_stop(move |_| state.cancel_replace_in_workspace())
 }
 
+/// "Rename `total` to `amount` — 12 sites in 4 files?" with every line shown.
+pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
+    let headline = move || {
+        state.rename_plan.with(|p| {
+            p.as_ref()
+                .map(|p| format!("Rename “{}” to “{}”?", p.old_name, p.new_name))
+                .unwrap_or_default()
+        })
+    };
+    let subtitle = move || {
+        state
+            .rename_plan
+            .with(|p| p.as_ref().map(|p| p.summary()).unwrap_or_default())
+    };
+
+    // Every site, as it reads now and as it will read. A count alone is not
+    // something a reader can check.
+    let sites = move || {
+        state.rename_plan.with(|plan| {
+            let Some(plan) = plan.as_ref() else {
+                return String::new();
+            };
+            let root = state.root.get_untracked();
+            let mut out = String::new();
+            let mut shown = 0usize;
+            for file in &plan.files {
+                let rel = file.path.strip_prefix(&root).unwrap_or(&file.path);
+                out.push_str(&format!("{}\n", rel.display()));
+                for site in &file.sites {
+                    if shown >= 40 {
+                        break;
+                    }
+                    out.push_str(&format!(
+                        "  {}: {}\n     → {}\n",
+                        site.line + 1,
+                        site.before,
+                        site.after
+                    ));
+                    shown += 1;
+                }
+                if shown >= 40 {
+                    let left = plan.site_count() - shown;
+                    if left > 0 {
+                        out.push_str(&format!("… and {left} more\n"));
+                    }
+                    break;
+                }
+            }
+            if !plan.unreadable.is_empty() {
+                out.push_str(&format!(
+                    "\ncould not read {} file(s); they will not be changed\n",
+                    plan.unreadable.len()
+                ));
+            }
+            out
+        })
+    };
+
+    let box_ = stack((
+        label(headline).style(|s| s.color(theme::fg()).font_size(15.0)),
+        label(subtitle).style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_top(4.0)),
+        floem::views::scroll(label(sites).style(|s| {
+            s.color(theme::fg_dim())
+                .font_size(12.0)
+                .font_family("monospace".to_string())
+                .padding(8.0)
+        }))
+        .style(|s| s.max_height(300.0).width_full().margin_top(12.0)),
+        stack((
+            button("Rename", true).on_click_stop(move |_| state.confirm_rename()),
+            button("Cancel", false).on_click_stop(move |_| state.cancel_rename()),
+        ))
+        .style(|s| s.gap(8.0).margin_top(16.0)),
+    ))
+    .style(|s| {
+        s.flex_col()
+            .width(640.0)
+            .padding(24.0)
+            .background(theme::bg_panel())
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(12.0)
+    })
+    .on_click_stop(|_| {});
+
+    container(box_)
+        .style(move |s| {
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .items_center()
+                .justify_center()
+                .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
+            if state.rename_plan.with(Option::is_some) {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.cancel_rename())
+}
+
 /// A bar shown when the caret is inside a git merge-conflict block, offering
 /// to accept the current, incoming, or both sides.
 pub fn merge_conflict_bar(state: AppState) -> impl IntoView {

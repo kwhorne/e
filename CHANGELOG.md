@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Rename asks the language server, and shows you what it will do.** `F2`
+  replaced whole-word matches in the active buffer and wrote them straight in —
+  so it renamed inside strings and comments, missed every other file, and gave
+  you no way to check before it happened.
+
+  It now asks the language server, which knows which occurrences are the symbol
+  and sees the whole workspace, then lists every site as it reads now and as it
+  will read. Nothing is written until you confirm. Open buffers are changed
+  through the document, so the rename is undoable; the rest are written to disk.
+
+  Where there is no language server, or it declines the rename, the old textual
+  behaviour is still there as the fallback.
+
 ## [0.9.12] - 2026-08-13
 
 ### Added

@@ -3,6 +3,26 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # An escape hatch for when one asset fails and the rest are fine. Re-pushing
+  # the tag would rebuild everything, and Rust builds aren't reproducible, so
+  # the good assets would come back with different checksums. This rebuilds
+  # only what you ask for and attaches it to a release that already exists.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach assets to (e.g. v0.9.13)"
+        required: true
+      ref:
+        description: "Commit or branch to build from. Defaults to the tag itself; point it elsewhere when the fix you need isn't in the tag."
+        required: false
+      assets:
+        description: "Which assets to rebuild"
+        required: false
+        default: dmg
+        type: choice
+        options:
+          - dmg
+          - all
 
 permissions:
   contents: write
@@ -11,6 +31,7 @@ jobs:
   build:
     name: Build & upload (${{ matrix.target }})
     runs-on: macos-latest
+    if: github.event_name == 'push' || inputs.assets == 'all'
     strategy:
       fail-fast: false
       matrix:
@@ -19,6 +40,8 @@ jobs:
           - x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -36,12 +59,14 @@ jobs:
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: |
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz.sha256
 
   linux:
     name: Build & upload (${{ matrix.target }})
+    if: github.event_name == 'push' || inputs.assets == 'all'
     strategy:
       fail-fast: false
       matrix:
@@ -53,6 +78,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -79,6 +106,7 @@ jobs:
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: |
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz.sha256
@@ -94,6 +122,8 @@ jobs:
       NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
@@ -132,6 +162,7 @@ jobs:
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: |
             dist/e-*-universal.dmg
             dist/e-*-universal.dmg.sha256

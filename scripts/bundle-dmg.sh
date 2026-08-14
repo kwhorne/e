@@ -150,24 +150,32 @@ DMG="dist/e-${VERSION}${ARCH_SUFFIX}.dmg"
 echo "==> building $DMG"
 rm -f "$DMG"
 
-if command -v create-dmg >/dev/null 2>&1; then
-  # Prettier layout if create-dmg is installed (brew install create-dmg).
-  create-dmg \
-    --volname "e $VERSION" \
-    --window-size 540 380 \
-    --icon-size 110 \
-    --icon "e.app" 140 180 \
-    --app-drop-link 400 180 \
-    "$DMG" "$APP" >/dev/null
-else
-  # Fallback: a plain DMG with an Applications symlink, using built-in hdiutil.
-  STAGING="$(mktemp -d)"
-  cp -R "$APP" "$STAGING/"
-  ln -s /Applications "$STAGING/Applications"
-  hdiutil create -volname "e $VERSION" -srcfolder "$STAGING" \
-    -ov -format UDZO "$DMG" >/dev/null
+# One path, always ours. `create-dmg` gives a prettier window, but it sizes the
+# image itself and it is only present on some machines — so whether it ran at all
+# depended on the runner, and a build that changes under you is worse than a
+# plain one. hdiutil is asked for an explicit size rather than left to estimate,
+# because its estimate is what fails, and it fails as "No space left on device"
+# on a disk with 97 GB free.
+STAGING="$(mktemp -d)"
+cp -R "$APP" "$STAGING/"
+ln -s /Applications "$STAGING/Applications"
+
+# Size the payload (du does not follow the /Applications symlink), then leave
+# generous headroom for the filesystem overhead of a fresh volume.
+PAYLOAD_MB="$(du -sm "$STAGING" | cut -f1)"
+IMAGE_MB=$(( PAYLOAD_MB + 200 ))
+echo "==> payload ${PAYLOAD_MB}MB, image ${IMAGE_MB}MB"
+
+if ! hdiutil create -volname "e $VERSION" -srcfolder "$STAGING" \
+     -size "${IMAGE_MB}m" -ov -format UDZO "$DMG"; then
+  echo "==> hdiutil failed; state for diagnosis:" >&2
+  du -sh "$STAGING" "$APP" dist 2>&1 >&2 || true
+  df -h . "$TMPDIR" >&2 || true
+  hdiutil info >&2 || true
   rm -rf "$STAGING"
+  exit 1
 fi
+rm -rf "$STAGING"
 
 # --- 5. sign + notarize + staple the DMG -----------------------------------
 if [[ "$IDENTITY" != "-" ]]; then

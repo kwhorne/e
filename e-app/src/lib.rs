@@ -79,6 +79,7 @@ mod review_view;
 mod runtime;
 mod runtime_view;
 mod schema_diff;
+mod search;
 mod semantic;
 mod semantic_view;
 mod session;

@@ -71,17 +71,17 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn rel(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .into_owned()
-}
-
 pub fn palette(state: AppState) -> impl IntoView {
+    use crate::search::{Action, Hit, Tab};
+
     let query: RwSignal<String> = RwSignal::new(String::new());
     let files: RwSignal<Vec<PathBuf>> = RwSignal::new(Vec::new());
     let selected: RwSignal<usize> = RwSignal::new(0);
+    let tab: RwSignal<Tab> = RwSignal::new(Tab::default());
+    // Symbols and Text are answered by a background request, so their results
+    // live here rather than being derived from a list we already hold.
+    let async_hits: RwSignal<Vec<Hit>> = RwSignal::new(Vec::new());
+    let gen: RwSignal<u64> = RwSignal::new(0);
 
     // Pulsed on open so the input grabs focus without the request_focus
     // tracking `open` (which would re-grab on close and steal/loop focus).
@@ -94,6 +94,8 @@ pub fn palette(state: AppState) -> impl IntoView {
             query.set(String::new());
             selected.set(0);
             files.set(Vec::new());
+            async_hits.set(Vec::new());
+            tab.set(Tab::default());
             focus_pulse.update(|x| *x += 1);
             let roots = state.roots.get_untracked();
             let send = floem::ext_event::create_ext_action(state.cx, move |all: Vec<PathBuf>| {
@@ -106,42 +108,129 @@ pub fn palette(state: AppState) -> impl IntoView {
         }
     });
 
-    // Filtered results, shared by the list view and the keyboard handlers.
-    let filtered = move || -> Vec<PathBuf> {
-        let q = query.get().to_lowercase();
-        let root = state.root.get();
-        let all = files.get();
-        if q.is_empty() {
-            return all.into_iter().take(MAX_RESULTS).collect();
+    // Ask the backend behind the current tab. Only the async ones go out to the
+    // language server or the file walker; the rest are ranked in place.
+    let request_async = move || {
+        let t = tab.get_untracked();
+        if !t.is_async() {
+            return;
         }
-        let mut scored: Vec<(i32, String, PathBuf)> = all
-            .into_iter()
-            .filter_map(|p| {
-                let r = rel(&p, &root);
-                crate::fuzzy::match_path(&q, &r).map(|m| (m.score, r, p))
-            })
-            .collect();
-        // Highest score first, then path, so equal scores are stable.
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-        scored
-            .into_iter()
-            .take(MAX_RESULTS)
-            .map(|(_, _, p)| p)
-            .collect()
+        let q = query.get_untracked();
+        if q.trim().len() < 2 {
+            async_hits.set(Vec::new());
+            return;
+        }
+        let g = gen.get_untracked() + 1;
+        gen.set(g);
+        let roots = state.roots.get_untracked();
+        let root = state.root.get_untracked();
+        let send =
+            floem::ext_event::create_ext_action(state.cx, move |(got, hits): (u64, Vec<Hit>)| {
+                if got == gen.get_untracked() {
+                    async_hits.set(hits);
+                    selected.set(0);
+                }
+            });
+        match t {
+            Tab::Text => {
+                std::thread::spawn(move || {
+                    let hits = crate::workspace_search::search(&roots, &q, Default::default(), 200)
+                        .into_iter()
+                        .map(|h| {
+                            let rel = h
+                                .path
+                                .strip_prefix(&root)
+                                .unwrap_or(&h.path)
+                                .to_string_lossy()
+                                .into_owned();
+                            Hit {
+                                label: h.text,
+                                detail: format!("{rel}:{}", h.line + 1),
+                                action: Action::Goto {
+                                    uri: format!("file://{}", h.path.display()),
+                                    line: h.line,
+                                    col: h.col,
+                                },
+                            }
+                        })
+                        .collect();
+                    send((g, hits));
+                });
+            }
+            Tab::Symbols => {
+                let Some(client) = state.lsp_for_active() else {
+                    async_hits.set(Vec::new());
+                    return;
+                };
+                std::thread::spawn(move || {
+                    let hits = client
+                        .workspace_symbol(&q)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .take(200)
+                        .map(|(name, uri, line, ch)| {
+                            let path = e_lsp::uri_to_path(&uri);
+                            let rel = path
+                                .strip_prefix(&root)
+                                .unwrap_or(&path)
+                                .to_string_lossy()
+                                .into_owned();
+                            Hit {
+                                label: name,
+                                detail: format!("{rel}:{}", line + 1),
+                                action: Action::Goto { uri, line, col: ch },
+                            }
+                        })
+                        .collect();
+                    send((g, hits));
+                });
+            }
+            _ => {}
+        }
     };
 
+    // Re-query when either the text or the tab changes.
+    create_effect(move |_| {
+        let _ = (query.get(), tab.get());
+        if state.palette_open.get_untracked() {
+            request_async();
+        }
+    });
+
+    let filtered = move || -> Vec<Hit> {
+        let q = query.get();
+        match tab.get() {
+            Tab::Files => {
+                crate::search::file_hits(&q, &files.get(), &state.root.get(), MAX_RESULTS)
+            }
+            Tab::Actions => {
+                crate::search::action_hits(&q, crate::cmd_palette::COMMANDS, MAX_RESULTS)
+            }
+            Tab::Symbols | Tab::Text => async_hits.get(),
+        }
+    };
+
+    let run = move |hit: Hit| {
+        state.palette_open.set(false);
+        match hit.action {
+            Action::Open(p) => state.open_path(p),
+            Action::Goto { uri, line, col } => state.jump_to(&uri, line as usize, col as usize),
+            Action::Command(id) => crate::cmd_palette::run_command(state, id),
+        }
+    };
     let open_selected = move || {
         let results = filtered();
         if results.is_empty() {
             return;
         }
         let idx = selected.get().min(results.len() - 1);
-        state.open_path(results[idx].clone());
-        state.palette_open.set(false);
+        run(results[idx].clone());
     };
 
     let input = text_input(query)
-        .placeholder("Go to file…")
+        // Static: `placeholder` is not reactive, and the tab bar above already
+        // says which source you are in.
+        .placeholder("Search…")
         .on_enter(open_selected)
         .style(|s| {
             theme::input_colors(s)
@@ -182,38 +271,109 @@ pub fn palette(state: AppState) -> impl IntoView {
             move |_| {
                 selected.update(|i| *i = i.saturating_sub(1));
             },
+        )
+        // Tab cycles the source, shift-Tab goes back — so switching never means
+        // reaching for the mouse mid-query.
+        .on_key_down(
+            Key::Named(NamedKey::Tab),
+            |_| true,
+            move |e| {
+                let back = matches!(e, floem::event::Event::KeyDown(k) if k.modifiers.shift());
+                tab.update(|t| *t = if back { t.prev() } else { t.next() });
+                selected.set(0);
+            },
         );
 
     let results = dyn_stack(
         move || filtered().into_iter().enumerate().collect::<Vec<_>>(),
-        |(i, p)| (*i, p.clone()),
-        move |(i, path)| {
-            let root = state.root.get();
-            let text = rel(&path, &root);
-            label(move || text.clone())
-                .style(move |s| {
-                    let s = s
-                        .height(26.0)
-                        .width_full()
-                        .items_center()
-                        .padding_horiz(10.0)
-                        .text_ellipsis()
-                        .cursor(floem::style::CursorStyle::Pointer)
-                        .color(theme::fg());
-                    if selected.get() == i {
-                        s.background(theme::bg_active()).color(theme::accent())
-                    } else {
-                        s.hover(|s| s.background(theme::bg_hover()))
-                    }
-                })
-                .on_click_stop(move |_| {
-                    selected.set(i);
-                    state.open_path(path.clone());
-                    state.palette_open.set(false);
-                })
+        |(i, h): &(usize, Hit)| (*i, h.label.clone(), h.detail.clone()),
+        move |(i, hit): (usize, Hit)| {
+            let (name, detail) = (hit.label.clone(), hit.detail.clone());
+            stack((
+                label(move || name.clone())
+                    .style(|s| s.text_ellipsis().color(theme::fg()).font_size(13.0)),
+                label(move || detail.clone()).style(|s| {
+                    s.text_ellipsis()
+                        .flex_grow(1.0_f32)
+                        .margin_left(10.0)
+                        .color(theme::fg_dim())
+                        .font_size(11.0)
+                }),
+            ))
+            .style(move |s| {
+                let s = s
+                    .height(26.0)
+                    .width_full()
+                    .items_center()
+                    .padding_horiz(10.0)
+                    .cursor(floem::style::CursorStyle::Pointer);
+                if selected.get() == i {
+                    s.background(theme::bg_active())
+                } else {
+                    s.hover(|s| s.background(theme::bg_hover()))
+                }
+            })
+            .on_click_stop(move |_| {
+                selected.set(i);
+                run(hit.clone());
+            })
         },
     )
     .style(|s| s.flex_col().width_full());
+
+    // The tab bar. Clicking switches source; Tab cycles.
+    let tabs = dyn_stack(
+        || Tab::ALL.into_iter().collect::<Vec<_>>(),
+        |t: &Tab| *t,
+        move |t: Tab| {
+            label(move || t.label().to_string())
+                .style(move |s| {
+                    let s = s
+                        .padding_horiz(12.0)
+                        .height(30.0)
+                        .items_center()
+                        .font_size(12.0)
+                        .cursor(floem::style::CursorStyle::Pointer);
+                    if tab.get() == t {
+                        s.color(theme::accent())
+                            .border_bottom(2.0)
+                            .border_color(theme::accent())
+                    } else {
+                        s.color(theme::fg_dim()).hover(|s| s.color(theme::fg()))
+                    }
+                })
+                .on_click_stop(move |_| {
+                    tab.set(t);
+                    selected.set(0);
+                    focus_pulse.update(|x| *x += 1);
+                })
+        },
+    )
+    .style(|s| {
+        s.flex_row()
+            .width_full()
+            .padding_horiz(4.0)
+            .border_bottom(1.0)
+            .border_color(theme::border())
+    });
+
+    // What to say when a tab has nothing to show yet.
+    let hint = label(move || {
+        let t = tab.get();
+        if filtered().is_empty() && query.get().trim().len() < 2 {
+            t.empty_hint().to_string()
+        } else {
+            String::new()
+        }
+    })
+    .style(move |s| {
+        let s = s.padding(10.0).font_size(12.0).color(theme::fg_dim());
+        if tab.get().is_async() && filtered().is_empty() {
+            s
+        } else {
+            s.hide()
+        }
+    });
 
     let results_scroll = scroll(results)
         .scroll_to_percent(move || {
@@ -222,7 +382,7 @@ pub fn palette(state: AppState) -> impl IntoView {
         })
         .style(|s| s.max_height(320.0).width_full());
 
-    let box_ = stack((input, results_scroll))
+    let box_ = stack((tabs, input, hint, results_scroll))
         .style(|s| {
             s.flex_col()
                 .width(560.0)

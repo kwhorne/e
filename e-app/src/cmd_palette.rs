@@ -9,7 +9,7 @@ use crate::state::AppState;
 use crate::theme;
 
 /// `(id, label)` for every command. `id` is matched in [`run_command`].
-const COMMANDS: &[(&str, &str)] = &[
+pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("goto-file", "Go to File…"),
     ("open-folder", "Open Folder…"),
     ("new-file", "New File"),

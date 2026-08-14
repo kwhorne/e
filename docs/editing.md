@@ -128,3 +128,29 @@ The status bar shows the file encoding and line-ending style. Click the **LF /
 - If a file changes on disk (e.g. after `git checkout`), clean buffers reload
   automatically. If you have unsaved edits, a bar offers to **Reload** (discard
   yours) or **Keep yours**.
+
+## Rename (`F2`)
+
+Put the caret on a symbol and press `F2`. `e` asks the language server what the
+rename would change and shows you every site — the file, the line, and the line
+as it will read — before anything is written:
+
+```
+app/Models/Order.php
+  14: public $total;
+     → public $amount;
+  27: return $this->total * 1.25;
+     → return $this->amount * 1.25;
+```
+
+**Rename** applies it; **Cancel** leaves everything alone. Files you have open
+change through the buffer, so a rename is undoable like any other edit; the rest
+are written to disk.
+
+The language server is what makes this safe: it knows which occurrences are the
+symbol and which are a word that happens to match inside a string or a comment,
+and it sees the whole workspace rather than the file you're in.
+
+Without a language server for the language — or when the server declines the
+rename — `e` falls back to replacing whole-word matches in the current buffer.
+That is textual, so check the preview.

@@ -17,7 +17,8 @@ use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
 use crate::dialogs::{
-    close_confirm_dialog, disk_conflict_bar, merge_conflict_bar, replace_confirm_dialog,
+    close_confirm_dialog, disk_conflict_bar, merge_conflict_bar, rename_preview_dialog,
+    replace_confirm_dialog,
 };
 use crate::diff_view::diff_view;
 use crate::editing::goto_bar;
@@ -609,6 +610,7 @@ fn app_view() -> impl IntoView {
             goto_bar(state),
             close_confirm_dialog(state),
             replace_confirm_dialog(state),
+            rename_preview_dialog(state),
             recent_palette(state),
             task_palette(state),
             settings_view(state),
@@ -619,6 +621,7 @@ fn app_view() -> impl IntoView {
             if state.goto.open.get()
                 || state.close_confirm.get().is_some()
                 || state.replace_confirm.with(Option::is_some)
+                || state.rename_plan.with(Option::is_some)
                 || state.recent.open.get()
                 || state.task.open.get()
                 || state.settings_open.get()

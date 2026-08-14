@@ -696,6 +696,10 @@ pub struct AppState {
     pub find: FindState,
     /// Local rename state.
     pub rename: RenameState,
+    /// A rename that has been planned but not yet written. `Some` shows the
+    /// preview; nothing touches a file until it is confirmed.
+    pub rename_plan: RwSignal<Option<crate::rename_preview::RenamePlan>>,
+    pub rename_busy: RwSignal<bool>,
     /// Timestamp (ms since epoch) of the last edit, for idle auto-save.
     pub last_edit: RwSignal<u128>,
     /// Markdown reading-mode preview toggle.
@@ -1288,6 +1292,8 @@ impl AppState {
             outline: RwSignal::new(Vec::new()),
             find: FindState::new(),
             rename: RenameState::new(),
+            rename_plan: RwSignal::new(None),
+            rename_busy: RwSignal::new(false),
             last_edit: RwSignal::new(0),
             md_preview: RwSignal::new(false),
             cmd: CmdPalette::new(),
@@ -2021,6 +2027,144 @@ impl AppState {
         }
     }
 
+    /// The textual rename that predates the language-server path.
+    ///
+    /// Whole-word matches in the active buffer only, so it also renames inside
+    /// strings and comments — which is why it is the fallback and not the
+    /// default.
+    fn rename_textually(&self, word: &str, new_name: &str) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        let occ = whole_word_occurrences(&text, word);
+        if occ.is_empty() {
+            return;
+        }
+        let edits: Vec<(Selection, String)> = occ
+            .iter()
+            .map(|(s, e)| (Selection::region(*s, *e), new_name.to_string()))
+            .collect();
+        let mut it = edits.iter().map(|(s, t)| (s.clone(), t.as_str()));
+        buf.doc.edit(&mut it, EditType::InsertChars);
+    }
+
+    /// Ask the language server what this rename would change, and show it.
+    ///
+    /// Returns whether it took over. When there is no server, or it declines,
+    /// the caller falls back to the textual rename that was here before — worse,
+    /// but better than nothing.
+    fn plan_rename_via_lsp(&self, word: &str, new_name: &str) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        let (Some(client), Some(uri), Some(editor)) = (
+            self.lsp_for_active(),
+            buf.uri.clone(),
+            buf.editor.get_untracked(),
+        ) else {
+            return false;
+        };
+        let (line, col) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
+        let (word, new_name) = (word.to_string(), new_name.to_string());
+        let name_for_request = new_name.clone();
+        let app = *self;
+
+        self.rename_busy.set(true);
+        let busy = self.rename_busy;
+        let out = self.rename_plan;
+        let send = create_ext_action(
+            self.cx,
+            move |edits: Option<Vec<(String, Vec<lsp_types::TextEdit>)>>| {
+                busy.set(false);
+                let Some(edits) = edits.filter(|e| !e.is_empty()) else {
+                    // The server had nothing for us; fall back rather than
+                    // leaving the user with a rename that silently did nothing.
+                    app.rename_textually(&word, &new_name);
+                    return;
+                };
+                let plan = crate::rename_preview::plan(&word, &new_name, &edits, |p| {
+                    // Prefer the open buffer: renaming against a stale copy of a
+                    // file the user has edited would preview one thing and write
+                    // another.
+                    app.buffers
+                        .with_untracked(|bs| {
+                            bs.iter()
+                                .find(|b| b.file.path.as_deref() == Some(p))
+                                .map(|b| b.doc.text().to_string())
+                        })
+                        .or_else(|| std::fs::read_to_string(p).ok())
+                });
+                if plan.is_empty() {
+                    app.rename_textually(&word, &new_name);
+                    return;
+                }
+                out.set(Some(plan));
+            },
+        );
+        std::thread::spawn(move || {
+            send(
+                client
+                    .rename(&uri, line as u32, col as u32, &name_for_request)
+                    .ok(),
+            );
+        });
+        true
+    }
+
+    /// Write a planned rename to every file it touches.
+    pub fn confirm_rename(&self) {
+        let Some(plan) = self.rename_plan.get_untracked() else {
+            return;
+        };
+        self.rename_plan.set(None);
+        let mut written = 0usize;
+        let mut failed: Vec<String> = Vec::new();
+        for file in &plan.files {
+            // Open buffers go through the document, so the change is undoable
+            // and the editor stays in sync; the rest are written to disk.
+            let open = self.buffers.with_untracked(|bs| {
+                bs.iter()
+                    .find(|b| b.file.path.as_deref() == Some(file.path.as_path()))
+                    .cloned()
+            });
+            match open {
+                Some(buf) => {
+                    let text = buf.doc.text().to_string();
+                    let updated = crate::rename_preview::apply_edits(&text, &file.edits);
+                    if updated != text {
+                        let len = text.len();
+                        buf.doc
+                            .edit_single(Selection::region(0, len), &updated, EditType::Other);
+                        written += 1;
+                    }
+                }
+                None => {
+                    let Ok(text) = std::fs::read_to_string(&file.path) else {
+                        failed.push(file.path.display().to_string());
+                        continue;
+                    };
+                    let updated = crate::rename_preview::apply_edits(&text, &file.edits);
+                    if updated != text && std::fs::write(&file.path, updated).is_err() {
+                        failed.push(file.path.display().to_string());
+                    } else {
+                        written += 1;
+                    }
+                }
+            }
+        }
+        self.fs_rev.update(|r| *r += 1);
+        self.check_external_changes();
+        if !failed.is_empty() {
+            Self::notify(&format!("rename could not write: {}", failed.join(", ")));
+        }
+        eprintln!("e: renamed in {written} file(s)");
+    }
+
+    pub fn cancel_rename(&self) {
+        self.rename_plan.set(None);
+    }
+
     pub fn apply_rename(&self) {
         let r = self.rename;
         if !r.open.get_untracked() {
@@ -2035,6 +2179,12 @@ impl AppState {
         // Livewire property rename spans the class *and* the view.
         let prop = word.trim_start_matches('$');
         if self.livewire_rename(prop, new_name.trim_start_matches('$')) {
+            return;
+        }
+        // Ask the language server first: it knows which occurrences are the
+        // symbol and which are a word that happens to match inside a string or
+        // a comment, and it sees the whole workspace rather than this buffer.
+        if self.plan_rename_via_lsp(&word, &new_name) {
             return;
         }
         let Some(buf) = self.active_buffer() else {

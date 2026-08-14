@@ -136,37 +136,6 @@ fn rel(path: &Path, root: &Path) -> String {
         .into_owned()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{rank, MAX_RESULTS};
-
-    fn best<'a>(q: &str, paths: &[&'a str]) -> &'a str {
-        let mut scored: Vec<(i64, &str)> = paths
-            .iter()
-            .filter_map(|p| rank(q, p).map(|s| (s, *p)))
-            .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
-        scored.first().map(|(_, p)| *p).unwrap_or("")
-    }
-
-    #[test]
-    fn filename_beats_deep_path() {
-        let paths = [
-            "Applications/Devin.app/Contents/Resources/app/out/vs/workbench/contrib/welcomeGettingStarted.js",
-            "resources/views/welcome.blade.php",
-        ];
-        assert_eq!(best("welcome", &paths), "resources/views/welcome.blade.php");
-        assert_eq!(best("welc", &paths), "resources/views/welcome.blade.php");
-    }
-
-    #[test]
-    fn fuzzy_subsequence_matches() {
-        assert!(rank("wbp", "resources/views/welcome.blade.php").is_some());
-        assert!(rank("xyz", "resources/views/welcome.blade.php").is_none());
-        assert!(MAX_RESULTS > 0);
-    }
-}
-
 pub fn palette(state: AppState) -> impl IntoView {
     let query: RwSignal<String> = RwSignal::new(String::new());
     let files: RwSignal<Vec<PathBuf>> = RwSignal::new(Vec::new());
@@ -343,4 +312,34 @@ pub fn palette(state: AppState) -> impl IntoView {
             }
         })
         .on_click_stop(move |_| state.palette_open.set(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rank;
+
+    fn best<'a>(q: &str, paths: &[&'a str]) -> &'a str {
+        let mut scored: Vec<(i64, &str)> = paths
+            .iter()
+            .filter_map(|p| rank(q, p).map(|s| (s, *p)))
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
+        scored.first().map(|(_, p)| *p).unwrap_or("")
+    }
+
+    #[test]
+    fn filename_beats_deep_path() {
+        let paths = [
+            "Applications/Devin.app/Contents/Resources/app/out/vs/workbench/contrib/welcomeGettingStarted.js",
+            "resources/views/welcome.blade.php",
+        ];
+        assert_eq!(best("welcome", &paths), "resources/views/welcome.blade.php");
+        assert_eq!(best("welc", &paths), "resources/views/welcome.blade.php");
+    }
+
+    #[test]
+    fn fuzzy_subsequence_matches() {
+        assert!(rank("wbp", "resources/views/welcome.blade.php").is_some());
+        assert!(rank("xyz", "resources/views/welcome.blade.php").is_none());
+    }
 }

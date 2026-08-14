@@ -2734,10 +2734,11 @@ mod tests {
     }
 
     fn cfg(engine: &str, host: &str) -> DbConfig {
-        let mut c = DbConfig::default();
-        c.engine = engine.to_string();
-        c.host = host.to_string();
-        c
+        DbConfig {
+            engine: engine.to_string(),
+            host: host.to_string(),
+            ..Default::default()
+        }
     }
 
     #[test]

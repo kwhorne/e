@@ -857,11 +857,12 @@ impl Animation {
             }
             AnimState::ExtMode {
                 started_on,
-                mut elapsed,
+                elapsed: _,
             } => {
+                // The bound `elapsed` was overwritten before it was ever read;
+                // binding it `mut` only to discard it warned on every build.
                 let now = Instant::now();
-                let duration = now - *started_on;
-                elapsed = duration;
+                let elapsed = now - *started_on;
 
                 if self.props_in_ext_progress.is_empty() {
                     self.state = AnimState::PassFinished {

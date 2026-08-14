@@ -39,10 +39,10 @@ only own Floem's own crates here, not the whole dependency tree.
 ## Working in the fork
 
 - Edit freely. `cargo build -p e-app` compiles this copy.
-- `cargo clippy --workspace` does **not** touch this fork (it's excluded from our
-  workspace), so upstream's own lint warnings — e.g. the pre-existing
-  `unused_assignments` in `src/animate.rs` — don't fail our CI. Keep our own
-  changes clean regardless.
+- `cargo clippy --workspace` **does** reach this tree, despite the exclusion —
+  it's a path dependency, so it gets compiled and linted with everything else.
+  CI now runs it with `-D warnings`, which means an upstream lint here fails our
+  build. Fix them here and record them below rather than leaving them.
 - `cargo fmt --all` **does** reach files here, despite the exclusion, and CI runs
   it with `--check`. Format anything you add.
 - CI runs `cargo test --manifest-path vendor/floem/editor-core/Cargo.toml` as its
@@ -58,6 +58,11 @@ There is no live git remote here. To pull newer upstream changes, clone
 local changes forward. Record any local patches in this file as they land:
 
 ### Local changes on top of upstream
+
+- **`src/animate.rs`: an unused assignment.** `AnimState::ExtMode` bound
+  `mut elapsed` and overwrote it before ever reading it, so every build printed
+  an `unused_assignments` warning. Fixed here rather than allowed, because CI now
+  runs `clippy -D warnings` and this tree is linted along with ours.
 
 - **`editor-core/src/buffer/mod.rs`: `Buffer::edit` can no longer abort the
   process.** Two shapes of input reached the CRDT engine as a malformed delta

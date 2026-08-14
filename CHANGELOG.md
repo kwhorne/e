@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`⌘P` is one search dialog with tabs.** Files, Symbols, Actions and Text —
+  Files by default. `Tab` cycles, `⇧Tab` goes back, or click. Finding a file, a
+  symbol, a command and a line of text used to be four overlays behind four
+  shortcuts, which meant deciding what you wanted before you started typing.
+
 - **Move a class, and everything that points at it.** *Refactor: Move Class…*
   takes the active file's fully-qualified name, asks for a new one, and shows
   what it would do before doing it: where the file goes, and every other file

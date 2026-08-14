@@ -124,11 +124,13 @@ fn rank_commands(query: &str) -> Vec<(&'static str, &'static str)> {
     if q.trim().is_empty() {
         return COMMANDS.to_vec();
     }
-    let mut scored: Vec<(i64, usize, (&'static str, &'static str))> = COMMANDS
+    // The same matcher the file search uses, so `rmc` finds "Refactor: Move
+    // Class…" the way it finds a CamelCase filename.
+    let mut scored: Vec<(i32, usize, (&'static str, &'static str))> = COMMANDS
         .iter()
         .enumerate()
         .filter_map(|(i, (id, label))| {
-            crate::palette::fuzzy_score(&q, &label.to_lowercase()).map(|sc| (sc, i, (*id, *label)))
+            crate::fuzzy::match_score(&q, label).map(|m| (m.score, i, (*id, *label)))
         })
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));

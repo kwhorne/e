@@ -71,64 +71,6 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Subsequence fuzzy score; higher is better. `None` if `q` is not a
-/// subsequence of `text`. Rewards consecutive matches and word boundaries.
-pub(crate) fn fuzzy_score(q: &str, text: &str) -> Option<i64> {
-    if q.is_empty() {
-        return Some(0);
-    }
-    let tb = text.as_bytes();
-    let qb = q.as_bytes();
-    let (mut ti, mut qi) = (0usize, 0usize);
-    let mut score = 0i64;
-    let mut last: i64 = -2;
-    while ti < tb.len() && qi < qb.len() {
-        if tb[ti] == qb[qi] {
-            let mut s = 1i64;
-            if ti as i64 == last + 1 {
-                s += 6; // consecutive
-            }
-            if ti == 0 || matches!(tb[ti - 1], b'/' | b'_' | b'-' | b'.' | b' ') {
-                s += 10; // start of a path/word segment
-            }
-            score += s;
-            last = ti as i64;
-            qi += 1;
-        }
-        ti += 1;
-    }
-    if qi == qb.len() {
-        Some(score)
-    } else {
-        None
-    }
-}
-
-/// Rank a file (relative path) against a lowercase query. Filename matches are
-/// weighted far above path matches, and shorter paths win ties.
-fn rank(q: &str, rel: &str) -> Option<i64> {
-    let rel_l = rel.to_lowercase();
-    let name = rel_l.rsplit('/').next().unwrap_or(&rel_l);
-
-    let mut score = if let Some(ns) = fuzzy_score(q, name) {
-        let mut s = ns * 8 + 200;
-        if name == q {
-            s += 2000;
-        } else if name.starts_with(q) {
-            s += 600;
-        } else if name.contains(q) {
-            s += 250;
-        }
-        s + fuzzy_score(q, &rel_l).unwrap_or(0)
-    } else {
-        fuzzy_score(q, &rel_l)?
-    };
-    // Prefer shorter, shallower paths.
-    score -= (rel_l.len() as i64) / 6;
-    score -= rel_l.matches('/').count() as i64 * 2;
-    Some(score)
-}
-
 fn rel(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
@@ -172,22 +114,19 @@ pub fn palette(state: AppState) -> impl IntoView {
         if q.is_empty() {
             return all.into_iter().take(MAX_RESULTS).collect();
         }
-        let mut scored: Vec<(i64, PathBuf)> = all
+        let mut scored: Vec<(i32, String, PathBuf)> = all
             .into_iter()
             .filter_map(|p| {
                 let r = rel(&p, &root);
-                rank(&q, &r).map(|s| (s, p))
+                crate::fuzzy::match_path(&q, &r).map(|m| (m.score, r, p))
             })
             .collect();
-        // Highest score first; break ties by shorter path.
-        scored.sort_by(|a, b| {
-            b.0.cmp(&a.0)
-                .then_with(|| rel(&a.1, &root).len().cmp(&rel(&b.1, &root).len()))
-        });
+        // Highest score first, then path, so equal scores are stable.
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
         scored
             .into_iter()
             .take(MAX_RESULTS)
-            .map(|(_, p)| p)
+            .map(|(_, _, p)| p)
             .collect()
     };
 
@@ -312,34 +251,4 @@ pub fn palette(state: AppState) -> impl IntoView {
             }
         })
         .on_click_stop(move |_| state.palette_open.set(false))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::rank;
-
-    fn best<'a>(q: &str, paths: &[&'a str]) -> &'a str {
-        let mut scored: Vec<(i64, &str)> = paths
-            .iter()
-            .filter_map(|p| rank(q, p).map(|s| (s, *p)))
-            .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
-        scored.first().map(|(_, p)| *p).unwrap_or("")
-    }
-
-    #[test]
-    fn filename_beats_deep_path() {
-        let paths = [
-            "Applications/Devin.app/Contents/Resources/app/out/vs/workbench/contrib/welcomeGettingStarted.js",
-            "resources/views/welcome.blade.php",
-        ];
-        assert_eq!(best("welcome", &paths), "resources/views/welcome.blade.php");
-        assert_eq!(best("welc", &paths), "resources/views/welcome.blade.php");
-    }
-
-    #[test]
-    fn fuzzy_subsequence_matches() {
-        assert!(rank("wbp", "resources/views/welcome.blade.php").is_some());
-        assert!(rank("xyz", "resources/views/welcome.blade.php").is_none());
-    }
 }

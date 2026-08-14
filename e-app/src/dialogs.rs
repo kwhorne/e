@@ -297,6 +297,102 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
         .on_click_stop(move |_| state.cancel_rename())
 }
 
+/// "Move App\Models\Order to App\Domain\Order?" with every file it touches.
+pub fn move_class_dialog(state: AppState) -> impl IntoView {
+    let headline = move || {
+        state.move_plan.with(|p| {
+            p.as_ref()
+                .map(|p| format!("Move “{}” to “{}”?", p.old_fqn, p.new_fqn))
+                .unwrap_or_default()
+        })
+    };
+    let subtitle = move || {
+        state.move_plan.with(|p| {
+            p.as_ref()
+                .map(|p| {
+                    format!(
+                        "{} → {} · {}",
+                        p.from.display(),
+                        p.to.display(),
+                        p.summary()
+                    )
+                })
+                .unwrap_or_default()
+        })
+    };
+    let files = move || {
+        state.move_plan.with(|plan| {
+            let Some(plan) = plan.as_ref() else {
+                return String::new();
+            };
+            let mut out = String::new();
+            for r in plan.referrers.iter().take(30) {
+                out.push_str(&format!(
+                    "{}  ({} reference{})\n",
+                    r.path.display(),
+                    r.hits,
+                    if r.hits == 1 { "" } else { "s" }
+                ));
+            }
+            if plan.referrer_count() > 30 {
+                out.push_str(&format!("… and {} more\n", plan.referrer_count() - 30));
+            }
+            out
+        })
+    };
+
+    let box_ = stack((
+        label(headline).style(|s| s.color(theme::fg()).font_size(15.0)),
+        label(subtitle).style(|s| {
+            s.color(theme::fg_dim())
+                .font_size(12.0)
+                .font_family("monospace".to_string())
+                .margin_top(4.0)
+        }),
+        floem::views::scroll(label(files).style(|s| {
+            s.color(theme::fg_dim())
+                .font_size(12.0)
+                .font_family("monospace".to_string())
+                .padding(8.0)
+        }))
+        .style(|s| s.max_height(240.0).width_full().margin_top(12.0)),
+        label(|| "The file is moved on disk and its referrers rewritten.".to_string())
+            .style(|s| s.color(theme::fg_dim()).font_size(12.0).margin_top(8.0)),
+        stack((
+            button("Move", true).on_click_stop(move |_| state.confirm_move_class()),
+            button("Cancel", false).on_click_stop(move |_| state.cancel_move_class()),
+        ))
+        .style(|s| s.gap(8.0).margin_top(16.0)),
+    ))
+    .style(|s| {
+        s.flex_col()
+            .width(600.0)
+            .padding(24.0)
+            .background(theme::bg_panel())
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(12.0)
+    })
+    .on_click_stop(|_| {});
+
+    container(box_)
+        .style(move |s| {
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .items_center()
+                .justify_center()
+                .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
+            if state.move_plan.with(Option::is_some) {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.cancel_move_class())
+}
+
 /// A bar shown when the caret is inside a git merge-conflict block, offering
 /// to accept the current, incoming, or both sides.
 pub fn merge_conflict_bar(state: AppState) -> impl IntoView {

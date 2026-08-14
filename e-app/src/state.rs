@@ -699,6 +699,11 @@ pub struct AppState {
     /// A rename that has been planned but not yet written. `Some` shows the
     /// preview; nothing touches a file until it is confirmed.
     pub rename_plan: RwSignal<Option<crate::rename_preview::RenamePlan>>,
+    /// A planned class move awaiting confirmation.
+    pub move_plan: RwSignal<Option<crate::move_class::MovePlan>>,
+    /// Whether the rename prompt is currently asking for a new fully-qualified
+    /// class name rather than a symbol — it reuses the same input.
+    pub rename_is_move: RwSignal<bool>,
     pub rename_busy: RwSignal<bool>,
     /// Timestamp (ms since epoch) of the last edit, for idle auto-save.
     pub last_edit: RwSignal<u128>,
@@ -1293,6 +1298,8 @@ impl AppState {
             find: FindState::new(),
             rename: RenameState::new(),
             rename_plan: RwSignal::new(None),
+            move_plan: RwSignal::new(None),
+            rename_is_move: RwSignal::new(false),
             rename_busy: RwSignal::new(false),
             last_edit: RwSignal::new(0),
             md_preview: RwSignal::new(false),
@@ -2049,6 +2056,128 @@ impl AppState {
         buf.doc.edit(&mut it, EditType::InsertChars);
     }
 
+    // ---- Move class ------------------------------------------------------
+
+    /// The project's PSR-4 maps, from `composer.json`.
+    fn psr4(&self) -> Vec<crate::move_class::Psr4Root> {
+        let root = self.root.get_untracked();
+        std::fs::read_to_string(root.join("composer.json"))
+            .map(|t| crate::move_class::psr4_roots(&t))
+            .unwrap_or_default()
+    }
+
+    /// Open the prompt for moving the active file's class.
+    pub fn open_move_class(&self) {
+        let roots = self.psr4();
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return;
+        };
+        let project = self.root.get_untracked();
+        let Ok(rel) = path.strip_prefix(&project) else {
+            Self::notify("that file is outside the project");
+            return;
+        };
+        let Some(fqn) = crate::move_class::fqn_for(&roots, rel) else {
+            Self::notify("no PSR-4 mapping covers that file");
+            return;
+        };
+        let r = self.rename;
+        r.word.set(fqn.clone());
+        r.new_name.set(fqn);
+        self.rename_is_move.set(true);
+        r.open.set(true);
+    }
+
+    /// Work out what moving the active class would do, and show it.
+    pub fn plan_move_class(&self, new_fqn: &str) {
+        self.rename_is_move.set(false);
+        let roots = self.psr4();
+        let old_fqn = self.rename.word.get_untracked();
+        if new_fqn.trim().is_empty() || new_fqn == old_fqn {
+            return;
+        }
+        let project = self.root.get_untracked();
+        // The same walker search uses, so ignore rules apply and `vendor/`
+        // never reaches the planner.
+        let files: Vec<std::path::PathBuf> = crate::workspace_search::search(
+            std::slice::from_ref(&project),
+            crate::move_class::class_of(&old_fqn),
+            Default::default(),
+            5000,
+        )
+        .into_iter()
+        .filter_map(|h| h.path.strip_prefix(&project).ok().map(|p| p.to_path_buf()))
+        .filter(|p| p.extension().is_some_and(|e| e == "php"))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+        let app = *self;
+        let plan = crate::move_class::plan_move(&roots, &old_fqn, new_fqn, &files, |p| {
+            let abs = project.join(p);
+            app.buffers
+                .with_untracked(|bs| {
+                    bs.iter()
+                        .find(|b| b.file.path.as_deref() == Some(abs.as_path()))
+                        .map(|b| b.doc.text().to_string())
+                })
+                .or_else(|| std::fs::read_to_string(&abs).ok())
+        });
+        match plan {
+            Some(p) => self.move_plan.set(Some(p)),
+            None => Self::notify("that move has no PSR-4 destination"),
+        }
+    }
+
+    /// Carry out a planned move: rewrite the referrers, then move the file.
+    pub fn confirm_move_class(&self) {
+        let Some(plan) = self.move_plan.get_untracked() else {
+            return;
+        };
+        self.move_plan.set(None);
+        let project = self.root.get_untracked();
+        let mut failed: Vec<String> = Vec::new();
+
+        for r in plan.referrers.iter() {
+            let abs = project.join(&r.path);
+            if std::fs::write(&abs, &r.updated).is_err() {
+                failed.push(r.path.display().to_string());
+            }
+        }
+        // The moved file last: if a referrer write failed, the class is at least
+        // still where every reference expects it.
+        if let Some(moved) = &plan.moved {
+            let to = project.join(&plan.to);
+            if let Some(dir) = to.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if std::fs::write(&to, &moved.updated).is_err() {
+                failed.push(plan.to.display().to_string());
+            } else {
+                let _ = std::fs::remove_file(project.join(&plan.from));
+            }
+        }
+
+        self.fs_rev.update(|r| *r += 1);
+        self.check_external_changes();
+        if failed.is_empty() {
+            Self::notify(&format!(
+                "moved to {} ({})",
+                plan.to.display(),
+                plan.summary()
+            ));
+        } else {
+            Self::notify(&format!("move could not write: {}", failed.join(", ")));
+        }
+    }
+
+    pub fn cancel_move_class(&self) {
+        self.move_plan.set(None);
+    }
+
     /// Ask the language server what this rename would change, and show it.
     ///
     /// Returns whether it took over. When there is no server, or it declines,
@@ -2174,6 +2303,11 @@ impl AppState {
         let new_name = r.new_name.get_untracked();
         r.open.set(false);
         if new_name.is_empty() || new_name == word {
+            self.rename_is_move.set(false);
+            return;
+        }
+        if self.rename_is_move.get_untracked() {
+            self.plan_move_class(&new_name);
             return;
         }
         // Livewire property rename spans the class *and* the view.

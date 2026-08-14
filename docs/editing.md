@@ -154,3 +154,35 @@ and it sees the whole workspace rather than the file you're in.
 Without a language server for the language — or when the server declines the
 rename — `e` falls back to replacing whole-word matches in the current buffer.
 That is textual, so check the preview.
+
+## Move Class
+
+*Refactor: Move Class…* in the command palette. It reads the active file's
+fully-qualified name from its path, asks for the new one, and previews the move:
+
+```
+App\Models\Order → App\Domain\Order
+app/Models/Order.php → app/Domain/Order.php · 3 references in 2 other files
+
+app/Http/Controllers/OrderController.php  (2 references)
+tests/Feature/OrderTest.php  (1 reference)
+```
+
+**Move** rewrites the referrers, writes the file at its new path, and removes the
+old one. Referrers are written first: if one of those fails, the class is still
+where every reference expects it.
+
+PSR-4 from your `composer.json` decides where the file goes, including
+`autoload-dev`, so moving a test class works the same way. A namespace no
+PSR-4 entry covers is refused rather than written somewhere Composer will never
+autoload it.
+
+Matching is by whole name. Moving `App\Models\Order` leaves
+`App\Models\OrderItem` alone, and `Legacy\App\Models\Order` is a different
+class. Aliased imports keep their alias; a leading `\` is preserved. Change the
+class name in the same move and its declaration and self-references follow —
+without renaming a method that happens to share the name.
+
+> References inside strings are not rewritten. A class name in a config array is
+> indistinguishable from prose, and silently editing a string is the worse
+> mistake. Search for the old name afterwards if you use them.

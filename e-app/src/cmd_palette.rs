@@ -28,6 +28,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("laravel-map", "Laravel: Architecture Map"),
     ("agent-log", "Agent: Timeline / Audit Log"),
     ("agent-send-selection", "Agent: Send Selection to Agent"),
+    ("move-class", "Refactor: Move Class…"),
     ("session-review", "Review: Session Changes"),
     ("review-measure-evidence", "Review: Measure Affected Routes"),
     ("run-tests", "Tests: Runner / Autonomous TDD"),

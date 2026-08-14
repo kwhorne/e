@@ -31,7 +31,10 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Clippy
-        run: cargo clippy --workspace --all-targets
+        # `-D warnings` because a warning nobody has to act on is a warning
+        # everybody stops reading. The four that existed when this was turned on
+        # were fixed rather than allowed.
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build
         run: cargo build --workspace
       - name: Test
@@ -59,7 +62,10 @@ jobs:
             clang pkg-config libssl-dev libwayland-dev libxkbcommon-x11-dev \
             libvulkan-dev libxcb-shape0-dev libxcb-xfixes0-dev libdbus-1-dev
       - name: Clippy
-        run: cargo clippy --workspace --all-targets
+        # `-D warnings` because a warning nobody has to act on is a warning
+        # everybody stops reading. The four that existed when this was turned on
+        # were fixed rather than allowed.
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build
         run: cargo build --workspace
       - name: Test

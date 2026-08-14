@@ -79,7 +79,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Integrated terminal** (`⌘T`) — PTY-backed with ANSI colour, multiple tabs, rename and split
 - **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent in an embedded terminal beside your code (Elyra has an experimental native chat panel too, off by default). All agents share deep editor co-op: reviewable `propose_edit` diffs, a risk-ranked **session review** (`⌘⌥V`), an autonomous TDD loop (`⌘⇧T`), and an activity timeline (`⌘⌥A`)
 - **Editing essentials** — comment toggle (`⌘/`), line move/duplicate/delete, indent, multi-cursor (`⌘⇧D`), column editing (`⌥⌘↑/↓`), auto-closing brackets
-- **Code actions & refactor** (`⌘.`) — LSP quick fixes and extract variable/method; **compare** the active file with any other file; **EditorConfig** support
+- **Refactoring** — **rename** (`F2`) through the language server, previewing every site before it writes; **Move Class** that follows PSR-4 and rewrites every `use` and fully-qualified reference; **code actions** (`⌘.`) for LSP quick fixes and extract variable/method; **compare** the active file with any other file; **EditorConfig** support
 - **Split editor** (`⌘\`), **resizable & swappable panels**, **zoom** (`⌘±`), **word wrap** (`⌥Z`)
 - **Navigation history** (`⌃-` / `⌃⇧-`), **breadcrumbs**, **outline**, **inline diagnostics**, **bracket matching**
 - **Markdown preview** (`⌘⇧M`), **light / dark themes** (`F8`)

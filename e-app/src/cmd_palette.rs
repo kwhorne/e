@@ -34,6 +34,8 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("run-tests", "Tests: Runner / Autonomous TDD"),
     ("laravel-log", "Laravel: Log Tail"),
     ("runtime", "Laravel: Runtime Insight (Telescope)"),
+    ("grove-mail", "Grove: Mail Catcher"),
+    ("grove-hooks", "Grove: Webhooks"),
     ("schema-diff", "Laravel: Schema Diff (migrations vs DB)"),
     ("relations", "Laravel: Eloquent Relationship Graph"),
     ("event-graph", "Laravel: Event Dispatch Graph"),

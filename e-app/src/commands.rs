@@ -86,6 +86,8 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "run-tests" => state.toggle_tdd(),
         "laravel-log" => state.toggle_laravel_log(),
         "runtime" => state.toggle_runtime(),
+        "grove-mail" => state.toggle_grove_panel(crate::grove_state::GroveTab::Mail),
+        "grove-hooks" => state.toggle_grove_panel(crate::grove_state::GroveTab::Hooks),
         "schema-diff" => state.compute_schema_diff(),
         "relations" => state.toggle_relations(),
         "event-graph" => state.toggle_event_graph(),
@@ -177,6 +179,10 @@ fn close_overlays(state: AppState) {
     }
     if state.runtime_open.get() {
         state.runtime_open.set(false);
+        return;
+    }
+    if state.grove_panel_open.get() {
+        state.grove_panel_open.set(false);
         return;
     }
     if state.schema_diff_open.get() {

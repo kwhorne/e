@@ -342,6 +342,9 @@ fn app_view() -> impl IntoView {
                 if state.runtime_open.get_untracked() {
                     state.poll_runtime();
                 }
+                if state.grove_panel_open.get_untracked() {
+                    state.refresh_grove_panel();
+                }
             }
         });
     }
@@ -543,6 +546,10 @@ fn app_view() -> impl IntoView {
                 (
                     state.runtime_open,
                     crate::runtime_view::runtime_panel(state).into_any(),
+                ),
+                (
+                    state.grove_panel_open,
+                    crate::grove_view::grove_panel(state).into_any(),
                 ),
                 (
                     state.verify_open,

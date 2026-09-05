@@ -48,6 +48,8 @@ mod fuzzy;
 mod ghost;
 mod git_view;
 mod grove;
+mod grove_state;
+mod grove_view;
 mod hints_doc;
 mod inertia;
 mod keymap;

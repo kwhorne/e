@@ -393,6 +393,138 @@ pub fn explain_prompt(e: &Explain, sql_capture_on: Option<bool>) -> String {
     out
 }
 
+// ---- Mail-catcher and webhook hub ---------------------------------------------------
+
+/// One captured email (`grove mail`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Email {
+    pub id: u64,
+    pub from: String,
+    pub to: Vec<String>,
+    pub subject: String,
+    pub received_at: String,
+    pub size: usize,
+}
+
+/// A captured email in full (`grove mail show <id>`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EmailBody {
+    pub text: Option<String>,
+    pub html: Option<String>,
+    pub raw: String,
+}
+
+impl EmailBody {
+    /// The most readable rendering we have: plain text, else HTML with its
+    /// tags stripped, else the raw message.
+    pub fn readable(&self) -> String {
+        if let Some(t) = self.text.as_ref().filter(|t| !t.trim().is_empty()) {
+            return t.clone();
+        }
+        if let Some(h) = self.html.as_ref().filter(|h| !h.trim().is_empty()) {
+            return strip_tags(h);
+        }
+        self.raw.clone()
+    }
+}
+
+/// Drop HTML tags and collapse whitespace — enough to read a mail's HTML body.
+fn strip_tags(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                out.push(' ');
+            }
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Captured emails, newest first.
+pub fn mail() -> Vec<Email> {
+    run(&["mail"]).map(|d| parse_mail(&d)).unwrap_or_default()
+}
+
+/// One email in full.
+pub fn mail_show(id: u64) -> Option<EmailBody> {
+    run(&["mail", "show", &id.to_string()]).and_then(|d| parse_mail_body(&d))
+}
+
+/// Captured inbound webhooks (requests to `/__grove/hooks/<bucket>`), newest first.
+pub fn hooks(limit: usize) -> Vec<Request> {
+    let limit = limit.to_string();
+    run(&["hooks", "--limit", &limit])
+        .map(|d| parse_hooks(&d))
+        .unwrap_or_default()
+}
+
+/// Re-deliver a captured webhook to `to` (the app's handler URL).
+pub fn hook_replay(id: u64, to: &str) -> bool {
+    run(&["hooks", "replay", &id.to_string(), "--to", to]).is_some()
+}
+
+/// The site served on `host` (`felagi.test`), if any.
+pub fn site_by_host(host: &str) -> Option<Site> {
+    let host = host.trim().trim_end_matches('/').to_lowercase();
+    sites()
+        .into_iter()
+        .find(|s| s.hostname.to_lowercase() == host)
+}
+
+pub fn parse_mail(data: &Value) -> Vec<Email> {
+    data.get("mail")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    Some(Email {
+                        id: m.get("id")?.as_u64()?,
+                        from: str_of(m, "from"),
+                        to: m
+                            .get("to")
+                            .and_then(Value::as_array)
+                            .map(|t| {
+                                t.iter()
+                                    .filter_map(Value::as_str)
+                                    .map(str::to_string)
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        subject: str_of(m, "subject"),
+                        received_at: str_of(m, "received_at"),
+                        size: m.get("size").and_then(Value::as_u64).unwrap_or(0) as usize,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn parse_mail_body(data: &Value) -> Option<EmailBody> {
+    let m = data.get("mail_message")?;
+    if m.is_null() {
+        return None;
+    }
+    Some(EmailBody {
+        text: m.get("text").and_then(Value::as_str).map(str::to_string),
+        html: m.get("html").and_then(Value::as_str).map(str::to_string),
+        raw: str_of(m, "raw"),
+    })
+}
+
+pub fn parse_hooks(data: &Value) -> Vec<Request> {
+    data.get("hooks")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(parse_request).collect())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,6 +650,43 @@ mod tests {
         let mut quiet = e.clone();
         quiet.queries.clear();
         assert!(explain_prompt(&quiet, Some(false)).contains("grove sql-capture on"));
+    }
+
+    #[test]
+    fn parses_mail_list_and_body() {
+        let list = json!({ "mail": [
+            { "id": 7, "from": "app@felagi.test", "to": ["kh@gets.no"], "subject": "Kvittering",
+              "received_at": "2026-09-05T09:30:04Z", "received_ms": 1788600604000u64, "size": 1200 }
+        ]});
+        let mail = parse_mail(&list);
+        assert_eq!(mail.len(), 1);
+        assert_eq!(mail[0].subject, "Kvittering");
+        assert_eq!(mail[0].to, vec!["kh@gets.no"]);
+
+        let body = json!({ "mail_message": {
+            "id": 7, "from": "a", "to": [], "subject": "s", "received_at": "t", "received_ms": 0, "size": 1,
+            "raw": "Subject: s\r\n\r\n<p>Hei <b>Bjørn</b></p>", "text": null, "html": "<p>Hei <b>Bjørn</b></p>"
+        }});
+        let b = parse_mail_body(&body).unwrap();
+        assert_eq!(b.readable(), "Hei Bjørn");
+        assert!(parse_mail_body(&json!({ "mail_message": null })).is_none());
+    }
+
+    #[test]
+    fn parses_webhooks_as_requests() {
+        let v = json!({ "hooks": [
+            { "id": 12, "time": "10:00:00.000", "epoch_ms": 1u64, "site": "felagi", "method": "POST",
+              "path": "/__grove/hooks/stripe", "status": 200, "duration_ms": 3, "https": true }
+        ]});
+        let hooks = parse_hooks(&v);
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].path, "/__grove/hooks/stripe");
+        assert_eq!(hooks[0].method, "POST");
+    }
+
+    #[test]
+    fn strip_tags_keeps_the_words() {
+        assert_eq!(strip_tags("<div>a<br>b  <i>c</i></div>"), "a b c");
     }
 
     /// Against the real CLI when Grove is installed: the JSON contract holds.

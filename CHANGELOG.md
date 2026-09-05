@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `grove db snapshot` before migrating so a bad migration is one restore from
   undone.
 
+- **Verify the fix works without Clockwork.** When the app doesn't expose
+  Clockwork, the baseline and re-measure take their query lists from Grove's
+  causal chain for the replayed request (with SQL capture on).
+
+- **Grove's mail-catcher and webhook hub, in the editor.** *Grove: Mail
+  Catcher* lists what the app sent and shows a message's text; *Grove:
+  Webhooks* lists captured deliveries and re-delivers one to your handler on
+  the app's own URL. Both hand their selection to the agent.
+
 ## [0.9.14] - 2026-09-05
 
 ### Changed

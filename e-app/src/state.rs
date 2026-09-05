@@ -822,6 +822,15 @@ pub struct AppState {
     pub grove_site: RwSignal<Option<Option<crate::grove::Site>>>,
     /// Whether Grove correlates SQL with its request timeline (`None` = unknown).
     pub grove_sql_capture: RwSignal<Option<bool>>,
+    /// The Grove panel (mail-catcher + webhooks).
+    pub grove_panel_open: RwSignal<bool>,
+    pub grove_tab: RwSignal<crate::grove_state::GroveTab>,
+    pub grove_mail: RwSignal<Vec<crate::grove::Email>>,
+    pub grove_hooks: RwSignal<Vec<crate::grove::Request>>,
+    /// The selected entry `(tab, id)`, and the text shown for it.
+    pub grove_selected: RwSignal<Option<(crate::grove_state::GroveTab, u64)>>,
+    pub grove_detail: RwSignal<String>,
+    pub grove_refreshing: RwSignal<bool>,
     /// The in-progress "verify the fix" session, if any (see [`crate::verify`]).
     pub verify_session: RwSignal<Option<crate::verify::VerifySession>>,
     /// A verify measurement (baseline or after) is in flight.
@@ -1134,6 +1143,7 @@ fn substitute_route_params(uri: &str) -> String {
 /// not see" rather than "there were none". Conflating those two turns the
 /// evidence table into a confident lie.
 pub(crate) fn replay_for_verify(base: &str, url: &str) -> (u16, f64, Vec<(String, String)>, bool) {
+    let started = now_ms();
     let rr = do_http_request(base, url);
     let ms = rr
         .time
@@ -1141,7 +1151,47 @@ pub(crate) fn replay_for_verify(base: &str, url: &str) -> (u16, f64, Vec<(String
         .parse::<f64>()
         .map(|secs| secs * 1000.0)
         .unwrap_or(0.0);
+    if rr.clockwork {
+        return (rr.status.unwrap_or(0), ms, rr.queries, true);
+    }
+    // No Clockwork in the app: Grove's causal chain has the queries when SQL
+    // capture is on. Find our request in its timeline and take the SQL.
+    if let Some(queries) = grove_queries_for_replay(base, url, started) {
+        return (rr.status.unwrap_or(0), ms, queries, true);
+    }
     (rr.status.unwrap_or(0), ms, rr.queries, rr.clockwork)
+}
+
+/// The SQL Grove attributed to the request we just replayed to `url`: the
+/// newest timeline entry for that path that completed after `started_ms`.
+/// Grove records an entry as the response finishes, so one or two short
+/// retries cover the daemon being a step behind us.
+fn grove_queries_for_replay(
+    base: &str,
+    url: &str,
+    started_ms: u128,
+) -> Option<Vec<(String, String)>> {
+    let host = base.split("://").nth(1)?.trim_end_matches('/');
+    let site = crate::grove::site_by_host(host)?;
+    let path = url
+        .strip_prefix(base.trim_end_matches('/'))
+        .filter(|p| p.starts_with('/'))
+        .unwrap_or(url);
+    for attempt in 0..4 {
+        if let Some(list) = crate::grove::requests(&site.name, 5) {
+            if let Some(r) = list
+                .iter()
+                .find(|r| r.path == path && r.epoch_ms >= started_ms)
+            {
+                let e = crate::grove::explain(r.id)?;
+                return Some(e.queries.into_iter().map(|q| (q, String::new())).collect());
+            }
+        }
+        if attempt < 3 {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+    None
 }
 
 /// Perform the request via the system `curl` (`-k` so Grove's private-CA HTTPS
@@ -1422,6 +1472,13 @@ impl AppState {
             runtime_polling: RwSignal::new(false),
             grove_site: RwSignal::new(None),
             grove_sql_capture: RwSignal::new(None),
+            grove_panel_open: RwSignal::new(false),
+            grove_tab: RwSignal::new(crate::grove_state::GroveTab::Mail),
+            grove_mail: RwSignal::new(Vec::new()),
+            grove_hooks: RwSignal::new(Vec::new()),
+            grove_selected: RwSignal::new(None),
+            grove_detail: RwSignal::new(String::new()),
+            grove_refreshing: RwSignal::new(false),
             verify_session: RwSignal::new(None),
             verify_busy: RwSignal::new(false),
             verify_open: RwSignal::new(false),

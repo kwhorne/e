@@ -114,6 +114,19 @@ Without Grove, the panel polls [Clockwork](https://underground.works/clockwork)
 (`/__clockwork/latest`) as before: queries with N+1 warnings, cache hits/misses,
 sent mails, and events.
 
+**Verify the fix** (below) takes its query counts from Grove's chain too when
+the app has no Clockwork — turn on SQL capture first.
+
+### Mail and webhooks (Grove)
+
+**Grove: Mail Catcher** (command palette) lists every email the app sent to
+Grove's SMTP server — subject, recipients, time — and shows a message's text
+when you click it; ✨ hands it to the agent to check content and find where it
+is built. **Grove: Webhooks** lists the deliveries captured at
+`/__grove/hooks/<bucket>`; select one and **↻ Re-deliver** sends the exact same
+request to your handler at that path on the app's own URL, so you can fix the
+handler and replay until it answers 200.
+
 ### Verify the fix (✓)
 
 Click the **✓** on a captured request to verify a change end to end. `e`

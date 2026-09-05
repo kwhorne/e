@@ -61,7 +61,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Database panel** (`⌘3`) — a full database IDE: browse & query MySQL, PostgreSQL, SQLite and ClickHouse; a real **SQL console** (highlighting, schema completion, multi-statement result tabs, query history, `:params`); **transactional editing** (stage → Submit/Revert) with production-aware safety rails; environment labels, pagination, value/JSON viewer; export CSV/JSON/SQL & CSV import; EXPLAIN + agent index migrations; views, DDL, schema relationships, snapshots, cross-table search. Passwords live in the OS keychain, never in a config file
 - **Inline SQL in PHP** — SQL strings are syntax-highlighted; **run under cursor** (`⌘↵`), **EXPLAIN** (`⌥⌘↵`) flags full scans / missing indexes, and *Suggest Index* asks the agent for a migration
 - **Laravel intelligence** — completion, hover and go-to-definition for `route()`, `view()`, `config()`, `env()`, `__()` and `<x-…>` components, sourced from your project
-- **Laravel code generation** — `⌘⇧,` opens the Laravel menu; **New Eloquent Model** (`⌘⌥N`) turns a typed spec (fields, types, defaults, relations) into the model, migration, factory, seeder, form requests, controller, JSON resource and policy in one go; **New Pivot Table**; **Route Search** (`⌘⇧R`); **Find Unused Views**
+- **Laravel code generation** — `⌘⇧,` opens the Laravel menu; **New Eloquent Model** (`⌘⇧N`) turns a typed spec (fields, types, defaults, relations) into the model, migration, factory, seeder, form requests, controller, JSON resource and policy in one go; **New Pivot Table**; **Route Search** (`⌘⇧R`); **Find Unused Views**
 - **Eloquent completion** — `$model->` suggests real table columns from the live database schema, merged with the language server
 - **Eloquent relationship graph** (`⌘⌥R`) — models vs. live foreign keys, flagging relations with no backing FK
 - **Inertia awareness** — `Inertia::render()` resolves to the page component (goto, completion, and in the map); Ziggy `route()` and shared props complete on the JS side
@@ -163,7 +163,7 @@ A selection — see [the full list](docs/keyboard-shortcuts.md).
 | `⌘⌥G`      | Event dispatch graph         | `⌘⌥E`    | Related files |
 | `⌘⌥I`      | Runtime insight (Clockwork)  | `⌘⌥A`    | Agent timeline |
 | `⌘⌥T`      | Tinker scratchpad            | `⌘⇧T`    | Autonomous TDD |
-| `⌘⇧,`      | Laravel menu                 | `⌘⌥N`    | New Eloquent Model |
+| `⌘⇧,`      | Laravel menu                 | `⌘⇧N`    | New Eloquent Model |
 | `⌘⇧R`      | Route search                 | `⌘⇧A`    | Artisan command |
 | `⌘=` / `⌘-`| Zoom in / out                | `⌥Z`     | Toggle word wrap |
 | `⌃-` / `⌃⇧-` | Go back / forward          | `⌘⇧M`    | Markdown preview |

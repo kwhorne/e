@@ -84,18 +84,38 @@ pub fn parse_list(json: &Value) -> Vec<ArtisanCmd> {
 
 /// Ask the application for its commands. Blocking (boots the app); run off
 /// the UI thread.
-pub fn list(root: &Path) -> Vec<ArtisanCmd> {
+pub fn list(root: &Path) -> Result<Vec<ArtisanCmd>, String> {
+    if !root.join("artisan").is_file() {
+        return Err(format!(
+            "{} has no `artisan` file — not a Laravel project",
+            root.display()
+        ));
+    }
     let out = std::process::Command::new("php")
         .args(["-d", "error_reporting=0", "-d", "display_errors=0"])
         .args(["artisan", "list", "--format=json"])
         .current_dir(root)
-        .output();
-    let Ok(out) = out else {
-        return Vec::new();
-    };
+        .output()
+        .map_err(|e| {
+            format!(
+                "couldn't run php: {e} (PATH is {})",
+                std::env::var("PATH").unwrap_or_default()
+            )
+        })?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let why = stderr
+            .lines()
+            .chain(stdout.lines())
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("no output");
+        return Err(format!("php artisan list failed: {why}"));
+    }
     serde_json::from_slice::<Value>(&out.stdout)
         .map(|v| parse_list(&v))
-        .unwrap_or_default()
+        .map_err(|e| format!("couldn't read artisan's command list: {e}"))
 }
 
 /// Rank commands for a query: name prefix first, then name contains, then

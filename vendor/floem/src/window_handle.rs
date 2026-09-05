@@ -75,6 +75,11 @@ pub(crate) struct WindowHandle {
     transparent: bool,
     pub(crate) scale: f64,
     pub(crate) modifiers: Modifiers,
+    /// What the focused view asked for. IME is switched off while the
+    /// command key is held so dead-key chords (⌘⌥N: ⌥N is `˜` on macOS) reach
+    /// the app as key events instead of starting a composition, and restored
+    /// to this when the key is released.
+    ime_allowed_by_view: bool,
     pub(crate) cursor_position: Point,
     pub(crate) window_position: Point,
     pub(crate) last_pointer_down: Option<(u8, Point, Instant)>,
@@ -187,6 +192,7 @@ impl WindowHandle {
             profile: None,
             scale,
             modifiers: Modifiers::default(),
+            ime_allowed_by_view: false,
             cursor_position: Point::ZERO,
             window_position: Point::ZERO,
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -1046,9 +1052,8 @@ impl WindowHandle {
                         }
                     }
                     UpdateMessage::SetImeAllowed { allowed } => {
-                        if let Some(window) = self.window.as_ref() {
-                            window.set_ime_allowed(allowed);
-                        }
+                        self.ime_allowed_by_view = allowed;
+                        self.apply_ime_allowed();
                     }
                     UpdateMessage::SetImeCursorArea { position, size } => {
                         if let Some(window) = self.window.as_ref() {
@@ -1304,7 +1309,20 @@ impl WindowHandle {
         if is_altgr {
             modifiers.set(Modifiers::ALTGR, true);
         }
+        let meta_changed = self.modifiers.meta() != modifiers.meta();
         self.modifiers = modifiers;
+        if meta_changed {
+            self.apply_ime_allowed();
+        }
+    }
+
+    /// The view's IME wish, except while the command key is down: a chord never
+    /// produces text, and with IME on, macOS turns ⌘ plus a dead key (⌥N, ⌥E,
+    /// ⌥U, ⌥I) into a composition and swallows the key event.
+    fn apply_ime_allowed(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_ime_allowed(self.ime_allowed_by_view && !self.modifiers.meta());
+        }
     }
 }
 

@@ -140,7 +140,7 @@ panels. Type to narrow it further.
 
 ## Code generation
 
-**Laravel: New Eloquent Model…** (`⌘⌥N`) is a spec in an editor panel with a
+**Laravel: New Eloquent Model…** (`⌘⇧N`) is a spec in an editor panel with a
 live preview of the files it will create. Fields have a type, `?` for nullable
 and an optional default; `foreignId Customer` is a foreign key *and* a
 `belongsTo`. Relations, options (`id timestamps softDeletes fillable`, prefix

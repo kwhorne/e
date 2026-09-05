@@ -9,6 +9,36 @@ These features require a language server on your `PATH`.
 - `rustup`'s `rust-analyzer` shim only works after
   `rustup component add rust-analyzer`.
 
+## Started from the Dock, everything is "not installed"
+
+The status bar says *intelephense ↓ click to install* though it is installed,
+`⌘⇧A` says *No Artisan commands*, tasks can't find `php` — but the same app
+started from a terminal finds them all. An app launched from the Dock, Finder
+or `open` inherits launchd's PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), not your
+shell's, and Grove's `~/.grove/bin`, `~/.npm-global/bin` and Composer's
+`vendor/bin` aren't in it.
+
+`e` asks your login shell for its PATH at startup (`$SHELL -ilc`, so both the
+profile and the rc file run) and adopts it, so this should not happen from
+0.9.20 on. If a tool is still missing, check that your shell finds it
+(`which php`) and that the PATH line lives in a file the login shell reads
+(`~/.zprofile` or `~/.zshrc` for zsh). `E_NO_SHELL_PATH=1` skips the lookup;
+a shell that takes more than four seconds to start is skipped too.
+
+## A shortcut does nothing
+
+Shortcuts match the key you press, not what it would type: `⌘⇧,` is the comma
+key even though ⇧, is `;` on a Norwegian keyboard and `<` on a US one, and
+`⌘⌥E` is the E key even though ⌥E is a dead key (accent composition is
+switched off while ⌘ is held). A chord can still be taken before it reaches
+any app — on one Mac `⌘⌥N` never arrived while `⌘⇧N` did — which is why New
+Eloquent Model is `⌘⇧N`. If a chord does nothing,
+start `e` from a terminal with `E_DEBUG_KEYS=1 e --foreground .` and press it:
+every chord is logged with the key macOS reported, the physical key and the
+command it resolved to (or `None`). Bindings are listed in
+[keyboard-shortcuts.md](keyboard-shortcuts.md) and overridable in
+`config.json`.
+
 ## `e .` used to hang the terminal
 
 Since 0.9.17 the command hands the shell back immediately and the editor

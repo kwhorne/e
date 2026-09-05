@@ -959,6 +959,8 @@ pub struct AppState {
     pub artisan: crate::artisan_palette::ArtisanState,
     pub artisan_cmds: RwSignal<Arc<Vec<crate::artisan::ArtisanCmd>>>,
     pub artisan_loading: RwSignal<bool>,
+    /// Why the command list is empty, when `php artisan list` failed.
+    pub artisan_error: RwSignal<String>,
     /// Buffer id awaiting a close confirmation (unsaved changes).
     pub close_confirm: RwSignal<Option<u64>>,
     /// Most-recently-used files (newest first) and the ⌘E switcher state.
@@ -1727,6 +1729,7 @@ impl AppState {
             artisan: crate::artisan_palette::ArtisanState::new(),
             artisan_cmds: RwSignal::new(Arc::new(Vec::new())),
             artisan_loading: RwSignal::new(false),
+            artisan_error: RwSignal::new(String::new()),
             close_confirm: RwSignal::new(None),
             recent_files: RwSignal::new(Vec::new()),
             recent: crate::recent::RecentState::new(),

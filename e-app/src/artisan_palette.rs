@@ -72,11 +72,21 @@ impl AppState {
             let root = self.root.get_untracked();
             let cmds = self.artisan_cmds;
             let loading = self.artisan_loading;
+            let error = self.artisan_error;
             self.spawn_bg(
                 move || artisan::list(&root),
-                move |list: Vec<ArtisanCmd>| {
+                move |list: Result<Vec<ArtisanCmd>, String>| {
                     loading.set(false);
-                    cmds.set(Arc::new(list));
+                    match list {
+                        Ok(list) => {
+                            error.set(String::new());
+                            cmds.set(Arc::new(list));
+                        }
+                        Err(e) => {
+                            eprintln!("e: artisan: {e}");
+                            error.set(e);
+                        }
+                    }
                 },
             );
         }
@@ -301,7 +311,12 @@ pub fn artisan_palette(state: AppState) -> impl IntoView {
         if state.artisan_loading.get() {
             "Asking the app for its commands…".to_string()
         } else {
-            "No Artisan commands (is `php` on PATH and this a Laravel project?)".to_string()
+            let error = state.artisan_error.get();
+            if error.is_empty() {
+                "No Artisan commands (is `php` on PATH and this a Laravel project?)".to_string()
+            } else {
+                format!("No Artisan commands: {error}")
+            }
         }
     })
     .style(move |s| {

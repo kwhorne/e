@@ -287,7 +287,7 @@ fn composer(state: AppState) -> impl IntoView {
     state.agent.composer_doc.set(Some(doc.clone()));
 
     let te = text_editor_keys("", move |editor_sig, kp, mods| {
-        if let KeyInput::Keyboard(key, _) = &kp.key {
+        if let KeyInput::Keyboard(key, physical) = &kp.key {
             if matches!(key, Key::Named(NamedKey::Enter))
                 && !mods.shift()
                 && !mods.meta()
@@ -297,7 +297,7 @@ fn composer(state: AppState) -> impl IntoView {
                 state.send_composer();
                 return CommandExecuted::Yes;
             }
-            if handle_shortcut(state, key, mods) {
+            if handle_shortcut(state, key, Some(physical), mods) {
                 return CommandExecuted::Yes;
             }
         }

@@ -44,6 +44,9 @@ use crate::update_view::update_notice;
 
 /// Launch the editor.
 pub fn launch() {
+    // Before anything spawns: a Dock launch has launchd's PATH, and every
+    // tool lookup below wants the shell's.
+    crate::shell_env::adopt_login_path();
     detach_from_terminal();
     install_crash_logger();
     // exit_on_close defaults to false on macOS, which leaves the process (and its
@@ -236,11 +239,27 @@ fn install_crash_logger() {
 /// Keys are resolved through the (default + user-overridable) keymap and routed
 /// to the matching command. Invoked from the editor key handler and a global
 /// fallback listener.
-pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bool {
-    match crate::keymap::command_for(key, mods) {
+pub(crate) fn handle_shortcut(
+    state: AppState,
+    key: &Key,
+    physical: Option<&floem::keyboard::PhysicalKey>,
+    mods: Modifiers,
+) -> bool {
+    let resolved = crate::keymap::command_for(key, physical, mods);
+    if debug_keys() && (mods.meta() || mods.control() || mods.alt()) {
+        eprintln!("e: key {key:?} on {physical:?} with {mods:?} -> {resolved:?}");
+    }
+    match resolved {
         Some(id) => crate::commands::dispatch(state, &id),
         None => false,
     }
+}
+
+/// `E_DEBUG_KEYS=1` logs every chord and what it resolved to — the way to see
+/// what a layout actually reports for a shortcut that "does nothing".
+fn debug_keys() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("E_DEBUG_KEYS").is_some_and(|v| !v.is_empty() && v != "0"))
 }
 
 /// Resolve the CLI argument into `(workspace_root, file_to_open)`.
@@ -825,7 +844,12 @@ fn app_view() -> impl IntoView {
     })
     .on_event(EventListener::KeyDown, move |e| {
         if let Event::KeyDown(ke) = e {
-            if handle_shortcut(state, &ke.key.logical_key, ke.modifiers) {
+            if handle_shortcut(
+                state,
+                &ke.key.logical_key,
+                Some(&ke.key.physical_key),
+                ke.modifiers,
+            ) {
                 return EventPropagation::Stop;
             }
         }

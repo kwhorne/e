@@ -281,7 +281,13 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
-                if ke.modifiers.meta() && handle_shortcut(state, &ke.key.logical_key, ke.modifiers)
+                if ke.modifiers.meta()
+                    && handle_shortcut(
+                        state,
+                        &ke.key.logical_key,
+                        Some(&ke.key.physical_key),
+                        ke.modifiers,
+                    )
                 {
                     return EventPropagation::Stop;
                 }

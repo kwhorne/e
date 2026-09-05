@@ -292,8 +292,8 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
 
             let te = text_editor_keys("", move |editor_sig, kp, mods| {
                 // App shortcuts first (the editor otherwise swallows every key).
-                if let KeyInput::Keyboard(key, _) = &kp.key {
-                    if handle_shortcut(state, key, mods) {
+                if let KeyInput::Keyboard(key, physical) = &kp.key {
+                    if handle_shortcut(state, key, Some(physical), mods) {
                         return CommandExecuted::Yes;
                     }
                     // Auto-pairing for plain typed brackets/quotes.

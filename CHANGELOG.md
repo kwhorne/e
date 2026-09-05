@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Started from the Dock, every tool was "not installed".** A GUI launch
+  inherits launchd's PATH, not the shell's, so php (Grove's `~/.grove/bin`),
+  intelephense (`~/.npm-global/bin`) and laravel-lsp (Composer's `vendor/bin`)
+  weren't found: the status bar offered to install servers that were there,
+  and `⌘⇧A` said *No Artisan commands*. `e` now asks the login shell for its
+  PATH at startup and adopts it. When `php artisan list` does fail, the
+  palette says why.
+
+- **New Eloquent Model is `⌘⇧N`** (was `⌘⌥N` in 0.9.19). `⌘⌥N` never
+  reached the app on the machine it was reported from — something system-wide
+  claims it — while `⌘⇧N` does, and it pairs with `⌘N` (new file).
+
+- **`⌘⇧,` and `⌘⌥N` did nothing.** Two causes. Shortcuts matched only the
+  character the key produced — `;` (Norwegian) or `<` (US) for ⇧, — so a chord
+  that matches nothing by character is now matched by the physical key, and
+  every binding works on every layout. And ⌥N, ⌥E, ⌥U and ⌥I are dead keys on
+  macOS: with ⌘ held they started an accent composition and the key event never
+  reached the editor, which also silenced `⌘⌥E` (related files), `⌘⌥U` (undo
+  tree) and `⌘⌥I` (runtime insight). IME is now off while ⌘ is down, so those
+  chords arrive as keys. `E_DEBUG_KEYS=1` logs each chord and what it resolved
+  to.
+
 ## [0.9.19] - 2026-09-05
 
 ### Added

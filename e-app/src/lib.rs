@@ -95,6 +95,7 @@ mod semantic;
 mod semantic_view;
 mod session;
 mod settings_view;
+pub mod shell_env;
 mod snippets;
 mod state;
 mod status;

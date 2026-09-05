@@ -62,7 +62,7 @@ pub fn sql_console(state: AppState) -> impl IntoView {
         let comp = state.completion;
         let ours = comp.open.get_untracked()
             && comp.buffer_id.get_untracked() == Some(crate::completion_state::CONSOLE_COMP_ID);
-        if let KeyInput::Keyboard(key, _) = &kp.key {
+        if let KeyInput::Keyboard(key, physical) = &kp.key {
             use floem::keyboard::{Key, NamedKey};
             // ⌘/Ctrl+Enter runs the selection or the statement under the cursor;
             // add Shift to run the whole console. Intercepted before app shortcuts
@@ -80,7 +80,7 @@ pub fn sql_console(state: AppState) -> impl IntoView {
                 comp.open.set(false);
                 return CommandExecuted::Yes;
             }
-            if handle_shortcut(state, key, mods) {
+            if handle_shortcut(state, key, Some(physical), mods) {
                 return CommandExecuted::Yes;
             }
         }

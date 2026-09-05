@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Eloquent helper types `Model::factory()`** as the model's factory class
   when `database/factories` has one, so factory states complete too.
 
+- **A Migrations panel.** *Laravel: Migrations* lists every migration with its
+  batch and status from `migrate:status`; ▶ Migrate runs what's pending (behind
+  a Grove snapshot when it can), ↶ rolls the last batch back, and a click opens
+  the migration's file.
+
 - **Agents can wait for diagnostics.** `wait_diagnostics` on the editor socket
   reloads the file the agent wrote (or opens it), waits for every running
   language server to publish again, and answers with the problems — the write →

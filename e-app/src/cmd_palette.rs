@@ -40,6 +40,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("run-test-at-cursor", "Tests: Run Test at Cursor"),
     ("laravel-log", "Laravel: Log Tail"),
     ("runtime", "Laravel: Runtime Insight (Telescope)"),
+    ("migrations", "Laravel: Migrations"),
     ("grove-mail", "Grove: Mail Catcher"),
     ("grove-hooks", "Grove: Webhooks"),
     ("schema-diff", "Laravel: Schema Diff (migrations vs DB)"),

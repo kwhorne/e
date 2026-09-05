@@ -553,6 +553,10 @@ fn app_view() -> impl IntoView {
                     crate::grove_view::grove_panel(state).into_any(),
                 ),
                 (
+                    state.migrations_open,
+                    crate::migrations::migrations_panel(state).into_any(),
+                ),
+                (
                     state.verify_open,
                     crate::verify_view::verify_panel(state).into_any(),
                 ),

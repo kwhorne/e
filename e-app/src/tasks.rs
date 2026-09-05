@@ -106,7 +106,7 @@ fn grove_tasks(root: &Path) -> Vec<Task> {
 
 /// Grove's snapshot engine for the project's database, from `.env`; `None`
 /// for SQLite and anything else Grove doesn't snapshot.
-fn grove_snapshot_engine(root: &Path) -> Option<&'static str> {
+pub(crate) fn grove_snapshot_engine(root: &Path) -> Option<&'static str> {
     let env = std::fs::read_to_string(root.join(".env")).ok()?;
     let conn = env
         .lines()

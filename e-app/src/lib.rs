@@ -66,6 +66,7 @@ mod log;
 mod lsp_registry;
 mod map;
 mod markdown_view;
+mod migrations;
 mod move_class;
 mod navigation;
 mod outline;

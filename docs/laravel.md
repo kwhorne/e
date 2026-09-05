@@ -275,6 +275,16 @@ feature test to `tests/Feature/` using the request path, the response status, an
 assertions inferred from the response (JSON structure or an HTML `<title>`). It
 opens the file, ready for the `⌘⇧T` "fix to green" loop.
 
+## Migrations
+
+**Laravel: Migrations** (command palette) lists every migration with its batch
+and whether it has run, from `php artisan migrate:status`. **▶ Migrate** runs
+what's pending — behind a `grove db snapshot` when Grove serves the database, so
+a bad migration is one `grove db restore` from undone — and **↶ Rollback last
+batch** runs `migrate:rollback --step=1`; both in a terminal tab, with the list
+re-read once they have had a moment to finish. Click a migration to open its
+file.
+
 ## Schema diff
 
 **Laravel: Schema Diff** (command palette) compares your migrations against the

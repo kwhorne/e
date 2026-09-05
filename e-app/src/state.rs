@@ -847,6 +847,11 @@ pub struct AppState {
     /// Agents waiting for fresh diagnostics on a file they just wrote.
     pub diag_waiters: RwSignal<Vec<DiagWaiter>>,
     diag_waiter_seq: RwSignal<u64>,
+    /// The Migrations panel.
+    pub migrations_open: RwSignal<bool>,
+    pub migrations: RwSignal<Vec<crate::migrations::Migration>>,
+    pub migrations_error: RwSignal<String>,
+    pub migrations_loading: RwSignal<bool>,
     /// The Grove panel (mail-catcher + webhooks).
     pub grove_panel_open: RwSignal<bool>,
     pub grove_tab: RwSignal<crate::grove_state::GroveTab>,
@@ -1612,6 +1617,10 @@ impl AppState {
             grove_sql_capture: RwSignal::new(None),
             diag_waiters: RwSignal::new(Vec::new()),
             diag_waiter_seq: RwSignal::new(0),
+            migrations_open: RwSignal::new(false),
+            migrations: RwSignal::new(Vec::new()),
+            migrations_error: RwSignal::new(String::new()),
+            migrations_loading: RwSignal::new(false),
             grove_panel_open: RwSignal::new(false),
             grove_tab: RwSignal::new(crate::grove_state::GroveTab::Mail),
             grove_mail: RwSignal::new(Vec::new()),

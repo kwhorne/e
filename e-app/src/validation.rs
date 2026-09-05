@@ -112,6 +112,76 @@ pub fn rule_partial(line_before: &str) -> Option<String> {
     }
 }
 
+/// The cursor is typing a rule *parameter* that names a table or a column:
+/// `exists:` / `unique:` (table), `exists:users,` (column), and the object
+/// forms `Rule::exists('` / `Rule::unique('users', '`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParamCtx {
+    Table { partial: String },
+    Column { table: String, partial: String },
+}
+
+/// Byte offset just after the opening quote of the unterminated string the
+/// cursor is in, if any.
+fn open_string(line_before: &str) -> Option<usize> {
+    let mut in_str: Option<(char, usize)> = None;
+    for (i, c) in line_before.char_indices() {
+        match in_str {
+            Some((q, _)) if c == q => in_str = None,
+            Some(_) => {}
+            None if c == '\'' || c == '"' => in_str = Some((c, i + 1)),
+            None => {}
+        }
+    }
+    in_str.map(|(_, start)| start)
+}
+
+pub fn param_context(line_before: &str) -> Option<ParamCtx> {
+    let start = open_string(line_before)?;
+    let content = &line_before[start..];
+    let before = line_before[..start - 1].trim_end();
+
+    // `Rule::exists('users', 'id` / `Rule::unique('`
+    for rule in ["Rule::exists(", "Rule::unique("] {
+        if let Some(pos) = before.rfind(rule) {
+            let args = &before[pos + rule.len()..];
+            if args.trim().is_empty() {
+                return Some(ParamCtx::Table {
+                    partial: content.to_string(),
+                });
+            }
+            // One earlier string argument, then a comma: the column.
+            let t = args.trim();
+            let t = t.strip_suffix(',')?.trim_end();
+            let table = t
+                .strip_prefix('\'')
+                .and_then(|x| x.strip_suffix('\''))
+                .or_else(|| t.strip_prefix('"').and_then(|x| x.strip_suffix('"')))?;
+            return Some(ParamCtx::Column {
+                table: table.to_string(),
+                partial: content.to_string(),
+            });
+        }
+    }
+
+    // `'required|exists:users,id` — the last pipe segment with a colon.
+    let seg = content.rsplit('|').next().unwrap_or(content);
+    let (rule, rest) = seg.split_once(':')?;
+    if !matches!(rule.trim(), "exists" | "unique") {
+        return None;
+    }
+    match rest.split_once(',') {
+        None => Some(ParamCtx::Table {
+            partial: rest.to_string(),
+        }),
+        Some((table, after)) if !after.contains(',') => Some(ParamCtx::Column {
+            table: table.trim().to_string(),
+            partial: after.to_string(),
+        }),
+        Some(_) => None,
+    }
+}
+
 /// Generate `'field' => 'rules'` lines from a table's columns.
 pub fn generate_rules(table: &str, cols: &[ColumnInfo]) -> String {
     let skip = [
@@ -214,5 +284,40 @@ mod tests {
         assert!(!r.contains("'id'")); // skipped
         assert!(r.contains("'email' => 'required|email',"));
         assert!(r.contains("'age' => 'nullable|integer',"));
+    }
+
+    #[test]
+    fn exists_and_unique_parameters_name_tables_then_columns() {
+        assert_eq!(
+            param_context("'email' => 'required|exists:us"),
+            Some(ParamCtx::Table {
+                partial: "us".into()
+            })
+        );
+        assert_eq!(
+            param_context("'email' => 'required|unique:users,em"),
+            Some(ParamCtx::Column {
+                table: "users".into(),
+                partial: "em".into()
+            })
+        );
+        // A third segment (ignore column) isn't a name we can complete.
+        assert_eq!(param_context("'x' => 'unique:users,email,"), None);
+        // Object form.
+        assert_eq!(
+            param_context("Rule::exists('us"),
+            Some(ParamCtx::Table {
+                partial: "us".into()
+            })
+        );
+        assert_eq!(
+            param_context("Rule::unique('users', 'em"),
+            Some(ParamCtx::Column {
+                table: "users".into(),
+                partial: "em".into()
+            })
+        );
+        // Not a table/column rule.
+        assert_eq!(param_context("'x' => 'max:2"), None);
     }
 }

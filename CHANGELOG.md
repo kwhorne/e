@@ -66,6 +66,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scopeActive()` method to a `#[Scope] active()` attribute with its import.
   They show even when no language server runs.
 
+- **An Artisan palette.** `⌘⇧A` lists every command the app declares, `make:`
+  first; pick one, type its arguments against the usage line as a hint, and it
+  runs in a terminal tab.
+
+- **Eloquent helper code.** *Laravel: Generate Eloquent Helper* writes
+  `_ide_helper_models.php` from the live schema and the models' relationships
+  and scopes, so Intelephense completes and type-checks `$user->posts`,
+  `$order->total` and `User::active()` everywhere. Kept current on schema
+  reload once it exists; the servers are told about it at once.
+
+- **`exists:` and `unique:` complete tables and columns** from the live
+  schema, in rule strings and in `Rule::exists()` / `Rule::unique()`.
+
+- **Blade component attributes complete** from the component's `@props` or
+  class constructor; `@include`, `@extends`, `@each` and `@component` get view
+  completion, hover and go to definition like `view()`.
+
+- **Controller actions complete in routes**: `[UserController::class, '`
+  offers the controller's public methods.
+
 ## [0.9.14] - 2026-09-05
 
 ### Changed

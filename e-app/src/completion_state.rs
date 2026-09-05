@@ -477,8 +477,52 @@ impl AppState {
             }
         }
 
-        // Validation rule names inside `validate([…])` / FormRequest `rules()`.
+        // Validation rule names inside `validate([…])` / FormRequest `rules()`,
+        // and the tables and columns `exists:` / `unique:` name, from the live schema.
         if matches!(buf.file.language, Language::Php | Language::Blade) {
+            if let Some(ctx) = crate::validation::param_context(line_before) {
+                let schema = self.db.schema_cache.get_untracked();
+                let (partial, names): (String, Vec<(String, String)>) = match ctx {
+                    crate::validation::ParamCtx::Table { partial } => {
+                        let mut tables: Vec<String> = schema.keys().cloned().collect();
+                        tables.sort();
+                        (
+                            partial,
+                            tables
+                                .into_iter()
+                                .map(|t| (t, "table".to_string()))
+                                .collect(),
+                        )
+                    }
+                    crate::validation::ParamCtx::Column { table, partial } => (
+                        partial,
+                        schema
+                            .get(&table)
+                            .map(|cols| {
+                                cols.iter()
+                                    .map(|c| (c.name.clone(), format!("{} · {table}", c.data_type)))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    ),
+                };
+                let items: Vec<lsp_types::CompletionItem> = names
+                    .into_iter()
+                    .filter(|(n, _)| n.starts_with(&partial))
+                    .map(|(n, detail)| lsp_types::CompletionItem {
+                        label: n.clone(),
+                        insert_text: Some(n),
+                        kind: Some(lsp_types::CompletionItemKind::FIELD),
+                        detail: Some(detail),
+                        ..Default::default()
+                    })
+                    .collect();
+                if !items.is_empty() {
+                    let fstart = offset.saturating_sub(partial.len());
+                    self.show_string_completions(&buf, &editor, buffer_id, fstart, items);
+                    return;
+                }
+            }
             if let Some(partial) = crate::validation::rule_partial(line_before) {
                 let items: Vec<lsp_types::CompletionItem> = crate::validation::rule_names(&partial)
                     .into_iter()

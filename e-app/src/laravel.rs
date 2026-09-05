@@ -687,29 +687,257 @@ pub fn detect_context(line_before_cursor: &str) -> Option<(Helper, String)> {
     let before = line_before_cursor[..qpos].trim_end();
     let before = before.strip_suffix('(')?.trim_end();
 
-    for (helper, name) in [
-        (Helper::Route, "route"),
-        (Helper::View, "view"),
-        (Helper::Config, "config"),
-        (Helper::Env, "env"),
-        (Helper::Trans, "__"),
-        (Helper::Trans, "trans"),
-        (Helper::Trans, "trans_choice"),
-        (Helper::Trans, "lang"), // @lang(...)
+    // `(helper, name, directive_only)`: Blade's `@include('…')` and friends take
+    // a view name too, but `include(` in PHP is the language construct.
+    for (helper, name, directive_only) in [
+        (Helper::Route, "route", false),
+        (Helper::Route, "to_route", false),
+        (Helper::View, "view", false),
+        (Helper::View, "include", true),
+        (Helper::View, "includeIf", true),
+        (Helper::View, "extends", true),
+        (Helper::View, "each", true),
+        (Helper::View, "component", true),
+        (Helper::Config, "config", false),
+        (Helper::Env, "env", false),
+        (Helper::Trans, "__", false),
+        (Helper::Trans, "trans", false),
+        (Helper::Trans, "trans_choice", false),
+        (Helper::Trans, "lang", true), // @lang(...)
     ] {
         if let Some(idx) = before.len().checked_sub(name.len()) {
             if before[idx..].eq_ignore_ascii_case(name) {
-                let boundary = idx == 0 || {
-                    let b = before.as_bytes()[idx - 1];
-                    !(b.is_ascii_alphanumeric() || b == b'_')
+                let prev = if idx == 0 {
+                    None
+                } else {
+                    Some(before.as_bytes()[idx - 1])
                 };
-                if boundary {
+                let boundary = prev
+                    .map(|b| !(b.is_ascii_alphanumeric() || b == b'_'))
+                    .unwrap_or(true);
+                if boundary && (!directive_only || prev == Some(b'@')) {
                     return Some((helper, prefix.to_string()));
                 }
             }
         }
     }
     None
+}
+
+// ---- Blade component attributes -------------------------------------------
+
+/// The cursor is typing an attribute of a Blade component tag:
+/// `<x-alert type="danger" si|` → `("alert", "si")`.
+pub fn component_attr_context(line_before: &str) -> Option<(String, String)> {
+    let idx = line_before.rfind("<x-")?;
+    let tag = &line_before[idx + 3..];
+    if tag.contains('>') {
+        return None;
+    }
+    let name_len = tag
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'))
+        .count();
+    if name_len == 0 || name_len == tag.len() {
+        return None; // still typing the tag name
+    }
+    let name = &tag[..name_len];
+    let rest = &tag[name_len..];
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    // Inside an attribute value? (odd number of quotes after the name)
+    if rest.chars().filter(|c| *c == '"' || *c == '\'').count() % 2 == 1 {
+        return None;
+    }
+    let partial = rest
+        .rsplit(char::is_whitespace)
+        .next()
+        .unwrap_or("")
+        .trim_start_matches(':');
+    if partial.contains('=') {
+        return None;
+    }
+    Some((name.to_string(), partial.to_string()))
+}
+
+/// Attribute names a component accepts: the keys of an anonymous component's
+/// `@props([...])`, or a class component's constructor parameters and public
+/// properties, as kebab-case attributes.
+pub fn component_props(root: &Path, name: &str) -> Vec<String> {
+    let rel: PathBuf = name.split('.').collect();
+    let base = root.join("resources/views/components");
+    for blade in [
+        base.join(&rel).with_extension("blade.php"),
+        base.join(&rel).join("index.blade.php"),
+    ] {
+        if let Ok(src) = std::fs::read_to_string(&blade) {
+            return props_of_anonymous(&src);
+        }
+    }
+    let class_rel: PathBuf = name.split('.').map(studly).collect();
+    let class = root
+        .join("app/View/Components")
+        .join(class_rel)
+        .with_extension("php");
+    std::fs::read_to_string(class)
+        .map(|src| props_of_class(&src))
+        .unwrap_or_default()
+}
+
+fn studly(s: &str) -> String {
+    s.split(['-', '_'])
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let mut c = p.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// `@props(['type', 'size' => 'md', 'user' => null])` → `type`, `size`, `user`.
+pub fn props_of_anonymous(src: &str) -> Vec<String> {
+    let Some(at) = src.find("@props(") else {
+        return Vec::new();
+    };
+    let rest = &src[at + "@props(".len()..];
+    let Some(end) = rest.find("])") else {
+        return Vec::new();
+    };
+    let inner = rest[..end].trim_start_matches(['[', ' ', '\n']);
+    let mut out = Vec::new();
+    for entry in inner.split(',') {
+        let e = entry.trim();
+        let key = e.split("=>").next().unwrap_or("").trim();
+        let key = key.trim_matches(['\'', '"']);
+        if !key.is_empty()
+            && key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            out.push(kebab(key));
+        }
+    }
+    out
+}
+
+/// Constructor parameters and public properties of a class component.
+pub fn props_of_class(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(at) = src.find("function __construct(") {
+        let rest = &src[at + "function __construct(".len()..];
+        let end = rest.find(')').unwrap_or(rest.len());
+        for param in rest[..end].split(',') {
+            if let Some(dollar) = param.find('$') {
+                let name: String = param[dollar + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    out.push(kebab(&name));
+                }
+            }
+        }
+    }
+    for line in src.lines() {
+        let t = line.trim();
+        if t.starts_with("public ") && t.contains('$') && !t.contains("function") {
+            if let Some(dollar) = t.find('$') {
+                let name: String = t[dollar + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    out.push(kebab(&name));
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+// ---- Controller actions in routes ------------------------------------------
+
+/// The cursor is typing the method of a `[Controller::class, '…']` route action:
+/// `Route::get('/u', [UserController::class, 'sh|` → `("UserController", "sh")`.
+pub fn controller_action_context(line_before: &str) -> Option<(String, String)> {
+    let qpos = line_before.rfind(['\'', '"'])?;
+    let partial = &line_before[qpos + 1..];
+    if partial.contains(['\'', '"'])
+        || !partial
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    let before = line_before[..qpos].trim_end();
+    let before = before.strip_suffix(',')?.trim_end();
+    let before = before.strip_suffix("::class")?;
+    let class_start = before
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| c.is_ascii_alphanumeric() || *c == '_' || *c == '\\')
+        .last()
+        .map(|(i, _)| i)?;
+    let class = &before[class_start..];
+    let class = class.rsplit('\\').next().unwrap_or(class);
+    if class.is_empty() || !before[..class_start].trim_end().ends_with('[') {
+        return None;
+    }
+    Some((class.to_string(), partial.to_string()))
+}
+
+/// Public methods of the controller `short` refers to in `file_text`: resolved
+/// through the file's `use` imports (else its namespace, else
+/// `App\Http\Controllers`) and Composer's PSR-4 map.
+pub fn controller_methods(root: &Path, file_text: &str, short: &str) -> Vec<String> {
+    let fqn = file_text
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| l.strip_prefix("use ")?.strip_suffix(';'))
+        .map(|l| l.trim_start_matches('\\'))
+        .find(|fqn| fqn.rsplit('\\').next() == Some(short))
+        .map(str::to_string)
+        .or_else(|| {
+            crate::eloquent_helper::namespace_of(file_text).map(|ns| format!("{ns}\\{short}"))
+        })
+        .unwrap_or_else(|| format!("App\\Http\\Controllers\\{short}"));
+    let Ok(composer) = std::fs::read_to_string(root.join("composer.json")) else {
+        return Vec::new();
+    };
+    let roots = crate::move_class::psr4_roots(&composer);
+    let Some(rel) = crate::move_class::path_for(&roots, &fqn) else {
+        return Vec::new();
+    };
+    let Ok(src) = std::fs::read_to_string(root.join(rel)) else {
+        return Vec::new();
+    };
+    public_methods(&src)
+}
+
+/// `public function name(` declarations, minus magic methods.
+pub fn public_methods(src: &str) -> Vec<String> {
+    let mut out: Vec<String> = src
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("public ") && l.contains("function "))
+        .filter_map(|l| {
+            let after = &l[l.find("function ")? + "function ".len()..];
+            let name: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            (!name.is_empty() && !name.starts_with("__")).then_some(name)
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Detect the full token under the cursor (for hover / go-to-definition).
@@ -1170,5 +1398,69 @@ mod tests {
             vec!["user".to_string()]
         );
         assert!(required_params("/").is_empty());
+    }
+
+    #[test]
+    fn blade_view_directives_are_view_contexts_only_as_directives() {
+        assert_eq!(
+            detect_context("@include('partials.na"),
+            Some((Helper::View, "partials.na".into()))
+        );
+        assert_eq!(
+            detect_context("@extends('lay"),
+            Some((Helper::View, "lay".into()))
+        );
+        // PHP's include construct is not a view helper.
+        assert_eq!(detect_context("include('fi"), None);
+        assert_eq!(
+            detect_context("return to_route('ho"),
+            Some((Helper::Route, "ho".into()))
+        );
+    }
+
+    #[test]
+    fn component_attribute_context_and_props() {
+        assert_eq!(
+            component_attr_context("<x-alert type=\"danger\" si"),
+            Some(("alert".into(), "si".into()))
+        );
+        assert_eq!(
+            component_attr_context("<x-forms.input :"),
+            Some(("forms.input".into(), "".into()))
+        );
+        // Still typing the name, inside a value, or after the tag closed: nothing.
+        assert_eq!(component_attr_context("<x-ale"), None);
+        assert_eq!(component_attr_context("<x-alert type=\"dan"), None);
+        assert_eq!(component_attr_context("<x-alert>te"), None);
+
+        let blade = "@props(['type', 'size' => 'md', 'user' => null])\n<div>";
+        assert_eq!(props_of_anonymous(blade), vec!["type", "size", "user"]);
+        let class = "class Alert extends Component\n{\n    public string $extra = '';\n    public function __construct(public string $type, public ?User $userName = null)\n    {\n    }\n}";
+        assert_eq!(props_of_class(class), vec!["extra", "type", "user-name"]);
+    }
+
+    #[test]
+    fn controller_action_context_and_methods() {
+        assert_eq!(
+            controller_action_context("Route::get('/users', [UserController::class, 'sh"),
+            Some(("UserController".into(), "sh".into()))
+        );
+        assert_eq!(
+            controller_action_context(
+                "Route::post('/x', [\\App\\Http\\Controllers\\OrderController::class, '"
+            ),
+            Some(("OrderController".into(), "".into()))
+        );
+        assert_eq!(
+            controller_action_context("Route::get('/users', 'UserController@"),
+            None
+        );
+        assert_eq!(
+            controller_action_context("[UserController::class, $x"),
+            None
+        );
+
+        let src = "class UserController extends Controller\n{\n    public function __construct() {}\n    public function index() {}\n    public function show(User $user) {}\n    protected function helper() {}\n}";
+        assert_eq!(public_methods(src), vec!["index", "show"]);
     }
 }

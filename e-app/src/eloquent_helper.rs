@@ -357,4 +357,32 @@ mod tests {
             .contains("@method static \\Illuminate\\Database\\Eloquent\\Builder<static> active()"));
         assert!(php.contains("class User extends \\Illuminate\\Database\\Eloquent\\Model {}"));
     }
+
+    /// Against a real project when `E_LARAVEL_PROJECT` points at one: every
+    /// model parses, the helper renders, and it is valid-looking PHP.
+    #[test]
+    fn renders_a_real_project_when_pointed_at_one() {
+        let Some(root) = std::env::var_os("E_LARAVEL_PROJECT").map(std::path::PathBuf::from) else {
+            eprintln!(
+                "skipping renders_a_real_project_when_pointed_at_one: E_LARAVEL_PROJECT not set"
+            );
+            return;
+        };
+        let nodes = crate::relations::build_graph(&root, &[]);
+        assert!(!nodes.is_empty(), "models under app/Models");
+        let models = build(&nodes, &HashMap::new());
+        assert_eq!(models.len(), nodes.len());
+        let php = render(&models);
+        eprintln!(
+            "helper: {} models, {} relations, {} scopes, {} bytes",
+            models.len(),
+            models.iter().map(|m| m.relations.len()).sum::<usize>(),
+            models.iter().map(|m| m.scopes.len()).sum::<usize>(),
+            php.len()
+        );
+        assert!(php.starts_with("<?php\n"));
+        assert!(php.matches("namespace ").count() >= models.len());
+        // Every declared class is closed and no namespace block is left open.
+        assert_eq!(php.matches("{}\n}\n").count(), models.len());
+    }
 }

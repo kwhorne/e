@@ -26,6 +26,8 @@ from your project:
 | `env('…')`                     | environment variables (with value) |
 | `__('…')`, `trans('…')`, `@lang` | translation keys (with text) |
 | `<x-…>`                        | Blade components |
+| `<x-alert …`                   | the component's props as attributes (from `@props([…])` or the class's constructor) |
+| `@include`, `@extends`, `@each`, `@component` | view names (with hover and go to definition) |
 
 These are read from your project, so they reflect your actual routes, views,
 config, `.env`, language files and components.
@@ -103,10 +105,38 @@ Alongside the language servers' quick fixes, the code-action picker offers
 
 ## Validation rules
 
-Rule names complete inside `validate([…])` and FormRequest `rules()`. The
-command **Laravel: Generate Validation Rules from Table** writes
-`'field' => 'rules'` lines from the live schema (nullable → `nullable`,
-`varchar(255)` → `max:255`, and so on) at the cursor.
+Rule names complete inside `validate([…])` and FormRequest `rules()`, and so do
+the tables and columns `exists:` and `unique:` name — `exists:us` offers your
+tables, `exists:users,` their columns, from the live schema; `Rule::exists('…')`
+and `Rule::unique('users', '…')` likewise. The command **Laravel: Generate
+Validation Rules from Table** writes `'field' => 'rules'` lines from the live
+schema (nullable → `nullable`, `varchar(255)` → `max:255`, and so on) at the
+cursor.
+
+## Artisan
+
+`⌘⇧A` opens the Artisan palette with every command the app declares (its own
+and its packages'), `make:` first. Pick one, and the usage line becomes the hint
+for an argument line: `Order -mf` for `make:model`, `--seed` for `migrate`.
+Enter runs it in a terminal tab, so prompts and output work as in a shell.
+
+## Eloquent helper
+
+**Laravel: Generate Eloquent Helper** writes `_ide_helper_models.php` in the
+project root: for every model, `@property` per column with its PHP type from the
+live schema, `@property-read` for each relationship (a `Collection<int, Post>`
+plus `posts_count` on the many side), and `@method static Builder` for each
+scope (`scopeActive()` or `#[Scope]`). Intelephense reads it like any file, so
+`$user->posts`, `$order->total` and `User::active()` complete and type-check
+everywhere — in closures, on collections, in Blade. Once the file exists it is
+regenerated whenever the schema is reloaded, and the language servers are told
+about it at once. Add it to `.gitignore`.
+
+## Routes: controller actions
+
+In a route file, `[UserController::class, '` completes the controller's public
+methods, resolving the class through the file's `use` imports and Composer's
+PSR-4 map.
 
 ## Gates & policies
 

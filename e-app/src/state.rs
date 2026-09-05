@@ -4590,12 +4590,12 @@ impl AppState {
     /// Offer Laravel completions if the cursor is inside a helper string.
     /// Returns true when the context was handled (so we skip the LSP).
     pub(crate) fn try_laravel_completion(&self, buffer_id: u64) -> bool {
-        let Some(data) = self.laravel.get() else {
-            return false;
-        };
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return false;
         };
+        if !matches!(buf.file.language, Language::Php | Language::Blade) {
+            return false;
+        }
         let Some(editor) = buf.editor.get_untracked() else {
             return false;
         };
@@ -4605,6 +4605,51 @@ impl AppState {
         let upto = offset.min(text.len());
         let line_start = text[..upto].rfind('\n').map(|i| i + 1).unwrap_or(0);
         let line_before = &text[line_start..upto];
+        let root = self.root.get_untracked();
+
+        // `[UserController::class, 'sh…']`: the controller's public methods.
+        if buf.file.language == Language::Php {
+            if let Some((class, partial)) = laravel::controller_action_context(line_before) {
+                let items = laravel::controller_methods(&root, &text, &class)
+                    .into_iter()
+                    .filter(|m| m.starts_with(&partial))
+                    .map(|m| lsp_types::CompletionItem {
+                        label: m.clone(),
+                        insert_text: Some(m),
+                        kind: Some(lsp_types::CompletionItemKind::METHOD),
+                        detail: Some(format!("{class} action")),
+                        ..Default::default()
+                    })
+                    .collect();
+                let start = offset - partial.len();
+                return self.show_string_completions(&buf, &editor, buffer_id, start, items);
+            }
+        }
+
+        // `<x-alert ty…`: the component's props as attributes.
+        if buf.file.language == Language::Blade {
+            if let Some((component, partial)) = laravel::component_attr_context(line_before) {
+                let items = laravel::component_props(&root, &component)
+                    .into_iter()
+                    .filter(|p| p.starts_with(&partial))
+                    .map(|p| lsp_types::CompletionItem {
+                        label: p.clone(),
+                        insert_text: Some(format!("{p}=\"\"")),
+                        kind: Some(lsp_types::CompletionItemKind::PROPERTY),
+                        detail: Some(format!("<x-{component}> prop")),
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>();
+                if !items.is_empty() {
+                    let start = offset - partial.len();
+                    return self.show_string_completions(&buf, &editor, buffer_id, start, items);
+                }
+            }
+        }
+
+        let Some(data) = self.laravel.get() else {
+            return false;
+        };
 
         // Laravel's own helpers. When the official Laravel server is running it
         // owns these contexts — it's project-accurate, understands more of them
@@ -4627,7 +4672,6 @@ impl AppState {
         let Some(site) = crate::ide_json::call_site(line_before) else {
             return false;
         };
-        let root = self.root.get_untracked();
         let items = crate::ide_json::complete(&rules, &site, &data, &root);
         if items.is_empty() {
             return false;
@@ -4639,7 +4683,7 @@ impl AppState {
     /// Show `items` as the completion popup for the string starting at `start`.
     /// Returns true so the caller knows the context was handled (and skips the
     /// language server) — an empty list closes the popup but still counts.
-    fn show_string_completions(
+    pub(crate) fn show_string_completions(
         &self,
         buf: &Buffer,
         editor: &Editor,

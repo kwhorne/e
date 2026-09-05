@@ -133,6 +133,121 @@ pub fn properties(class_src: &str) -> Vec<String> {
     props
 }
 
+/// Methods an action can call — `wire:click="save"` — i.e. the class's public
+/// methods minus Livewire's lifecycle hooks.
+pub fn actions(class_src: &str) -> Vec<String> {
+    const HOOKS: &[&str] = &[
+        "mount",
+        "render",
+        "boot",
+        "booted",
+        "hydrate",
+        "dehydrate",
+        "rules",
+        "messages",
+        "validationAttributes",
+        "exception",
+        "rendering",
+        "rendered",
+    ];
+    crate::laravel::public_methods(class_src)
+        .into_iter()
+        .filter(|m| {
+            !HOOKS.contains(&m.as_str())
+                && !m.starts_with("updated")
+                && !m.starts_with("updating")
+                && !m.starts_with("hydrate")
+                && !m.starts_with("dehydrate")
+        })
+        .collect()
+}
+
+/// `wire:click="sa` (any `wire:<event>[.modifier]="…"` attribute) → `"sa"`.
+pub fn wire_action_partial(line_before: &str) -> Option<String> {
+    let at = line_before.rfind("wire:")?;
+    let attr = &line_before[at + 5..];
+    let (name, rest) = attr.split_once('=')?;
+    let event = name.split('.').next().unwrap_or("");
+    const EVENTS: &[&str] = &[
+        "click",
+        "submit",
+        "change",
+        "input",
+        "keydown",
+        "keyup",
+        "blur",
+        "focus",
+        "mouseenter",
+        "mouseleave",
+        "scroll",
+        "init",
+        "load",
+    ];
+    if !EVENTS.contains(&event) {
+        return None;
+    }
+    let value = rest.strip_prefix('"').or_else(|| rest.strip_prefix('\''))?;
+    if value.contains(['"', '\'', '(', ' ']) {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+/// Component names Livewire would resolve from the class tree:
+/// `app/Livewire/Admin/UserTable.php` → `admin.user-table`.
+pub fn component_names(root: &Path) -> Vec<String> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<String>, depth: usize) {
+        if depth > 6 {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(base, &p, out, depth + 1);
+            } else if p.extension().map(|x| x == "php").unwrap_or(false) {
+                let Ok(rel) = p.strip_prefix(base) else {
+                    continue;
+                };
+                let parts: Vec<String> = rel
+                    .with_extension("")
+                    .components()
+                    .map(|c| pascal_to_kebab(&c.as_os_str().to_string_lossy()))
+                    .collect();
+                out.push(parts.join("."));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for base in ["app/Livewire", "app/Http/Livewire"] {
+        let b = root.join(base);
+        walk(&b, &b, &mut out, 0);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// `@livewire('adm` or `<livewire:adm` → `"adm"`.
+pub fn tag_partial(line_before: &str) -> Option<String> {
+    if let Some(i) = line_before.rfind("<livewire:") {
+        let p = &line_before[i + "<livewire:".len()..];
+        if !p.contains([' ', '>', '/']) {
+            return Some(p.to_string());
+        }
+    }
+    if let Some(i) = line_before.rfind("@livewire(") {
+        let p = line_before[i + "@livewire(".len()..].trim_start();
+        let p = p.strip_prefix('\'').or_else(|| p.strip_prefix('"'))?;
+        if !p.contains(['\'', '"', ',']) {
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
 /// Line (0-based) of the `public $prop` declaration in the class, if present.
 pub fn property_line(class_src: &str, prop: &str) -> Option<usize> {
     let needle = format!("${prop}");
@@ -333,5 +448,27 @@ mod tests {
         assert!(rv.contains("{{ $title }}"));
         // "names" must not be touched.
         assert!(rv.contains(r#"wire:model="names""#));
+    }
+
+    #[test]
+    fn actions_skip_lifecycle_hooks_and_wire_contexts_are_found() {
+        let cls = "class Counter extends Component\n{\n    public function mount() {}\n    public function increment() {}\n    public function updatedCount() {}\n    public function save() {}\n    public function render() {}\n}";
+        assert_eq!(actions(cls), vec!["increment", "save"]);
+        assert_eq!(
+            wire_action_partial("<button wire:click=\"sa").as_deref(),
+            Some("sa")
+        );
+        assert_eq!(
+            wire_action_partial("<form wire:submit.prevent=\"").as_deref(),
+            Some("")
+        );
+        assert_eq!(wire_action_partial("<input wire:model=\"na"), None);
+        assert_eq!(wire_action_partial("<button wire:click=\"save("), None);
+        assert_eq!(
+            tag_partial("<livewire:admin.us").as_deref(),
+            Some("admin.us")
+        );
+        assert_eq!(tag_partial("@livewire('cou").as_deref(), Some("cou"));
+        assert_eq!(tag_partial("<livewire:counter />"), None);
     }
 }

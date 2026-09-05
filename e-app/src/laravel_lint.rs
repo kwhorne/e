@@ -11,7 +11,9 @@
 //! Pure functions over text; columns are UTF-8 bytes like every diagnostic the
 //! editor draws.
 
-use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use std::path::{Path, PathBuf};
+
+use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, TextEdit};
 
 use e_core::language::Language;
 
@@ -58,6 +60,12 @@ fn diag(range: Range, severity: DiagnosticSeverity, message: String) -> Diagnost
     }
 }
 
+/// A diagnostic with a machine-readable `code` a fix can act on.
+fn coded(mut d: Diagnostic, code: String) -> Diagnostic {
+    d.code = Some(NumberOrString::String(code));
+    d
+}
+
 /// Lint a PHP or Blade file against the project's routes, views and translations.
 pub fn lint(text: &str, language: Language, data: &LaravelData) -> Vec<Diagnostic> {
     if !matches!(language, Language::Php | Language::Blade) {
@@ -75,14 +83,17 @@ pub fn lint(text: &str, language: Language, data: &LaravelData) -> Vec<Diagnosti
                     continue;
                 }
                 if !data.views.iter().any(|v| v.name == call.token) {
-                    out.push(diag(
-                        range,
-                        DiagnosticSeverity::ERROR,
-                        format!(
-                            "View `{}` not found (resources/views/{}.blade.php)",
-                            call.token,
-                            call.token.replace('.', "/")
+                    out.push(coded(
+                        diag(
+                            range,
+                            DiagnosticSeverity::ERROR,
+                            format!(
+                                "View `{}` not found (resources/views/{}.blade.php)",
+                                call.token,
+                                call.token.replace('.', "/")
+                            ),
                         ),
+                        format!("missing-view:{}", call.token),
                     ));
                 }
             }
@@ -130,14 +141,126 @@ pub fn lint(text: &str, language: Language, data: &LaravelData) -> Vec<Diagnosti
                     continue;
                 }
                 if !data.translations.iter().any(|e| e.key == *t) {
-                    out.push(diag(
-                        range,
-                        DiagnosticSeverity::WARNING,
-                        format!("Translation key `{t}` not found in lang/"),
+                    out.push(coded(
+                        diag(
+                            range,
+                            DiagnosticSeverity::WARNING,
+                            format!("Translation key `{t}` not found in lang/"),
+                        ),
+                        format!("missing-trans:{t}"),
                     ));
                 }
             }
             Helper::Config | Helper::Env | Helper::Component => {}
+        }
+    }
+    out
+}
+
+/// A fix for one of our diagnostics: create or edit a file other than the one
+/// being edited.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fix {
+    pub title: String,
+    pub path: PathBuf,
+    pub edits: Vec<TextEdit>,
+}
+
+fn at(line: u32, character: u32) -> Position {
+    Position { line, character }
+}
+
+/// Fixes for the diagnostics under the caret: create the missing view file,
+/// or add the missing translation key to its `lang/<locale>/<file>.php`.
+/// `read` supplies a file's current text (`None` when it doesn't exist), so
+/// this stays pure and testable.
+pub fn fixes(
+    diags: &[Diagnostic],
+    root: &Path,
+    locale: &str,
+    read: &dyn Fn(&Path) -> Option<String>,
+) -> Vec<Fix> {
+    let mut out = Vec::new();
+    for d in diags {
+        let Some(NumberOrString::String(code)) = &d.code else {
+            continue;
+        };
+        if let Some(view) = code.strip_prefix("missing-view:") {
+            let rel: PathBuf = view.split('.').collect();
+            let path = root
+                .join("resources/views")
+                .join(rel)
+                .with_extension("blade.php");
+            let shown = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            out.push(Fix {
+                title: format!("Create {shown}"),
+                path,
+                edits: vec![TextEdit {
+                    range: Range {
+                        start: at(0, 0),
+                        end: at(0, 0),
+                    },
+                    new_text: "<div>\n    \n</div>\n".into(),
+                }],
+            });
+        } else if let Some(key) = code.strip_prefix("missing-trans:") {
+            // Only `file.key` (one level) maps to a line in a file; deeper keys
+            // would need a nested array we'd rather not guess at.
+            let Some((file, name)) = key.split_once('.') else {
+                continue;
+            };
+            if name.contains('.') || file.is_empty() || name.is_empty() {
+                continue;
+            }
+            let lang_dir = if root.join("lang").is_dir() || !root.join("resources/lang").is_dir() {
+                root.join("lang")
+            } else {
+                root.join("resources/lang")
+            };
+            let path = lang_dir.join(locale).join(format!("{file}.php"));
+            let shown = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            let line = format!("    '{name}' => '',\n");
+            match read(&path) {
+                Some(text) => {
+                    // Insert before the closing `];`.
+                    let Some(close) = text.rfind("];") else {
+                        continue;
+                    };
+                    let line_no = text[..close].matches('\n').count() as u32;
+                    let col =
+                        (close - text[..close].rfind('\n').map(|i| i + 1).unwrap_or(0)) as u32;
+                    out.push(Fix {
+                        title: format!("Add `{name}` to {shown}"),
+                        path,
+                        edits: vec![TextEdit {
+                            range: Range {
+                                start: at(line_no, col),
+                                end: at(line_no, col),
+                            },
+                            new_text: line,
+                        }],
+                    });
+                }
+                None => out.push(Fix {
+                    title: format!("Create {shown} with `{name}`"),
+                    path,
+                    edits: vec![TextEdit {
+                        range: Range {
+                            start: at(0, 0),
+                            end: at(0, 0),
+                        },
+                        new_text: format!("<?php\n\nreturn [\n{line}];\n"),
+                    }],
+                }),
+            }
         }
     }
     out
@@ -284,5 +407,37 @@ mod tests {
             ]
         );
         assert_eq!(d[0].range.start.line, 0);
+    }
+
+    #[test]
+    fn fixes_create_the_view_and_add_the_key() {
+        let src = "view('orders.missing'); __('auth.nope'); __('deep.a.b');";
+        let d = lint(src, Language::Php, &data());
+        let root = Path::new("/p");
+        let read = |p: &Path| -> Option<String> {
+            (p == Path::new("/p/lang/nb/auth.php"))
+                .then(|| "<?php\n\nreturn [\n    'failed' => 'Feil',\n];\n".to_string())
+        };
+        let f = fixes(&d, root, "nb", &read);
+        assert_eq!(f.len(), 2, "{f:?}");
+        assert_eq!(
+            f[0].title,
+            "Create resources/views/orders/missing.blade.php"
+        );
+        assert_eq!(
+            f[0].path,
+            PathBuf::from("/p/resources/views/orders/missing.blade.php")
+        );
+        assert_eq!(f[1].title, "Add `nope` to lang/nb/auth.php");
+        // Inserted on the `];` line, at its start.
+        assert_eq!(f[1].edits[0].range.start, at(4, 0));
+        assert_eq!(f[1].edits[0].new_text, "    'nope' => '',\n");
+        // A file that doesn't exist yet is created around the key.
+        let none = |_: &Path| -> Option<String> { None };
+        let f = fixes(&d, root, "nb", &none);
+        assert!(f[1].title.starts_with("Create lang/nb/auth.php"));
+        assert!(f[1].edits[0]
+            .new_text
+            .contains("return [\n    'nope' => '',\n];"));
     }
 }

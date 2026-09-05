@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Run the test at the caret.** `⌘⌥⇧T` runs just the Pest `it()`/`test()`
+  or PHPUnit `test_`/`#[Test]` the caret is in, through the TDD panel with
+  jump-to-failure; the next run is the whole suite.
+
+- **Missing views and translation keys can be fixed from the picker.** The
+  lints' diagnostics carry a code, and the code-action picker offers *Create
+  resources/views/…blade.php* (opened once created) and *Add `key` to
+  lang/<locale>/file.php* (the file is created when missing).
+
+- **Livewire actions and component names complete.** `wire:click="…"` and the
+  other event attributes offer the class's action methods; `<livewire:…>` and
+  `@livewire('…')` offer component names from `app/Livewire`.
+
+- **The Eloquent helper types `Model::factory()`** as the model's factory class
+  when `database/factories` has one, so factory states complete too.
+
+- **Agents can wait for diagnostics.** `wait_diagnostics` on the editor socket
+  reloads the file the agent wrote (or opens it), waits for every running
+  language server to publish again, and answers with the problems — the write →
+  check → fix loop without the agent guessing how long to sleep.
+
 ## [0.9.15] - 2026-09-05
 
 ### Changed

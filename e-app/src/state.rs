@@ -360,6 +360,17 @@ pub struct TermSession {
     pub name: RwSignal<String>,
 }
 
+/// An agent's request to be told the diagnostics for a file once every
+/// running server has re-published after the file changed.
+#[derive(Clone)]
+pub struct DiagWaiter {
+    pub id: u64,
+    pub uri: String,
+    /// Server ids we haven't heard from yet.
+    pub pending: HashSet<String>,
+    pub reply: std::sync::mpsc::Sender<serde_json::Value>,
+}
+
 /// Queue of `(server id, event)` from the LSP reader threads, drained on the
 /// UI thread.
 pub type LspQueue = Arc<Mutex<VecDeque<(String, ServerEvent)>>>;
@@ -833,6 +844,9 @@ pub struct AppState {
     pub grove_site: RwSignal<Option<Option<crate::grove::Site>>>,
     /// Whether Grove correlates SQL with its request timeline (`None` = unknown).
     pub grove_sql_capture: RwSignal<Option<bool>>,
+    /// Agents waiting for fresh diagnostics on a file they just wrote.
+    pub diag_waiters: RwSignal<Vec<DiagWaiter>>,
+    diag_waiter_seq: RwSignal<u64>,
     /// The Grove panel (mail-catcher + webhooks).
     pub grove_panel_open: RwSignal<bool>,
     pub grove_tab: RwSignal<crate::grove_state::GroveTab>,
@@ -901,6 +915,8 @@ pub struct AppState {
 
     // ---- Autonomous TDD loop -------------------------------------------
     pub tdd_open: RwSignal<bool>,
+    /// Extra arguments for the next test run only (`tests/X.php --filter=…`).
+    pub tdd_filter: RwSignal<Option<String>>,
     pub tdd_status: RwSignal<TddStatus>,
     pub tdd_output: RwSignal<String>,
     /// Parsed per-test results from the last run, when the runner could produce
@@ -1594,6 +1610,8 @@ impl AppState {
             runtime_polling: RwSignal::new(false),
             grove_site: RwSignal::new(None),
             grove_sql_capture: RwSignal::new(None),
+            diag_waiters: RwSignal::new(Vec::new()),
+            diag_waiter_seq: RwSignal::new(0),
             grove_panel_open: RwSignal::new(false),
             grove_tab: RwSignal::new(crate::grove_state::GroveTab::Mail),
             grove_mail: RwSignal::new(Vec::new()),
@@ -1635,6 +1653,7 @@ impl AppState {
             req_running: RwSignal::new(false),
             req_inertia: RwSignal::new(None),
             tdd_open: RwSignal::new(false),
+            tdd_filter: RwSignal::new(None),
             tdd_status: RwSignal::new(TddStatus::Idle),
             tdd_output: RwSignal::new(String::new()),
             tdd_results: RwSignal::new(Default::default()),
@@ -4626,6 +4645,53 @@ impl AppState {
             }
         }
 
+        if buf.file.language == Language::Blade {
+            // `wire:click="sa…"`: the component class's action methods.
+            if let Some(partial) = crate::livewire::wire_action_partial(line_before) {
+                let methods = buf
+                    .file
+                    .path
+                    .as_ref()
+                    .and_then(|p| crate::livewire::resolve(&root, p))
+                    .and_then(|c| std::fs::read_to_string(c.class_file).ok())
+                    .map(|src| crate::livewire::actions(&src))
+                    .unwrap_or_default();
+                let items = methods
+                    .into_iter()
+                    .filter(|m| m.starts_with(&partial))
+                    .map(|m| lsp_types::CompletionItem {
+                        label: m.clone(),
+                        insert_text: Some(m),
+                        kind: Some(lsp_types::CompletionItemKind::METHOD),
+                        detail: Some("Livewire action".to_string()),
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>();
+                if !items.is_empty() {
+                    let start = offset - partial.len();
+                    return self.show_string_completions(&buf, &editor, buffer_id, start, items);
+                }
+            }
+            // `<livewire:adm…` / `@livewire('adm…`: component names.
+            if let Some(partial) = crate::livewire::tag_partial(line_before) {
+                let items = crate::livewire::component_names(&root)
+                    .into_iter()
+                    .filter(|n| n.contains(&partial))
+                    .map(|n| lsp_types::CompletionItem {
+                        label: n.clone(),
+                        insert_text: Some(n),
+                        kind: Some(lsp_types::CompletionItemKind::MODULE),
+                        detail: Some("Livewire component".to_string()),
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>();
+                if !items.is_empty() {
+                    let start = offset - partial.len();
+                    return self.show_string_completions(&buf, &editor, buffer_id, start, items);
+                }
+            }
+        }
+
         // `<x-alert ty…`: the component's props as attributes.
         if buf.file.language == Language::Blade {
             if let Some((component, partial)) = laravel::component_attr_context(line_before) {
@@ -4750,6 +4816,223 @@ impl AppState {
             }
         });
         self.apply_diagnostics_to_buffer(uri, &merged);
+        self.resolve_diag_waiters(server_id, uri);
+    }
+
+    /// The diagnostics for `uri` in the shape the agent socket speaks.
+    pub(crate) fn diagnostics_json_for(&self, uri: &str) -> Vec<serde_json::Value> {
+        let path = uri_to_path(uri).to_string_lossy().into_owned();
+        self.diagnostics.with_untracked(|map| {
+            map.get(uri)
+                .map(|diags| {
+                    diags
+                        .iter()
+                        .map(|d| {
+                            let severity = match d.severity {
+                                Some(lsp_types::DiagnosticSeverity::ERROR) => "error",
+                                Some(lsp_types::DiagnosticSeverity::WARNING) => "warning",
+                                Some(lsp_types::DiagnosticSeverity::INFORMATION) => "info",
+                                Some(lsp_types::DiagnosticSeverity::HINT) => "hint",
+                                _ => "info",
+                            };
+                            serde_json::json!({
+                                "file": path,
+                                "line": d.range.start.line + 1,
+                                "col": d.range.start.character + 1,
+                                "severity": severity,
+                                "source": d.source,
+                                "message": d.message,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    }
+
+    /// An agent wrote `path` and wants to know what the language servers make
+    /// of it: reload the buffer (open it if needed), then answer once every
+    /// running server for the file has re-published — or at `timeout`, with
+    /// whatever is known then. The edit → diagnostics → fix loop, without the
+    /// agent guessing how long to sleep.
+    pub fn agent_wait_diagnostics(
+        &self,
+        path: PathBuf,
+        timeout: std::time::Duration,
+        reply: std::sync::mpsc::Sender<serde_json::Value>,
+    ) {
+        let root = self.root.get_untracked();
+        let abs = if path.is_absolute() {
+            path
+        } else {
+            root.join(path)
+        };
+        let abs = abs.canonicalize().unwrap_or(abs);
+        let uri = path_to_uri(&abs);
+        let language = e_core::language::Language::from_path(&abs);
+
+        let open = self.buffers.with_untracked(|bs| {
+            bs.iter()
+                .find(|b| b.file.path.as_deref() == Some(abs.as_path()))
+                .cloned()
+        });
+        let answer_now = |note: &str| {
+            let _ = reply.send(serde_json::json!({
+                "ok": true,
+                "path": abs.to_string_lossy(),
+                "diagnostics": self.diagnostics_json_for(&uri),
+                "complete": true,
+                "note": note,
+            }));
+        };
+        match &open {
+            Some(b) if b.dirty.get_untracked() => {
+                answer_now("buffer has unsaved changes; not reloaded from disk");
+                return;
+            }
+            Some(b) => {
+                let on_disk = std::fs::read_to_string(&abs).unwrap_or_default();
+                if on_disk == b.doc.text().to_string() {
+                    // Nothing changed, so nothing new is coming: answer with
+                    // what the servers already said.
+                    answer_now("file unchanged");
+                    return;
+                }
+                self.reload_buffer(b);
+            }
+            None => self.open_path(abs.clone()),
+        }
+
+        let pending: HashSet<String> =
+            lsp_registry::server_specs(language, self.is_laravel_project())
+                .iter()
+                .filter(|s| {
+                    self.lsp_clients
+                        .with_untracked(|m| m.get(s.id).map(|c| c.is_alive()).unwrap_or(false))
+                })
+                .map(|s| s.id.to_string())
+                .collect();
+        if pending.is_empty() {
+            answer_now("no language server for this file");
+            return;
+        }
+        let id = self.diag_waiter_seq.get_untracked() + 1;
+        self.diag_waiter_seq.set(id);
+        self.diag_waiters.update(|w| {
+            w.push(DiagWaiter {
+                id,
+                uri: uri.clone(),
+                pending,
+                reply,
+            })
+        });
+        let app = *self;
+        floem::action::exec_after(timeout, move |_| {
+            let waiter = app.diag_waiters.try_update(|w| {
+                let pos = w.iter().position(|x| x.id == id)?;
+                Some(w.remove(pos))
+            });
+            if let Some(Some(w)) = waiter {
+                let _ = w.reply.send(serde_json::json!({
+                    "ok": true,
+                    "path": uri_to_path(&w.uri).to_string_lossy(),
+                    "diagnostics": app.diagnostics_json_for(&w.uri),
+                    "complete": false,
+                    "note": format!("timed out waiting for {}", w.pending.iter().cloned().collect::<Vec<_>>().join(", ")),
+                }));
+            }
+        });
+    }
+
+    /// `server_id` published for `uri`: waiters on that file hear from it, and
+    /// are answered once every server they were waiting for has spoken.
+    fn resolve_diag_waiters(&self, server_id: &str, uri: &str) {
+        if self.diag_waiters.with_untracked(|w| w.is_empty()) {
+            return;
+        }
+        let done: Vec<DiagWaiter> = self
+            .diag_waiters
+            .try_update(|w| {
+                let mut done = Vec::new();
+                w.retain_mut(|x| {
+                    if x.uri != uri {
+                        return true;
+                    }
+                    x.pending.remove(server_id);
+                    if x.pending.is_empty() {
+                        done.push(x.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+                done
+            })
+            .unwrap_or_default();
+        for w in done {
+            let _ = w.reply.send(serde_json::json!({
+                "ok": true,
+                "path": uri_to_path(&w.uri).to_string_lossy(),
+                "diagnostics": self.diagnostics_json_for(&w.uri),
+                "complete": true,
+            }));
+        }
+    }
+
+    /// The app's locale, for which `lang/<locale>/` a missing key belongs to.
+    pub(crate) fn app_locale(&self) -> String {
+        self.laravel
+            .get_untracked()
+            .and_then(|d| {
+                d.envs
+                    .iter()
+                    .find(|kv| kv.key == "APP_LOCALE")
+                    .map(|kv| kv.value.clone())
+                    .filter(|v| !v.is_empty())
+                    .or_else(|| {
+                        d.configs
+                            .iter()
+                            .find(|kv| kv.key == "app.locale")
+                            .map(|kv| kv.value.clone())
+                            .filter(|v| !v.is_empty())
+                    })
+            })
+            .unwrap_or_else(|| "en".to_string())
+    }
+
+    /// Code actions that fix `e`'s own Laravel diagnostics under the caret:
+    /// create the missing view, add the missing translation key.
+    fn lint_fix_actions(&self, uri: &str, line: u32, col: u32) -> Vec<e_lsp::CodeActionItem> {
+        let at: Vec<Diagnostic> = self.diagnostics.with_untracked(|m| {
+            m.get(uri)
+                .map(|ds| {
+                    ds.iter()
+                        .filter(|d| d.source.as_deref() == Some("laravel"))
+                        .filter(|d| {
+                            let s = &d.range.start;
+                            let e = &d.range.end;
+                            (s.line < line || (s.line == line && s.character <= col))
+                                && (e.line > line || (e.line == line && e.character >= col))
+                        })
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
+        if at.is_empty() {
+            return Vec::new();
+        }
+        let root = self.root.get_untracked();
+        let locale = self.app_locale();
+        crate::laravel_lint::fixes(&at, &root, &locale, &|p| std::fs::read_to_string(p).ok())
+            .into_iter()
+            .map(|f| e_lsp::CodeActionItem {
+                title: f.title,
+                edits: vec![(path_to_uri(&f.path), f.edits)],
+                command: None,
+                server: "e".to_string(),
+            })
+            .collect()
     }
 
     /// Is the workspace a Laravel project? Cheap fs check, cached for the
@@ -5214,9 +5497,20 @@ impl AppState {
                 }
                 None => {
                     let path = uri_to_path(uri);
-                    let Ok(text) = std::fs::read_to_string(&path) else {
-                        eprintln!("e: workspace edit: could not read {}", path.display());
-                        continue;
+                    let text = match std::fs::read_to_string(&path) {
+                        Ok(t) => t,
+                        // A file the edit brings into being (a missing view, a
+                        // new lang file): start from nothing.
+                        Err(_) if !path.exists() => {
+                            if let Some(dir) = path.parent() {
+                                let _ = std::fs::create_dir_all(dir);
+                            }
+                            String::new()
+                        }
+                        Err(_) => {
+                            eprintln!("e: workspace edit: could not read {}", path.display());
+                            continue;
+                        }
                     };
                     let updated = crate::rename_preview::apply_edits(&text, list);
                     if updated == text {
@@ -5678,7 +5972,13 @@ impl AppState {
         // `e`'s own Laravel refactorings at the caret — cheap text transforms,
         // so they're computed right here and shown first.
         let text = buf.doc.text().to_string();
-        let local = local_code_actions(&text, buf.file.language, cursor.offset(), &uri);
+        let mut local = self.lint_fix_actions(&uri, sl, sc);
+        local.extend(local_code_actions(
+            &text,
+            buf.file.language,
+            cursor.offset(),
+            &uri,
+        ));
 
         if clients.is_empty() {
             if local.is_empty() {
@@ -5729,7 +6029,17 @@ impl AppState {
             return;
         };
         if !item.edits.is_empty() {
+            // A file the action creates is worth looking at afterwards.
+            let created: Vec<PathBuf> = item
+                .edits
+                .iter()
+                .map(|(u, _)| uri_to_path(u))
+                .filter(|p| !p.exists())
+                .collect();
             self.apply_workspace_edits(&item.edits);
+            if let Some(p) = created.into_iter().find(|p| p.exists()) {
+                self.open_path(p);
+            }
             return;
         }
         let Some(command) = item.command.clone() else {

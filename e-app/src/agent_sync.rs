@@ -11,6 +11,8 @@
 //!   diagnostics and workspace root.
 //! - `{"method":"open","path":"…","line":45,"col":1}` → open + jump.
 //! - `{"method":"diagnostics"}` → all problems.
+//! - `{"method":"wait_diagnostics","path":"…","timeout_ms":5000}` → the file's
+//!   problems once the language servers have re-read what you just wrote.
 //! - `{"method":"focus","target":"terminal|editor|agent"}`.
 //! - `{"method":"notify","message":"…"}`.
 //!
@@ -303,6 +305,25 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             state.review_summary.set(Some(text.to_string()));
             json!({"ok": true})
         }
+        // The agent wrote a file and wants the servers' verdict on it: answered
+        // once every running server has re-published, or at the timeout.
+        "wait_diagnostics" => {
+            let Some(path) = req.get("path").and_then(|p| p.as_str()) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing path"}));
+                return;
+            };
+            let timeout = req
+                .get("timeout_ms")
+                .and_then(|t| t.as_u64())
+                .unwrap_or(5000)
+                .clamp(200, 30_000);
+            state.agent_wait_diagnostics(
+                std::path::PathBuf::from(path),
+                Duration::from_millis(timeout),
+                reply,
+            );
+            return;
+        }
         "open" => {
             let Some(path) = req.get("path").and_then(|p| p.as_str()) else {
                 let _ = reply.send(json!({"ok": false, "error": "missing path"}));
@@ -524,7 +545,8 @@ fn log_summary(req: &Value) -> String {
     let path = s("path");
     let short = path.rsplit('/').next().unwrap_or(path);
     match req.get("method").and_then(|m| m.as_str()).unwrap_or("") {
-        "open" | "mark" | "lsp_definition" | "lsp_references" | "lsp_hover" => {
+        "open" | "mark" | "lsp_definition" | "lsp_references" | "lsp_hover"
+        | "wait_diagnostics" => {
             let line = req.get("line").and_then(|l| l.as_u64()).unwrap_or(0);
             format!("{short}:{line}")
         }

@@ -3,6 +3,7 @@
 
 use floem::ext_event::create_ext_action;
 use floem::reactive::{SignalGet, SignalUpdate};
+use floem::views::editor::text::Document;
 
 use crate::state::{AppState, TddStatus};
 
@@ -23,6 +24,11 @@ impl AppState {
             self.tdd_status.set(TddStatus::Failed);
             self.tdd_open.set(true);
             return;
+        };
+        // "Run this test" narrows one run; the next run is the whole suite again.
+        let cmd = match self.tdd_filter.try_update(|f| f.take()).flatten() {
+            Some(extra) => format!("{cmd} {extra}"),
+            None => cmd,
         };
         // Safety cap so an unproductive loop can't run forever.
         if self.tdd_loop.get_untracked() && self.tdd_iteration.get_untracked() >= 15 {
@@ -100,6 +106,32 @@ impl AppState {
     }
 
     /// Start the autonomous "fix to green" loop.
+    /// Run only the test the caret is in — a Pest description or a PHPUnit
+    /// method — in the TDD panel, so a failure still has a line to jump to.
+    pub fn run_test_at_cursor(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let (Some(editor), Some(path)) = (buf.editor.get_untracked(), buf.file.path.clone()) else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        let offset = editor.cursor.get_untracked().offset();
+        let Some(name) = crate::tasks::test_at_cursor(&text, offset) else {
+            Self::notify("No test at the caret (it/test(…) or a test_ method)");
+            return;
+        };
+        let root = self.root.get_untracked();
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        self.tdd_filter
+            .set(Some(crate::tasks::single_test_args(&rel, &name)));
+        self.run_tests();
+    }
+
     pub fn tdd_fix_to_green(&self) {
         self.tdd_iteration.set(0);
         self.tdd_loop.set(true);

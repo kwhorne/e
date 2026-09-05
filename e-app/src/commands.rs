@@ -86,6 +86,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "session-review" => state.toggle_review(),
         "review-measure-evidence" => state.review_measure_evidence(),
         "run-tests" => state.toggle_tdd(),
+        "run-test-at-cursor" => state.run_test_at_cursor(),
         "laravel-log" => state.toggle_laravel_log(),
         "runtime" => state.toggle_runtime(),
         "grove-mail" => state.toggle_grove_panel(crate::grove_state::GroveTab::Mail),

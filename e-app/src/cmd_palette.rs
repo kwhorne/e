@@ -37,6 +37,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("session-review", "Review: Session Changes"),
     ("review-measure-evidence", "Review: Measure Affected Routes"),
     ("run-tests", "Tests: Runner / Autonomous TDD"),
+    ("run-test-at-cursor", "Tests: Run Test at Cursor"),
     ("laravel-log", "Laravel: Log Tail"),
     ("runtime", "Laravel: Runtime Insight (Telescope)"),
     ("grove-mail", "Grove: Mail Catcher"),

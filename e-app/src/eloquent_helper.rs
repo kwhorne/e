@@ -30,6 +30,8 @@ pub struct HelperModel {
     pub relations: Vec<(String, String, String)>,
     /// Query scopes, as their query-builder method names (`active`, not `scopeActive`).
     pub scopes: Vec<String>,
+    /// The model's factory class (FQN), when `database/factories` has one.
+    pub factory: Option<String>,
 }
 
 /// The PHP type for a column, in phpDoc form.
@@ -118,7 +120,11 @@ fn is_many(kind: &str) -> bool {
 
 /// Describe every model: its table's columns from `schema`, its relations from
 /// the parsed graph, its scopes and namespace from its source file.
-pub fn build(nodes: &[ModelNode], schema: &HashMap<String, Vec<ColumnInfo>>) -> Vec<HelperModel> {
+pub fn build(
+    root: &Path,
+    nodes: &[ModelNode],
+    schema: &HashMap<String, Vec<ColumnInfo>>,
+) -> Vec<HelperModel> {
     let mut ns_cache: HashMap<std::path::PathBuf, String> = HashMap::new();
     let mut namespace_for = |file: &Path| -> String {
         if let Some(ns) = ns_cache.get(file) {
@@ -154,12 +160,22 @@ pub fn build(nodes: &[ModelNode], schema: &HashMap<String, Vec<ColumnInfo>>) -> 
                 )
             })
             .collect();
+        // `User::factory()` returns `UserFactory`, so its states complete too.
+        let factory_file = root.join(format!("database/factories/{}Factory.php", node.name));
+        let factory = std::fs::read_to_string(&factory_file).ok().map(|fsrc| {
+            format!(
+                "\\{}\\{}Factory",
+                namespace_of(&fsrc).unwrap_or_else(|| "Database\\Factories".to_string()),
+                node.name
+            )
+        });
         out.push(HelperModel {
             namespace,
             class: node.name.clone(),
             columns: schema.get(&node.table).cloned().unwrap_or_default(),
             relations,
             scopes: scopes_of(&src),
+            factory,
         });
     }
     out.sort_by(|a, b| (&a.namespace, &a.class).cmp(&(&b.namespace, &b.class)));
@@ -196,6 +212,11 @@ pub fn render(models: &[HelperModel]) -> String {
         for s in &m.scopes {
             out.push_str(&format!(
                 "     * @method static \\Illuminate\\Database\\Eloquent\\Builder<static> {s}()\n"
+            ));
+        }
+        if let Some(f) = &m.factory {
+            out.push_str(&format!(
+                "     * @method static {f} factory($count = null, $state = [])\n"
             ));
         }
         out.push_str(&format!(
@@ -256,7 +277,7 @@ impl AppState {
                 } else {
                     &cached
                 };
-                let models = build(&nodes, schema);
+                let models = build(&root, &nodes, schema);
                 if models.is_empty() {
                     return Err("no Eloquent models found under app/Models".into());
                 }
@@ -344,8 +365,12 @@ mod tests {
                 ),
             ],
             scopes: vec!["active".into()],
+            factory: Some("\\Database\\Factories\\UserFactory".into()),
         };
         let php = render(&[m]);
+        assert!(php.contains(
+            "@method static \\Database\\Factories\\UserFactory factory($count = null, $state = [])"
+        ));
         assert!(php.starts_with("<?php\n"));
         assert!(php.contains("namespace App\\Models {"));
         assert!(php.contains("     * @property int $id\n"));
@@ -370,7 +395,7 @@ mod tests {
         };
         let nodes = crate::relations::build_graph(&root, &[]);
         assert!(!nodes.is_empty(), "models under app/Models");
-        let models = build(&nodes, &HashMap::new());
+        let models = build(&root, &nodes, &HashMap::new());
         assert_eq!(models.len(), nodes.len());
         let php = render(&models);
         eprintln!(

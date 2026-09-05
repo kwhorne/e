@@ -64,6 +64,13 @@ re-indexing, exact type info:
 | `{"method":"lsp_references","path":"…","line":12,"col":5}` | `{references:[…]}` |
 | `{"method":"lsp_hover","path":"…","line":12,"col":5}` | `{hover}` |
 | `{"method":"lsp_symbols","query":"User"}` | workspace symbols with locations |
+| `{"method":"wait_diagnostics","path":"…","timeout_ms":5000}` | the file's problems once every running server has re-read what you just wrote — `{path, diagnostics:[…], complete}` (`complete:false` on timeout) |
+
+`wait_diagnostics` closes the loop: write the file, ask, fix what comes back.
+The editor reloads the buffer from disk (or opens it), waits for each language
+server serving the file to publish again, and answers with the merged list; a
+file that hasn't changed, or has unsaved edits in the editor, is answered at
+once with what is already known.
 
 (The file should be open in the editor so its server is running.)
 

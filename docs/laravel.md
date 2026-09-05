@@ -76,6 +76,12 @@ Arguments that are expressions (`'a.'.$b`, `$name`) and namespaced names
 (`pkg::view`) are left alone. When the official `laravel/lsp` is running it
 reports missing views and routes itself, so these lints stay off then.
 
+Two of them come with a fix in the code-action picker: **Create
+resources/views/…blade.php** for a missing view (the file opens once created),
+and **Add `key` to lang/<locale>/file.php** for a missing translation key, where
+the locale is `APP_LOCALE` from `.env` (else `app.locale`, else `en`) and the
+file is created around the key when it doesn't exist yet.
+
 ## Package completions (`ide.json`)
 
 Packages that ship a Laravel Idea [`ide.json`](https://laravel-idea.com/docs/ide_json/overview)
@@ -112,6 +118,13 @@ and `Rule::unique('users', '…')` likewise. The command **Laravel: Generate
 Validation Rules from Table** writes `'field' => 'rules'` lines from the live
 schema (nullable → `nullable`, `varchar(255)` → `max:255`, and so on) at the
 cursor.
+
+## Tests: run the one at the caret
+
+`⌘⌥⇧T` runs only the test the caret is in — a Pest `it('…')` / `test('…')`
+description or a PHPUnit `test_…` / `#[Test]` method — as `php artisan test
+<file> --filter="…"`, in the TDD panel, so a failure still has a line to jump to.
+The next `⌘⇧T` runs the whole suite again.
 
 ## Artisan
 
@@ -169,6 +182,9 @@ seeder, controller, policy, request, resource, and test — in a quick picker.
   `⌘⌥J` switches between the view and the class.
 - Renaming a property with `F2` updates **both** the class (`$prop`,
   `$this->prop`) and every `wire:` reference in the view.
+- `wire:click="…"`, `wire:submit`, `wire:change` and the other event attributes
+  complete from the class's action methods (public, minus lifecycle hooks).
+- `<livewire:…>` and `@livewire('…')` complete component names from `app/Livewire`.
 
 ## Runtime insight
 

@@ -131,6 +131,53 @@ description or a PHPUnit `test_…` / `#[Test]` method — as `php artisan test
 <file> --filter="…"`, in the TDD panel, so a failure still has a line to jump to.
 The next `⌘⇧T` runs the whole suite again.
 
+## The Laravel menu
+
+`⌘⇧,` opens the command palette filtered to `Laravel: ` — every Laravel command
+in one list, the way Laravel Idea's menu gathers them: code generation, the
+Artisan palette, route search, the Eloquent helper, migrations, the maps and
+panels. Type to narrow it further.
+
+## Code generation
+
+**Laravel: New Eloquent Model…** (`⌘⌥N`) is a spec in an editor panel with a
+live preview of the files it will create. Fields have a type, `?` for nullable
+and an optional default; `foreignId Customer` is a foreign key *and* a
+`belongsTo`. Relations, options (`id timestamps softDeletes fillable`, prefix
+`-` to turn one off) and what to generate are each one line:
+
+```
+model: Order
+fields:
+  customer_id   foreignId Customer
+  status        string = 'pending'
+  total         decimal(10,2)
+  notes         text?
+relations:
+  hasMany OrderLine
+options: id timestamps fillable
+generate: migration factory seeder request controller api-controller resource policy
+```
+
+`⌘↵` (or **Create**) writes the model with `$fillable`, `casts()` and the
+relation methods, plus whatever `generate:` lists: the `create_orders_table`
+migration; a factory with fakes chosen from the column types and names; a
+seeder; `StoreOrderRequest`/`UpdateOrderRequest` with rules derived from the
+fields (`required|string|max:255`, `nullable|string`, `exists:customers,id`,
+`sometimes` on update); a resource controller that uses those requests (or an
+API one under `App\Http\Controllers\Api` returning the JSON resource);
+`OrderResource`; `OrderPolicy`. Files that already exist are left alone and
+listed. The language servers are told about the new files at once, so they
+complete immediately.
+
+**Laravel: New Pivot Table…** is the same panel with a `pivot: Post Tag` line:
+one migration for `post_tag` with both foreign keys, a composite primary key
+and (unless `options: -timestamps`) timestamps.
+
+**Laravel: New Eloquent Model from Database Table** builds the model from the
+live schema instead (see below), and `⌘⇧A` runs any `make:` command with
+Artisan's own prompts.
+
 ## Artisan
 
 `⌘⇧A` opens the Artisan palette with every command the app declares (its own
@@ -155,6 +202,23 @@ about it at once. Add it to `.gitignore`.
 In a route file, `[UserController::class, '` completes the controller's public
 methods, resolving the class through the file's `use` imports and Composer's
 PSR-4 map.
+
+## Route search
+
+`⌘⇧R` lists every route — `GET /users/{user}` with its name and action — and
+filters as you type on method, URI, name or controller. Enter opens the
+controller action, or the routes-file line for a closure route.
+
+## Find unused views
+
+**Laravel: Find Unused Views** scans `app/`, `routes/`, `config/` and the views
+themselves for `view()`, `@include`/`@extends`/`@each`/`@component`,
+`Route::view()`, `View::make()`, mailables' `->view()`/`->markdown()`,
+`->layout()`/`#[Layout]`, `'view' =>`/`'layout' =>` entries and `<x-…>` tags,
+and lists the Blade views nothing refers to. Livewire views and single-file
+components, `errors.*` and `vendor.*` are resolved by convention and left out.
+A view named from a variable can't be seen, so read the list as "worth a look";
+Enter opens one.
 
 ## Gates & policies
 

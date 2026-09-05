@@ -662,6 +662,183 @@ pub fn required_params(uri: &str) -> Vec<String> {
     out
 }
 
+// ---- Unused views ------------------------------------------------------------
+
+/// Views nothing in the project appears to reference: not by `view()`,
+/// `@include`/`@extends`/`@each`/`@component`, a mailable's `->view()` /
+/// `->markdown()`, `Route::view()`, `View::make()`, a `'view' => '…'` array
+/// entry, or an `<x-…>` tag for a component. Livewire views (`livewire.*`),
+/// framework error pages (`errors.*`) and published vendor views (`vendor.*`)
+/// are resolved by convention, so they're left out. A heuristic: a view built
+/// from a variable name can't be seen, so treat the list as "worth a look".
+pub fn unused_views(root: &Path, data: &LaravelData) -> Vec<ViewInfo> {
+    let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut tags: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut files = Vec::new();
+    for dir in ["app", "routes", "resources/views", "config"] {
+        collect_php_files(&root.join(dir), &mut files, 0);
+    }
+    for file in files {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        for call in helper_calls(&text) {
+            if call.helper == Helper::View {
+                referenced.insert(call.token);
+            }
+        }
+        for name in extra_view_references(&text) {
+            referenced.insert(name);
+        }
+        let mut search = 0;
+        while let Some(rel) = text[search..].find("<x-") {
+            let at = search + rel + 3;
+            let tag: String = text[at..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'))
+                .collect();
+            if !tag.is_empty() {
+                tags.insert(tag);
+            }
+            search = at;
+        }
+    }
+    data.views
+        .iter()
+        .filter(|v| {
+            let n = v.name.as_str();
+            if n.starts_with("livewire.") || n.starts_with("errors.") || n.starts_with("vendor.") {
+                return false;
+            }
+            // Livewire 4 single-file components (`⚡counter.blade.php`) are
+            // found by Livewire's own namespaces, never by name.
+            if n.contains('⚡') {
+                return false;
+            }
+            if referenced.contains(n) {
+                return false;
+            }
+            if let Some(comp) = n.strip_prefix("components.") {
+                let tag = comp.strip_suffix(".index").unwrap_or(comp);
+                if tags.contains(tag) {
+                    return false;
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect()
+}
+
+/// The route files' contents, read once for a search.
+pub fn route_files(root: &Path) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    if let Ok(read) = std::fs::read_dir(root.join("routes")) {
+        for entry in read.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "php").unwrap_or(false) {
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    out.push((path, text));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// The routes-file line that declares `uri` (`Route::get('/users/{user}', …)`),
+/// for a route whose action isn't a controller method.
+pub fn route_definition(files: &[(PathBuf, String)], uri: &str) -> Option<(PathBuf, usize)> {
+    let uri = uri.trim_start_matches('/');
+    let needles = [
+        format!("'/{uri}'"),
+        format!("'{uri}'"),
+        format!("\"/{uri}\""),
+        format!("\"{uri}\""),
+    ];
+    for (path, text) in files {
+        for (i, line) in text.lines().enumerate() {
+            if line.contains("Route::") && needles.iter().any(|n| line.contains(n.as_str())) {
+                return Some((path.clone(), i));
+            }
+        }
+    }
+    None
+}
+
+fn collect_php_files(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
+    if depth > 8 {
+        return;
+    }
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_php_files(&path, out, depth + 1);
+        } else if path.extension().map(|e| e == "php").unwrap_or(false) {
+            out.push(path);
+        }
+    }
+}
+
+/// View names `helper_calls` doesn't see: `->view('x')`, `->markdown('x')`,
+/// `->layout('x')`, `#[Layout('x')]`, `->extends('x')`, `Route::view('/', 'x')`,
+/// `View::make('x')`, `'view' => 'x'` and `'layout' => 'x'`.
+pub fn extra_view_references(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let quoted_after = |pos: usize| -> Option<String> {
+        let rest = text[pos..].trim_start();
+        let q = rest.chars().next().filter(|c| *c == '\'' || *c == '"')?;
+        let end = rest[1..].find(q)?;
+        Some(rest[1..1 + end].to_string())
+    };
+    for needle in [
+        "->view(",
+        "->markdown(",
+        "->text(",
+        "->layout(",
+        "->extends(",
+        "Layout(",
+        "View::make(",
+    ] {
+        let mut search = 0;
+        while let Some(rel) = text[search..].find(needle) {
+            let at = search + rel + needle.len();
+            if let Some(v) = quoted_after(at) {
+                out.push(v);
+            }
+            search = at;
+        }
+    }
+    // Route::view('/uri', 'view'): the second argument.
+    let mut search = 0;
+    while let Some(rel) = text[search..].find("Route::view(") {
+        let at = search + rel + "Route::view(".len();
+        if let Some(comma) = text[at..].find(',') {
+            if let Some(v) = quoted_after(at + comma + 1) {
+                out.push(v);
+            }
+        }
+        search = at;
+    }
+    // 'view' => 'x', 'layout' => 'x' (config/livewire.php, mailable arrays)
+    for key in ["'view' =>", "\"view\" =>", "'layout' =>", "\"layout\" =>"] {
+        let mut search = 0;
+        while let Some(rel) = text[search..].find(key) {
+            let at = search + rel + key.len();
+            if let Some(v) = quoted_after(at) {
+                out.push(v);
+            }
+            search = at;
+        }
+    }
+    out.retain(|v| !v.is_empty() && !v.contains(['$', ' ', '/']));
+    out
+}
+
 // ---- Context detection ----------------------------------------------------
 
 /// Detect a Laravel helper context from the line text before the cursor,
@@ -1182,7 +1359,7 @@ pub fn route_views(data: &LaravelData, action: &str) -> Vec<String> {
 }
 
 /// Turn `App\Http\Controllers\UserController@index` into a file + method line.
-fn controller_location(root: &Path, action: &str) -> Option<(PathBuf, usize, usize)> {
+pub(crate) fn controller_location(root: &Path, action: &str) -> Option<(PathBuf, usize, usize)> {
     let (class, method) = match action.split_once('@') {
         Some((c, m)) => (c, Some(m)),
         None => (action, None),
@@ -1462,5 +1639,59 @@ mod tests {
 
         let src = "class UserController extends Controller\n{\n    public function __construct() {}\n    public function index() {}\n    public function show(User $user) {}\n    protected function helper() {}\n}";
         assert_eq!(public_methods(src), vec!["index", "show"]);
+    }
+
+    #[test]
+    fn extra_view_references_cover_mailables_routes_and_arrays() {
+        let src = "return $this->view('emails.receipt'); Route::view('/', 'welcome'); $m->markdown('mail.order'); ['view' => 'reports.daily']; #[Layout('layouts.app')] 'layout' => 'components.layouts.app',";
+        let mut refs = extra_view_references(src);
+        refs.sort();
+        assert_eq!(
+            refs,
+            vec![
+                "components.layouts.app",
+                "emails.receipt",
+                "layouts.app",
+                "mail.order",
+                "reports.daily",
+                "welcome"
+            ]
+        );
+    }
+
+    /// Against a real project (`E_LARAVEL_PROJECT`): the scan finishes and
+    /// doesn't flag views the project plainly uses.
+    #[test]
+    fn live_unused_views_scan() {
+        let Ok(root) = std::env::var("E_LARAVEL_PROJECT") else {
+            eprintln!("skipping: E_LARAVEL_PROJECT not set");
+            return;
+        };
+        let root = PathBuf::from(root);
+        let data = load(&root);
+        let started = std::time::Instant::now();
+        let unused = unused_views(&root, &data);
+        eprintln!(
+            "{} of {} views look unused ({:?}):",
+            unused.len(),
+            data.views.len(),
+            started.elapsed()
+        );
+        for v in &unused {
+            eprintln!("  {}", v.name);
+        }
+        // Anything a route or controller references by literal is used.
+        let files = route_files(&root);
+        for (_, text) in &files {
+            for call in helper_calls(text) {
+                if call.helper == Helper::View {
+                    assert!(
+                        !unused.iter().any(|v| v.name == call.token),
+                        "{} is referenced from a route file",
+                        call.token
+                    );
+                }
+            }
+        }
     }
 }

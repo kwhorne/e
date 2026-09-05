@@ -492,6 +492,9 @@ fn app_view() -> impl IntoView {
                 if state.grove_panel_open.get_untracked() {
                     state.refresh_grove_panel();
                 }
+                if state.model_wizard_open.get_untracked() {
+                    state.refresh_model_wizard_preview();
+                }
             }
         });
     }
@@ -679,6 +682,7 @@ fn app_view() -> impl IntoView {
             crate::db_view::db_params_dialog(state),
             crate::db_view::db_erd_panel(state),
             crate::tinker::tinker_panel(state),
+            crate::model_wizard::model_wizard_panel(state),
             crate::map::laravel_map(state),
             crate::agent_ui::agent_edit_review(state),
             crate::agent_ui::agent_log_panel(state),

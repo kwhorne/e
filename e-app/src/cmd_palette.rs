@@ -15,6 +15,15 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("new-file", "New File"),
     ("open-file", "Open File…"),
     ("add-folder", "Add Folder to Workspace…"),
+    ("laravel-menu", "Laravel: Menu (every Laravel command)"),
+    ("new-model", "Laravel: New Eloquent Model…"),
+    (
+        "generate-model",
+        "Laravel: New Eloquent Model from Database Table",
+    ),
+    ("new-pivot", "Laravel: New Pivot Table…"),
+    ("route-search", "Laravel: Route Search…"),
+    ("unused-views", "Laravel: Find Unused Views"),
     ("laravel-refresh", "Laravel: Refresh Project Data"),
     ("artisan", "Laravel: Artisan Command…"),
     (
@@ -121,13 +130,23 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
 #[derive(Clone, Copy)]
 pub struct CmdPalette {
     pub open: RwSignal<bool>,
+    /// A query to start with the next time the palette opens (a menu, such as
+    /// `Laravel: `, is the palette filtered to one prefix). Taken on open.
+    pub initial: RwSignal<String>,
 }
 
 impl CmdPalette {
     pub fn new() -> Self {
         Self {
             open: RwSignal::new(false),
+            initial: RwSignal::new(String::new()),
         }
+    }
+
+    /// Open the palette with `query` already typed.
+    pub fn open_with(&self, query: &str) {
+        self.initial.set(query.to_string());
+        self.open.set(true);
     }
 }
 
@@ -169,7 +188,8 @@ pub fn command_palette(state: AppState) -> impl IntoView {
             // Start fresh every time: a stale query from a previous invocation
             // would make new keystrokes append (e.g. "che" → "<old>che") and match
             // nothing — which read as an unresponsive palette.
-            query.set(String::new());
+            let initial = cmd.initial.try_update(std::mem::take).unwrap_or_default();
+            query.set(initial);
             selected.set(0);
             focus_pulse.update(|x| *x += 1);
         }

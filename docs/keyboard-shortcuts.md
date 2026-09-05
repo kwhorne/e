@@ -92,6 +92,10 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | `⌘⌥I`    | Runtime insight (Telescope-style capture) |
 | `⌘⌥L`    | Laravel log tail |
 | `⌘⌥T`    | Tinker scratchpad |
+| `⌘⇧,`    | Laravel menu (every Laravel command) |
+| `⌘⌥N`    | New Eloquent Model (spec → model, migration, factory, requests, controller, …) |
+| `⌘⇧R`    | Route search |
+| `⌘⇧A`    | Artisan command palette |
 | `⌘⇧T`    | Autonomous TDD panel |
 | `⌘⌥A`    | Agent activity timeline |
 | `⌘⌥S`    | Send editor selection to the agent |

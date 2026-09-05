@@ -12,7 +12,7 @@ use floem::views::editor::core::cursor::{Cursor, CursorMode};
 use floem::views::editor::core::selection::Selection;
 use floem::views::editor::text::Document;
 
-use e_lsp::uri_to_path;
+use e_lsp::{path_to_uri, uri_to_path};
 
 use crate::picker::{PickerItem, PickerMode};
 use crate::state::{grep_workspace, rel_uri, AppState, ReplaceConfirm};
@@ -221,6 +221,102 @@ impl AppState {
                     uri: u,
                     line: l,
                     char: c,
+                })
+                .collect();
+            send(items);
+        });
+    }
+
+    /// Route Search: every route in the project in the picker — method and URI
+    /// to match on, name and action beside — and Enter opens the controller
+    /// action, or the routes file line for a closure.
+    pub fn open_route_search(&self) {
+        let Some(data) = self.laravel.get_untracked() else {
+            Self::notify("Not a Laravel project (no routes loaded)");
+            return;
+        };
+        let root = self.root.get_untracked();
+        let p = self.picker;
+        p.mode.set(PickerMode::References);
+        p.query.set(String::new());
+        p.items.set(Vec::new());
+        p.selected.set(0);
+        p.open.set(true);
+        let send = create_ext_action(self.cx, move |items: Vec<PickerItem>| {
+            p.items.set(items);
+            p.selected.set(0);
+        });
+        std::thread::spawn(move || {
+            let route_files = crate::laravel::route_files(&root);
+            let items = data
+                .routes
+                .iter()
+                .map(|r| {
+                    let (path, line) = crate::laravel::controller_location(&root, &r.action)
+                        .map(|(p, l, _)| (p, l))
+                        .or_else(|| crate::laravel::route_definition(&route_files, &r.uri))
+                        .unwrap_or_else(|| (root.join("routes/web.php"), 0));
+                    let name = if r.name.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{}  ", r.name)
+                    };
+                    PickerItem {
+                        label: format!("{} /{}", r.methods, r.uri.trim_start_matches('/')),
+                        detail: format!("{name}{}", r.action),
+                        uri: path_to_uri(&path),
+                        line: line as u32,
+                        char: 0,
+                    }
+                })
+                .collect();
+            send(items);
+        });
+    }
+
+    /// Find Unused Views: Blade views nothing references, in the picker; Enter
+    /// opens one so it can be checked and deleted.
+    pub fn find_unused_views(&self) {
+        let Some(data) = self.laravel.get_untracked() else {
+            Self::notify("Not a Laravel project (no views loaded)");
+            return;
+        };
+        let root = self.root.get_untracked();
+        let p = self.picker;
+        p.mode.set(PickerMode::References);
+        p.query.set(String::new());
+        p.items.set(vec![PickerItem {
+            label: "Scanning…".into(),
+            detail: String::new(),
+            uri: String::new(),
+            line: 0,
+            char: 0,
+        }]);
+        p.selected.set(0);
+        p.open.set(true);
+        let send = create_ext_action(self.cx, move |items: Vec<PickerItem>| {
+            if items.is_empty() {
+                p.open.set(false);
+                Self::notify("Every view is referenced somewhere");
+                return;
+            }
+            p.items.set(items);
+            p.selected.set(0);
+        });
+        std::thread::spawn(move || {
+            let items = crate::laravel::unused_views(&root, &data)
+                .into_iter()
+                .map(|v| PickerItem {
+                    label: v.name.clone(),
+                    detail: v
+                        .path
+                        .strip_prefix(&root)
+                        .unwrap_or(&v.path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    uri: path_to_uri(&v.path),
+                    line: 0,
+                    char: 0,
                 })
                 .collect();
             send(items);

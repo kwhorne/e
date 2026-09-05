@@ -59,6 +59,11 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         // Tasks & tests.
         "run-task" => state.open_task_palette(),
         "artisan" => state.open_artisan_palette(),
+        "laravel-menu" => state.cmd.open_with("Laravel: "),
+        "new-model" => state.open_model_wizard(false),
+        "new-pivot" => state.open_model_wizard(true),
+        "route-search" => state.open_route_search(),
+        "unused-views" => state.find_unused_views(),
         "install-intelephense" => state.install_lsp_by_id("intelephense"),
         "install-laravel-lsp" => state.install_lsp_by_id("laravel-lsp"),
         "eloquent-helper" => state.generate_eloquent_helper(),
@@ -237,6 +242,10 @@ fn close_overlays(state: AppState) {
     }
     if state.tinker_open.get() {
         state.tinker_open.set(false);
+        return;
+    }
+    if state.model_wizard_open.get() {
+        state.model_wizard_open.set(false);
         return;
     }
     if state.map_open.get() {

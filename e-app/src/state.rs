@@ -798,6 +798,17 @@ pub struct AppState {
     pub tinker_output: RwSignal<String>,
     pub tinker_running: RwSignal<bool>,
 
+    // ---- New Eloquent Model / pivot wizard ------------------------------
+    pub model_wizard_open: RwSignal<bool>,
+    /// `true` when the panel was opened for a pivot table.
+    pub model_wizard_pivot: RwSignal<bool>,
+    /// Bumped on open so the panel swaps in the right template.
+    pub model_wizard_reset: RwSignal<u64>,
+    pub model_wizard_doc: RwSignal<Option<std::rc::Rc<dyn floem::views::editor::text::Document>>>,
+    /// Preview: the files the current spec would create, or its errors.
+    pub model_wizard_files: RwSignal<Vec<String>>,
+    pub model_wizard_errors: RwSignal<Vec<String>>,
+
     // ---- Laravel architecture map --------------------------------------
     pub map_open: RwSignal<bool>,
     pub map_query: RwSignal<String>,
@@ -1623,6 +1634,12 @@ impl AppState {
             tinker_open: RwSignal::new(false),
             tinker_output: RwSignal::new(String::new()),
             tinker_running: RwSignal::new(false),
+            model_wizard_open: RwSignal::new(false),
+            model_wizard_pivot: RwSignal::new(false),
+            model_wizard_reset: RwSignal::new(0),
+            model_wizard_doc: RwSignal::new(None),
+            model_wizard_files: RwSignal::new(Vec::new()),
+            model_wizard_errors: RwSignal::new(Vec::new()),
             map_open: RwSignal::new(false),
             map_query: RwSignal::new(String::new()),
             sem_open: RwSignal::new(false),

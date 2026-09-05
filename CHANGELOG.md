@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Laravel menu.** `⌘⇧,` opens the command palette filtered to
+  `Laravel: ` — code generation, Artisan, route search, the Eloquent helper,
+  migrations, the maps and panels in one list, as in Laravel Idea.
+
+- **New Eloquent Model (`⌘⌥N`).** A spec in an editor panel — fields with
+  types, `?` for nullable and defaults, `foreignId Customer` for a foreign key
+  plus `belongsTo`, relations, options (`id timestamps softDeletes fillable`)
+  and `generate:` — with a live preview of the files it implies. `⌘↵` writes
+  them all: the model with `$fillable`, `casts()` and relation methods, the
+  migration, a factory with fakes from the column types and names, a seeder,
+  Store/Update form requests with rules from the fields, a resource controller
+  (and/or an API controller returning the JSON resource), the resource and the
+  policy. Existing files are left alone; the language servers learn about the
+  new ones at once.
+
+- **New Pivot Table.** The same panel with `pivot: Post Tag`: one migration
+  with both foreign keys, a composite primary key and timestamps.
+
+- **Route Search (`⌘⇧R`).** Every route with method, URI, name and action;
+  filter as you type, Enter opens the controller action or the routes-file
+  line for a closure.
+
+- **Find Unused Views.** Lists the Blade views nothing references — `view()`,
+  Blade directives, `Route::view()`, mailables, layouts, `'view' =>` entries
+  and `<x-…>` tags all count; Livewire components, error pages and vendor
+  views are skipped as resolved by convention.
+
+- **New Eloquent Model from Database Table** is in the command palette (it was
+  only an intention before).
+
 ## [0.9.18] - 2026-09-05
 
 ### Fixed

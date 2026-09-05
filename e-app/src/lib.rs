@@ -67,6 +67,7 @@ mod lsp_registry;
 mod map;
 mod markdown_view;
 mod migrations;
+mod model_wizard;
 mod move_class;
 mod navigation;
 mod outline;

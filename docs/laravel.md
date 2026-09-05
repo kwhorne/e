@@ -108,6 +108,11 @@ Alongside the language servers' quick fixes, the code-action picker offers
 - **Convert `{{ }}` ↔ `{!! !!}`** in Blade.
 - **Convert `scopeActive()` to `#[Scope] active()`** (Laravel 12.6+), adding the
   `use Illuminate\Database\Eloquent\Attributes\Scope;` import when missing.
+- **Promote to FormRequest** — with the caret in `$request->validate([…])` (or
+  `$this->validate($request, […])`): creates `app/Http/Requests/StoreUserRequest.php`
+  (named from the method and controller) holding the rules, replaces the call
+  with `$request->validated()`, retypes the method's `Request` parameter and adds
+  the import. The new class opens.
 
 ## Validation rules
 

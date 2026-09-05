@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Eloquent helper types `Model::factory()`** as the model's factory class
   when `database/factories` has one, so factory states complete too.
 
+- **Promote to FormRequest.** With the caret in an inline `validate([…])`, the
+  code-action picker creates the FormRequest class from the rules, replaces the
+  call with `validated()`, retypes the parameter and adds the import.
+
+- **Notifications on Linux.** `notify-send` carries them; elsewhere than macOS
+  and Linux they go to stderr.
+
 - **A Migrations panel.** *Laravel: Migrations* lists every migration with its
   batch and status from `migrate:status`; ▶ Migrate runs what's pending (behind
   a Grove snapshot when it can), ↶ rolls the last batch back, and a click opens

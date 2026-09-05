@@ -1081,6 +1081,7 @@ fn local_code_actions(
     language: Language,
     offset: usize,
     uri: &str,
+    root: &std::path::Path,
 ) -> Vec<e_lsp::CodeActionItem> {
     let starts: Vec<usize> = std::iter::once(0)
         .chain(text.match_indices('\n').map(|(i, _)| i + 1))
@@ -1093,27 +1094,59 @@ fn local_code_actions(
             character: (off - starts[line]) as u32,
         }
     };
-    crate::intentions::actions(text, language, offset)
+    let to_edits = |edits: Vec<(usize, usize, String)>| -> Vec<TextEdit> {
+        edits
+            .into_iter()
+            .map(|(s, e, new_text)| TextEdit {
+                range: lsp_types::Range {
+                    start: position(s),
+                    end: position(e),
+                },
+                new_text,
+            })
+            .collect()
+    };
+    let mut out: Vec<e_lsp::CodeActionItem> = crate::intentions::actions(text, language, offset)
         .into_iter()
         .map(|a| e_lsp::CodeActionItem {
             title: a.title,
-            edits: vec![(
-                uri.to_string(),
-                a.edits
-                    .into_iter()
-                    .map(|(s, e, new_text)| TextEdit {
-                        range: lsp_types::Range {
-                            start: position(s),
-                            end: position(e),
-                        },
-                        new_text,
-                    })
-                    .collect(),
-            )],
+            edits: vec![(uri.to_string(), to_edits(a.edits))],
             command: None,
             server: "e".to_string(),
         })
-        .collect()
+        .collect();
+    // Refactorings that also bring a new file into being (a FormRequest class).
+    out.extend(
+        crate::intentions::file_actions(text, language, offset)
+            .into_iter()
+            .map(|a| {
+                let mut edits = vec![(uri.to_string(), to_edits(a.edits))];
+                let (rel, content) = a.new_file;
+                edits.push((
+                    path_to_uri(&root.join(rel)),
+                    vec![TextEdit {
+                        range: lsp_types::Range {
+                            start: lsp_types::Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: lsp_types::Position {
+                                line: 0,
+                                character: 0,
+                            },
+                        },
+                        new_text: content,
+                    }],
+                ));
+                e_lsp::CodeActionItem {
+                    title: a.title,
+                    edits,
+                    command: None,
+                    server: "e".to_string(),
+                }
+            }),
+    );
+    out
 }
 
 /// A cheap fingerprint of everything `LaravelData` is scraped from: the mtimes
@@ -3605,15 +3638,32 @@ impl AppState {
     }
 
     /// Show a native macOS notification banner.
+    /// Show a native notification banner: macOS through `osascript`, Linux
+    /// through `notify-send`; anywhere else it goes to stderr, where the same
+    /// text is already written by the caller in most cases.
     pub(crate) fn notify(message: &str) {
-        let script = format!(
-            "display notification \"{}\" with title \"e\"",
-            message.replace('"', "'")
-        );
-        let _ = std::process::Command::new("osascript")
-            .arg("-e")
-            .arg(script)
-            .spawn();
+        #[cfg(target_os = "macos")]
+        {
+            let script = format!(
+                "display notification \"{}\" with title \"e\"",
+                message.replace('"', "'")
+            );
+            let _ = std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(script)
+                .spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("notify-send")
+                .arg("e")
+                .arg(message)
+                .spawn();
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            eprintln!("e: {message}");
+        }
     }
 
     /// Add another root folder to the workspace (multi-root).
@@ -5987,6 +6037,7 @@ impl AppState {
             buf.file.language,
             cursor.offset(),
             &uri,
+            &self.root.get_untracked(),
         ));
 
         if clients.is_empty() {

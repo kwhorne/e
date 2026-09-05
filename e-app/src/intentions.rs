@@ -13,6 +13,23 @@ pub struct LocalAction {
     pub edits: Vec<(usize, usize, String)>,
 }
 
+/// An action that edits the current file *and* creates another.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileAction {
+    pub title: String,
+    pub edits: Vec<(usize, usize, String)>,
+    /// `(path relative to the project root, contents)`.
+    pub new_file: (String, String),
+}
+
+/// Actions at `offset` that also create a file.
+pub fn file_actions(text: &str, language: Language, offset: usize) -> Vec<FileAction> {
+    match language {
+        Language::Php => promote_to_form_request(text, offset).into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Every action that applies at `offset`.
 pub fn actions(text: &str, language: Language, offset: usize) -> Vec<LocalAction> {
     let mut out = Vec::new();
@@ -235,6 +252,194 @@ fn scope_attribute(text: &str, offset: usize) -> Vec<LocalAction> {
     }]
 }
 
+/// The end (exclusive) of the bracketed literal starting at `open` (`[` or
+/// `(`), skipping strings, or `None` when unbalanced.
+fn matching_bracket(text: &str, open: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut in_str: Option<u8> = None;
+    let mut i = open;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = in_str {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == q {
+                in_str = None;
+            }
+        } else {
+            match b {
+                b'\'' | b'"' => in_str = Some(b),
+                b'[' | b'(' => depth += 1,
+                b']' | b')' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(i + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn studly(s: &str) -> String {
+    s.split(['_', '-'])
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let mut c = p.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// `$request->validate([...])` (or `$this->validate($request, [...])`) in a
+/// controller method → a FormRequest class in `app/Http/Requests` holding the
+/// rules, the call replaced by `$request->validated()`, and the method's
+/// `Request` parameter retyped to it. Laravel Idea's most used intention.
+fn promote_to_form_request(text: &str, offset: usize) -> Option<FileAction> {
+    let offset = offset.min(text.len());
+    // (call_start, array_open, call_end, variable)
+    let mut found: Option<(usize, usize, usize, String)> = None;
+    let needle = "->validate(";
+    let mut search = 0;
+    while let Some(rel) = text[search..].find(needle) {
+        let arrow = search + rel;
+        search = arrow + needle.len();
+        let var_start = text[..arrow]
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+            .last()
+            .map(|(i, _)| i);
+        let Some(var_start) = var_start else { continue };
+        let receiver = &text[var_start..arrow];
+        if !receiver.starts_with('$') {
+            continue;
+        }
+        let paren = arrow + needle.len() - 1;
+        let Some(call_end) = matching_bracket(text, paren) else {
+            continue;
+        };
+        if offset < var_start || offset > call_end {
+            continue;
+        }
+        let args_start = paren + 1;
+        let args = &text[args_start..call_end - 1];
+        // `$this->validate($request, [...])`: the array is the second argument.
+        let (var, array_open) = if receiver == "$this" {
+            let Some(comma) = args.find(',') else {
+                continue;
+            };
+            let first = args[..comma].trim();
+            if !first.starts_with('$') {
+                continue;
+            }
+            let Some(arr) = args[comma + 1..].find('[') else {
+                continue;
+            };
+            (first.to_string(), args_start + comma + 1 + arr)
+        } else {
+            let Some(arr) = args.find('[') else { continue };
+            (receiver.to_string(), args_start + arr)
+        };
+        found = Some((var_start, array_open, call_end, var));
+        break;
+    }
+    let (call_start, array_open, call_end, var) = found?;
+    let array_end = matching_bracket(text, array_open)?;
+    let inner = text[array_open + 1..array_end - 1].trim();
+    if inner.is_empty() {
+        return None;
+    }
+
+    // Names: `store` in `UserController` → StoreUserRequest.
+    let fn_pos = text[..call_start].rfind("function ")?;
+    let method: String = text[fn_pos + "function ".len()..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    let class_pos = text.find("class ")?;
+    let class: String = text[class_pos + "class ".len()..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    let base = class.strip_suffix("Controller").unwrap_or(&class);
+    let request_class = if method == "__invoke" || method.is_empty() {
+        format!("{base}Request")
+    } else {
+        format!("{}{base}Request", studly(&method))
+    };
+
+    let mut edits = Vec::new();
+    // 1. The call becomes `$request->validated()`.
+    edits.push((call_start, call_end, format!("{var}->validated()")));
+    // 2. The parameter is retyped, within this method's signature.
+    let sig_open = text[fn_pos..].find('(')? + fn_pos;
+    let sig_end = matching_bracket(text, sig_open)?;
+    let sig = &text[sig_open..sig_end];
+    let param = format!("Request {var}");
+    if let Some(rel) = sig.find(&param) {
+        let at = sig_open + rel;
+        // `\Illuminate\Http\Request $request` retypes as a whole.
+        let fqn = "\\Illuminate\\Http\\";
+        let start = if text[..at].ends_with(fqn) {
+            at - fqn.len()
+        } else {
+            at
+        };
+        edits.push((start, at + "Request".len(), request_class.clone()));
+    }
+    // 3. The import, unless already there.
+    let import = format!("App\\Http\\Requests\\{request_class}");
+    if !text.contains(&format!("use {import};")) {
+        let head = &text[..class_pos];
+        let insert_at = head
+            .match_indices("\nuse ")
+            .last()
+            .map(|(i, _)| {
+                head[i + 1..]
+                    .find('\n')
+                    .map(|n| i + 1 + n + 1)
+                    .unwrap_or(head.len())
+            })
+            .or_else(|| {
+                head.find("namespace ")
+                    .and_then(|i| head[i..].find('\n').map(|n| i + n + 1))
+            });
+        if let Some(at) = insert_at {
+            edits.push((at, at, format!("use {import};\n")));
+        }
+    }
+
+    // The new class: rules re-indented under `return [`.
+    let rules: Vec<String> = inner
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| format!("            {l}"))
+        .collect();
+    let content = format!(
+        "<?php\n\nnamespace App\\Http\\Requests;\n\nuse Illuminate\\Foundation\\Http\\FormRequest;\n\n\
+class {request_class} extends FormRequest\n{{\n    public function authorize(): bool\n    {{\n        return true;\n    }}\n\n\
+    /**\n     * @return array<string, \\Illuminate\\Contracts\\Validation\\ValidationRule|array<mixed>|string>\n     */\n\
+    public function rules(): array\n    {{\n        return [\n{}\n        ];\n    }}\n}}\n",
+        rules.join("\n")
+    );
+    Some(FileAction {
+        title: format!("Promote to FormRequest ({request_class})"),
+        edits,
+        new_file: (format!("app/Http/Requests/{request_class}.php"), content),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +522,41 @@ mod tests {
             .edits
             .iter()
             .all(|(_, _, r)| !r.contains("use Illuminate")));
+    }
+
+    #[test]
+    fn promotes_an_inline_validate_to_a_form_request() {
+        let src = "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Models\\User;\nuse Illuminate\\Http\\Request;\n\nclass UserController extends Controller\n{\n    public function store(Request $request)\n    {\n        $data = $request->validate([\n            'name' => 'required|max:255',\n            'email' => ['required', 'email'],\n        ]);\n        User::create($data);\n    }\n}\n";
+        let at = src.find("'email'").unwrap();
+        let acts = file_actions(src, Language::Php, at);
+        assert_eq!(acts.len(), 1);
+        let a = &acts[0];
+        assert_eq!(a.title, "Promote to FormRequest (StoreUserRequest)");
+        assert_eq!(a.new_file.0, "app/Http/Requests/StoreUserRequest.php");
+        let out = apply(src, &a.edits);
+        assert!(
+            out.contains("public function store(StoreUserRequest $request)"),
+            "{out}"
+        );
+        assert!(out.contains("$data = $request->validated();"));
+        assert!(out.contains(
+            "use Illuminate\\Http\\Request;\nuse App\\Http\\Requests\\StoreUserRequest;\n"
+        ));
+        let file = &a.new_file.1;
+        assert!(file.contains("class StoreUserRequest extends FormRequest"));
+        assert!(file.contains("            'name' => 'required|max:255',\n            'email' => ['required', 'email'],\n        ];"));
+        // Outside the call: nothing.
+        assert!(file_actions(src, Language::Php, src.find("User::create").unwrap()).is_empty());
+    }
+
+    #[test]
+    fn promotes_the_this_validate_form_and_invokable_controllers() {
+        let src = "<?php\nnamespace App\\Http\\Controllers;\nuse Illuminate\\Http\\Request;\nclass WebhookController extends Controller\n{\n    public function __invoke(\\Illuminate\\Http\\Request $request)\n    {\n        $this->validate($request, ['id' => 'required']);\n    }\n}\n";
+        let at = src.find("'id'").unwrap();
+        let a = &file_actions(src, Language::Php, at)[0];
+        assert_eq!(a.title, "Promote to FormRequest (WebhookRequest)");
+        let out = apply(src, &a.edits);
+        assert!(out.contains("__invoke(WebhookRequest $request)"), "{out}");
+        assert!(out.contains("$request->validated();"));
     }
 }

@@ -22,6 +22,45 @@ impl Task {
     }
 }
 
+/// Tasks Grove adds to a Laravel project: its dev processes (Vite, queue
+/// worker, whatever the app declares) and a snapshot-first migrate, so a
+/// migration that goes wrong is one `grove db restore` from undone.
+fn grove_tasks(root: &Path) -> Vec<Task> {
+    let mut tasks = vec![
+        Task::new("grove: dev start", "grove dev start"),
+        Task::new("grove: dev stop", "grove dev stop"),
+    ];
+    if let Some(engine) = grove_snapshot_engine(root) {
+        tasks.push(Task::new(
+            "artisan: migrate (snapshot first)",
+            format!(
+                "grove db snapshot --engine {engine} --note 'before migrate' && php artisan migrate"
+            ),
+        ));
+        tasks.push(Task::new(
+            "grove: db snapshot",
+            format!("grove db snapshot --engine {engine}"),
+        ));
+    }
+    tasks
+}
+
+/// Grove's snapshot engine for the project's database, from `.env`; `None`
+/// for SQLite and anything else Grove doesn't snapshot.
+fn grove_snapshot_engine(root: &Path) -> Option<&'static str> {
+    let env = std::fs::read_to_string(root.join(".env")).ok()?;
+    let conn = env
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("DB_CONNECTION="))?
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'');
+    match conn {
+        "mysql" | "mariadb" => Some("mysql"),
+        "pgsql" => Some("postgres"),
+        _ => None,
+    }
+}
+
 fn scripts_from(path: &Path, prefix: &str, runner: &dyn Fn(&str) -> String, out: &mut Vec<Task>) {
     let Ok(text) = std::fs::read_to_string(path) else {
         return;
@@ -85,6 +124,9 @@ pub fn detect(root: &Path) -> Vec<Task> {
         tasks.push(Task::new("artisan: serve", "php artisan serve"));
         tasks.push(Task::new("artisan: migrate", "php artisan migrate"));
         tasks.push(Task::new("artisan: tinker", "php artisan tinker"));
+        if crate::grove::available() {
+            tasks.extend(grove_tasks(root));
+        }
     }
     if root.join("vendor/bin/pest").exists() {
         tasks.push(Task::new("pest", "vendor/bin/pest"));

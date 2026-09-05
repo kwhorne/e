@@ -47,6 +47,7 @@ mod framework_completion;
 mod fuzzy;
 mod ghost;
 mod git_view;
+mod grove;
 mod hints_doc;
 mod inertia;
 mod keymap;

@@ -1,5 +1,6 @@
-//! Continuous "Runtime" panel: captures every request against the dev app (via
-//! Clockwork) while you work — queries with N+1 warnings, cache, mails, events —
+//! Continuous "Runtime" panel: captures every request against the dev app while
+//! you work — from Grove's proxy when it serves the project (queries with
+//! `grove sql-capture`, mail, matching error-log entries), else via Clockwork —
 //! so you don't need Telescope or Debugbar installed.
 
 use std::collections::HashMap;
@@ -9,7 +10,7 @@ use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
 use floem::IntoView;
 
-use crate::runtime::RuntimeReq;
+use crate::runtime::{DetailLine, RuntimeReq};
 use crate::state::AppState;
 use crate::theme;
 
@@ -154,64 +155,39 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
             .hover(|s| s.background(theme::bg_hover()))
     })
     .on_click_stop(move |_| {
+        let opening = state
+            .runtime_expanded
+            .with_untracked(|e| e.as_deref() != Some(id_for_expand.as_str()));
         state.runtime_expanded.update(|e| {
-            *e = if e.as_deref() == Some(id_for_expand.as_str()) {
-                None
-            } else {
+            *e = if opening {
                 Some(id_for_expand.clone())
+            } else {
+                None
             }
         });
+        if opening {
+            state.runtime_load_chain(&id_for_expand);
+        }
     });
 
-    // Expanded query list.
-    let queries = r.queries.clone();
+    // Expanded detail: queries (with EXPLAIN), mail sent, matching error log.
+    let row = r.clone();
     let detail = dyn_stack(
         move || {
             if state
                 .runtime_expanded
                 .with(|e| e.as_deref() == Some(id.as_str()))
             {
-                queries.clone().into_iter().enumerate().collect::<Vec<_>>()
+                row.detail_lines(state.grove_sql_capture.get())
+                    .into_iter()
+                    .enumerate()
+                    .collect::<Vec<_>>()
             } else {
                 Vec::new()
             }
         },
         |(i, _)| *i,
-        move |(_, (sql, dur))| {
-            let text = format!("{}  ({dur}ms)", sql.trim());
-            let raw = sql.clone();
-            let explain = label(|| "EXPLAIN".to_string())
-                .style(|s| {
-                    s.font_size(10.0)
-                        .flex_shrink(0.0_f32)
-                        .padding_horiz(6.0)
-                        .border_radius(3.0)
-                        .color(theme::accent())
-                        .cursor(floem::style::CursorStyle::Pointer)
-                        .hover(|s| s.background(theme::bg_hover()))
-                })
-                .on_click_stop(move |_| state.db_explain_from_runtime(raw.clone()));
-            stack((
-                label(move || text.clone()).style(|s| {
-                    s.font_size(11.0)
-                        .font_family("monospace".to_string())
-                        .color(theme::fg_dim())
-                        .flex_grow(1.0_f32)
-                        .min_width(0.0)
-                        .text_ellipsis()
-                }),
-                explain,
-            ))
-            .style(|s| {
-                s.flex_row()
-                    .items_center()
-                    .gap(6.0)
-                    .padding_left(24.0)
-                    .padding_right(12.0)
-                    .padding_vert(1.0)
-                    .width_full()
-            })
-        },
+        move |(_, line)| detail_row(state, line),
     )
     .style(|s| s.flex_col().width_full().padding_bottom(4.0));
 
@@ -220,6 +196,62 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
             .width_full()
             .border_bottom(1.0)
             .border_color(theme::border())
+    })
+}
+
+/// One line of a request's expanded detail.
+fn detail_row(state: AppState, line: DetailLine) -> impl IntoView {
+    let (text, color, explain_sql) = match line {
+        DetailLine::Query { sql, duration } => {
+            let text = if duration.is_empty() {
+                sql.trim().to_string()
+            } else {
+                format!("{}  ({duration}ms)", sql.trim())
+            };
+            (text, theme::fg_dim(), Some(sql))
+        }
+        DetailLine::Mail(m) => (format!("✉ {m}"), AMBER, None),
+        DetailLine::Log(l) => (format!("⚠ {l}"), RED, None),
+        DetailLine::Note(n) => (n, theme::fg_dim(), None),
+    };
+    let has_sql = explain_sql.is_some();
+    let sql = explain_sql.unwrap_or_default();
+    let explain = label(|| "EXPLAIN".to_string())
+        .style(move |s| {
+            let s = s
+                .font_size(10.0)
+                .flex_shrink(0.0_f32)
+                .padding_horiz(6.0)
+                .border_radius(3.0)
+                .color(theme::accent())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()));
+            if has_sql {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.db_explain_from_runtime(sql.clone()));
+    stack((
+        label(move || text.clone()).style(move |s| {
+            s.font_size(11.0)
+                .font_family("monospace".to_string())
+                .color(color)
+                .flex_grow(1.0_f32)
+                .min_width(0.0)
+                .text_ellipsis()
+        }),
+        explain,
+    ))
+    .style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(6.0)
+            .padding_left(24.0)
+            .padding_right(12.0)
+            .padding_vert(1.0)
+            .width_full()
     })
 }
 
@@ -236,6 +268,32 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
             .font_size(11.0)
             .color(theme::fg_dim())
     });
+    // Grove correlates SQL with requests only while capture is on; the toggle
+    // lives here because an empty query list is the moment you want it.
+    let sql = label(move || {
+        if state.grove_site.get().flatten().is_none() {
+            return String::new();
+        }
+        match state.grove_sql_capture.get() {
+            Some(true) => "SQL capture: on".to_string(),
+            Some(false) => "SQL capture: off".to_string(),
+            None => "SQL capture: ?".to_string(),
+        }
+    })
+    .style(move |s| {
+        let s = s
+            .padding_horiz(10.0)
+            .padding_vert(3.0)
+            .border_radius(4.0)
+            .font_size(11.0)
+            .cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
+        match state.grove_sql_capture.get() {
+            Some(true) => s.color(GREEN),
+            _ => s.color(theme::fg_dim()),
+        }
+    })
+    .on_click_stop(move |_| state.toggle_grove_sql_capture());
     let clear = label(|| "Clear".to_string())
         .style(|s| {
             s.padding_horiz(10.0)
@@ -255,7 +313,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.runtime_open.set(false));
-    let header = stack((title, count, clear, close)).style(|s| {
+    let header = stack((title, count, sql, clear, close)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(8.0)
@@ -266,19 +324,25 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
             .border_color(theme::border())
     });
 
-    let hint = label(|| "Browse your app — requests are captured live via Clockwork.".to_string())
-        .style(move |s| {
-            let s = s.padding(14.0).color(theme::fg_dim()).font_size(12.0);
-            if state.runtime_reqs.with(|r| r.is_empty()) {
-                s
-            } else {
-                s.hide()
-            }
-        });
+    let hint = label(move || {
+        if state.grove_site.get().flatten().is_some() {
+            "Browse your app — Grove captures every request live, nothing to install.".to_string()
+        } else {
+            "Browse your app — requests are captured live via Clockwork.".to_string()
+        }
+    })
+    .style(move |s| {
+        let s = s.padding(14.0).color(theme::fg_dim()).font_size(12.0);
+        if state.runtime_reqs.with(|r| r.is_empty()) {
+            s
+        } else {
+            s.hide()
+        }
+    });
 
     let rows = dyn_stack(
         move || state.runtime_reqs.get(),
-        |r| r.id.clone(),
+        |r| format!("{}:{}", r.id, r.chain_loaded),
         move |r| request_row(state, r),
     )
     .style(|s| s.flex_col().width_full());

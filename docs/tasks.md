@@ -24,3 +24,12 @@ named terminal tab so you can watch the output.
 The **Run Tests** command (`⌘⇧P` → Run Tests) runs the project's primary test
 command — `php artisan test`, `pest`, `phpunit`, `cargo test`, `go test ./...`,
 or `npm test`, depending on what it detects.
+
+## Grove
+
+When [Grove](https://github.com/kwhorne/grove) is installed, a Laravel project
+also gets `grove: dev start` / `grove: dev stop` (the site's Vite server, queue
+worker and whatever the app declares via `DevCommands`), and — for a MySQL or
+PostgreSQL database — **`artisan: migrate (snapshot first)`**, which takes a
+`grove db snapshot` before running the migration so a bad one is one
+`grove db restore` from undone, plus `grove: db snapshot` on its own.

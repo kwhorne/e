@@ -817,6 +817,11 @@ pub struct AppState {
     pub runtime_reqs: RwSignal<Vec<RuntimeReq>>,
     pub runtime_expanded: RwSignal<Option<String>>,
     pub runtime_polling: RwSignal<bool>,
+    /// The Grove site serving this project: `None` = not resolved yet,
+    /// `Some(None)` = Grove isn't around or doesn't serve it.
+    pub grove_site: RwSignal<Option<Option<crate::grove::Site>>>,
+    /// Whether Grove correlates SQL with its request timeline (`None` = unknown).
+    pub grove_sql_capture: RwSignal<Option<bool>>,
     /// The in-progress "verify the fix" session, if any (see [`crate::verify`]).
     pub verify_session: RwSignal<Option<crate::verify::VerifySession>>,
     /// A verify measurement (baseline or after) is in flight.
@@ -1415,6 +1420,8 @@ impl AppState {
             runtime_reqs: RwSignal::new(Vec::new()),
             runtime_expanded: RwSignal::new(None),
             runtime_polling: RwSignal::new(false),
+            grove_site: RwSignal::new(None),
+            grove_sql_capture: RwSignal::new(None),
             verify_session: RwSignal::new(None),
             verify_busy: RwSignal::new(false),
             verify_open: RwSignal::new(false),
@@ -4210,20 +4217,24 @@ impl AppState {
         self.req_open.set(false);
     }
 
-    /// The app's base URL (the `app_url` setting, or the Grove `*.test` default).
+    /// The app's base URL: the `app_url` setting if set; else what Grove says
+    /// the site is served as (real host, and `http://` when it has no HTTPS);
+    /// else the `https://<folder>.test` convention.
     pub fn app_base(&self) -> String {
         let s = self.settings.get_untracked().app_url;
-        if s.trim().is_empty() {
-            let name = self
-                .root
-                .get_untracked()
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "app".into());
-            format!("https://{name}.test")
-        } else {
-            s.trim().trim_end_matches('/').to_string()
+        if !s.trim().is_empty() {
+            return s.trim().trim_end_matches('/').to_string();
         }
+        if let Some(site) = self.grove_site() {
+            return site.base_url();
+        }
+        let name = self
+            .root
+            .get_untracked()
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "app".into());
+        format!("https://{name}.test")
     }
 
     /// Generate a Pest feature test from the last replayed request (URL, status,

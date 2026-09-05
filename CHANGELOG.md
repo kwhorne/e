@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Runtime panel reads Grove, and needs nothing installed in the app.**
+  With Grove serving the project, requests come from Grove's own timeline (it
+  is the proxy), each one expandable into its causal chain — the SQL it issued
+  with `grove sql-capture` on (a toggle in the panel header), the mail it sent,
+  and the matching error-log entries. ✨ hands the agent Grove's `explain`
+  bundle: the request with credentials redacted, its queries and mail, and the
+  stacktrace from `laravel.log`. Clockwork remains the source when Grove isn't
+  around.
+
+- **The app URL comes from Grove.** Replay and the Runtime panel used
+  `https://<folder>.test`, which was wrong for a site without HTTPS and for a
+  folder named differently from its site. Grove's real hostname and scheme are
+  used when it serves the project; the setting still overrides.
+
+- **Grove tasks in the task palette.** `grove: dev start` / `stop`, and for a
+  MySQL or PostgreSQL project `artisan: migrate (snapshot first)`, which takes
+  a `grove db snapshot` before migrating so a bad migration is one restore from
+  undone.
+
 ## [0.9.14] - 2026-09-05
 
 ### Changed

@@ -97,10 +97,22 @@ seeder, controller, policy, request, resource, and test — in a quick picker.
 ## Runtime insight
 
 `⌘⌥I` opens a continuous, Telescope-style panel that captures every request
-against your dev app via [Clockwork](https://underground.works/clockwork):
-method, URI, status and duration, plus SQL queries with N+1 warnings, cache
-hits/misses, sent mails, and events. Click a request to expand its queries; ✨
-hands it to the agent. No Telescope or Debugbar install required.
+against your dev app. No Telescope or Debugbar install required.
+
+With [Grove](https://github.com/kwhorne/grove) serving the project, the panel
+reads Grove's own request timeline — Grove is the proxy, so every request is
+there with nothing installed in the app: method, path, status and duration.
+Expanding a request fetches its **causal chain** from Grove: the SQL it issued
+(turn on **SQL capture** in the panel header, which runs `grove sql-capture on`;
+MySQL), the mail it sent, and the matching **error-log entries**. ✨ hands the
+agent Grove's whole `explain` bundle — the request with credentials redacted, its
+queries and mail, and the stacktrace from `laravel.log` — so it can go straight
+to the cause. The replay base URL also comes from Grove (the real host, and
+`http://` for a site without HTTPS).
+
+Without Grove, the panel polls [Clockwork](https://underground.works/clockwork)
+(`/__clockwork/latest`) as before: queries with N+1 warnings, cache hits/misses,
+sent mails, and events.
 
 ### Verify the fix (✓)
 
@@ -175,9 +187,9 @@ the latest error to the agent.
 In the architecture map (`⌘⌥M`), click ▶ on a GET route to replay the request
 against your running app and see the response — plus the SQL queries it ran
 (if the app has `laravel/clockwork`), with N+1 duplicates flagged. The base URL
-defaults to `https://<folder>.test` (Grove); override it under
-**Settings → Laravel → App URL**. "Explain with agent" hands the analysis to the
-AI panel.
+is what Grove serves the project as when Grove is running (else
+`https://<folder>.test`); override it under **Settings → Laravel → App URL**.
+"Explain with agent" hands the analysis to the AI panel.
 
 ## Working on a Laravel project
 

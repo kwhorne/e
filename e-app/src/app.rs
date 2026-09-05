@@ -275,6 +275,9 @@ fn app_view() -> impl IntoView {
     state.load_db_schema_cache();
     // Reflect Grove's real Xdebug state in the setting (no-op without Grove).
     state.sync_grove_xdebug_state();
+    // Which Grove site is this project? Decides the Runtime panel's source and
+    // the replay base URL. Off-thread; Clockwork covers until it lands.
+    state.resolve_grove_site();
     crate::agent_sync::start(state);
 
     // Restore the previous session, then open any file passed on the CLI.

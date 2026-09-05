@@ -5194,7 +5194,10 @@ impl AppState {
             let _ = tx.send(());
         });
         let root = self.root.get();
-        match LspClient::start(spec.program, spec.args, &root, handler) {
+        let settings = spec
+            .settings
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+        match LspClient::start_with_settings(spec.program, spec.args, &root, settings, handler) {
             Ok(client) => {
                 eprintln!("e: starting {} for {}", spec.id, root.display());
                 self.lsp_clients.update(|m| {

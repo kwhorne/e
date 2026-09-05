@@ -319,6 +319,10 @@ struct Inner {
     /// The outstanding request per superseding method, so a newer one can
     /// cancel it (see `LspClient::request_superseding`).
     latest: Mutex<HashMap<&'static str, i64>>,
+    /// Settings handed to the server: the whole tree (`{"intelephense": {…}}`),
+    /// answered section by section to `workspace/configuration` and pushed once
+    /// as `workspace/didChangeConfiguration`.
+    settings: Option<Value>,
 }
 
 impl Inner {
@@ -498,6 +502,20 @@ impl LspClient {
         root: &Path,
         on_event: EventHandler,
     ) -> Result<Arc<Self>> {
+        Self::start_with_settings(program, args, root, None, on_event)
+    }
+
+    /// [`Self::start`] with a settings tree the server can ask for — the shape a
+    /// VS Code `settings.json` would hold, e.g. `{"intelephense": {"files":
+    /// {"maxSize": 5000000}}}`. Answered per section to `workspace/configuration`
+    /// and pushed once after the handshake as `workspace/didChangeConfiguration`.
+    pub fn start_with_settings(
+        program: &str,
+        args: &[&str],
+        root: &Path,
+        settings: Option<Value>,
+        on_event: EventHandler,
+    ) -> Result<Arc<Self>> {
         let mut child = Command::new(program)
             .args(args)
             .stdin(Stdio::piped())
@@ -546,6 +564,7 @@ impl LspClient {
             closing: AtomicBool::new(false),
             writer,
             latest: Mutex::new(HashMap::new()),
+            settings,
         });
         let on_event = Arc::new(on_event);
 
@@ -714,6 +733,12 @@ impl LspClient {
         self.inner.send_value(&json!({
             "jsonrpc": "2.0", "method": "initialized", "params": {}
         }))?;
+        if let Some(settings) = &self.inner.settings {
+            self.inner.send_value(&json!({
+                "jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
+                "params": { "settings": settings }
+            }))?;
+        }
         Ok(())
     }
 
@@ -1574,11 +1599,19 @@ fn respond_to_server_request(msg: &Value, inner: &Inner, on_event: &EventHandler
 
     let result: Result<Value, Value> = match method {
         "workspace/configuration" => {
-            let n = params
+            let items = params
                 .and_then(|p| p["items"].as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
-            Ok(Value::Array(vec![Value::Null; n]))
+                .cloned()
+                .unwrap_or_default();
+            Ok(Value::Array(
+                items
+                    .iter()
+                    .map(|item| {
+                        let section = item.get("section").and_then(Value::as_str);
+                        configuration_section(inner.settings.as_ref(), section)
+                    })
+                    .collect(),
+            ))
         }
         "workspace/workspaceFolders" => Ok(json!([{ "uri": inner.root_uri, "name": "root" }])),
         "workspace/applyEdit" => {
@@ -1612,6 +1645,25 @@ fn respond_to_server_request(msg: &Value, inner: &Inner, on_event: &EventHandler
         Err(e) => json!({ "jsonrpc": "2.0", "id": id, "error": e }),
     };
     let _ = inner.send_value(&reply);
+}
+
+/// The part of a settings tree a `workspace/configuration` item asks for:
+/// `section` is dotted (`intelephense.files`); no section means everything;
+/// anything we don't have is `null`, which servers read as "use the default".
+fn configuration_section(settings: Option<&Value>, section: Option<&str>) -> Value {
+    let Some(mut cur) = settings else {
+        return Value::Null;
+    };
+    let Some(section) = section.filter(|s| !s.is_empty()) else {
+        return cur.clone();
+    };
+    for part in section.split('.') {
+        match cur.get(part) {
+            Some(v) => cur = v,
+            None => return Value::Null,
+        }
+    }
+    cur.clone()
 }
 
 /// Read one LSP message (headers + JSON body) from `reader`.
@@ -1696,7 +1748,30 @@ mod tests {
             closing: AtomicBool::new(false),
             writer,
             latest: Mutex::new(HashMap::new()),
+            settings: None,
         }
+    }
+
+    #[test]
+    fn configuration_sections_come_from_the_settings_tree() {
+        let settings = json!({ "intelephense": { "files": { "maxSize": 5000000 }, "telemetry": { "enabled": false } } });
+        assert_eq!(
+            configuration_section(Some(&settings), Some("intelephense.files")),
+            json!({ "maxSize": 5000000 })
+        );
+        assert_eq!(
+            configuration_section(Some(&settings), Some("intelephense")),
+            settings["intelephense"]
+        );
+        assert_eq!(
+            configuration_section(Some(&settings), Some("rust-analyzer")),
+            Value::Null
+        );
+        assert_eq!(configuration_section(Some(&settings), None), settings);
+        assert_eq!(
+            configuration_section(None, Some("intelephense")),
+            Value::Null
+        );
     }
 
     #[test]

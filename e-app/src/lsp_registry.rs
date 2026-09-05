@@ -21,6 +21,9 @@ pub struct ServerSpec {
     pub install: &'static str,
     /// A missing optional server costs features, never correctness.
     pub optional: bool,
+    /// Settings the server asks for over `workspace/configuration`, as the
+    /// JSON tree a VS Code `settings.json` would hold. `None` = the defaults.
+    pub settings: Option<&'static str>,
 }
 
 const INTELEPHENSE: ServerSpec = ServerSpec {
@@ -30,7 +33,13 @@ const INTELEPHENSE: ServerSpec = ServerSpec {
     language_id: "php",
     install: "npm i -g intelephense",
     optional: false,
+    settings: Some(INTELEPHENSE_SETTINGS),
 };
+
+/// Intelephense skips files over 1 MB by default, which in a Laravel project
+/// means Composer's class map and — more to the point — the model helper
+/// Laravel Idea writes to `vendor/_laravel_ide/`. Five megabytes covers those.
+const INTELEPHENSE_SETTINGS: &str = r#"{"intelephense":{"files":{"maxSize":5000000}}}"#;
 
 /// The official Laravel language server (`composer global require laravel/lsp`).
 /// Optional: if the binary isn't installed we simply don't get its features.
@@ -41,6 +50,7 @@ const LARAVEL_PHP: ServerSpec = ServerSpec {
     language_id: "php",
     install: LARAVEL_INSTALL,
     optional: true,
+    settings: None,
 };
 
 const LARAVEL_BLADE: ServerSpec = ServerSpec {
@@ -50,6 +60,7 @@ const LARAVEL_BLADE: ServerSpec = ServerSpec {
     language_id: "blade",
     install: LARAVEL_INSTALL,
     optional: true,
+    settings: None,
 };
 
 const LARAVEL_INSTALL: &str = "composer global require laravel/lsp";
@@ -66,6 +77,7 @@ pub fn server_specs(language: Language, laravel: bool) -> Vec<ServerSpec> {
         language_id,
         install,
         optional: false,
+        settings: None,
     };
     match language {
         Language::Php => {
@@ -240,6 +252,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn server_settings_are_valid_json_trees() {
+        for spec in server_specs(Language::Php, true) {
+            if let Some(s) = spec.settings {
+                let v: serde_json::Value = serde_json::from_str(s).expect("valid JSON");
+                assert!(v.is_object(), "{}: settings must be a tree", spec.id);
+            }
+        }
+        assert!(INTELEPHENSE.settings.unwrap().contains("maxSize"));
     }
 
     #[test]

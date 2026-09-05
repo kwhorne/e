@@ -86,6 +86,15 @@ back to `e`'s built-in helpers instead (restart to apply).
 | Formatting, rename | the **primary** (general-purpose) server only |
 | Diagnostics | kept **per server** and merged, so one can't erase the other's |
 
+### Server settings
+
+`e` hands each server the settings it asks for over `workspace/configuration`
+(and pushes them once after the handshake). Intelephense gets
+`files.maxSize = 5 MB` instead of its 1 MB default, so a Laravel project's
+Composer class map and — more usefully — the model helper Laravel Idea writes to
+`vendor/_laravel_ide/` are indexed rather than skipped with an
+"over the maximum file size" line.
+
 ### Server health
 
 The status bar shows each server for the active file: `intelephense ✓`, what it

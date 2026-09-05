@@ -378,3 +378,65 @@ fn laravel_lsp_initialises_on_a_real_project() {
         client.incremental_sync()
     );
 }
+
+/// Settings reach the server: with `files.maxSize` raised, Intelephense indexes
+/// a class in a 1.5 MB file it would skip by default.
+#[test]
+fn intelephense_honours_settings_over_workspace_configuration() {
+    if !on_path("intelephense") {
+        eprintln!(
+            "skipping intelephense_honours_settings_over_workspace_configuration: not installed"
+        );
+        return;
+    }
+    let mut padding = String::from("<?php\n\nnamespace Big;\n\nclass Enorm\n{\n}\n\n/*\n");
+    while padding.len() < 1_500_000 {
+        padding.push_str("padding padding padding padding padding padding padding padding\n");
+    }
+    padding.push_str("*/\n");
+
+    let run = |settings: Option<serde_json::Value>, name: &str| -> usize {
+        let dir = tmp_dir(name);
+        std::fs::write(dir.join("Enorm.php"), &padding).unwrap();
+        let indexed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ix = indexed.clone();
+        let client = LspClient::start_with_settings(
+            "intelephense",
+            &["--stdio"],
+            &dir,
+            settings,
+            Box::new(move |ev| {
+                if let e_lsp::ServerEvent::Progress { done: true, .. } = ev {
+                    ix.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }),
+        )
+        .expect("intelephense starts");
+        assert!(client.wait_ready(Duration::from_secs(30)));
+        for _ in 0..200 {
+            if indexed.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let found = client
+            .workspace_symbol("Enorm")
+            .map(|v| v.len())
+            .unwrap_or(0);
+        let _ = std::fs::remove_dir_all(&dir);
+        found
+    };
+
+    assert_eq!(
+        run(None, "intelephense-maxsize-default"),
+        0,
+        "skipped at the 1 MB default"
+    );
+    assert!(
+        run(
+            Some(serde_json::json!({ "intelephense": { "files": { "maxSize": 5_000_000 } } })),
+            "intelephense-maxsize-raised",
+        ) >= 1,
+        "indexed once the limit is raised"
+    );
+}

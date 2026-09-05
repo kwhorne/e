@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Intelephense indexes files up to 5 MB.** Its 1 MB default skipped Composer's
+  class map and the model helper Laravel Idea writes to `vendor/_laravel_ide/`
+  ("over the maximum file size"). Servers now receive per-server settings over
+  `workspace/configuration`, and Intelephense's raise the limit.
+
 - **`e .` no longer holds the terminal, and closing the terminal no longer
   closes `e`.** The command launches the editor detached — through
   LaunchServices when run from the app bundle, else in its own process group —

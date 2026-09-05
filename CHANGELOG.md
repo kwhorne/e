@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.19] - 2026-09-05
+
 ### Added
 
 - **The Laravel menu.** `⌘⇧,` opens the command palette filtered to

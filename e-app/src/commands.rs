@@ -62,6 +62,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "laravel-menu" => state.cmd.open_with("Laravel: "),
         "new-model" => state.open_model_wizard(false),
         "new-pivot" => state.open_model_wizard(true),
+        "new-class" => state.open_artisan_palette_with("make:"),
         "route-search" => state.open_route_search(),
         "unused-views" => state.find_unused_views(),
         "install-intelephense" => state.install_lsp_by_id("intelephense"),

@@ -175,8 +175,10 @@ one migration for `post_tag` with both foreign keys, a composite primary key
 and (unless `options: -timestamps`) timestamps.
 
 **Laravel: New Eloquent Model from Database Table** builds the model from the
-live schema instead (see below), and `⌘⇧A` runs any `make:` command with
-Artisan's own prompts.
+live schema instead (see below). **Laravel: New Class…** is the Artisan palette
+opened on `make:` — every generator the app and its packages declare
+(controller, job, event, listener, mail, notification, command, Livewire
+component, …), with Artisan's own usage line as the hint for the arguments.
 
 ## Artisan
 

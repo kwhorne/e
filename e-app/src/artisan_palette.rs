@@ -51,9 +51,15 @@ impl AppState {
     /// Open the palette; list the app's commands the first time (boots the
     /// app once, off the UI thread).
     pub fn open_artisan_palette(&self) {
+        self.open_artisan_palette_with("");
+    }
+
+    /// Open the palette with `query` already typed — `make:` is "New Class",
+    /// every generator the app and its packages declare.
+    pub fn open_artisan_palette_with(&self, query: &str) {
         let a = self.artisan;
         a.stage.set(Stage::Pick);
-        a.query.set(String::new());
+        a.query.set(query.to_string());
         a.selected.set(0);
         a.chosen.set(None);
         a.args.set(String::new());

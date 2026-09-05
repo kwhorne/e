@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New Pivot Table.** The same panel with `pivot: Post Tag`: one migration
   with both foreign keys, a composite primary key and timestamps.
 
+- **New Class…** opens the Artisan palette on `make:` — every generator the
+  app and its packages declare, with Artisan's usage line as the argument hint.
+
 - **Route Search (`⌘⇧R`).** Every route with method, URI, name and action;
   filter as you type, Enter opens the controller action or the routes-file
   line for a closure.

@@ -22,6 +22,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
         "Laravel: New Eloquent Model from Database Table",
     ),
     ("new-pivot", "Laravel: New Pivot Table…"),
+    ("new-class", "Laravel: New Class… (every make: generator)"),
     ("route-search", "Laravel: Route Search…"),
     ("unused-views", "Laravel: Find Unused Views"),
     ("laravel-refresh", "Laravel: Refresh Project Data"),

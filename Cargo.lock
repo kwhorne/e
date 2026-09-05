@@ -1293,14 +1293,14 @@ checksum = "edf234dd1594d6dd434a8fb8cada51ddbbc593e40e4a01556a0b31c62da2775b"
 
 [[package]]
 name = "e"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "e-app",
 ]
 
 [[package]]
 name = "e-agent"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1309,7 +1309,7 @@ dependencies = [
 
 [[package]]
 name = "e-app"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1334,7 +1334,7 @@ dependencies = [
 
 [[package]]
 name = "e-core"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "anyhow",
  "encoding_rs",
@@ -1361,7 +1361,7 @@ dependencies = [
 
 [[package]]
 name = "e-dap"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1371,7 +1371,7 @@ dependencies = [
 
 [[package]]
 name = "e-db"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "keyring",
  "mysql",
@@ -1384,7 +1384,7 @@ dependencies = [
 
 [[package]]
 name = "e-lsp"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1396,11 +1396,11 @@ dependencies = [
 
 [[package]]
 name = "e-review"
-version = "0.9.17"
+version = "0.9.18"
 
 [[package]]
 name = "e-term"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "anyhow",
  "portable-pty",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "e-verify"
-version = "0.9.17"
+version = "0.9.18"
 dependencies = [
  "serde_json",
 ]

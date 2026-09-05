@@ -17,6 +17,10 @@ pub struct ServerSpec {
     pub args: &'static [&'static str],
     /// The LSP `languageId` to announce for documents of this language.
     pub language_id: &'static str,
+    /// Command that installs the server, shown when the binary isn't on `PATH`.
+    pub install: &'static str,
+    /// A missing optional server costs features, never correctness.
+    pub optional: bool,
 }
 
 const INTELEPHENSE: ServerSpec = ServerSpec {
@@ -24,6 +28,8 @@ const INTELEPHENSE: ServerSpec = ServerSpec {
     program: "intelephense",
     args: &["--stdio"],
     language_id: "php",
+    install: "npm i -g intelephense",
+    optional: false,
 };
 
 /// The official Laravel language server (`composer global require laravel/lsp`).
@@ -33,6 +39,8 @@ const LARAVEL_PHP: ServerSpec = ServerSpec {
     program: "laravel-lsp",
     args: &[],
     language_id: "php",
+    install: LARAVEL_INSTALL,
+    optional: true,
 };
 
 const LARAVEL_BLADE: ServerSpec = ServerSpec {
@@ -40,16 +48,24 @@ const LARAVEL_BLADE: ServerSpec = ServerSpec {
     program: "laravel-lsp",
     args: &[],
     language_id: "blade",
+    install: LARAVEL_INSTALL,
+    optional: true,
 };
+
+const LARAVEL_INSTALL: &str = "composer global require laravel/lsp";
+const CLANGD_INSTALL: &str = "brew install llvm";
+const TSSERVER_INSTALL: &str = "npm i -g typescript-language-server typescript";
 
 /// Every server to run for `language`. `laravel` enables the framework server in
 /// Laravel projects (it has nothing to say about a plain PHP project).
 pub fn server_specs(language: Language, laravel: bool) -> Vec<ServerSpec> {
-    let spec = |id, program, args, language_id| ServerSpec {
+    let spec = |id, program, args, language_id, install| ServerSpec {
         id,
         program,
         args,
         language_id,
+        install,
+        optional: false,
     };
     match language {
         Language::Php => {
@@ -67,36 +83,73 @@ pub fn server_specs(language: Language, laravel: bool) -> Vec<ServerSpec> {
                 vec![]
             }
         }
-        Language::Rust => vec![spec("rust-analyzer", "rust-analyzer", &[], "rust")],
-        Language::C => vec![spec("clangd", "clangd", &[], "c")],
-        Language::Cpp => vec![spec("clangd", "clangd", &[], "cpp")],
+        Language::Rust => vec![spec(
+            "rust-analyzer",
+            "rust-analyzer",
+            &[],
+            "rust",
+            "rustup component add rust-analyzer",
+        )],
+        Language::C => vec![spec("clangd", "clangd", &[], "c", CLANGD_INSTALL)],
+        Language::Cpp => vec![spec("clangd", "clangd", &[], "cpp", CLANGD_INSTALL)],
         Language::TypeScript => vec![spec(
             "tsserver",
             "typescript-language-server",
             &["--stdio"],
             "typescript",
+            TSSERVER_INSTALL,
         )],
         Language::JavaScript => vec![spec(
             "tsserver",
             "typescript-language-server",
             &["--stdio"],
             "javascript",
+            TSSERVER_INSTALL,
         )],
-        Language::Go => vec![spec("gopls", "gopls", &[], "go")],
+        Language::Go => vec![spec(
+            "gopls",
+            "gopls",
+            &[],
+            "go",
+            "go install golang.org/x/tools/gopls@latest",
+        )],
         Language::Python => vec![spec(
             "pyright",
             "pyright-langserver",
             &["--stdio"],
             "python",
+            "npm i -g pyright",
         )],
         _ => vec![],
     }
+}
+
+/// The server with `id` among `language`'s servers, if it has one.
+pub fn spec_for(language: Language, laravel: bool, id: &str) -> Option<ServerSpec> {
+    server_specs(language, laravel)
+        .into_iter()
+        .find(|s| s.id == id)
 }
 
 /// The server that owns single-answer operations (formatting, rename): the
 /// first, i.e. the general-purpose one.
 pub fn primary_spec(language: Language, laravel: bool) -> Option<ServerSpec> {
     server_specs(language, laravel).into_iter().next()
+}
+
+/// What to tell the user when `spec`'s binary isn't installed: what's missing,
+/// that it's optional when it is, and the one command that fixes it.
+pub fn missing_message(spec: &ServerSpec) -> String {
+    // The command goes last so it can be copied without trailing punctuation.
+    let note = if spec.optional {
+        " (optional — e works without it, with fewer features)"
+    } else {
+        ""
+    };
+    format!(
+        "{} is not installed{note}. Install it with: {}",
+        spec.program, spec.install
+    )
 }
 
 /// LSP `languageId` for a language, or `None` when no server handles it.
@@ -163,5 +216,47 @@ mod tests {
     fn unsupported_language_has_no_server() {
         assert!(server_specs(Language::Markdown, true).is_empty());
         assert_eq!(language_id(Language::Markdown, true), None);
+    }
+
+    #[test]
+    fn every_server_knows_how_to_install_itself() {
+        // A missing binary is only actionable if we can name the fix.
+        for lang in [
+            Language::Php,
+            Language::Blade,
+            Language::Rust,
+            Language::C,
+            Language::Cpp,
+            Language::TypeScript,
+            Language::JavaScript,
+            Language::Go,
+            Language::Python,
+        ] {
+            for spec in server_specs(lang, true) {
+                assert!(
+                    !spec.install.is_empty(),
+                    "{} has no install command",
+                    spec.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn missing_message_names_the_binary_and_the_command() {
+        let msg = missing_message(&LARAVEL_PHP);
+        assert!(msg.contains("laravel-lsp"), "{msg}");
+        assert!(msg.contains("composer global require laravel/lsp"), "{msg}");
+        // The Laravel server is optional; say so, so it doesn't read as a fault.
+        assert!(msg.contains("optional"), "{msg}");
+        // The command must end the line — a trailing period gets copied with it.
+        assert!(
+            msg.ends_with("composer global require laravel/lsp"),
+            "{msg}"
+        );
+
+        let required = missing_message(&INTELEPHENSE);
+        assert!(!required.contains("optional"), "{required}");
+        assert!(required.ends_with("npm i -g intelephense"), "{required}");
     }
 }

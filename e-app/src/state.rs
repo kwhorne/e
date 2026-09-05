@@ -20,14 +20,14 @@ use floem::views::editor::core::selection::{SelRegion, Selection};
 use floem::views::editor::text::Document;
 use floem::views::editor::text_document::TextDocument;
 use floem::views::editor::Editor;
-use lsp_types::{Diagnostic, PublishDiagnosticsParams};
+use lsp_types::{Diagnostic, TextEdit};
 
 use e_agent::{AgentClient, ChatState, Streaming};
 use e_core::buffer::{self, FileInfo};
 use e_core::git;
 use e_core::language::Language;
 use e_core::syntax::highlight_lines;
-use e_lsp::{path_to_uri, uri_to_path, LspClient};
+use e_lsp::{path_to_uri, uri_to_path, LspClient, MessageLevel, ServerEvent};
 use e_term::Terminal;
 
 use crate::cmd_palette::CmdPalette;
@@ -311,6 +311,10 @@ pub struct Buffer {
     pub bracket_marks: BracketMarks,
     /// `file://` URI, when backed by a path (used for LSP).
     pub uri: Option<String>,
+    /// Document version last announced to the language servers.
+    pub lsp_version: RwSignal<i64>,
+    /// Bumped per edit; a lint run for an older generation is dropped.
+    pub lint_gen: Rc<std::cell::Cell<u64>>,
     /// The live editor, set once its view is built.
     pub editor: RwSignal<Option<Editor>>,
     /// The editor's top-left position in the window (for popups).
@@ -356,8 +360,29 @@ pub struct TermSession {
     pub name: RwSignal<String>,
 }
 
-/// Queue of diagnostics waiting to be applied on the UI thread.
-pub type DiagQueue = Arc<Mutex<VecDeque<(String, PublishDiagnosticsParams)>>>;
+/// Queue of `(server id, event)` from the LSP reader threads, drained on the
+/// UI thread.
+pub type LspQueue = Arc<Mutex<VecDeque<(String, ServerEvent)>>>;
+
+/// How many times a language server may die and be brought back per session
+/// before we stop trying. A server that keeps crashing on the same file would
+/// otherwise burn CPU forever behind the user's back.
+const MAX_LSP_RESTARTS: u32 = 3;
+
+/// What we know about one language server.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ServerHealth {
+    /// Spawned; the handshake is still running on a background thread.
+    Starting { restarts: u32 },
+    /// Up; `restarts` says how many crashes it has come back from.
+    Running { restarts: u32 },
+    /// The binary isn't on `PATH`. Retried when it appears.
+    NotInstalled,
+    /// It started but refused to initialise. Left down until asked to retry.
+    Failed(String),
+    /// Died more than [`MAX_LSP_RESTARTS`] times. Left down until asked to retry.
+    GaveUp { crashes: u32 },
+}
 
 // The language-server registry lives in [`crate::lsp_registry`] (a language can
 // have several servers — PHP runs intelephense *and* laravel-lsp).
@@ -529,8 +554,9 @@ pub struct DbPanel {
     pub scroll: RwSignal<(f64, f64, u64)>,
     /// An agent-proposed query awaiting the user's consent.
     pub consent: RwSignal<Option<DbConsent>>,
-    /// Cached live DB schema `table -> columns`, for Eloquent completion.
-    pub schema_cache: RwSignal<std::collections::HashMap<String, Vec<e_db::ColumnInfo>>>,
+    /// Cached live DB schema `table -> columns`, for Eloquent completion. Behind
+    /// an `Arc` so the per-keystroke readers share it instead of copying it.
+    pub schema_cache: RwSignal<Arc<std::collections::HashMap<String, Vec<e_db::ColumnInfo>>>>,
     /// The cell currently being edited `(row, col, column_name)`.
     pub edit: RwSignal<Option<(usize, usize, String)>>,
     pub edit_value: RwSignal<String>,
@@ -597,7 +623,7 @@ impl DbPanel {
             editing_key: RwSignal::new(None),
             scroll: RwSignal::new((0.0, 0.0, 0)),
             consent: RwSignal::new(None),
-            schema_cache: RwSignal::new(std::collections::HashMap::new()),
+            schema_cache: RwSignal::new(Arc::new(std::collections::HashMap::new())),
             edit: RwSignal::new(None),
             edit_value: RwSignal::new(String::new()),
             edit_null: RwSignal::new(false),
@@ -637,8 +663,12 @@ pub struct AppState {
     /// The PHP language server, started lazily on first PHP file.
     /// Running language servers, keyed by server id.
     pub lsp_clients: RwSignal<HashMap<String, Arc<LspClient>>>,
-    /// Server ids that failed to start (don't retry).
-    lsp_failed: RwSignal<HashSet<String>>,
+    /// Per-server health: drives the status bar and the restart policy.
+    pub lsp_health: RwSignal<HashMap<String, ServerHealth>>,
+    /// What each server says it is busy with (`Indexing 42%`), while it is.
+    pub lsp_progress: RwSignal<HashMap<String, String>>,
+    /// Servers whose install command is running in a terminal tab.
+    lsp_installing: RwSignal<HashSet<String>>,
     /// Diagnostics keyed by `file://` URI.
     /// Merged view: uri -> diagnostics from every server. Readers use this.
     pub diagnostics: RwSignal<HashMap<String, Vec<Diagnostic>>>,
@@ -647,15 +677,15 @@ pub struct AppState {
     pub diag_by_server: RwSignal<HashMap<(String, String), Vec<Diagnostic>>>,
     /// Cached “is this a Laravel project?” (decides whether laravel-lsp runs).
     laravel_project: RwSignal<Option<bool>>,
-    /// Channel the LSP reader thread pushes diagnostics into.
-    /// Wake notification only — payloads travel in [`Self::diag_queue`], because a
+    /// Channel the LSP reader threads wake the UI with.
+    /// Wake notification only — payloads travel in [`Self::lsp_queue`], because a
     /// signal-per-message coalesces (only the last value survives a frame) and
     /// two servers publishing for the same file would drop one of them.
-    diag_tx: RwSignal<Sender<()>>,
-    /// Pending `(server id, params)` from the LSP reader threads.
-    pub diag_queue: RwSignal<DiagQueue>,
+    lsp_tx: RwSignal<Sender<()>>,
+    /// Pending `(server id, event)` from the LSP reader threads.
+    pub lsp_queue: RwSignal<LspQueue>,
     /// Receiver, taken once by the UI to build a reactive signal.
-    pub diag_rx: RwSignal<Option<Receiver<()>>>,
+    pub lsp_rx: RwSignal<Option<Receiver<()>>>,
     /// Completion popup state.
     pub completion: Completion,
     /// Hover popup state.
@@ -994,15 +1024,52 @@ fn undo_store_path(file: &std::path::Path) -> PathBuf {
 }
 
 /// Byte offset → (line, character) both 0-based, for LSP-style ranges.
-fn offset_to_lc(text: &str, off: usize) -> (u32, u32) {
-    let up = &text[..off.min(text.len())];
-    let line = up.bytes().filter(|b| *b == b'\n').count() as u32;
-    let col = up
-        .rsplit('\n')
-        .next()
-        .map(|s| s.chars().count())
-        .unwrap_or(0) as u32;
-    (line, col)
+/// Unknown-column warnings for the query-builder calls in `text`, against the
+/// live schema. Pure, so it runs on any thread. Columns are UTF-8 bytes, like
+/// every other diagnostic the editor draws.
+fn column_lint(
+    text: &str,
+    root: &std::path::Path,
+    schema: &HashMap<String, Vec<e_db::ColumnInfo>>,
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    if schema.is_empty() {
+        return diags;
+    }
+    // Line starts once, rather than counting newlines from the top per finding.
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+    let position = |off: usize| {
+        let off = off.min(text.len());
+        let line = starts.partition_point(|&s| s <= off).saturating_sub(1);
+        lsp_types::Position {
+            line: line as u32,
+            character: (off - starts[line]) as u32,
+        }
+    };
+    for (start, end, col) in crate::querycomplete::column_args(text) {
+        let Some(target) = crate::querycomplete::resolve_target(text, start, root) else {
+            continue;
+        };
+        let Some(cols) = schema.get(&target.table) else {
+            continue;
+        };
+        if cols.iter().any(|c| c.name == col) {
+            continue;
+        }
+        diags.push(Diagnostic {
+            range: lsp_types::Range {
+                start: position(start),
+                end: position(end),
+            },
+            severity: Some(lsp_types::DiagnosticSeverity::WARNING),
+            source: Some("laravel".to_string()),
+            message: format!("Column `{col}` not found in table `{}`", target.table),
+            ..Default::default()
+        });
+    }
+    diags
 }
 
 struct RequestResult {
@@ -1179,6 +1246,10 @@ const SYNC_HIGHLIGHT_LIMIT: usize = 64 * 1024;
 /// short enough not to feel like the colours are lagging behind.
 const HIGHLIGHT_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(120);
 
+/// How long typing has to pause before the query-builder lint re-runs. It reads
+/// model files from disk, so it should run when the user stops, not per key.
+const LINT_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(300);
+
 /// Re-highlight a large file off the UI thread, debounced.
 ///
 /// `gen` is the edit this job belongs to; if `hl_gen` has moved on by the time
@@ -1268,11 +1339,13 @@ impl AppState {
             next_id: RwSignal::new(1),
             palette_open: RwSignal::new(false),
             lsp_clients: RwSignal::new(HashMap::new()),
-            lsp_failed: RwSignal::new(HashSet::new()),
+            lsp_health: RwSignal::new(HashMap::new()),
+            lsp_progress: RwSignal::new(HashMap::new()),
+            lsp_installing: RwSignal::new(HashSet::new()),
             diagnostics: RwSignal::new(HashMap::new()),
-            diag_tx: RwSignal::new(tx),
-            diag_rx: RwSignal::new(Some(rx)),
-            diag_queue: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
+            lsp_tx: RwSignal::new(tx),
+            lsp_rx: RwSignal::new(Some(rx)),
+            lsp_queue: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
             diag_by_server: RwSignal::new(HashMap::new()),
             laravel_project: RwSignal::new(None),
             completion: Completion::new(),
@@ -3207,6 +3280,8 @@ impl AppState {
             find_marks: Rc::new(RefCell::new(Vec::new())),
             bracket_marks: Rc::new(RefCell::new(Vec::new())),
             uri: None,
+            lsp_version: RwSignal::new(1),
+            lint_gen: Rc::new(std::cell::Cell::new(0)),
             editor: RwSignal::new(None),
             win_origin: RwSignal::new(Point::ZERO),
             pending_goto: RwSignal::new(None),
@@ -3643,6 +3718,11 @@ impl AppState {
         if !laravel::is_laravel(&root) {
             return;
         }
+        // We know what's coming: start the PHP and Blade servers now, so their
+        // handshake overlaps with the user finding the first file to open
+        // instead of following it. Spawning is milliseconds; nothing blocks.
+        self.ensure_lsp(Language::Php);
+        self.ensure_lsp(Language::Blade);
         let laravel_sig = self.laravel;
         let send = create_ext_action(self.cx, move |data: LaravelData| {
             eprintln!("e: loaded Laravel project data");
@@ -4277,7 +4357,9 @@ impl AppState {
     /// Look up a running language server for `language` (does not start one).
     pub fn lsp_for_language(&self, language: Language) -> Option<Arc<LspClient>> {
         let spec = lsp_registry::primary_spec(language, self.is_laravel_project())?;
-        self.lsp_clients.with(|m| m.get(spec.id).cloned())
+        self.lsp_clients
+            .with(|m| m.get(spec.id).cloned())
+            .filter(|c| c.is_alive())
     }
 
     /// The language server for the active buffer, if running.
@@ -4327,7 +4409,9 @@ impl AppState {
 
     /// Is the official Laravel language server up?
     pub(crate) fn laravel_lsp_running(&self) -> bool {
-        self.lsp_clients.with(|m| m.contains_key("laravel-lsp"))
+        self.lsp_clients
+            .with(|m| m.get("laravel-lsp").map(|c| c.is_alive()))
+            .unwrap_or(false)
     }
 
     /// The LSP `languageId` for `language`, or `None` when nothing handles it.
@@ -4343,6 +4427,7 @@ impl AppState {
             specs
                 .iter()
                 .filter_map(|s| m.get(s.id).cloned())
+                .filter(|c| c.is_alive())
                 .collect::<Vec<_>>()
         })
     }
@@ -4368,42 +4453,471 @@ impl AppState {
             .and_then(|s| self.lsp_clients.with(|m| m.get(s.id).cloned()))
     }
 
-    /// Start one server if it isn't already running (and hasn't already failed).
+    /// Start one server if it isn't already running, subject to the health
+    /// policy: a missing binary is retried only once it shows up on `PATH`, and a
+    /// server that gave up or failed to initialise stays down until the user asks.
     fn ensure_one_lsp(&self, spec: &lsp_registry::ServerSpec) -> Option<Arc<LspClient>> {
         if let Some(client) = self.lsp_clients.with(|m| m.get(spec.id).cloned()) {
-            return Some(client);
+            if client.is_alive() {
+                return Some(client);
+            }
+            // A corpse whose exit event hasn't been handled yet; the restart
+            // policy below decides what happens to it.
+            self.lsp_clients.update(|m| {
+                m.remove(spec.id);
+            });
         }
-        if self.lsp_failed.with(|f| f.contains(spec.id)) {
-            return None;
-        }
-        let tx = self.diag_tx.get();
-        let queue = self.diag_queue.get_untracked();
-        // Tag diagnostics with the server that produced them so two servers on
-        // the same file don't overwrite each other.
+        let restarts = match self.lsp_health.with(|h| h.get(spec.id).cloned()) {
+            // Retried only when the binary has appeared, so installing it while
+            // `e` runs is picked up on the next file open — and nobody is nagged
+            // on every open until then.
+            Some(ServerHealth::NotInstalled) if !program_on_path(spec.program) => return None,
+            Some(ServerHealth::GaveUp { .. }) | Some(ServerHealth::Failed(_)) => return None,
+            Some(ServerHealth::Running { restarts })
+            | Some(ServerHealth::Starting { restarts }) => restarts,
+            _ => 0,
+        };
+        self.start_lsp(spec, restarts)
+    }
+
+    /// Spawn one server and record how it went. `restarts` is carried into its
+    /// health so a crash loop can be counted across restarts.
+    fn start_lsp(&self, spec: &lsp_registry::ServerSpec, restarts: u32) -> Option<Arc<LspClient>> {
+        let tx = self.lsp_tx.get();
+        let queue = self.lsp_queue.get_untracked();
+        // Tag events with the server that produced them so two servers on the
+        // same file don't overwrite each other's diagnostics.
         let server_id = spec.id.to_string();
-        let handler: e_lsp::DiagnosticsHandler = Box::new(move |p| {
+        let handler: e_lsp::EventHandler = Box::new(move |event| {
             if let Ok(mut q) = queue.lock() {
-                q.push_back((server_id.clone(), p));
+                q.push_back((server_id.clone(), event));
             }
             let _ = tx.send(());
         });
         let root = self.root.get();
         match LspClient::start(spec.program, spec.args, &root, handler) {
             Ok(client) => {
-                eprintln!("e: started {} for {}", spec.id, root.display());
+                eprintln!("e: starting {} for {}", spec.id, root.display());
                 self.lsp_clients.update(|m| {
                     m.insert(spec.id.to_string(), client.clone());
+                });
+                self.lsp_health.update(|h| {
+                    h.insert(spec.id.to_string(), ServerHealth::Starting { restarts });
                 });
                 Some(client)
             }
             Err(e) => {
-                eprintln!("e: could not start {} ({e:#})", spec.program);
-                self.lsp_failed.update(|f| {
-                    f.insert(spec.id.to_string());
+                // Not installed is the common case, and it has a one-line fix —
+                // say what to run instead of reporting a bare spawn failure.
+                let health = if is_not_found(&e) {
+                    let msg = lsp_registry::missing_message(spec);
+                    eprintln!("e: {msg}");
+                    Self::notify(&format!("{msg} — or click it in the status bar"));
+                    ServerHealth::NotInstalled
+                } else {
+                    let msg = format!("could not start {} ({e:#})", spec.program);
+                    eprintln!("e: {msg}");
+                    Self::notify(&msg);
+                    ServerHealth::Failed(format!("{e:#}"))
+                };
+                self.lsp_health.update(|h| {
+                    h.insert(spec.id.to_string(), health);
                 });
                 None
             }
         }
+    }
+
+    /// Handle one event a language server pushed at us (on the UI thread).
+    pub fn handle_lsp_event(&self, server_id: &str, event: ServerEvent) {
+        match event {
+            ServerEvent::Ready => {
+                let restarts = match self
+                    .lsp_health
+                    .with_untracked(|h| h.get(server_id).cloned())
+                {
+                    Some(ServerHealth::Starting { restarts }) => restarts,
+                    Some(ServerHealth::Running { restarts }) => restarts,
+                    _ => 0,
+                };
+                self.lsp_health.update(|h| {
+                    h.insert(server_id.to_string(), ServerHealth::Running { restarts });
+                });
+                if let Some(c) = self
+                    .lsp_clients
+                    .with_untracked(|m| m.get(server_id).cloned())
+                {
+                    eprintln!(
+                        "e: {server_id} ready ({:?} columns, {} sync)",
+                        c.position_encoding(),
+                        if c.incremental_sync() {
+                            "incremental"
+                        } else {
+                            "full"
+                        }
+                    );
+                }
+            }
+            ServerEvent::InitFailed(reason) => {
+                self.lsp_clients.update(|m| {
+                    m.remove(server_id);
+                });
+                self.lsp_health.update(|h| {
+                    h.insert(server_id.to_string(), ServerHealth::Failed(reason.clone()));
+                });
+                let msg = format!("{server_id} failed to initialise: {reason}");
+                eprintln!("e: {msg}");
+                Self::notify(&msg);
+            }
+            ServerEvent::Diagnostics(p) => {
+                self.publish_diagnostics(server_id, p.uri.as_str(), p.diagnostics);
+            }
+            ServerEvent::ApplyEdit { label, edits } => {
+                let n = self.apply_workspace_edits(&edits);
+                let what = label.unwrap_or_else(|| "edit".to_string());
+                eprintln!("e: {server_id}: applied {what} to {n} file(s)");
+                if n > 0 {
+                    Self::notify(&format!("{server_id}: {what}"));
+                }
+            }
+            ServerEvent::Message { level, text } => match level {
+                // A server saying "license invalid" or "project too large" is
+                // exactly what the user needs to see; chatter stays on stderr.
+                MessageLevel::Error | MessageLevel::Warning => {
+                    eprintln!("e: {server_id}: {text}");
+                    Self::notify(&format!("{server_id}: {text}"));
+                }
+                MessageLevel::Info | MessageLevel::Log => eprintln!("[lsp:{server_id}] {text}"),
+            },
+            ServerEvent::Progress {
+                title,
+                message,
+                percentage,
+                done,
+            } => {
+                if done {
+                    // Intelephense answers anything asked during indexing with
+                    // nothing, and caches that answer until a document event.
+                    // Now that it knows the project, ask again for what the
+                    // user is looking at.
+                    self.request_outline();
+                    self.request_inlay_hints_active();
+                }
+                self.lsp_progress.update(|p| {
+                    if done {
+                        p.remove(server_id);
+                    } else {
+                        let mut text = title;
+                        if let Some(m) = message.filter(|m| !m.is_empty()) {
+                            text = format!("{text} {m}");
+                        }
+                        if let Some(pct) = percentage {
+                            text = format!("{text} {pct}%");
+                        }
+                        p.insert(server_id.to_string(), text.trim().to_string());
+                    }
+                });
+            }
+            ServerEvent::Exited => self.on_lsp_exited(server_id),
+        }
+    }
+
+    /// A server process died on us. Bring it back — with every open document
+    /// re-sent, since the new process knows nothing — unless it has done this
+    /// too often, in which case leave it down and say so.
+    fn on_lsp_exited(&self, id: &str) {
+        // A client we shut down ourselves never reports this (see `closing` in
+        // e-lsp), so an exit is always the live one dying — unless a newer
+        // client has already taken the slot, in which case the event is stale.
+        match self.lsp_clients.with_untracked(|m| m.get(id).cloned()) {
+            Some(c) if c.is_alive() => return,
+            Some(_) => {}
+            None => return,
+        }
+        self.lsp_clients.update(|m| {
+            m.remove(id);
+        });
+        self.lsp_progress.update(|p| {
+            p.remove(id);
+        });
+        let restarts = match self.lsp_health.with_untracked(|h| h.get(id).cloned()) {
+            Some(ServerHealth::Running { restarts })
+            | Some(ServerHealth::Starting { restarts }) => restarts + 1,
+            _ => 1,
+        };
+        if restarts > MAX_LSP_RESTARTS {
+            self.lsp_health.update(|h| {
+                h.insert(id.to_string(), ServerHealth::GaveUp { crashes: restarts });
+            });
+            let msg = format!(
+                "{id} crashed {restarts} times and was not restarted — click it in the status bar to try again"
+            );
+            eprintln!("e: {msg}");
+            Self::notify(&msg);
+            return;
+        }
+        eprintln!("e: {id} exited unexpectedly — restarting ({restarts}/{MAX_LSP_RESTARTS})");
+        if self.restart_lsp(id, restarts) {
+            Self::notify(&format!("{id} crashed and was restarted"));
+        }
+    }
+
+    /// Start server `id` afresh and hand it every open document it serves.
+    /// Returns whether it came up.
+    fn restart_lsp(&self, id: &str, restarts: u32) -> bool {
+        let laravel = self.is_laravel_project();
+        let buffers = self.buffers.get_untracked();
+        // Which spec? Any open buffer whose language wants this server says.
+        // With none open there is nothing to serve; the next open starts it.
+        let Some(spec) = buffers
+            .iter()
+            .find_map(|b| lsp_registry::spec_for(b.file.language, laravel, id))
+        else {
+            self.lsp_health.update(|h| {
+                h.remove(id);
+            });
+            return false;
+        };
+        let Some(client) = self.start_lsp(&spec, restarts) else {
+            return false;
+        };
+        for b in &buffers {
+            let Some(s) = lsp_registry::spec_for(b.file.language, laravel, id) else {
+                continue;
+            };
+            if let Some(uri) = b.uri.as_ref() {
+                client.did_open(
+                    uri,
+                    s.language_id,
+                    b.lsp_version.get_untracked(),
+                    &b.doc.text().to_string(),
+                );
+            }
+        }
+        true
+    }
+
+    /// Status-bar click: whatever is down for the active file comes back. A
+    /// server that isn't installed gets installed (its command runs in a
+    /// terminal tab, and it starts when the binary appears); a crashed or
+    /// failed one is simply tried again.
+    pub fn retry_lsp_for_active(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let laravel = self.is_laravel_project();
+        for spec in lsp_registry::server_specs(buf.file.language, laravel) {
+            let running = self
+                .lsp_clients
+                .with_untracked(|m| m.get(spec.id).map(|c| c.is_alive()))
+                .unwrap_or(false);
+            if running {
+                continue;
+            }
+            let missing = matches!(
+                self.lsp_health.with_untracked(|h| h.get(spec.id).cloned()),
+                Some(ServerHealth::NotInstalled)
+            ) && !program_on_path(spec.program);
+            if missing {
+                self.install_lsp(&spec);
+                continue;
+            }
+            self.lsp_health.update(|h| {
+                h.remove(spec.id);
+            });
+            self.restart_lsp(spec.id, 0);
+        }
+    }
+
+    /// Run a server's install command in a terminal tab, then watch `PATH` for
+    /// the binary and start the server the moment it shows up — so "install
+    /// intelephense" is one click, with no restart and nothing to type.
+    pub fn install_lsp(&self, spec: &lsp_registry::ServerSpec) {
+        let already = self.lsp_installing.with_untracked(|s| s.contains(spec.id));
+        if already {
+            Self::notify(&format!("{} is still installing", spec.id));
+            return;
+        }
+        self.lsp_installing.update(|s| {
+            s.insert(spec.id.to_string());
+        });
+        eprintln!("e: installing {} with `{}`", spec.id, spec.install);
+        self.run_task(&format!("install {}", spec.id), spec.install);
+        self.watch_for_installed(*spec, 0);
+    }
+
+    /// Poll for `spec.program` on `PATH` every two seconds, for up to ten
+    /// minutes (a `composer global require` on a cold cache can take a while).
+    fn watch_for_installed(&self, spec: lsp_registry::ServerSpec, attempt: u32) {
+        const EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+        const MAX_ATTEMPTS: u32 = 300;
+        let app = *self;
+        floem::action::exec_after(EVERY, move |_| {
+            if program_on_path(spec.program) {
+                app.lsp_installing.update(|s| {
+                    s.remove(spec.id);
+                });
+                app.lsp_health.update(|h| {
+                    h.remove(spec.id);
+                });
+                eprintln!("e: {} installed — starting it", spec.id);
+                if app.restart_lsp(spec.id, 0) {
+                    Self::notify(&format!("{} installed and started", spec.id));
+                } else {
+                    Self::notify(&format!(
+                        "{} installed — it starts with the next {} file you open",
+                        spec.id, spec.language_id
+                    ));
+                }
+                return;
+            }
+            if attempt + 1 >= MAX_ATTEMPTS {
+                app.lsp_installing.update(|s| {
+                    s.remove(spec.id);
+                });
+                eprintln!("e: gave up waiting for {} to appear on PATH", spec.id);
+                return;
+            }
+            app.watch_for_installed(spec, attempt + 1);
+        });
+    }
+
+    /// One line of server health for the active file, and whether all is well:
+    /// `intelephense ✓ · laravel-lsp ↓`, or what a server is busy with.
+    /// Reactive: reads the health, progress and client signals.
+    pub fn lsp_status(&self) -> Option<(String, bool)> {
+        let buf = self.active_buffer()?;
+        let specs = lsp_registry::server_specs(buf.file.language, self.is_laravel_project());
+        if specs.is_empty() {
+            return None;
+        }
+        let health = self.lsp_health.get();
+        let progress = self.lsp_progress.get();
+        let alive = self.lsp_clients.with(|m| {
+            m.iter()
+                .map(|(k, c)| (k.clone(), c.is_alive()))
+                .collect::<HashMap<_, _>>()
+        });
+        let mut parts = Vec::new();
+        let mut all_ok = true;
+        for spec in specs {
+            let up = alive.get(spec.id).copied().unwrap_or(false);
+            let text = match (up, health.get(spec.id)) {
+                (true, Some(ServerHealth::Starting { .. })) => format!("{} …", spec.id),
+                (true, _) => match progress.get(spec.id) {
+                    Some(p) => format!("{}: {p}", spec.id),
+                    None => format!("{} ✓", spec.id),
+                },
+                (false, Some(ServerHealth::NotInstalled)) => {
+                    if self.lsp_installing.with(|s| s.contains(spec.id)) {
+                        format!("{} ↓ installing…", spec.id)
+                    } else {
+                        all_ok = false;
+                        format!("{} ↓ click to install", spec.id)
+                    }
+                }
+                (false, Some(ServerHealth::GaveUp { .. })) => {
+                    all_ok = false;
+                    format!("{} ✗ crashed", spec.id)
+                }
+                (false, Some(ServerHealth::Failed(_))) => {
+                    all_ok = false;
+                    format!("{} ✗ failed", spec.id)
+                }
+                // Never started (no file of this language opened yet), or
+                // between a crash and its restart.
+                (false, _) => continue,
+            };
+            parts.push(text);
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        Some((parts.join(" · "), all_ok))
+    }
+
+    /// Apply per-URI edits: open buffers through the document (undoable, and the
+    /// editor stays in sync), everything else straight to disk. Returns the
+    /// number of files changed.
+    pub fn apply_workspace_edits(&self, edits: &[(String, Vec<TextEdit>)]) -> usize {
+        let buffers = self.buffers.get_untracked();
+        let mut changed = 0usize;
+        for (uri, list) in edits {
+            if list.is_empty() {
+                continue;
+            }
+            let open = buffers
+                .iter()
+                .find(|b| b.uri.as_deref() == Some(uri.as_str()));
+            match open {
+                Some(buf) => {
+                    if Self::apply_edits_to_buffer(buf, list) {
+                        changed += 1;
+                    }
+                }
+                None => {
+                    let path = uri_to_path(uri);
+                    let Ok(text) = std::fs::read_to_string(&path) else {
+                        eprintln!("e: workspace edit: could not read {}", path.display());
+                        continue;
+                    };
+                    let updated = crate::rename_preview::apply_edits(&text, list);
+                    if updated == text {
+                        continue;
+                    }
+                    match std::fs::write(&path, updated) {
+                        Ok(()) => changed += 1,
+                        Err(e) => {
+                            eprintln!("e: workspace edit: could not write {}: {e}", path.display())
+                        }
+                    }
+                }
+            }
+        }
+        if changed > 0 {
+            self.fs_rev.update(|r| *r += 1);
+            self.check_external_changes();
+        }
+        changed
+    }
+
+    /// Apply edits to one open buffer, last-first so earlier offsets stay valid.
+    /// Returns whether anything changed.
+    fn apply_edits_to_buffer(buf: &Buffer, edits: &[TextEdit]) -> bool {
+        let Some(editor) = buf.editor.get_untracked() else {
+            // No view yet: replace the whole text instead of editing in place.
+            let text = buf.doc.text().to_string();
+            let updated = crate::rename_preview::apply_edits(&text, edits);
+            if updated == text {
+                return false;
+            }
+            buf.doc
+                .edit_single(Selection::region(0, text.len()), &updated, EditType::Other);
+            return true;
+        };
+        let mut offs: Vec<(usize, usize, String)> = edits
+            .iter()
+            .map(|e| {
+                let s = editor.offset_of_line_col(
+                    e.range.start.line as usize,
+                    e.range.start.character as usize,
+                );
+                let en = editor
+                    .offset_of_line_col(e.range.end.line as usize, e.range.end.character as usize);
+                (s, en.max(s), e.new_text.clone())
+            })
+            .collect();
+        offs.sort_by_key(|b| std::cmp::Reverse(b.0));
+        let mut changed = false;
+        for (s, en, text) in offs {
+            if s == en && text.is_empty() {
+                continue;
+            }
+            buf.doc
+                .edit_single(Selection::region(s, en), &text, EditType::InsertChars);
+            changed = true;
+        }
+        changed
     }
 
     /// Open a file by path. If it's already open, just focus it.
@@ -4563,7 +5077,7 @@ impl AppState {
                         let v = version.get() + 1;
                         version.set(v);
                         for client in clients {
-                            client.did_change_full(uri, v, &text);
+                            client.did_change(uri, v, &text);
                         }
                     }
                 }
@@ -4601,6 +5115,8 @@ impl AppState {
             find_marks: Rc::new(RefCell::new(Vec::new())),
             bracket_marks: Rc::new(RefCell::new(Vec::new())),
             uri,
+            lsp_version: version,
+            lint_gen: Rc::new(std::cell::Cell::new(0)),
             editor: RwSignal::new(None),
             win_origin: RwSignal::new(Point::ZERO),
             pending_goto: RwSignal::new(None),
@@ -4733,45 +5249,47 @@ impl AppState {
     /// CI enforces — so when the project ships Pint it wins over the language
     /// server, which formats PHP to its own taste and would fight it.
     pub fn format_active(&self) {
+        self.format_active_then(|| {});
+    }
+
+    /// Format the active buffer, then run `then` on the UI thread — right away
+    /// when there is nothing to format, or once the server's edits have been
+    /// applied. The request itself runs off the UI thread; formatting a large
+    /// file used to freeze the window for as long as the server took.
+    pub fn format_active_then(&self, then: impl FnOnce() + 'static) {
         let Some(buf) = self.active_buffer() else {
+            then();
             return;
         };
         if self.format_active_with_pint(&buf) {
+            then();
             return;
         }
         if self.lsp_language_id(buf.file.language).is_none() {
+            then();
             return;
         }
-        let (Some(client), Some(uri), Some(editor)) = (
-            self.lsp_for_active(),
-            buf.uri.clone(),
-            buf.editor.get_untracked(),
-        ) else {
+        let (Some(client), Some(uri)) = (self.lsp_for_active(), buf.uri.clone()) else {
+            then();
             return;
         };
-        let edits = match client.formatting(&uri, 4, true) {
-            Ok(e) if !e.is_empty() => e,
-            _ => return,
-        };
-        // Resolve to offsets against the current text, then apply bottom-up so
-        // earlier offsets stay valid.
-        let mut offs: Vec<(usize, usize, String)> = edits
-            .into_iter()
-            .map(|e| {
-                let s = editor.offset_of_line_col(
-                    e.range.start.line as usize,
-                    e.range.start.character as usize,
-                );
-                let en = editor
-                    .offset_of_line_col(e.range.end.line as usize, e.range.end.character as usize);
-                (s, en, e.new_text)
-            })
-            .collect();
-        offs.sort_by_key(|b| std::cmp::Reverse(b.0));
-        for (s, en, text) in offs {
-            buf.doc
-                .edit_single(Selection::region(s, en), &text, EditType::InsertChars);
-        }
+        // If the text changes while the server is thinking, its edits describe
+        // a document that no longer exists; skip rather than corrupt.
+        let version = buf.lsp_version.get_untracked();
+        self.spawn_bg(
+            move || client.formatting(&uri, 4, true).ok(),
+            move |edits: Option<Vec<TextEdit>>| {
+                if let Some(edits) = edits.filter(|e| !e.is_empty()) {
+                    if buf.lsp_version.get_untracked() == version {
+                        Self::apply_edits_to_buffer(&buf, &edits);
+                    } else {
+                        eprintln!("e: format: the file changed while formatting; skipped");
+                        Self::notify("Formatting skipped: the file changed meanwhile");
+                    }
+                }
+                then();
+            },
+        );
     }
 
     /// Request LSP code actions (quick fixes / refactors like extract) at the
@@ -4810,16 +5328,15 @@ impl AppState {
         self.spawn_bg(
             move || {
                 // Offer every server's fixes together (intelephense quick fixes
-                // plus laravel-lsp's framework fixes).
-                let mut list = Vec::new();
-                for client in &clients {
-                    list.extend(
-                        client
-                            .code_actions(&uri, sl, sc, el, ec, &diags)
-                            .unwrap_or_default(),
-                    );
-                }
-                list
+                // plus laravel-lsp's framework fixes), asked in parallel.
+                fan_out(&clients, |client| {
+                    client
+                        .code_actions(&uri, sl, sc, el, ec, &diags)
+                        .unwrap_or_default()
+                })
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
             },
             move |list: Vec<e_lsp::CodeActionItem>| {
                 if list.is_empty() {
@@ -4832,43 +5349,41 @@ impl AppState {
         );
     }
 
-    /// Apply the chosen code action's edits to the matching open buffers.
+    /// Apply the chosen code action: its edits if it carries them, otherwise run
+    /// its command and let the server send the edits back as `workspace/applyEdit`.
     pub fn apply_code_action(&self, index: usize) {
         self.code_actions_open.set(false);
         let Some(item) = self.code_actions.with_untracked(|l| l.get(index).cloned()) else {
             return;
         };
-        let buffers = self.buffers.get_untracked();
-        for (uri, edits) in &item.edits {
-            let Some(buf) = buffers
-                .iter()
-                .find(|b| b.uri.as_deref() == Some(uri.as_str()))
-            else {
-                continue; // v1: only edits to already-open files are applied
-            };
-            let Some(editor) = buf.editor.get_untracked() else {
-                continue;
-            };
-            let mut offs: Vec<(usize, usize, String)> = edits
-                .iter()
-                .map(|e| {
-                    let s = editor.offset_of_line_col(
-                        e.range.start.line as usize,
-                        e.range.start.character as usize,
-                    );
-                    let en = editor.offset_of_line_col(
-                        e.range.end.line as usize,
-                        e.range.end.character as usize,
-                    );
-                    (s, en, e.new_text.clone())
-                })
-                .collect();
-            offs.sort_by_key(|b| std::cmp::Reverse(b.0));
-            for (s, en, text) in offs {
-                buf.doc
-                    .edit_single(Selection::region(s, en), &text, EditType::InsertChars);
-            }
+        if !item.edits.is_empty() {
+            self.apply_workspace_edits(&item.edits);
+            return;
         }
+        let Some(command) = item.command.clone() else {
+            return;
+        };
+        let client = self
+            .lsp_clients
+            .with_untracked(|m| m.values().find(|c| c.name() == item.server).cloned());
+        let Some(client) = client else {
+            Self::notify("That code action's language server is no longer running");
+            return;
+        };
+        let title = item.title.clone();
+        self.spawn_bg(
+            move || {
+                client
+                    .execute_command(&command)
+                    .map_err(|e| format!("{e:#}"))
+            },
+            move |result: Result<serde_json::Value, String>| {
+                if let Err(e) = result {
+                    eprintln!("e: code action `{title}` failed: {e}");
+                    Self::notify(&format!("Code action failed: {e}"));
+                }
+            },
+        );
     }
 
     /// Strip trailing whitespace and ensure a final newline in the active buffer.
@@ -4896,8 +5411,17 @@ impl AppState {
     /// Save the active buffer to disk (formatting / trimming first, if enabled).
     pub fn save_active(&self) {
         if self.settings.get_untracked().format_on_save {
-            self.format_active();
+            // Formatting is asynchronous; the write must wait for its edits.
+            let app = *self;
+            self.format_active_then(move || app.write_active());
+            return;
         }
+        self.write_active();
+    }
+
+    /// The saving half of [`Self::save_active`]: trim, fix the final newline,
+    /// write, and tell everyone who cares.
+    fn write_active(&self) {
         // EditorConfig `trim_trailing_whitespace` overrides the global setting.
         let ec = self
             .active_buffer()
@@ -5029,7 +5553,9 @@ impl AppState {
     }
 
     /// Recompute Laravel query-builder lint (unknown columns) for a buffer and
-    /// re-render its diagnostics. Cheap no-op without a live schema.
+    /// re-render its diagnostics. Debounced and off the UI thread: resolving a
+    /// model's table reads its class file, and a keystroke shouldn't wait for
+    /// disk. Cheap no-op without a live schema.
     pub fn refresh_lint(&self, buffer_id: u64) {
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return;
@@ -5037,54 +5563,45 @@ impl AppState {
         if buf.large || !matches!(buf.file.language, Language::Php | Language::Blade) {
             return;
         }
-        let root = self.root.get_untracked();
-        let text = buf.doc.text().to_string();
-        let mut diags: Vec<Diagnostic> = Vec::new();
-        self.db.schema_cache.with_untracked(|schema| {
-            if schema.is_empty() {
-                return;
-            }
-            for (start, end, col) in crate::querycomplete::column_args(&text) {
-                let Some(target) = crate::querycomplete::resolve_target(&text, start, &root) else {
-                    continue;
-                };
-                if let Some(cols) = schema.get(&target.table) {
-                    if !cols.iter().any(|c| c.name == col) {
-                        let (sl, sc) = offset_to_lc(&text, start);
-                        let (el, ec) = offset_to_lc(&text, end);
-                        diags.push(Diagnostic {
-                            range: lsp_types::Range {
-                                start: lsp_types::Position {
-                                    line: sl,
-                                    character: sc,
-                                },
-                                end: lsp_types::Position {
-                                    line: el,
-                                    character: ec,
-                                },
-                            },
-                            severity: Some(lsp_types::DiagnosticSeverity::WARNING),
-                            source: Some("laravel".to_string()),
-                            message: format!(
-                                "Column `{col}` not found in table `{}`",
-                                target.table
-                            ),
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-        });
-        let changed = *buf.lint.borrow() != diags;
-        *buf.lint.borrow_mut() = diags;
-        if changed {
-            if let Some(uri) = buf.uri.clone() {
-                let lsp = self
-                    .diagnostics
-                    .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
-                self.apply_diagnostics_to_buffer(&uri, &lsp);
-            }
+        if self.db.schema_cache.with_untracked(|s| s.is_empty()) {
+            return;
         }
+        let gen = buf.lint_gen.get() + 1;
+        buf.lint_gen.set(gen);
+        let app = *self;
+        floem::action::exec_after(LINT_DEBOUNCE, move |_| {
+            let Some(buf) = app.buffer_by_id(buffer_id) else {
+                return;
+            };
+            if buf.lint_gen.get() != gen {
+                return; // typed again while waiting; that keystroke's run will do it
+            }
+            let text = buf.doc.text().to_string();
+            let root = app.root.get_untracked();
+            let schema = app.db.schema_cache.get_untracked();
+            let lint_gen = buf.lint_gen.clone();
+            app.spawn_bg(
+                move || column_lint(&text, &root, &schema),
+                move |diags: Vec<Diagnostic>| {
+                    if lint_gen.get() != gen {
+                        return; // the text moved on while we were linting
+                    }
+                    let Some(buf) = app.buffer_by_id(buffer_id) else {
+                        return;
+                    };
+                    if *buf.lint.borrow() == diags {
+                        return;
+                    }
+                    *buf.lint.borrow_mut() = diags;
+                    if let Some(uri) = buf.uri.clone() {
+                        let lsp = app
+                            .diagnostics
+                            .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
+                        app.apply_diagnostics_to_buffer(&uri, &lsp);
+                    }
+                },
+            );
+        });
     }
 
     /// `(line, col, selection_len)` of the active editor's cursor (1-based).
@@ -5153,6 +5670,50 @@ impl AppState {
     pub fn rel_path(&self, uri: &str) -> String {
         rel_uri(uri, &self.root.get())
     }
+}
+
+/// Did this failure come from a binary that isn't there? The `io::Error` sits
+/// under `anyhow`'s context, so walk the chain rather than matching on text.
+fn is_not_found(err: &anyhow::Error) -> bool {
+    err.chain()
+        .filter_map(|c| c.downcast_ref::<std::io::Error>())
+        .any(|io| io.kind() == std::io::ErrorKind::NotFound)
+}
+
+/// Ask every server the same question at once; answers come back in server
+/// order. Latency is the slowest server's, not the sum of all of them. Call
+/// from a background thread — each `f` blocks on its server.
+pub(crate) fn fan_out<T: Send + Default>(
+    clients: &[Arc<LspClient>],
+    f: impl Fn(&LspClient) -> T + Sync,
+) -> Vec<T> {
+    if clients.len() == 1 {
+        return vec![f(&clients[0])];
+    }
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = clients
+            .iter()
+            .map(|c| {
+                let f = &f;
+                scope.spawn(move || f(c))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_default())
+            .collect()
+    })
+}
+
+/// Is `program` runnable by name? A bare name is looked up on `PATH`; a path is
+/// checked as given. Used to notice a server installed while `e` was running.
+fn program_on_path(program: &str) -> bool {
+    if program.contains('/') {
+        return std::path::Path::new(program).is_file();
+    }
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
+        .unwrap_or(false)
 }
 
 pub(crate) fn is_word_char(c: char) -> bool {
@@ -5631,5 +6192,68 @@ mod trim_tests {
         let (edits, nl) = trailing_trim_edits("a\nb\n");
         assert!(edits.is_empty());
         assert!(!nl);
+    }
+}
+
+#[cfg(test)]
+mod not_found_tests {
+    use super::is_not_found;
+    use anyhow::Context;
+
+    #[test]
+    fn sees_enoent_under_anyhow_context() {
+        // The real shape: `Command::spawn` wrapped in `with_context`, exactly as
+        // `LspClient::start` reports a language server that isn't installed.
+        let err: anyhow::Error = std::process::Command::new("e-no-such-language-server")
+            .spawn()
+            .with_context(|| "spawning language server `e-no-such-language-server`")
+            .unwrap_err();
+        assert!(is_not_found(&err), "{err:#}");
+    }
+
+    #[test]
+    fn a_crash_is_not_a_missing_binary() {
+        assert!(!is_not_found(&anyhow::anyhow!(
+            "server closed the connection"
+        )));
+    }
+}
+
+#[cfg(test)]
+mod column_lint_tests {
+    use super::column_lint;
+    use std::collections::HashMap;
+
+    #[test]
+    fn flags_unknown_columns_at_byte_positions() {
+        let text = "<?php\n// Håndter\nDB::table('users')->where('nmae', 1)->where('name', 2);\n";
+        let mut schema = HashMap::new();
+        schema.insert(
+            "users".to_string(),
+            vec![e_db::ColumnInfo {
+                name: "name".into(),
+                data_type: "varchar".into(),
+                nullable: false,
+                key: String::new(),
+            }],
+        );
+        let diags = column_lint(text, std::path::Path::new("/nonexistent"), &schema);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let d = &diags[0];
+        assert!(d.message.contains("nmae"));
+        // Line 2 (the `å` on line 1 must not shift it), byte column of `nmae`.
+        let line = text.lines().nth(2).unwrap();
+        assert_eq!(d.range.start.line, 2);
+        assert_eq!(d.range.start.character as usize, line.find("nmae").unwrap());
+        assert_eq!(
+            d.range.end.character as usize,
+            line.find("nmae").unwrap() + 4
+        );
+    }
+
+    #[test]
+    fn nothing_without_a_schema() {
+        let text = "DB::table('users')->where('x', 1);";
+        assert!(column_lint(text, std::path::Path::new("/"), &HashMap::new()).is_empty());
     }
 }

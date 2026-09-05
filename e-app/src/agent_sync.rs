@@ -677,16 +677,18 @@ fn diagnostics(state: AppState) -> Vec<Value> {
     out
 }
 
+/// The canonical `file://` URI for a path the agent named — the same spelling
+/// the buffers are keyed by, so `Økonomi/` and `%C3%98konomi/` meet.
 fn path_to_uri(path: &str) -> String {
     if path.starts_with("file://") {
-        path.to_string()
+        e_lsp::normalize_uri(path)
     } else {
-        format!("file://{path}")
+        e_lsp::path_to_uri(std::path::Path::new(path))
     }
 }
 
 fn uri_to_path_str(uri: &str) -> String {
-    uri.strip_prefix("file://").unwrap_or(uri).to_string()
+    e_lsp::uri_to_path(uri).to_string_lossy().into_owned()
 }
 
 #[cfg(all(test, unix))]

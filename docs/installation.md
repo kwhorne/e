@@ -153,7 +153,7 @@ servers for the languages you use and make sure they are on your `PATH`:
 | PHP             | Intelephense                  | `npm i -g intelephense` |
 | PHP / Blade (Laravel) | [laravel/lsp](https://github.com/laravel/lsp) | `composer global require laravel/lsp` |
 | Rust            | rust-analyzer                 | `rustup component add rust-analyzer` |
-| C / C++         | clangd                        | bundled with LLVM |
+| C / C++         | clangd                        | `brew install llvm` (bundled with LLVM) |
 | TypeScript / JS | typescript-language-server    | `npm i -g typescript-language-server typescript` |
 | Go              | gopls                         | `go install golang.org/x/tools/gopls@latest` |
 | Python          | pyright                       | `npm i -g pyright` |

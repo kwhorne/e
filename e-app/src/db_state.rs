@@ -56,7 +56,9 @@ impl AppState {
         let sig = self.db.schema_cache;
         let send = create_ext_action(
             self.cx,
-            move |m: std::collections::HashMap<String, Vec<e_db::ColumnInfo>>| sig.set(m),
+            move |m: std::collections::HashMap<String, Vec<e_db::ColumnInfo>>| {
+                sig.set(std::sync::Arc::new(m))
+            },
         );
         std::thread::spawn(move || {
             let mut map = std::collections::HashMap::new();

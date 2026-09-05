@@ -98,6 +98,9 @@ impl SyntaxStyling {
 }
 
 /// Build per-line diagnostic spans from LSP diagnostics + the buffer text.
+///
+/// Columns are UTF-8 bytes: `e-lsp` converts the server's units on arrival, and
+/// the text layout's hit-testing is byte-indexed, so bytes go straight through.
 pub fn build_diag_lines(diags: &[Diagnostic], text: &str) -> Vec<Vec<DiagSpan>> {
     let line_lens: Vec<usize> = text
         .split_inclusive('\n')
@@ -106,7 +109,7 @@ pub fn build_diag_lines(diags: &[Diagnostic], text: &str) -> Vec<Vec<DiagSpan>> 
                 .strip_suffix("\r\n")
                 .or_else(|| l.strip_suffix('\n'))
                 .unwrap_or(l);
-            t.chars().count()
+            t.len()
         })
         .collect();
     let n = line_lens.len().max(1);

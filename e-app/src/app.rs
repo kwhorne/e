@@ -212,10 +212,11 @@ fn app_view() -> impl IntoView {
         crate::config::save_dark(theme::is_dark());
     });
 
-    // Bridge the LSP reader thread's diagnostics into a UI-thread signal.
-    if let Some(rx) = state.diag_rx.try_update(|opt| opt.take()).flatten() {
+    // Bridge the LSP reader threads' events (diagnostics, edits, messages,
+    // progress, exits) into the UI thread.
+    if let Some(rx) = state.lsp_rx.try_update(|opt| opt.take()).flatten() {
         let notif = create_signal_from_channel(rx);
-        let queue = state.diag_queue.get_untracked();
+        let queue = state.lsp_queue.get_untracked();
         create_effect(move |_| {
             if notif.get().is_none() {
                 return;
@@ -226,8 +227,8 @@ fn app_view() -> impl IntoView {
                 Ok(mut q) => q.drain(..).collect(),
                 Err(_) => return,
             };
-            for (server_id, params) in drained {
-                state.publish_diagnostics(&server_id, params.uri.as_ref(), params.diagnostics);
+            for (server_id, event) in drained {
+                state.handle_lsp_event(&server_id, event);
             }
         });
     }

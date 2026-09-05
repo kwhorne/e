@@ -22,6 +22,9 @@ pub struct Completion {
     pub buffer_id: RwSignal<Option<u64>>,
     /// Byte offset where the replaced word starts.
     pub start_offset: RwSignal<usize>,
+    /// Bumped per request (and on close); a result for an older generation is
+    /// dropped, so a slow server can't overwrite what a newer keystroke showed.
+    pub gen: RwSignal<u64>,
 }
 
 impl Completion {
@@ -33,6 +36,7 @@ impl Completion {
             anchor: RwSignal::new(Point::ZERO),
             buffer_id: RwSignal::new(None),
             start_offset: RwSignal::new(0),
+            gen: RwSignal::new(0),
         }
     }
 }

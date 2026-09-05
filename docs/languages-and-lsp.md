@@ -39,7 +39,9 @@ and provides:
 | Go              | gopls                                     |
 | Python          | pyright                                   |
 
-See [Installation](installation.md#language-servers) for install commands.
+See [Installation](installation.md#language-servers) for install commands — or
+just open a file: when a server's binary isn't on `PATH`, `e` names it and prints
+the command that installs it instead of reporting a spawn failure.
 
 Servers are launched per language, so a mixed project (e.g. PHP + TypeScript)
 gets full support for each. A language can also run **several** servers at once —
@@ -60,7 +62,10 @@ composer global require laravel/lsp
 ```
 
 Make sure Composer's global `vendor/bin` is on your `PATH`. If it isn't
-installed, nothing breaks — you simply keep `e`'s built-in Laravel intelligence.
+installed, nothing breaks — you simply keep `e`'s built-in Laravel intelligence,
+and `e` tells you the command that would install it (once per session, not once
+per file). Install it while `e` is running and the next PHP or Blade file you
+open picks it up; no restart needed.
 
 It adds routes, views/Blade, translations, config, environment variables,
 assets/Mix, middleware, Inertia, Livewire, auth/policies, container bindings and
@@ -80,6 +85,47 @@ back to `e`'s built-in helpers instead (restart to apply).
 | Hover, go to definition | the **first** server with an answer |
 | Formatting, rename | the **primary** (general-purpose) server only |
 | Diagnostics | kept **per server** and merged, so one can't erase the other's |
+
+### Server health
+
+The status bar shows each server for the active file: `intelephense ✓`, what it
+is busy with while it indexes (`intelephense: Indexing 42%`), or why it isn't
+there (`laravel-lsp ↓ click to install`, `intelephense ✗ crashed`). Click it to
+bring back whatever is down: a server that isn't installed has its install
+command run in a terminal tab and starts the moment the binary appears on
+`PATH`; a crashed one is started again.
+
+A server that dies is restarted and handed every open document again, up to
+three times per session; after that it is left down and you are told. A server
+that can't start at all (a broken install, say) is left down until you click.
+
+Messages a server sends about itself — an invalid license, a project too large
+to index — appear as notifications. Edits a server asks for
+(`workspace/applyEdit`, including from code actions that run a server command)
+are applied to open buffers through the editor, and to other files on disk.
+
+Columns are converted between the editor's UTF-8 bytes and the server's UTF-16
+units, so squiggles, completions and renames land where they should on lines
+with `æøå`, emoji or any other non-ASCII text. Servers that speak UTF-8
+(rust-analyzer, clangd) are asked to, and skip the conversion.
+
+### Nothing waits for a server
+
+Servers start in the background: opening a file never waits for a handshake,
+and in a Laravel project the PHP and Blade servers are started as soon as the
+project opens, so they are usually ready before the first file is. Edits made
+while a server starts are folded into the document it is handed when it comes
+up. The status bar shows `intelephense …` until then.
+
+Every keystroke sends the server only the bytes that changed (for servers that
+support incremental sync — all the usual ones do), through a writer thread, so a
+server that is slow to read never stalls typing. When several servers serve one
+file they are asked in parallel, and a request the user has typed past is
+cancelled (`$/cancelRequest`) rather than left to finish. Formatting, including
+format-on-save, runs off the UI thread; if the file changes while the server is
+formatting, the stale result is dropped rather than applied. The Laravel
+query-builder lint (unknown columns against the live schema) runs 300 ms after
+the last edit, on a background thread.
 
 ## Diagnostics
 

@@ -16,9 +16,13 @@ use floem::views::editor::text::Document;
 
 use e_core::language::Language;
 use e_lsp::{path_to_uri, SignatureInfo};
+use lsp_types::{CompletionItem, CompletionTextEdit, TextEdit};
+use serde_json::{json, Value};
 
 use crate::laravel::{self, LaravelData};
-use crate::state::{dedup_by_label, is_word_char, line_indent, word_start, AppState};
+use crate::state::{
+    dedup_by_label, fan_out, is_word_char, line_indent, word_start, AppState, Buffer,
+};
 use crate::{builtin_completion, framework_completion, snippets};
 
 /// Sentinel `buffer_id` marking the completion popup as owned by the SQL console
@@ -45,10 +49,18 @@ impl AppState {
             return;
         };
         let offset = editor.cursor.get_untracked().offset();
-        let text = buf.doc.text().to_string();
-        let before: Vec<char> = text[..offset.min(text.len())].chars().collect();
-        let last = before.last().copied();
-        let prev = before.get(before.len().wrapping_sub(2)).copied();
+        // Only the two characters before the caret matter here; slice just
+        // those out of the rope instead of copying the whole document (and
+        // then all of it again as a `Vec<char>`) on every keystroke.
+        let rope = buf.doc.text();
+        let upto = offset.min(rope.len());
+        let from = (upto.saturating_sub(8)..=upto)
+            .find(|&i| rope.is_codepoint_boundary(i))
+            .unwrap_or(upto);
+        let tail = rope.slice_to_cow(from..upto);
+        let mut back = tail.chars().rev();
+        let last = back.next();
+        let prev = back.next();
 
         // Signature help on call punctuation.
         match last {
@@ -528,20 +540,23 @@ impl AppState {
         comp.start_offset.set(start);
         comp.anchor.set(anchor);
 
-        // Snippets and built-ins (keywords / buffer words / Laravel) are
-        // computed synchronously; LSP results are merged in when available.
+        // Snippets are a table lookup. The built-ins — keywords, every word in
+        // the buffer, and Eloquent columns (which reads the model's class file
+        // for its table) — scan the whole document, so with a language server
+        // in play they run on the request thread alongside it.
         let snippet_items = snippets::completion_items(buf.file.language, &word);
-        let mut builtin_items = builtin_completion::items(buf.file.language, &word, &text);
-        // Eloquent columns from the live DB schema merge in alongside LSP results.
-        if let Some((_, cols)) = crate::eloquent::complete(
-            buf.file.language,
-            &text,
-            offset,
-            &self.root.get_untracked(),
-            &self.db.schema_cache.get_untracked(),
-        ) {
-            builtin_items.extend(cols);
-        }
+        let language = buf.file.language;
+        let root = self.root.get_untracked();
+        let schema = self.db.schema_cache.get_untracked();
+        let builtin = move |text: &str| {
+            let mut items = builtin_completion::items(language, &word, text);
+            if let Some((_, cols)) =
+                crate::eloquent::complete(language, text, offset, &root, &schema)
+            {
+                items.extend(cols);
+            }
+            items
+        };
 
         let show = move |items: Vec<lsp_types::CompletionItem>| {
             let items = dedup_by_label(items);
@@ -554,32 +569,45 @@ impl AppState {
             }
         };
 
+        // A new generation: whatever an earlier, slower request returns from
+        // now on is stale and must not replace what this keystroke shows.
+        let gen = comp.gen.get_untracked() + 1;
+        comp.gen.set(gen);
+
         let clients = self.lsp_all_for_active();
         match (clients.is_empty(), buf.uri.clone()) {
             (false, Some(uri)) => {
+                type Items = Vec<lsp_types::CompletionItem>;
                 let send =
-                    create_ext_action(self.cx, move |lsp: Vec<lsp_types::CompletionItem>| {
-                        let mut items = snippet_items.clone();
+                    create_ext_action(self.cx, move |(lsp, builtin_items): (Items, Items)| {
+                        if comp.gen.get_untracked() != gen {
+                            return;
+                        }
+                        let mut items = snippet_items;
                         items.extend(lsp);
-                        items.extend(builtin_items.clone());
+                        items.extend(builtin_items);
                         show(items);
                     });
                 std::thread::spawn(move || {
-                    // Merge every server's suggestions (intelephense + laravel-lsp).
-                    let mut items = Vec::new();
-                    for client in &clients {
-                        items.extend(
-                            client
-                                .completion(&uri, line as u32, col as u32)
-                                .unwrap_or_default(),
-                        );
-                    }
-                    send(items);
+                    let builtin_items = builtin(&text);
+                    // Merge every server's suggestions (intelephense + laravel-lsp),
+                    // asked in parallel, remembering which one offered each:
+                    // resolving an item later (for its `use` import) has to go
+                    // back to the same server.
+                    let per_server = fan_out(&clients, |client| {
+                        client
+                            .completion(&uri, line as u32, col as u32)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|it| tag_source(it, client.name()))
+                            .collect::<Vec<_>>()
+                    });
+                    send((per_server.into_iter().flatten().collect(), builtin_items));
                 });
             }
             _ => {
                 let mut items = snippet_items;
-                items.extend(builtin_items);
+                items.extend(builtin(&text));
                 show(items);
             }
         }
@@ -597,6 +625,9 @@ impl AppState {
     }
 
     pub fn close_completion(&self) {
+        // Bump the generation too, so a request still in flight can't reopen
+        // the popup the user just dismissed (or typed past).
+        self.completion.gen.update(|g| *g += 1);
         if self.completion.open.get_untracked() {
             self.completion.open.set(false);
         }
@@ -655,6 +686,30 @@ impl AppState {
             }
         }
 
+        // The server's own edit range beats our word start when it has one: it
+        // knows exactly what it meant to replace (`$this->na` and friends). Its
+        // end was the caret at request time; the caret is the end now.
+        let (start, insert) = match &item.text_edit {
+            Some(CompletionTextEdit::Edit(e)) => (
+                editor
+                    .offset_of_line_col(
+                        e.range.start.line as usize,
+                        e.range.start.character as usize,
+                    )
+                    .min(end),
+                e.new_text.clone(),
+            ),
+            Some(CompletionTextEdit::InsertAndReplace(e)) => (
+                editor
+                    .offset_of_line_col(
+                        e.insert.start.line as usize,
+                        e.insert.start.character as usize,
+                    )
+                    .min(end),
+                e.new_text.clone(),
+            ),
+            None => (start, insert),
+        };
         buf.doc.edit_single(
             Selection::region(start, end),
             &insert,
@@ -668,7 +723,102 @@ impl AppState {
             None,
             None,
         ));
+        // Imports and the like: attached to the item, or fetched from the
+        // server that offered it. Shifted past the text we just inserted.
+        let delta = insert.len() as isize - (end - start) as isize;
+        self.apply_completion_extras(&buf, item.clone(), start, delta);
         true
+    }
+
+    /// Apply a completion's `additionalTextEdits` — typically the `use` import
+    /// for a class picked from another namespace. Servers attach them lazily, so
+    /// when they're missing the item is resolved with the server that offered it
+    /// and the edits land a moment later.
+    fn apply_completion_extras(
+        &self,
+        buf: &Buffer,
+        item: CompletionItem,
+        insert_start: usize,
+        delta: isize,
+    ) {
+        let (source, item) = untag_source(item);
+        if let Some(extra) = item.additional_text_edits.clone().filter(|e| !e.is_empty()) {
+            Self::apply_additional_edits(buf, &extra, insert_start, delta);
+            return;
+        }
+        let (Some(source), Some(uri)) = (source, buf.uri.clone()) else {
+            return;
+        };
+        let Some(client) = self
+            .lsp_clients_for(buf.file.language)
+            .into_iter()
+            .find(|c| c.name() == source && c.supports_completion_resolve())
+        else {
+            return;
+        };
+        let bid = buf.id;
+        let app = *self;
+        self.spawn_bg(
+            move || client.resolve_completion(&uri, &item).ok(),
+            move |resolved: Option<CompletionItem>| {
+                let Some(extra) = resolved
+                    .and_then(|r| r.additional_text_edits)
+                    .filter(|e| !e.is_empty())
+                else {
+                    return;
+                };
+                if let Some(buf) = app.buffer_by_id(bid) {
+                    Self::apply_additional_edits(&buf, &extra, insert_start, delta);
+                }
+            },
+        );
+    }
+
+    /// Apply edits the server computed *before* our completion insert: anything
+    /// at or past `insert_start` has moved by `delta` bytes since. Applied
+    /// last-first so earlier offsets stay valid, and the caret is carried along
+    /// (direct document edits don't move it).
+    fn apply_additional_edits(buf: &Buffer, edits: &[TextEdit], insert_start: usize, delta: isize) {
+        let Some(editor) = buf.editor.get_untracked() else {
+            return;
+        };
+        let shift = |o: usize| {
+            if o >= insert_start {
+                (o as isize + delta).max(0) as usize
+            } else {
+                o
+            }
+        };
+        let mut offs: Vec<(usize, usize, String)> = edits
+            .iter()
+            .map(|e| {
+                let s = editor.offset_of_line_col(
+                    e.range.start.line as usize,
+                    e.range.start.character as usize,
+                );
+                let t = editor
+                    .offset_of_line_col(e.range.end.line as usize, e.range.end.character as usize);
+                (shift(s), shift(t.max(s)), e.new_text.clone())
+            })
+            .collect();
+        offs.sort_by_key(|b| std::cmp::Reverse(b.0));
+        let caret = editor.cursor.get_untracked().offset();
+        let mut caret_shift: isize = 0;
+        for (s, t, text) in offs {
+            buf.doc
+                .edit_single(Selection::region(s, t), &text, EditType::InsertChars);
+            if s < caret {
+                caret_shift += text.len() as isize - (t - s) as isize;
+            }
+        }
+        if caret_shift != 0 {
+            let pos = (caret as isize + caret_shift).max(0) as usize;
+            editor.cursor.set(Cursor::new(
+                CursorMode::Insert(Selection::caret(pos)),
+                None,
+                None,
+            ));
+        }
     }
 
     /// Resolve the Laravel helper token under the cursor, if any.
@@ -789,14 +939,18 @@ impl AppState {
             _ => hover.open.set(false),
         });
         std::thread::spawn(move || {
-            // First server with something to say wins (laravel-lsp is asked last,
-            // so a framework hover only shows where general PHP has nothing).
-            let text = clients.iter().find_map(|c| {
+            // Every server is asked at once; the first in server order with
+            // something to say wins (laravel-lsp comes last, so a framework
+            // hover only shows where general PHP has nothing).
+            let text = fan_out(&clients, |c| {
                 c.hover(&uri, line as u32, col as u32)
                     .ok()
                     .flatten()
                     .filter(|t| !t.trim().is_empty())
-            });
+            })
+            .into_iter()
+            .flatten()
+            .next();
             send(text);
         });
     }
@@ -1004,5 +1158,65 @@ mod tests {
             sql_prefix_and_context("SELECT id FROM users WHERE ac"),
             ("ac".into(), false)
         );
+    }
+}
+
+/// Remember which server offered an item, inside its `data` — a field that is
+/// opaque to us and travels with the item through merging and dedup. Undone by
+/// [`untag_source`] before the item goes back to the server.
+fn tag_source(mut item: CompletionItem, server: &str) -> CompletionItem {
+    item.data = Some(json!({ "e_source": server, "data": item.data }));
+    item
+}
+
+/// The server an item came from (see [`tag_source`]), and the item with its
+/// original `data` restored.
+fn untag_source(mut item: CompletionItem) -> (Option<String>, CompletionItem) {
+    let source = item
+        .data
+        .as_ref()
+        .and_then(|d| d.get("e_source"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    if source.is_some() {
+        let inner = item
+            .data
+            .take()
+            .and_then(|mut d| d.get_mut("data").map(Value::take));
+        item.data = inner.filter(|v| !v.is_null());
+    }
+    (source, item)
+}
+
+#[cfg(test)]
+mod source_tag_tests {
+    use super::*;
+
+    #[test]
+    fn tag_roundtrips_and_restores_the_servers_data() {
+        let mut item = CompletionItem::new_simple("User".into(), "class".into());
+        item.data = Some(json!({ "id": 42 }));
+        let tagged = tag_source(item.clone(), "intelephense");
+        let (source, back) = untag_source(tagged);
+        assert_eq!(source.as_deref(), Some("intelephense"));
+        assert_eq!(back.data, Some(json!({ "id": 42 })));
+        assert_eq!(back.label, "User");
+    }
+
+    #[test]
+    fn items_without_data_stay_without_data() {
+        let item = CompletionItem::new_simple("foo".into(), "".into());
+        let (source, back) = untag_source(tag_source(item, "laravel-lsp"));
+        assert_eq!(source.as_deref(), Some("laravel-lsp"));
+        assert_eq!(back.data, None);
+    }
+
+    #[test]
+    fn untagged_items_are_left_alone() {
+        let mut item = CompletionItem::new_simple("snippet".into(), "snippet".into());
+        item.data = Some(json!({ "theirs": true }));
+        let (source, back) = untag_source(item.clone());
+        assert_eq!(source, None);
+        assert_eq!(back.data, item.data);
     }
 }

@@ -7,6 +7,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A missing language server tells you how to install it.** Opening a Blade file
+  without `laravel/lsp` printed `could not start laravel-lsp (No such file or
+  directory (os error 2))` — an errno for something that is not an error and has a
+  one-line fix. It now says which binary is missing, that the Laravel server is
+  optional, and the command that installs it, as a notification as well as on
+  stderr, so you see it without having launched `e` from a terminal. Once per
+  server per session, not once per file. A server that is installed but fails for
+  some other reason still reports the real failure.
+
+- **Squiggles, completions and renames land on the right column in Norwegian
+  text.** The editor counts columns in UTF-8 bytes; language servers count them
+  in UTF-16 units. Nothing converted between the two, so on any line with an
+  `æ`, `ø`, `å` or an emoji before the caret, diagnostics were drawn a few
+  characters to the right, completion was asked at the wrong spot, and rename
+  and formatting wrote at the wrong offset. Every position now crosses the
+  boundary through a converter that knows the line's text — open documents from
+  the editor's own copy, other files from disk. Servers that can count in
+  UTF-8 (rust-analyzer, clangd) are asked to and skip the conversion.
+
+- **Files under `Økonomi/` or `#2 rapport/` get diagnostics.** `file://` URIs
+  escaped only spaces, and un-escaped only spaces, so a path with a non-ASCII or
+  reserved character was spelled differently by us and by the server, and the
+  server's diagnostics never matched the buffer. URIs are now percent-encoded
+  properly both ways, and every URI a server sends back is normalised to the
+  editor's spelling before it is used as a key.
+
+- **A slow server can't overwrite a newer completion list.** Each request gets
+  a generation; a result for an older one is dropped. Closing the popup, or
+  typing past it, also invalidates whatever is still in flight.
+
+- **Completing a class from another namespace adds its `use` statement.** The
+  server's `additionalTextEdits` — which Intelephense attaches only on
+  `completionItem/resolve` — were ignored, as was its `textEdit` range. Both are
+  honoured: the item is resolved with the server that offered it, the import
+  lands a moment later, and the caret stays on the text you were typing.
+
+- **Servers can talk back.** `workspace/applyEdit` is applied (open buffers
+  through the editor, other files on disk), so code actions that run a server
+  command work; `window/showMessage` becomes a notification, so "license
+  invalid" or "project too large" is no longer silent; `workspace/workspaceFolders`
+  is answered; unknown requests get a proper error instead of `null`.
+
+- **A crashed language server comes back, and the status bar says how it is.**
+  A server that died was left in place, failing every request for the rest of
+  the session. It is now restarted and handed every open document again, up to
+  three times, then left down with a notification. The status bar shows each
+  server for the active file — running, indexing (with the server's own
+  progress), not installed, or crashed — and a click starts what's down. A
+  server that isn't installed is installed by that click: its install command
+  runs in a terminal tab, and it starts the moment the binary appears on
+  `PATH`, with no restart. A server installed by other means while `e` runs is
+  picked up on the next file open.
+
+- **Opening the first PHP file no longer freezes the window.** Starting a
+  language server waited for its `initialize` reply on the UI thread — up to
+  thirty seconds, in series for Intelephense and then laravel-lsp. The handshake
+  now runs in the background: opening a file returns at once, edits made while
+  the server starts are folded into the document it is handed when it comes up,
+  and requests made meanwhile wait for it within their own timeout. In a Laravel
+  project both servers start as soon as the project opens, so they are usually
+  ready before the first file is. The status bar shows `intelephense …` until
+  then.
+
+- **A keystroke sends the server the bytes that changed, not the file.** Every
+  edit re-sent the whole document to every server, written to the pipe on the
+  UI thread under a lock — so a server slow to read a file larger than the pipe
+  buffer stalled typing. Servers that support incremental sync (all the usual
+  ones) now get a single range edit computed against the client's mirror of the
+  document; the rest still get the full text. All writes go through a writer
+  thread, so the editor never waits on a server's stdin.
+
+- **Several servers are asked at once.** Completion, hover and code actions
+  asked Intelephense and laravel-lsp one after the other, so the wait was the
+  sum of both; it is now the slower of the two. Hover still prefers the general
+  PHP server's answer where it has one.
+
+- **A request you have typed past is cancelled.** Completion, hover, signature
+  help, inlay hints, symbols and workspace search send `$/cancelRequest` for
+  the previous request of the same kind when a new one goes out, and its waiting
+  thread is released immediately instead of holding on for up to five seconds.
+
+- **Formatting runs off the UI thread**, including format-on-save, which now
+  writes the file once the server's edits are in. If the text changes while the
+  server is formatting, the stale result is dropped instead of applied.
+
+- **Closing a window doesn't wait for language servers.** Shutting a server down
+  slept on the UI thread for a third of a second per server; the shutdown
+  sequence is now sent and a background thread makes sure the process is gone.
+  Reading the two characters before the caret to decide whether to complete no
+  longer copies the whole document twice per keystroke either.
+
+- **The query-builder lint waits for you to stop typing.** With a live database
+  schema, every keystroke in a PHP file re-scanned the whole file for
+  `where('column')` calls and, for each one, read the model's class file from
+  disk to find its table — on the UI thread. It now runs 300 ms after the last
+  edit, on a background thread, and a run the text has moved past is dropped.
+  Its squiggles are placed in the editor's own byte columns, so they line up on
+  lines with non-ASCII text.
+
+- **Completion's buffer scan runs with the language server, not before it.**
+  Collecting the buffer's words and looking up Eloquent columns (another read
+  of the model file) happened on the UI thread before the server was even
+  asked; both now run on the request thread. The database schema is shared
+  behind an `Arc` instead of being copied on every completion, hover and lint.
+
 ## [0.9.13] - 2026-08-14
 
 ### Changed

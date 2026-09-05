@@ -1,5 +1,6 @@
 //! The bottom status bar — reflects the active buffer.
 
+use floem::peniko::Color;
 use floem::reactive::SignalGet;
 use floem::views::editor::text::Document;
 use floem::views::{label, stack, Decorators};
@@ -7,6 +8,9 @@ use floem::IntoView;
 
 use crate::state::AppState;
 use crate::theme;
+
+/// Colour for a language server that isn't running (missing, crashed, given up).
+const LSP_WARN: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
 
 pub fn status_bar(state: AppState) -> impl IntoView {
     let left = label(move || match state.active_buffer() {
@@ -36,6 +40,24 @@ pub fn status_bar(state: AppState) -> impl IntoView {
         Some(b) => b.file.language.name().to_string(),
         None => String::new(),
     });
+
+    // Language-server health for the active file: `intelephense ✓`, or what it
+    // is busy with, or why it isn't there. Click to (re)start what's down.
+    let lsp = label(move || state.lsp_status().map(|(text, _)| text).unwrap_or_default())
+        .style(move |s| {
+            let ok = state.lsp_status().map(|(_, ok)| ok).unwrap_or(true);
+            let s = s
+                .cursor(floem::style::CursorStyle::Pointer)
+                .text_ellipsis()
+                .max_width(320.0)
+                .hover(|s| s.color(theme::fg()));
+            if ok {
+                s
+            } else {
+                s.color(LSP_WARN)
+            }
+        })
+        .on_click_stop(move |_| state.retry_lsp_for_active());
 
     let branch = label(move || {
         state
@@ -78,6 +100,7 @@ pub fn status_bar(state: AppState) -> impl IntoView {
 
     let right = stack((
         diags,
+        lsp,
         branch,
         position,
         indent,

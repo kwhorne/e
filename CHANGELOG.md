@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`e .` no longer holds the terminal, and closing the terminal no longer
+  closes `e`.** The command launches the editor detached — through
+  LaunchServices when run from the app bundle, else in its own process group —
+  and returns at once. What used to print in the terminal (which language
+  server started, what couldn't be found) now goes to `~/.config/e/e.log`;
+  `e --foreground .` keeps the old behaviour for reading it live.
+
 ## [0.9.16] - 2026-09-05
 
 ### Changed

@@ -9,6 +9,12 @@ These features require a language server on your `PATH`.
 - `rustup`'s `rust-analyzer` shim only works after
   `rustup component add rust-analyzer`.
 
+## `e .` used to hang the terminal
+
+Since 0.9.17 the command hands the shell back immediately and the editor
+survives the terminal closing. Server and project messages go to
+`~/.config/e/e.log`; `e --foreground .` keeps them in the terminal.
+
 ## The window doesn't come to the front (macOS)
 
 Launching the bare binary from a terminal may leave the window behind. Use the

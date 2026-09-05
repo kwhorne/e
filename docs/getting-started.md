@@ -26,6 +26,11 @@ e .            # open the current directory
 e path/to/file # open a file
 ```
 
+The command returns at once and `e` outlives the terminal, like `code .`. What
+`e` used to print in the terminal — which language server started, what it
+couldn't find — goes to `~/.config/e/e.log`. To keep it attached and read that
+live, run `e --foreground .` (or set `E_FOREGROUND=1`).
+
 ## The interface
 
 ```

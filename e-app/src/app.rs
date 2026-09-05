@@ -44,6 +44,7 @@ use crate::update_view::update_notice;
 
 /// Launch the editor.
 pub fn launch() {
+    detach_from_terminal();
     install_crash_logger();
     // exit_on_close defaults to false on macOS, which leaves the process (and its
     // Dock icon) alive after the window closes. e is single-window, so quit for
@@ -58,6 +59,149 @@ pub fn launch() {
             ),
         )
         .run();
+}
+
+/// `e .` from a terminal should hand the shell back at once and outlive the
+/// terminal, like `code .` does. When we're attached to a TTY and haven't been
+/// re-launched yet, launch ourselves detached and exit: through LaunchServices
+/// when running from the app bundle on macOS (so the window activates and gets
+/// its Dock icon), else as a new process group with stdio sent to
+/// `~/.config/e/e.log` — where the language-server messages that used to land
+/// in the terminal now go. `e --foreground …` (or `E_FOREGROUND=1`) keeps the
+/// process attached, for reading stderr live.
+fn detach_from_terminal() {
+    use std::io::IsTerminal;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--foreground" || a == "-f")
+        || std::env::var_os("E_FOREGROUND").is_some()
+        || std::env::var_os("E_DETACHED").is_some()
+    {
+        return;
+    }
+    // Launched by Finder, `open`, or a service: nothing to detach from.
+    if !(std::io::stdin().is_terminal() || std::io::stdout().is_terminal()) {
+        return;
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let args = absolute_args(&args, &cwd);
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+
+    #[cfg(target_os = "macos")]
+    {
+        // Inside `e.app`: let LaunchServices do it, so the app activates and
+        // gets its Dock icon like any other. `open` returns at once.
+        if let Some(bundle) = exe
+            .ancestors()
+            .find(|p| p.extension().is_some_and(|x| x == "app"))
+        {
+            let mut cmd = std::process::Command::new("open");
+            cmd.arg("-n").arg("-a").arg(bundle);
+            if !args.is_empty() {
+                cmd.arg("--args").args(&args);
+            }
+            if cmd.status().map(|s| s.success()).unwrap_or(false) {
+                std::process::exit(0);
+            }
+            // Fall through to the plain detach if `open` refused.
+        }
+    }
+
+    let log = std::env::var_os("HOME").map(|h| {
+        let dir = PathBuf::from(h).join(".config").join("e");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("e.log")
+    });
+    let open_log = || -> Option<std::fs::File> {
+        let path = log.as_ref()?;
+        // Keep it from growing forever: start over past a few megabytes.
+        if std::fs::metadata(path)
+            .map(|m| m.len() > 4 << 20)
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(path);
+        }
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()
+    };
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.args(&args)
+        .env("E_DETACHED", "1")
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(
+            open_log()
+                .map(std::process::Stdio::from)
+                .unwrap_or_else(std::process::Stdio::null),
+        )
+        .stderr(
+            open_log()
+                .map(std::process::Stdio::from)
+                .unwrap_or_else(std::process::Stdio::null),
+        );
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Our own process group: the terminal's SIGHUP is for its foreground
+        // group, and that is no longer us.
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    match cmd.spawn() {
+        Ok(_) => std::process::exit(0),
+        // Couldn't detach: run attached rather than not at all.
+        Err(e) => eprintln!("e: could not detach from the terminal ({e}); running attached"),
+    }
+}
+
+/// Path arguments made absolute against `cwd`, so the detached process (whose
+/// working directory may be `/` when LaunchServices starts it) opens the same
+/// thing. Flags pass through.
+fn absolute_args(args: &[String], cwd: &std::path::Path) -> Vec<String> {
+    args.iter()
+        .map(|a| {
+            if a.starts_with('-') {
+                return a.clone();
+            }
+            let p = PathBuf::from(a);
+            let abs = if p.is_absolute() { p } else { cwd.join(p) };
+            abs.canonicalize()
+                .unwrap_or(abs)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod detach_tests {
+    use super::absolute_args;
+    use std::path::Path;
+
+    #[test]
+    fn path_arguments_become_absolute_and_flags_pass_through() {
+        let cwd = std::env::temp_dir();
+        let out = absolute_args(
+            &["--foreground".into(), ".".into(), "/etc/hosts".into()],
+            &cwd,
+        );
+        assert_eq!(out[0], "--foreground");
+        assert_eq!(
+            Path::new(&out[1]),
+            cwd.canonicalize().unwrap_or(cwd.clone())
+        );
+        assert!(Path::new(&out[2]).is_absolute());
+    }
 }
 
 /// Append panics (message + location + backtrace) to `~/.config/e/crash.log`
@@ -102,7 +246,8 @@ pub(crate) fn handle_shortcut(state: AppState, key: &Key, mods: Modifiers) -> bo
 /// Resolve the CLI argument into `(workspace_root, file_to_open)`.
 fn resolve_args() -> (PathBuf, Option<PathBuf>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    match std::env::args().nth(1) {
+    // Flags (`--foreground`) aren't paths.
+    match std::env::args().skip(1).find(|a| !a.starts_with('-')) {
         // Bare launch (double-click, `e` with no path): reopen the last project.
         None => (crate::config::load_last_project().unwrap_or(cwd), None),
         Some(arg) => {

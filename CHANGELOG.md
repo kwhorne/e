@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-09-05
+
 ### Changed
 
 - **The Runtime panel reads Grove, and needs nothing installed in the app.**
@@ -1428,7 +1430,8 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.14...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.15...HEAD
+[0.9.15]: https://github.com/kwhorne/e/compare/v0.9.14...v0.9.15
 [0.9.14]: https://github.com/kwhorne/e/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/kwhorne/e/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/kwhorne/e/compare/v0.9.11...v0.9.12

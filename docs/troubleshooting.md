@@ -39,6 +39,13 @@ repository, and the `git` command-line tool to be installed and on your `PATH`.
 The change gutter for an open file refreshes when the file is reopened or saved.
 The Source Control panel itself updates immediately.
 
+## "Couldn't check for updates … status: 403"
+
+That was GitHub's API rate limit (60 calls an hour per address without a
+login). Since 0.9.18 the check doesn't use the API, so this no longer happens;
+if you see it on an older build, wait an hour or update by hand from the
+releases page.
+
 ## Auto-update can't install
 
 - Ensure you're running a released binary (not a `cargo run` dev build).

@@ -127,6 +127,21 @@ impl AppState {
         self.pane_active(pane).set(Some(id));
     }
 
+    /// Close the sessions whose shell has exited (`exit`, Ctrl-D, a finished
+    /// command). Called on every terminal tick; a dead PTY would otherwise sit
+    /// there as a prompt that answers nothing.
+    pub fn reap_exited_terminals(&self) {
+        let dead: Vec<u64> = self.terminals.with_untracked(|ts| {
+            ts.iter()
+                .filter(|t| t.term.borrow().has_exited())
+                .map(|t| t.id)
+                .collect()
+        });
+        for id in dead {
+            self.close_terminal(id);
+        }
+    }
+
     /// Close a terminal session (kills its shell).
     pub fn close_terminal(&self, id: u64) {
         let mut next = None;

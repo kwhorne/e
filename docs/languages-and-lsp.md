@@ -67,6 +67,12 @@ and `e` tells you the command that would install it (once per session, not once
 per file). Install it while `e` is running and the next PHP or Blade file you
 open picks it up; no restart needed.
 
+Or let `e` do it: **Laravel: Install Intelephense** and **Laravel: Install Laravel
+language server** in the command palette (`⌘⇧P`) run the install command in a
+terminal tab and start the server the moment it appears. In a Laravel project
+the status bar shows a missing PHP server whatever file is open, and clicking it
+does the same.
+
 It adds routes, views/Blade, translations, config, environment variables,
 assets/Mix, middleware, Inertia, Livewire, auth/policies, container bindings and
 validation rules — with completions, hovers, **diagnostics** (an unknown route or

@@ -18,6 +18,14 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("laravel-refresh", "Laravel: Refresh Project Data"),
     ("artisan", "Laravel: Artisan Command…"),
     (
+        "install-intelephense",
+        "Laravel: Install Intelephense (PHP language server)",
+    ),
+    (
+        "install-laravel-lsp",
+        "Laravel: Install Laravel language server (laravel/lsp)",
+    ),
+    (
         "eloquent-helper",
         "Laravel: Generate Eloquent Helper (model phpDocs)",
     ),

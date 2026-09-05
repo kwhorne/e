@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Couldn't check for updates … status: 403".** The updater asked the GitHub
+  API, whose 60 unauthenticated calls an hour per address a day of restarts
+  uses up. The version now comes from the `releases/latest` redirect and the
+  notes from `CHANGELOG.md` at the tag, neither rationed; the download uses the
+  release's own URL and is verified against the published `.sha256`. The API
+  remains only as a fallback, and hitting its limit is reported as such.
+
+- **Installing a language server is a palette command.** *Laravel: Install
+  Intelephense* and *Laravel: Install Laravel language server* (`⌘⇧P`) run the
+  install and start the server when it appears; if it is installed but down,
+  they start it. In a Laravel project the status bar shows a missing PHP server
+  before any PHP file is open, and the "not installed" notice names the command.
+
+- **`exit` in the integrated terminal closes the tab** instead of leaving a
+  dead prompt. A session whose shell has exited (`exit`, Ctrl-D, a finished
+  command) is closed on the next terminal tick; the last one closes the panel.
+
 ## [0.9.17] - 2026-09-05
 
 ### Fixed

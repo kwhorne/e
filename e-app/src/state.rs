@@ -3787,8 +3787,13 @@ impl AppState {
             }
             Err(e) => status_sig.set(UpdateStatus::Failed(e)),
         });
+        let Some(version) = self.update_info.get_untracked().map(|i| i.version) else {
+            self.update_status
+                .set(UpdateStatus::Failed("no update to install".into()));
+            return;
+        };
         std::thread::spawn(move || {
-            let result = updater::install().map_err(|e| format!("{e:#}"));
+            let result = updater::install(&version).map_err(|e| format!("{e:#}"));
             send(result);
         });
     }
@@ -5214,7 +5219,10 @@ impl AppState {
                 let health = if is_not_found(&e) {
                     let msg = lsp_registry::missing_message(spec);
                     eprintln!("e: {msg}");
-                    Self::notify(&format!("{msg} — or click it in the status bar"));
+                    Self::notify(&format!(
+                        "{msg} — or click it in the status bar, or run “Install {}” from ⌘⇧P",
+                        spec.id
+                    ));
                     ServerHealth::NotInstalled
                 } else {
                     let msg = format!("could not start {} ({e:#})", spec.program);
@@ -5404,11 +5412,16 @@ impl AppState {
     /// terminal tab, and it starts when the binary appears); a crashed or
     /// failed one is simply tried again.
     pub fn retry_lsp_for_active(&self) {
-        let Some(buf) = self.active_buffer() else {
-            return;
-        };
         let laravel = self.is_laravel_project();
-        for spec in lsp_registry::server_specs(buf.file.language, laravel) {
+        let mut specs = self
+            .active_buffer()
+            .map(|b| lsp_registry::server_specs(b.file.language, laravel))
+            .unwrap_or_default();
+        // Same fallback as the status line: the PHP servers, in a Laravel project.
+        if specs.is_empty() && laravel {
+            specs = lsp_registry::server_specs(Language::Php, laravel);
+        }
+        for spec in specs {
             let running = self
                 .lsp_clients
                 .with_untracked(|m| m.get(spec.id).map(|c| c.is_alive()))
@@ -5429,6 +5442,42 @@ impl AppState {
             });
             self.restart_lsp(spec.id, 0);
         }
+    }
+
+    /// Command palette: install (or start) the server with `id`. Installed and
+    /// running → say so; installed but down → start it; missing → install it.
+    pub fn install_lsp_by_id(&self, id: &str) {
+        let laravel = true; // the palette entries are the Laravel servers
+        let Some(spec) = lsp_registry::server_specs(Language::Php, laravel)
+            .into_iter()
+            .chain(lsp_registry::server_specs(Language::Blade, laravel))
+            .find(|s| s.id == id)
+        else {
+            return;
+        };
+        let running = self
+            .lsp_clients
+            .with_untracked(|m| m.get(spec.id).map(|c| c.is_alive()))
+            .unwrap_or(false);
+        if running {
+            Self::notify(&format!("{} is installed and running", spec.id));
+            return;
+        }
+        if program_on_path(spec.program) {
+            self.lsp_health.update(|h| {
+                h.remove(spec.id);
+            });
+            if self.restart_lsp(spec.id, 0) {
+                Self::notify(&format!("{} is installed — started it", spec.id));
+            } else {
+                Self::notify(&format!(
+                    "{} is installed — it starts with the next PHP file you open",
+                    spec.id
+                ));
+            }
+            return;
+        }
+        self.install_lsp(&spec);
     }
 
     /// Run a server's install command in a terminal tab, then watch `PATH` for
@@ -5488,8 +5537,16 @@ impl AppState {
     /// `intelephense ✓ · laravel-lsp ↓`, or what a server is busy with.
     /// Reactive: reads the health, progress and client signals.
     pub fn lsp_status(&self) -> Option<(String, bool)> {
-        let buf = self.active_buffer()?;
-        let specs = lsp_registry::server_specs(buf.file.language, self.is_laravel_project());
+        let laravel = self.is_laravel_project();
+        let mut specs = self
+            .active_buffer()
+            .map(|b| lsp_registry::server_specs(b.file.language, laravel))
+            .unwrap_or_default();
+        // In a Laravel project the PHP servers matter whatever file is open —
+        // a missing one should be visible before the first PHP file is.
+        if specs.is_empty() && laravel {
+            specs = lsp_registry::server_specs(Language::Php, laravel);
+        }
         if specs.is_empty() {
             return None;
         }

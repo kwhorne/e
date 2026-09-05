@@ -59,6 +59,8 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         // Tasks & tests.
         "run-task" => state.open_task_palette(),
         "artisan" => state.open_artisan_palette(),
+        "install-intelephense" => state.install_lsp_by_id("intelephense"),
+        "install-laravel-lsp" => state.install_lsp_by_id("laravel-lsp"),
         "eloquent-helper" => state.generate_eloquent_helper(),
         "run-test" => state.run_test(),
 

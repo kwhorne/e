@@ -385,6 +385,7 @@ fn app_view() -> impl IntoView {
         create_effect(move |_| {
             if ticks.get().is_some() {
                 term_tick.update(|t| *t += 1);
+                state.reap_exited_terminals();
             }
         });
     }

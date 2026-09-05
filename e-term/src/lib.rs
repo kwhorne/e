@@ -341,6 +341,8 @@ impl Perform for Screen {
 
 /// A live terminal session.
 pub struct Terminal {
+    /// Set by the reader thread when the PTY closes (the process exited).
+    exited: Arc<std::sync::atomic::AtomicBool>,
     _master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     _child: Box<dyn Child + Send + Sync>,
@@ -404,14 +406,17 @@ impl Terminal {
         let mut reader = pair.master.try_clone_reader().context("clone reader")?;
         let writer = pair.master.take_writer().context("take writer")?;
         let screen = Arc::new(Mutex::new(Screen::new(rows, cols)));
+        let exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         {
             let screen = screen.clone();
+            let exited = exited.clone();
             thread::spawn(move || {
                 let mut parser = Parser::new();
                 let mut buf = [0u8; 8192];
                 loop {
                     match reader.read(&mut buf) {
+                        // EOF (or EIO on macOS) once the shell has exited.
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
                             if let Ok(mut s) = screen.lock() {
@@ -421,6 +426,9 @@ impl Terminal {
                         }
                     }
                 }
+                exited.store(true, std::sync::atomic::Ordering::SeqCst);
+                // One more tick, so the owner notices without waiting for input.
+                on_update();
             });
         }
 
@@ -429,7 +437,14 @@ impl Terminal {
             writer,
             _child: child,
             screen,
+            exited,
         })
+    }
+
+    /// Has the shell (or command) exited? True once the PTY reached EOF; the
+    /// owner should close the session rather than leave a dead prompt.
+    pub fn has_exited(&self) -> bool {
+        self.exited.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Send bytes to the shell (keyboard input).
@@ -564,5 +579,34 @@ mod scroll_tests {
             "no bg run: {:?}",
             r[0]
         );
+    }
+
+    #[test]
+    fn has_exited_flips_when_the_shell_leaves() {
+        let ticks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let t2 = ticks.clone();
+        let mut term = Terminal::spawn(
+            "/bin/sh",
+            std::path::Path::new("/"),
+            24,
+            80,
+            Box::new(move || {
+                t2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("a shell in a pty");
+        assert!(!term.has_exited());
+        term.write(b"exit\n");
+        let mut exited = false;
+        for _ in 0..100 {
+            if term.has_exited() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(exited, "the pty reached EOF after `exit`");
+        // The owner was ticked at least once after the exit.
+        assert!(ticks.load(std::sync::atomic::Ordering::SeqCst) >= 1);
     }
 }

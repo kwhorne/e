@@ -696,10 +696,25 @@ mod tests {
             eprintln!("skipping live_cli_contract_when_grove_is_installed: grove not installed");
             return;
         }
+        // The daemon has to be up for the contract to be testable at all; a
+        // stopped Grove is a fact about the machine, not about the code.
+        if run(&["status"]).is_none() {
+            eprintln!("skipping live_cli_contract_when_grove_is_installed: daemon not answering");
+            return;
+        }
         // `grove list --json` parses (the machine may have zero sites), and
-        // `sql-capture status --json` answers with a definite state.
+        // `sql-capture status --json` answers with a definite state. The daemon
+        // serialises requests, so allow it a moment under a parallel test run.
         let _sites = sites();
-        assert!(sql_capture().is_some(), "grove sql-capture status --json");
+        let mut capture = None;
+        for _ in 0..5 {
+            capture = sql_capture();
+            if capture.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        assert!(capture.is_some(), "grove sql-capture status --json");
         // A limit of 1 is honoured on the timeline (any site name is fine here).
         if let Some(first) = sites().first() {
             let reqs = requests(&first.name, 1).expect("grove requests --json");

@@ -52,6 +52,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which keys `.env.example` declares and it doesn't set. Off while the official
   Laravel language server runs, which reports the same.
 
+- **Packages teach `e` their string arguments through `ide.json`.** The file
+  the Laravel ecosystem already writes for PhpStorm's Laravel Idea is read from
+  the project root and every installed package: its `completions` bind route
+  names, views, config keys, translation keys, env variables, Blade components,
+  validation rules, gates, Inertia pages or a package's own list of strings to
+  a function, method or constructor argument. One file per package, instead of
+  one feature per package.
+
+- **Laravel refactorings as code actions.** Next to the servers' quick fixes:
+  a validation string to an array, a `'Controller@method'` string to
+  `[Controller::class, 'method']`, `{{ }}` ↔ `{!! !!}` in Blade, and a
+  `scopeActive()` method to a `#[Scope] active()` attribute with its import.
+  They show even when no language server runs.
+
 ## [0.9.14] - 2026-09-05
 
 ### Changed

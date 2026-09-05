@@ -703,6 +703,8 @@ pub struct AppState {
     laravel_reload_pending: RwSignal<bool>,
     /// Idle ticks since the last freshness check.
     laravel_tick: RwSignal<u32>,
+    /// Completion rules the project and its packages declare in `ide.json`.
+    pub ide_rules: RwSignal<Arc<Vec<crate::ide_json::Rule>>>,
     /// References / symbol-search picker.
     pub picker: Picker,
     /// A planned workspace replace awaiting confirmation (`Some` shows the dialog).
@@ -1047,6 +1049,48 @@ fn undo_store_path(file: &std::path::Path) -> PathBuf {
 }
 
 /// Byte offset → (line, character) both 0-based, for LSP-style ranges.
+/// `e`'s own refactorings at `offset`, as code-action items with edits against
+/// `uri` in byte columns (what the rest of the editor speaks).
+fn local_code_actions(
+    text: &str,
+    language: Language,
+    offset: usize,
+    uri: &str,
+) -> Vec<e_lsp::CodeActionItem> {
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+    let position = |off: usize| {
+        let off = off.min(text.len());
+        let line = starts.partition_point(|&s| s <= off).saturating_sub(1);
+        lsp_types::Position {
+            line: line as u32,
+            character: (off - starts[line]) as u32,
+        }
+    };
+    crate::intentions::actions(text, language, offset)
+        .into_iter()
+        .map(|a| e_lsp::CodeActionItem {
+            title: a.title,
+            edits: vec![(
+                uri.to_string(),
+                a.edits
+                    .into_iter()
+                    .map(|(s, e, new_text)| TextEdit {
+                        range: lsp_types::Range {
+                            start: position(s),
+                            end: position(e),
+                        },
+                        new_text,
+                    })
+                    .collect(),
+            )],
+            command: None,
+            server: "e".to_string(),
+        })
+        .collect()
+}
+
 /// A cheap fingerprint of everything `LaravelData` is scraped from: the mtimes
 /// of route, config, lang and env files, of component classes, and of the
 /// directories under `resources/views` (a view appears or disappears with its
@@ -1480,6 +1524,7 @@ impl AppState {
             laravel_loading: RwSignal::new(false),
             laravel_reload_pending: RwSignal::new(false),
             laravel_tick: RwSignal::new(0),
+            ide_rules: RwSignal::new(Arc::new(Vec::new())),
             picker: Picker::new(),
             replace_confirm: RwSignal::new(None),
             terminals: RwSignal::new(Vec::new()),
@@ -3874,16 +3919,19 @@ impl AppState {
             move || {
                 let data = laravel::load(&root);
                 let fp = laravel_fingerprint(&root);
-                (data, fp)
+                let rules = crate::ide_json::load(&root);
+                (data, fp, rules)
             },
-            move |(data, fp): (LaravelData, u64)| {
+            move |(data, fp, rules): (LaravelData, u64, Vec<crate::ide_json::Rule>)| {
                 eprintln!(
-                    "e: loaded Laravel project data ({} routes, {} views, {} translations)",
+                    "e: loaded Laravel project data ({} routes, {} views, {} translations, {} ide.json rules)",
                     data.routes.len(),
                     data.views.len(),
-                    data.translations.len()
+                    data.translations.len(),
+                    rules.len()
                 );
                 app.laravel.set(Some(Arc::new(data)));
+                app.ide_rules.set(Arc::new(rules));
                 app.laravel_fp.set(Some(fp));
                 app.laravel_loading.set(false);
                 // Squiggles for missing views/routes/keys reflect the new data.
@@ -4535,13 +4583,6 @@ impl AppState {
     /// Offer Laravel completions if the cursor is inside a helper string.
     /// Returns true when the context was handled (so we skip the LSP).
     pub(crate) fn try_laravel_completion(&self, buffer_id: u64) -> bool {
-        // When the official Laravel server is running it owns these contexts —
-        // it's project-accurate, understands more of them (middleware, Inertia,
-        // validation rules) and is maintained upstream. Our built-in helpers stay
-        // as the fallback for when it isn't installed or is switched off.
-        if self.laravel_lsp_running() {
-            return false;
-        }
         let Some(data) = self.laravel.get() else {
             return false;
         };
@@ -4558,13 +4599,48 @@ impl AppState {
         let line_start = text[..upto].rfind('\n').map(|i| i + 1).unwrap_or(0);
         let line_before = &text[line_start..upto];
 
-        let Some((helper, prefix)) = laravel::detect_context(line_before) else {
+        // Laravel's own helpers. When the official Laravel server is running it
+        // owns these contexts — it's project-accurate, understands more of them
+        // and is maintained upstream — so ours stay as the fallback.
+        if !self.laravel_lsp_running() {
+            if let Some((helper, prefix)) = laravel::detect_context(line_before) {
+                let items = laravel::completions(&data, helper, &prefix);
+                let start = offset - prefix.len();
+                return self.show_string_completions(&buf, &editor, buffer_id, start, items);
+            }
+        }
+
+        // What packages declare in their `ide.json` (`new Axis('…')` takes one
+        // of these strings, `->rule('…')` takes a validation rule, …). No
+        // server reads those, so they apply either way.
+        let rules = self.ide_rules.get_untracked();
+        if rules.is_empty() {
+            return false;
+        }
+        let Some(site) = crate::ide_json::call_site(line_before) else {
             return false;
         };
+        let root = self.root.get_untracked();
+        let items = crate::ide_json::complete(&rules, &site, &data, &root);
+        if items.is_empty() {
+            return false;
+        }
+        let start = offset - site.prefix.len();
+        self.show_string_completions(&buf, &editor, buffer_id, start, items)
+    }
 
-        let items = laravel::completions(&data, helper, &prefix);
-        let start = offset - prefix.len();
-
+    /// Show `items` as the completion popup for the string starting at `start`.
+    /// Returns true so the caller knows the context was handled (and skips the
+    /// language server) — an empty list closes the popup but still counts.
+    fn show_string_completions(
+        &self,
+        buf: &Buffer,
+        editor: &Editor,
+        buffer_id: u64,
+        start: usize,
+        items: Vec<lsp_types::CompletionItem>,
+    ) -> bool {
+        let cursor = editor.cursor.get_untracked();
         let (_, below) = editor.points_of_offset(start, cursor.affinity);
         let vp = editor.viewport.get_untracked();
         let win = buf.win_origin.get_untracked();
@@ -5533,10 +5609,6 @@ impl AppState {
         let (Some(uri), Some(editor)) = (buf.uri.clone(), buf.editor.get_untracked()) else {
             return;
         };
-        if clients.is_empty() {
-            Self::notify("No language server for this file");
-            return;
-        }
         let cursor = editor.cursor.get_untracked();
         let (sl, sc, el, ec) = if let CursorMode::Insert(sel) = cursor.mode.clone() {
             match sel.regions().first() {
@@ -5551,6 +5623,21 @@ impl AppState {
             let (l, c) = editor.offset_to_line_col(cursor.offset());
             (l as u32, c as u32, l as u32, c as u32)
         };
+
+        // `e`'s own Laravel refactorings at the caret — cheap text transforms,
+        // so they're computed right here and shown first.
+        let text = buf.doc.text().to_string();
+        let local = local_code_actions(&text, buf.file.language, cursor.offset(), &uri);
+
+        if clients.is_empty() {
+            if local.is_empty() {
+                Self::notify("No code actions here");
+                return;
+            }
+            self.code_actions.set(local);
+            self.code_actions_open.set(true);
+            return;
+        }
         let diags = self
             .diagnostics
             .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
@@ -5560,14 +5647,17 @@ impl AppState {
             move || {
                 // Offer every server's fixes together (intelephense quick fixes
                 // plus laravel-lsp's framework fixes), asked in parallel.
-                fan_out(&clients, |client| {
-                    client
-                        .code_actions(&uri, sl, sc, el, ec, &diags)
-                        .unwrap_or_default()
-                })
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
+                let mut list = local;
+                list.extend(
+                    fan_out(&clients, |client| {
+                        client
+                            .code_actions(&uri, sl, sc, el, ec, &diags)
+                            .unwrap_or_default()
+                    })
+                    .into_iter()
+                    .flatten(),
+                );
+                list
             },
             move |list: Vec<e_lsp::CodeActionItem>| {
                 if list.is_empty() {

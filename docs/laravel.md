@@ -74,6 +74,33 @@ Arguments that are expressions (`'a.'.$b`, `$name`) and namespaced names
 (`pkg::view`) are left alone. When the official `laravel/lsp` is running it
 reports missing views and routes itself, so these lints stay off then.
 
+## Package completions (`ide.json`)
+
+Packages that ship a Laravel Idea [`ide.json`](https://laravel-idea.com/docs/ide_json/overview)
+— and your own project's `ide.json` — teach `e` their string arguments: `new
+Axis('…')` completes the strings the package lists, `->rule('…')` on its
+validation class completes rule names, a function it declares as taking a route
+name completes your routes. `e` reads `ide.json` from the project root and from
+every `vendor/*/*/` on load, and honours the `completions` section: kinds
+`routeName`, `viewName`, `configKey`, `translationKey`, `environmentVariable`,
+`bladeComponent`, `validationRule`, `staticStrings`, `gate`/`policy`,
+`inertiaPage`, bound by function, method, constructor, parameter position and
+place (parameter or array value). Receiver types aren't inferred, so a
+`->method('…')` rule matches by method name.
+
+## Refactorings (code actions)
+
+Alongside the language servers' quick fixes, the code-action picker offers
+`e`'s own Laravel refactorings at the caret:
+
+- **Convert validation string to array** — `'required|max:255'` →
+  `['required', 'max:255']`.
+- **Convert to `[Controller::class, 'method']`** — from the string
+  `'UserController@index'` form.
+- **Convert `{{ }}` ↔ `{!! !!}`** in Blade.
+- **Convert `scopeActive()` to `#[Scope] active()`** (Laravel 12.6+), adding the
+  `use Illuminate\Database\Eloquent\Attributes\Scope;` import when missing.
+
 ## Validation rules
 
 Rule names complete inside `validate([…])` and FormRequest `rules()`. The

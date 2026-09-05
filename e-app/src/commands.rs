@@ -58,6 +58,8 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
 
         // Tasks & tests.
         "run-task" => state.open_task_palette(),
+        "artisan" => state.open_artisan_palette(),
+        "eloquent-helper" => state.generate_eloquent_helper(),
         "run-test" => state.run_test(),
 
         // Git.
@@ -183,6 +185,10 @@ fn close_overlays(state: AppState) {
     }
     if state.grove_panel_open.get() {
         state.grove_panel_open.set(false);
+        return;
+    }
+    if state.artisan.open.get() {
+        state.artisan_back();
         return;
     }
     if state.schema_diff_open.get() {

@@ -13,6 +13,7 @@ const DEFAULT: &[(&str, &str)] = &[
     ("cmd+p", "goto-file"),
     ("cmd+shift+p", "command-palette"),
     ("cmd+shift+b", "run-task"),
+    ("cmd+shift+a", "artisan"),
     ("cmd+e", "recent"),
     ("cmd+o", "open-folder"),
     ("cmd+n", "new-file"),

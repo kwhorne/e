@@ -625,7 +625,19 @@ fn app_view() -> impl IntoView {
             rename_preview_dialog(state),
             move_class_dialog(state),
             recent_palette(state),
-            task_palette(state),
+            // Two palettes share one slot so the tuple stays within floem's arity.
+            stack((
+                task_palette(state),
+                crate::artisan_palette::artisan_palette(state),
+            ))
+            .style(move |s| {
+                let s = s.absolute().inset(0.0).size_full();
+                if state.task.open.get() || state.artisan.open.get() {
+                    s
+                } else {
+                    s.hide()
+                }
+            }),
             settings_view(state),
             crate::code_action::code_action_picker(state),
         ))
@@ -638,6 +650,7 @@ fn app_view() -> impl IntoView {
                 || state.move_plan.with(Option::is_some)
                 || state.recent.open.get()
                 || state.task.open.get()
+                || state.artisan.open.get()
                 || state.settings_open.get()
                 || state.code_actions_open.get()
             {

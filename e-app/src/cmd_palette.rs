@@ -16,6 +16,11 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("open-file", "Open File…"),
     ("add-folder", "Add Folder to Workspace…"),
     ("laravel-refresh", "Laravel: Refresh Project Data"),
+    ("artisan", "Laravel: Artisan Command…"),
+    (
+        "eloquent-helper",
+        "Laravel: Generate Eloquent Helper (model phpDocs)",
+    ),
     ("toggle-database", "Toggle Database Panel"),
     ("run-sql", "Database: Run SQL Under Cursor (⌘⏎)"),
     ("explain-sql", "Database: Explain SQL Under Cursor (⌥⌘⏎)"),

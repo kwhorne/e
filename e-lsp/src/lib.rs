@@ -907,6 +907,21 @@ impl LspClient {
         }));
     }
 
+    /// Tell the server files changed on disk (`workspace/didChangeWatchedFiles`):
+    /// `kind` is 1 created, 2 changed, 3 deleted. Servers that registered for
+    /// watched files (we accept every registration) index them at once instead
+    /// of at their next start.
+    pub fn did_change_watched_files(&self, changes: &[(String, u32)]) {
+        let list: Vec<Value> = changes
+            .iter()
+            .map(|(uri, kind)| json!({ "uri": uri, "type": kind }))
+            .collect();
+        self.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({ "changes": list }),
+        );
+    }
+
     pub fn did_save(&self, uri: &str, text: &str) {
         self.notify(
             "textDocument/didSave",

@@ -53,11 +53,14 @@ impl AppState {
         let Some(cfg) = e_db::from_env(&root) else {
             return;
         };
-        let sig = self.db.schema_cache;
+        let state = *self;
         let send = create_ext_action(
             self.cx,
             move |m: std::collections::HashMap<String, Vec<e_db::ColumnInfo>>| {
-                sig.set(std::sync::Arc::new(m))
+                state.db.schema_cache.set(std::sync::Arc::new(m));
+                // A project that keeps the Eloquent helper gets it refreshed
+                // from the schema it was just handed.
+                state.maybe_regenerate_eloquent_helper();
             },
         );
         std::thread::spawn(move || {

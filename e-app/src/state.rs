@@ -923,6 +923,10 @@ pub struct AppState {
     /// Task-runner palette state + detected tasks.
     pub task: crate::task_palette::TaskState,
     pub task_list: RwSignal<Vec<crate::tasks::Task>>,
+    /// The Artisan palette and the app's command list (loaded on first open).
+    pub artisan: crate::artisan_palette::ArtisanState,
+    pub artisan_cmds: RwSignal<Arc<Vec<crate::artisan::ArtisanCmd>>>,
+    pub artisan_loading: RwSignal<bool>,
     /// Buffer id awaiting a close confirmation (unsaved changes).
     pub close_confirm: RwSignal<Option<u64>>,
     /// Most-recently-used files (newest first) and the ⌘E switcher state.
@@ -1642,6 +1646,9 @@ impl AppState {
             goto: crate::editing::GotoState::new(),
             task: crate::task_palette::TaskState::new(),
             task_list: RwSignal::new(Vec::new()),
+            artisan: crate::artisan_palette::ArtisanState::new(),
+            artisan_cmds: RwSignal::new(Arc::new(Vec::new())),
+            artisan_loading: RwSignal::new(false),
             close_confirm: RwSignal::new(None),
             recent_files: RwSignal::new(Vec::new()),
             recent: crate::recent::RecentState::new(),

@@ -539,6 +539,129 @@ fn kebab(s: &str) -> String {
     out
 }
 
+// ---- Whole-file scan --------------------------------------------------------
+
+/// A helper call with a literal first argument, found anywhere in a file:
+/// `route('users.show')`, `view('x')`, `@include('x')`, `__('auth.failed')`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HelperCall {
+    pub helper: Helper,
+    /// The literal string argument.
+    pub token: String,
+    /// Byte range of the token (inside the quotes).
+    pub start: usize,
+    pub end: usize,
+    /// Whether the call passes anything after the string (`route('x', $y)`).
+    pub more_args: bool,
+}
+
+/// Every helper call in `text` whose first argument is a plain string literal.
+/// Calls whose argument is an expression (`'a.'.$b`, `$name`) are skipped —
+/// there is nothing to check statically. `Route::view()` and `View::make()`
+/// are skipped too: their first argument isn't a view name.
+pub fn helper_calls(text: &str) -> Vec<HelperCall> {
+    const NAMES: &[(&str, Helper)] = &[
+        ("route", Helper::Route),
+        ("to_route", Helper::Route),
+        ("view", Helper::View),
+        ("include", Helper::View),
+        ("extends", Helper::View),
+        ("each", Helper::View),
+        ("component", Helper::View),
+        ("config", Helper::Config),
+        ("env", Helper::Env),
+        ("__", Helper::Trans),
+        ("trans", Helper::Trans),
+        ("trans_choice", Helper::Trans),
+        ("lang", Helper::Trans),
+    ];
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b != b'(' {
+            continue;
+        }
+        // Identifier before the paren.
+        let mut s = i;
+        while s > 0 && (bytes[s - 1].is_ascii_alphanumeric() || bytes[s - 1] == b'_') {
+            s -= 1;
+        }
+        if s == i {
+            continue;
+        }
+        let ident = &text[s..i];
+        let Some(&(_, helper)) = NAMES.iter().find(|(n, _)| *n == ident) else {
+            continue;
+        };
+        // What precedes the identifier decides whether it's the helper we mean.
+        let is_directive = s > 0 && bytes[s - 1] == b'@';
+        let prev2 = if s >= 2 { &text[s - 2..s] } else { "" };
+        match ident {
+            // Blade-only names must be directives; `$this->component(` isn't one.
+            "include" | "extends" | "each" | "component" | "lang" if !is_directive => continue,
+            // `Route::view('/', 'welcome')` and `View::make()` take a URI / class first.
+            "view" if prev2 == "::" => continue,
+            _ => {}
+        }
+        if !is_directive && s > 0 {
+            let p = bytes[s - 1];
+            // `$route(`, `->view(` (Livewire `$this->view`?), `Foo::env(` — not the helper.
+            if p == b'$' || (p == b'>' && ident != "route") {
+                continue;
+            }
+        }
+        // First argument: a quoted string.
+        let after = &text[i + 1..];
+        let ws = after.len() - after.trim_start().len();
+        let a = &after[ws..];
+        let Some(q) = a.chars().next().filter(|c| *c == '\'' || *c == '"') else {
+            continue;
+        };
+        let vstart = i + 1 + ws + 1;
+        let Some(rel_end) = text[vstart..].find(q) else {
+            continue;
+        };
+        let vend = vstart + rel_end;
+        // What follows the literal: `)` closes, `,` means more args, anything
+        // else (`.`, `??`) makes the argument an expression we can't check.
+        let rest = text[vend + 1..].trim_start();
+        let more_args = match rest.chars().next() {
+            Some(')') => false,
+            Some(',') => true,
+            _ => continue,
+        };
+        let token = text[vstart..vend].to_string();
+        if token.is_empty() {
+            continue;
+        }
+        out.push(HelperCall {
+            helper,
+            token,
+            start: vstart,
+            end: vend,
+            more_args,
+        });
+    }
+    out
+}
+
+/// Required parameters of a route URI: `users/{user}/posts/{post?}` → `["user"]`.
+pub fn required_params(uri: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = uri;
+    while let Some(open) = rest.find('{') {
+        let Some(close) = rest[open..].find('}') else {
+            break;
+        };
+        let inner = &rest[open + 1..open + close];
+        if !inner.ends_with('?') {
+            out.push(inner.to_string());
+        }
+        rest = &rest[open + close + 1..];
+    }
+    out
+}
+
 // ---- Context detection ----------------------------------------------------
 
 /// Detect a Laravel helper context from the line text before the cursor,
@@ -1002,5 +1125,50 @@ mod tests {
             vec!["admin.users".to_string(), "dashboard".to_string()]
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scans_helper_calls_with_literal_arguments() {
+        let src = "<?php\n// Håndter\n$a = route('users.show', $user); $b = route('home');\n\
+                   return view('orders.index'); echo __('auth.failed');\n\
+                   Route::view('/', 'welcome'); $c = view('x.' . $y); $d = config('app.name');";
+        let calls = helper_calls(src);
+        let names: Vec<(Helper, &str, bool)> = calls
+            .iter()
+            .map(|c| (c.helper, c.token.as_str(), c.more_args))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                (Helper::Route, "users.show", true),
+                (Helper::Route, "home", false),
+                (Helper::View, "orders.index", false),
+                (Helper::Trans, "auth.failed", false),
+                (Helper::Config, "app.name", false),
+            ]
+        );
+        // Byte positions: the `å` before it is two bytes, and the range is the
+        // literal inside the quotes.
+        let first = &calls[0];
+        assert_eq!(&src[first.start..first.end], "users.show");
+    }
+
+    #[test]
+    fn scans_blade_directives_only_as_directives() {
+        let src = "@extends('layouts.app')\n@include('partials.nav', ['x' => 1])\n\
+                   @lang('messages.hi')\n$this->component('nope');";
+        let calls = helper_calls(src);
+        let tokens: Vec<&str> = calls.iter().map(|c| c.token.as_str()).collect();
+        assert_eq!(tokens, vec!["layouts.app", "partials.nav", "messages.hi"]);
+        assert!(calls[1].more_args);
+    }
+
+    #[test]
+    fn required_params_skip_optional_ones() {
+        assert_eq!(
+            required_params("users/{user}/posts/{post?}"),
+            vec!["user".to_string()]
+        );
+        assert!(required_params("/").is_empty());
     }
 }

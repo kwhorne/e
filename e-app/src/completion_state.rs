@@ -4,7 +4,7 @@
 //! Extracted from the former `state.rs` god-module (fields stay on `AppState`);
 //! same pattern as [`crate::debug`] / [`crate::runtime`].
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use floem::ext_event::create_ext_action;
 use floem::kurbo::Point;
@@ -822,7 +822,7 @@ impl AppState {
     }
 
     /// Resolve the Laravel helper token under the cursor, if any.
-    fn laravel_token(&self) -> Option<(laravel::Helper, String, Rc<LaravelData>)> {
+    fn laravel_token(&self) -> Option<(laravel::Helper, String, Arc<LaravelData>)> {
         let data = self.laravel.get()?;
         let buf = self.active_buffer()?;
         let editor = buf.editor.get_untracked()?;
@@ -872,7 +872,7 @@ impl AppState {
 
     /// Ziggy `route('name')` under the cursor in a JS-family file, plus the
     /// Laravel data — the same route table the PHP side uses.
-    fn active_ziggy_route(&self) -> Option<(String, Rc<LaravelData>)> {
+    fn active_ziggy_route(&self) -> Option<(String, Arc<LaravelData>)> {
         let buf = self.active_buffer()?;
         if !matches!(
             buf.file.language,

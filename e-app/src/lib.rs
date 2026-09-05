@@ -54,6 +54,7 @@ mod hints_doc;
 mod inertia;
 mod keymap;
 mod laravel;
+mod laravel_lint;
 mod laravel_state;
 mod livewire;
 mod log;

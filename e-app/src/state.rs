@@ -693,7 +693,16 @@ pub struct AppState {
     /// Signature-help popup state.
     pub signature: SignatureState,
     /// Laravel project data (routes/views/config/env), if applicable.
-    pub laravel: RwSignal<Option<Rc<LaravelData>>>,
+    pub laravel: RwSignal<Option<Arc<LaravelData>>>,
+    /// Fingerprint of the files `LaravelData` is scraped from, as of the last
+    /// check; a change means the data is stale and is reloaded.
+    laravel_fp: RwSignal<Option<u64>>,
+    laravel_fp_busy: RwSignal<bool>,
+    /// A scrape is running; another change while it runs queues one more.
+    laravel_loading: RwSignal<bool>,
+    laravel_reload_pending: RwSignal<bool>,
+    /// Idle ticks since the last freshness check.
+    laravel_tick: RwSignal<u32>,
     /// References / symbol-search picker.
     pub picker: Picker,
     /// A planned workspace replace awaiting confirmation (`Some` shows the dialog).
@@ -1038,6 +1047,65 @@ fn undo_store_path(file: &std::path::Path) -> PathBuf {
 }
 
 /// Byte offset → (line, character) both 0-based, for LSP-style ranges.
+/// A cheap fingerprint of everything `LaravelData` is scraped from: the mtimes
+/// of route, config, lang and env files, of component classes, and of the
+/// directories under `resources/views` (a view appears or disappears with its
+/// directory's mtime; an edit inside one changes no view name).
+pub(crate) fn laravel_fingerprint(root: &std::path::Path) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn stat(h: &mut DefaultHasher, p: &std::path::Path) {
+        if let Ok(m) = std::fs::metadata(p) {
+            if let Ok(t) = m.modified() {
+                if let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) {
+                    p.hash(h);
+                    d.as_nanos().hash(h);
+                }
+            }
+        }
+    }
+    /// Files directly in `dir`, and (when `recurse`) below it, to a sane depth.
+    fn files(h: &mut DefaultHasher, dir: &std::path::Path, recurse: bool, depth: u8) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if recurse && depth < 6 {
+                    files(h, &p, true, depth + 1);
+                }
+            } else {
+                stat(h, &p);
+            }
+        }
+    }
+    /// Directory mtimes only, recursively.
+    fn dirs(h: &mut DefaultHasher, dir: &std::path::Path, depth: u8) {
+        stat(h, dir);
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() && depth < 8 {
+                dirs(h, &p, depth + 1);
+            }
+        }
+    }
+
+    let mut h = DefaultHasher::new();
+    stat(&mut h, &root.join(".env"));
+    files(&mut h, &root.join("routes"), false, 0);
+    files(&mut h, &root.join("config"), false, 0);
+    files(&mut h, &root.join("lang"), true, 0);
+    files(&mut h, &root.join("resources/lang"), true, 0);
+    files(&mut h, &root.join("app/View/Components"), true, 0);
+    dirs(&mut h, &root.join("resources/views"), 0);
+    h.finish()
+}
+
 /// Unknown-column warnings for the query-builder calls in `text`, against the
 /// live schema. Pure, so it runs on any thread. Columns are UTF-8 bytes, like
 /// every other diagnostic the editor draws.
@@ -1407,6 +1475,11 @@ impl AppState {
             hover: HoverState::new(),
             signature: SignatureState::new(),
             laravel: RwSignal::new(None),
+            laravel_fp: RwSignal::new(None),
+            laravel_fp_busy: RwSignal::new(false),
+            laravel_loading: RwSignal::new(false),
+            laravel_reload_pending: RwSignal::new(false),
+            laravel_tick: RwSignal::new(0),
             picker: Picker::new(),
             replace_confirm: RwSignal::new(None),
             terminals: RwSignal::new(Vec::new()),
@@ -3774,6 +3847,10 @@ impl AppState {
     }
 
     /// If the workspace is a Laravel project, scrape its data in the background.
+    /// Called at startup, on **Laravel: Refresh Project Data**, when a file the
+    /// data comes from is saved in `e`, and when the freshness check sees one
+    /// change on disk (a `make:controller`, a `git checkout`). One scrape at a
+    /// time; a change during a scrape queues exactly one more.
     pub fn load_laravel(&self) {
         if !self.settings.get_untracked().laravel {
             return;
@@ -3782,20 +3859,105 @@ impl AppState {
         if !laravel::is_laravel(&root) {
             return;
         }
+        if self.laravel_loading.get_untracked() {
+            self.laravel_reload_pending.set(true);
+            return;
+        }
+        self.laravel_loading.set(true);
         // We know what's coming: start the PHP and Blade servers now, so their
         // handshake overlaps with the user finding the first file to open
         // instead of following it. Spawning is milliseconds; nothing blocks.
         self.ensure_lsp(Language::Php);
         self.ensure_lsp(Language::Blade);
-        let laravel_sig = self.laravel;
-        let send = create_ext_action(self.cx, move |data: LaravelData| {
-            eprintln!("e: loaded Laravel project data");
-            laravel_sig.set(Some(Rc::new(data)));
-        });
-        std::thread::spawn(move || {
-            let data = laravel::load(&root);
-            send(data);
-        });
+        let app = *self;
+        self.spawn_bg(
+            move || {
+                let data = laravel::load(&root);
+                let fp = laravel_fingerprint(&root);
+                (data, fp)
+            },
+            move |(data, fp): (LaravelData, u64)| {
+                eprintln!(
+                    "e: loaded Laravel project data ({} routes, {} views, {} translations)",
+                    data.routes.len(),
+                    data.views.len(),
+                    data.translations.len()
+                );
+                app.laravel.set(Some(Arc::new(data)));
+                app.laravel_fp.set(Some(fp));
+                app.laravel_loading.set(false);
+                // Squiggles for missing views/routes/keys reflect the new data.
+                app.relint_all();
+                if app.laravel_reload_pending.get_untracked() {
+                    app.laravel_reload_pending.set(false);
+                    app.load_laravel();
+                }
+            },
+        );
+    }
+
+    /// Idle-tick check (every fourth tick, i.e. about every two seconds): has
+    /// anything `LaravelData` is scraped from changed on disk? If so, reload.
+    /// The fingerprint is a few hundred `stat`s, done off the UI thread.
+    pub fn check_laravel_freshness(&self) {
+        if self.laravel.get_untracked().is_none() || self.laravel_fp_busy.get_untracked() {
+            return;
+        }
+        let tick = self.laravel_tick.get_untracked() + 1;
+        self.laravel_tick.set(tick);
+        if tick % 4 != 0 {
+            return;
+        }
+        let root = self.root.get_untracked();
+        let app = *self;
+        self.laravel_fp_busy.set(true);
+        self.spawn_bg(
+            move || laravel_fingerprint(&root),
+            move |fp: u64| {
+                app.laravel_fp_busy.set(false);
+                match app.laravel_fp.get_untracked() {
+                    Some(prev) if prev != fp => {
+                        eprintln!("e: Laravel project files changed on disk — refreshing");
+                        app.laravel_fp.set(Some(fp));
+                        app.load_laravel();
+                    }
+                    None => app.laravel_fp.set(Some(fp)),
+                    _ => {}
+                }
+            },
+        );
+    }
+
+    /// A file was saved in `e`: if it's one the Laravel data comes from, the
+    /// data is stale right now — don't wait for the freshness tick.
+    fn laravel_touch(&self, path: &std::path::Path) {
+        if self.laravel.get_untracked().is_none() {
+            return;
+        }
+        let root = self.root.get_untracked();
+        let Ok(rel) = path.strip_prefix(&root) else {
+            return;
+        };
+        let rel = rel.to_string_lossy();
+        let relevant = rel == ".env"
+            || rel.starts_with("routes/")
+            || rel.starts_with("config/")
+            || rel.starts_with("lang/")
+            || rel.starts_with("resources/lang/")
+            || rel.starts_with("app/View/Components/");
+        if relevant {
+            self.load_laravel();
+        }
+    }
+
+    /// Re-run the lints for every open buffer (after project data changed).
+    fn relint_all(&self) {
+        let ids: Vec<u64> = self
+            .buffers
+            .with_untracked(|bs| bs.iter().map(|b| b.id).collect());
+        for id in ids {
+            self.refresh_lint(id);
+        }
     }
 
     pub fn toggle_tinker(&self) {
@@ -5206,6 +5368,7 @@ impl AppState {
         self.focused_active().set(Some(id));
         self.sync_bp_marks(&canon.to_string_lossy());
         self.load_blame(id);
+        self.refresh_lint(id);
         self.request_inlay_hints(id);
     }
 
@@ -5532,6 +5695,7 @@ impl AppState {
                 self.run_phpstan(buf.id);
                 self.request_inlay_hints(buf.id);
                 eprintln!("e: saved {}", path.display());
+                self.laravel_touch(path);
                 if let Some(uri) = buf.uri.as_ref() {
                     for client in self.lsp_clients_for(buf.file.language) {
                         client.did_save(uri, &text);
@@ -5620,18 +5784,34 @@ impl AppState {
         });
     }
 
-    /// Recompute Laravel query-builder lint (unknown columns) for a buffer and
-    /// re-render its diagnostics. Debounced and off the UI thread: resolving a
-    /// model's table reads its class file, and a keystroke shouldn't wait for
-    /// disk. Cheap no-op without a live schema.
+    /// Recompute `e`'s own lints for a buffer and re-render its diagnostics:
+    /// unknown query-builder columns (live schema), missing views / routes /
+    /// translation keys (project data — off when laravel-lsp runs, which does
+    /// the same), and `.env` keys `.env.example` declares. Debounced and off the
+    /// UI thread: resolving a model's table reads its class file, and a
+    /// keystroke shouldn't wait for disk.
     pub fn refresh_lint(&self, buffer_id: u64) {
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return;
         };
-        if buf.large || !matches!(buf.file.language, Language::Php | Language::Blade) {
+        let php_like = matches!(buf.file.language, Language::Php | Language::Blade);
+        let is_env = buf
+            .file
+            .path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n == ".env")
+            .unwrap_or(false);
+        if buf.large || !(php_like || is_env) {
             return;
         }
-        if self.db.schema_cache.with_untracked(|s| s.is_empty()) {
+        let schema = self.db.schema_cache.get_untracked();
+        let laravel = if self.laravel_lsp_running() {
+            None
+        } else {
+            self.laravel.get_untracked()
+        };
+        if php_like && schema.is_empty() && laravel.is_none() {
             return;
         }
         let gen = buf.lint_gen.get() + 1;
@@ -5645,11 +5825,27 @@ impl AppState {
                 return; // typed again while waiting; that keystroke's run will do it
             }
             let text = buf.doc.text().to_string();
+            let language = buf.file.language;
             let root = app.root.get_untracked();
-            let schema = app.db.schema_cache.get_untracked();
             let lint_gen = buf.lint_gen.clone();
             app.spawn_bg(
-                move || column_lint(&text, &root, &schema),
+                move || {
+                    let mut diags = Vec::new();
+                    if php_like {
+                        if !schema.is_empty() {
+                            diags.extend(column_lint(&text, &root, &schema));
+                        }
+                        if let Some(data) = &laravel {
+                            diags.extend(crate::laravel_lint::lint(&text, language, data));
+                        }
+                    }
+                    if is_env {
+                        if let Ok(example) = std::fs::read_to_string(root.join(".env.example")) {
+                            diags.extend(crate::laravel_lint::lint_env(&text, &example));
+                        }
+                    }
+                    diags
+                },
                 move |diags: Vec<Diagnostic>| {
                     if lint_gen.get() != gen {
                         return; // the text moved on while we were linting
@@ -6323,5 +6519,31 @@ mod column_lint_tests {
     fn nothing_without_a_schema() {
         let text = "DB::table('users')->where('x', 1);";
         assert!(column_lint(text, std::path::Path::new("/"), &HashMap::new()).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::laravel_fingerprint;
+
+    #[test]
+    fn changes_when_a_route_file_or_view_dir_changes() {
+        let dir = std::env::temp_dir().join(format!("e_fp_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("routes")).unwrap();
+        std::fs::create_dir_all(dir.join("resources/views")).unwrap();
+        std::fs::write(dir.join("routes/web.php"), "<?php").unwrap();
+        let a = laravel_fingerprint(&dir);
+        // Same files, same fingerprint.
+        assert_eq!(a, laravel_fingerprint(&dir));
+        // A new route file changes it…
+        std::fs::write(dir.join("routes/api.php"), "<?php").unwrap();
+        let b = laravel_fingerprint(&dir);
+        assert_ne!(a, b);
+        // …and so does a new view directory.
+        std::fs::create_dir_all(dir.join("resources/views/orders")).unwrap();
+        let c = laravel_fingerprint(&dir);
+        assert_ne!(b, c);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

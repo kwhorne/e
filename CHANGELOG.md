@@ -37,6 +37,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Webhooks* lists captured deliveries and re-delivers one to your handler on
   the app's own URL. Both hand their selection to the agent.
 
+- **Laravel project data refreshes itself.** Routes, views, config, `.env`
+  and translations were scraped once and reloaded only by hand, so a new route
+  was "not found" until you remembered *Refresh Project Data*. Saving one of
+  those files in `e` reloads at once; a change from outside (`make:controller`,
+  `git checkout`) is picked up within a couple of seconds by a fingerprint of
+  the files involved. One scrape runs at a time.
+
+- **Missing views, routes and translation keys are underlined as you type.**
+  `view('orders.missing')`, `@include` and `@extends` of a view that doesn't
+  exist, `route('nope')`, `route('users.show')` without the `{user}` it needs,
+  and `__('auth.nope')` with no such key in `lang/` get squiggles from the
+  project data `e` already has — checks Intelephense can't make. `.env` shows
+  which keys `.env.example` declares and it doesn't set. Off while the official
+  Laravel language server runs, which reports the same.
+
 ## [0.9.14] - 2026-09-05
 
 ### Changed

@@ -7,8 +7,11 @@ Inspired by the official Laravel VS Code extension, `e` introspects your project
 (via `php artisan` and the filesystem) to provide completion, hover and
 navigation for Laravel's helpers. It is enabled automatically in any project
 with an `artisan` file; toggle it under **Settings → Laravel features** (or the
-`laravel` config key). Run **Laravel: Refresh Project Data** from the command
-palette (`⌘⇧P`) after adding routes, views or config.
+`laravel` config key). The data refreshes itself: saving a route, config, lang
+or `.env` file in `e` reloads it at once, and a change on disk from outside —
+`php artisan make:controller`, a `git checkout` — is noticed within a couple of
+seconds. **Laravel: Refresh Project Data** (`⌘⇧P`) is still there for a forced
+reload.
 
 ## Helper completion
 
@@ -54,6 +57,22 @@ live schema — `where('…')`, `orderBy()`, `select()`, `pluck()`, `value()`,
 `load()`, `whereHas()`. The table is resolved from `Model::`, `$model`, or
 `DB::table('…')`. Columns that don't exist in the schema are underlined with a
 warning — a check PhpStorm can't do without the database.
+
+## Laravel lints
+
+From the same project data, `e` underlines what would fail at runtime, as you
+type (300 ms after the last keystroke, off the UI thread):
+
+| In | Check |
+| -- | ----- |
+| `view('…')`, `@include`, `@extends`, `@each`, `@component` | the view file exists (error) |
+| `route('…')`, `to_route('…')` | the route is defined (error); its required `{parameters}` are passed (warning) |
+| `__('file.key')`, `trans()`, `trans_choice()`, `@lang` | the key exists in `lang/` (warning; sentence keys are JSON translations that fall back to themselves) |
+| `.env` | every key `.env.example` declares is set (warning at the top of the file) |
+
+Arguments that are expressions (`'a.'.$b`, `$name`) and namespaced names
+(`pkg::view`) are left alone. When the official `laravel/lsp` is running it
+reports missing views and routes itself, so these lints stay off then.
 
 ## Validation rules
 

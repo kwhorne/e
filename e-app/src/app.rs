@@ -336,6 +336,7 @@ fn app_view() -> impl IntoView {
                     state.save_session();
                 }
                 state.check_external_changes();
+                state.check_laravel_freshness();
                 if state.log_open.get_untracked() {
                     state.refresh_laravel_log();
                 }

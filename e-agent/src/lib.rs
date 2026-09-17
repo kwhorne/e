@@ -16,7 +16,7 @@ pub mod chat;
 pub mod client;
 pub mod protocol;
 
-pub use chat::{ChatItem, ChatState, ToolCall, ToolStatus};
+pub use chat::{ChatItem, ChatState, ModelInfo, ToolCall, ToolStatus};
 pub use client::{pump, AgentClient, Streaming};
 pub use protocol::{parse_event, AgentEvent};
 

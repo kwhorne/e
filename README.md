@@ -78,7 +78,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Task runner** (`⌘⇧B`) — npm/Composer/Cargo/Go/artisan/Make tasks and tests
 - **Graphical settings** (`⌘,`) and **customizable keybindings**
 - **Integrated terminal** (`⌘T`) — PTY-backed with ANSI colour, multiple tabs, rename and split
-- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent in an embedded terminal beside your code (Elyra has an experimental native chat panel too, off by default). All agents share deep editor co-op: reviewable `propose_edit` diffs, a risk-ranked **session review** (`⌘⌥V`), an autonomous TDD loop (`⌘⇧T`), and an activity timeline (`⌘⌥A`)
+- **AI agent panel** (`⌘L`) — run Elyra, Claude Code, Codex or any CLI agent in an embedded terminal beside your code, or turn on **Elyra Cascade**: Elyra as a chat panel with session history, a model picker across Anthropic, OpenAI, Gemini and Grok (API keys in Settings, kept in the Keychain), Code/Ask modes and streaming markdown. All agents share deep editor co-op: reviewable `propose_edit` diffs, a risk-ranked **session review** (`⌘⌥V`), an autonomous TDD loop (`⌘⇧T`), and an activity timeline (`⌘⌥A`)
 - **Editing essentials** — comment toggle (`⌘/`), line move/duplicate/delete, indent, multi-cursor (`⌘⇧D`), column editing (`⌥⌘↑/↓`), auto-closing brackets
 - **Refactoring** — **rename** (`F2`) through the language server, previewing every site before it writes; **Move Class** that follows PSR-4 and rewrites every `use` and fully-qualified reference; **code actions** (`⌘.`) for LSP quick fixes and extract variable/method; **compare** the active file with any other file; **EditorConfig** support
 - **Split editor** (`⌘\`), **resizable & swappable panels**, **zoom** (`⌘±`), **word wrap** (`⌥Z`)
@@ -108,9 +108,8 @@ Language servers are launched automatically when available on your `PATH`:
 
 The right-hand **Agent panel** (`⌘L`) runs a coding agent beside your open
 project. **Elyra**, Claude Code, Codex and any other CLI agent run in an embedded
-terminal. (Elyra can optionally use an experimental native chat panel — streaming
-markdown, tool-call cards, an auto-growing composer — via **Settings → Agents →
-“Native Elyra chat”**, off by default.) Switch agents from the panel header, and
+terminal, or — with **Settings → Agents → Elyra Cascade** on — as a chat panel
+with session history, a model picker and Code/Ask modes ([details](docs/agents.md#elyra-cascade)). Switch agents from the panel header, and
 configure them in your global settings (`⌘,`):
 
 ```jsonc

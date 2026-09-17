@@ -11,7 +11,6 @@ use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
 use floem::views::{dyn_container, empty, label, rich_text, scroll, stack, Decorators};
 use floem::IntoView;
 
-use crate::agent_native::agent_native_body;
 use crate::app::handle_shortcut;
 use crate::state::AppState;
 use crate::terminal_view::{char_size, key_to_bytes};
@@ -188,7 +187,7 @@ fn native_selected(state: AppState) -> bool {
     // Opt-in (experimental, off by default): only Elyra renders as the native
     // chat panel, and only when the setting is on. See
     // `AppState::use_native_agent`.
-    if !state.settings.with(|s| s.native_agent) {
+    if !state.settings.with(|s| s.cascade) {
         return false;
     }
     let id = state.agent.current.get();
@@ -208,18 +207,22 @@ fn native_selected(state: AppState) -> bool {
 }
 
 pub fn agent_panel(state: AppState) -> impl IntoView {
+    // Cascade brings its own header (session tab, history, menu); the terminal
+    // keeps the agent switcher.
     let body = dyn_container(
         move || native_selected(state),
         move |native| {
             if native {
-                agent_native_body(state).into_any()
+                crate::cascade::cascade_panel(state).into_any()
             } else {
-                agent_body(state).into_any()
+                stack((agent_header(state), agent_body(state)))
+                    .style(|s| s.flex_col().size_full())
+                    .into_any()
             }
         },
     )
     .style(|s| s.flex_col().size_full());
-    stack((agent_header(state), body)).style(move |s| {
+    stack((body,)).style(move |s| {
         let s = s
             .flex_col()
             .width(state.agent.width.get())

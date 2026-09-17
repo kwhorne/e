@@ -81,6 +81,8 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "new-terminal" => state.new_terminal(),
         "split-terminal" => state.split_terminal(),
         "agent" | "toggle-agent" => state.toggle_agent(),
+        "toggle-cascade" => state.toggle_cascade(),
+        "cascade-new-session" => state.native_agent_new_session(),
         "toggle-database" => state.toggle_db_panel(),
         "run-sql" => state.run_sql_under_cursor(),
         "explain-sql" => state.explain_sql_under_cursor(),

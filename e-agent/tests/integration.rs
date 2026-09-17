@@ -51,3 +51,54 @@ fn rpc_spawn_and_abort_roundtrip() {
         "expected a session header or command response from elyra rpc"
     );
 }
+
+/// Against a real `elyra` on PATH: the model and state commands answer, and the
+/// reducer folds them into a model list and a current model. Skips when elyra
+/// isn't installed.
+#[test]
+fn live_elyra_reports_models_and_state() {
+    use std::time::{Duration, Instant};
+
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let probe = std::process::Command::new(&shell)
+        .args(["-lc", "command -v elyra"])
+        .output();
+    if !probe.map(|o| o.status.success()).unwrap_or(false) {
+        eprintln!("skipping: elyra not on PATH");
+        return;
+    }
+    let cwd = std::env::temp_dir();
+    let (client, rx) = e_agent::AgentClient::spawn(
+        &shell,
+        &[
+            "-lc".to_string(),
+            "elyra --mode rpc --no-session".to_string(),
+        ],
+        &cwd,
+        &[],
+    )
+    .expect("spawn elyra");
+    client.get_state().unwrap();
+    client.get_available_models().unwrap();
+
+    let mut state = e_agent::ChatState::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline && (state.models.is_empty() || state.model.is_none()) {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(ev) => state.apply(ev),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(_) => break,
+        }
+    }
+    client.shutdown();
+    assert!(!state.models.is_empty(), "elyra listed no models");
+    let model = state.model.expect("elyra reported its current model");
+    eprintln!(
+        "elyra: {} models; current {}/{} thinking {:?}",
+        state.models.len(),
+        model.provider,
+        model.id,
+        state.thinking
+    );
+    assert!(state.models.iter().any(|m| m.id == model.id));
+}

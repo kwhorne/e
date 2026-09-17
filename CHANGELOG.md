@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Elyra Cascade.** Elyra as a chat panel instead of the terminal, drawn the
+  way Devin Local and Windsurf's Cascade draw theirs: a session tab with **＋**
+  new session, **◷** this project's earlier sessions (pick one to resume it,
+  conversation redrawn), a **⋯** menu and **✕**; an empty state that says
+  *Describe your task to Elyra*; the streaming transcript; and a composer card
+  with **＋** to attach the active file, the selection or all open files,
+  **Code / Ask** mode, a **model chip** listing every model Elyra offers by
+  provider with the thinking level, and **↑** send / **■** stop. The model,
+  thinking level and mode are remembered. **Settings → Agents → Elyra
+  Cascade**, the palette's *Agent: Elyra Cascade on/off*, or the ⋯ menu switch
+  between it and the terminal panel; other agents keep the terminal.
+
+- **API keys in Settings.** **Settings → Agents** takes a key for Anthropic,
+  OpenAI, Gemini and Grok (xAI). Keys go into the macOS Keychain (elsewhere a
+  0600 file), never `config.json`, show masked once saved, and are handed to
+  Elyra as its environment variables when Cascade starts it.
+
+### Changed
+
+- The `native_agent` setting is now `cascade` (the old key is still read), and
+  the "Native Elyra chat (experimental)" toggle is "Elyra Cascade".
+
 ## [0.9.20] - 2026-09-05
 
 ### Fixed

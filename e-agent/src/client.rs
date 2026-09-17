@@ -114,6 +114,37 @@ impl AgentClient {
         self.send(&json!({ "type": "new_session" }))
     }
 
+    /// Switch model. The `set_model` response carries the full model object.
+    pub fn set_model(&self, provider: &str, model_id: &str) -> Result<()> {
+        self.send(&json!({ "type": "set_model", "provider": provider, "modelId": model_id }))
+    }
+
+    /// Set the thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`).
+    pub fn set_thinking_level(&self, level: &str) -> Result<()> {
+        self.send(&json!({ "type": "set_thinking_level", "level": level }))
+    }
+
+    /// Ask for every model the agent can use; answered by a `response` whose
+    /// data holds `models`.
+    pub fn get_available_models(&self) -> Result<()> {
+        self.send(&json!({ "type": "get_available_models" }))
+    }
+
+    /// Ask for the session state (current model, thinking level, session file).
+    pub fn get_state(&self) -> Result<()> {
+        self.send(&json!({ "type": "get_state" }))
+    }
+
+    /// Ask for the conversation so far — how a resumed session is redrawn.
+    pub fn get_messages(&self) -> Result<()> {
+        self.send(&json!({ "type": "get_messages" }))
+    }
+
+    /// Compact the context now.
+    pub fn compact(&self) -> Result<()> {
+        self.send(&json!({ "type": "compact" }))
+    }
+
     /// Serialize a command and write it as one `\n`-terminated line to stdin.
     fn send(&self, cmd: &Value) -> Result<()> {
         let mut line = serde_json::to_string(cmd)?;

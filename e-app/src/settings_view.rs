@@ -141,6 +141,140 @@ fn app_url_row(state: AppState) -> impl IntoView {
     .style(row_style)
 }
 
+/// One provider's API key: masked once stored, with Replace / Remove; an
+/// input with Save while editing. Keys live in the Keychain, never in
+/// config.json, and are handed to Elyra as its environment variable.
+fn api_key_row(state: AppState, p: crate::secrets::Provider) -> impl IntoView {
+    use crate::secrets;
+    // `stored` mirrors the keychain so the row re-renders without re-reading it
+    // on every frame (the security tool is a process spawn).
+    let stored: RwSignal<Option<String>> = create_rw_signal(secrets::get(p));
+    let editing: RwSignal<bool> = create_rw_signal(false);
+    let draft: RwSignal<String> = create_rw_signal(String::new());
+    let error: RwSignal<String> = create_rw_signal(String::new());
+
+    let small_btn = |text: &'static str| {
+        label(move || text.to_string()).style(|s| {
+            s.padding_horiz(10.0)
+                .height(26.0)
+                .items_center()
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(6.0)
+                .font_size(12.0)
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+    };
+
+    let save = move || {
+        let key = draft.get_untracked();
+        match secrets::set(p, &key) {
+            Ok(()) => {
+                stored.set(secrets::get(p));
+                draft.set(String::new());
+                editing.set(false);
+                error.set(String::new());
+                // Elyra reads the key when it starts, so a running one restarts.
+                if state.agent.native_client.get_untracked().is_some() {
+                    state.restart_agent();
+                }
+            }
+            Err(e) => error.set(e),
+        }
+    };
+
+    let controls = dyn_container(
+        move || (editing.get(), stored.get().is_some()),
+        move |(is_editing, has_key)| {
+            if is_editing {
+                let input = text_input(draft)
+                    .placeholder(p.key_hint())
+                    .on_enter(save)
+                    .style(|s| {
+                        theme::input_colors(s)
+                            .width(260.0)
+                            .min_width(0.0)
+                            .flex_shrink(1.0_f32)
+                            .font_size(12.0)
+                            .padding_horiz(8.0)
+                            .padding_vert(4.0)
+                    });
+                let save_btn = small_btn("Save").on_click_stop(move |_| save());
+                let cancel = small_btn("Cancel").on_click_stop(move |_| {
+                    editing.set(false);
+                    draft.set(String::new());
+                    error.set(String::new());
+                });
+                stack((input, save_btn, cancel))
+                    .style(|s| s.items_center().gap(6.0))
+                    .into_any()
+            } else if has_key {
+                let masked =
+                    label(move || stored.get().map(|k| secrets::mask(&k)).unwrap_or_default())
+                        .style(|s| {
+                            s.font_family("monospace".to_string())
+                                .font_size(12.0)
+                                .color(theme::fg_dim())
+                                .padding_horiz(6.0)
+                        });
+                let replace = small_btn("Replace").on_click_stop(move |_| editing.set(true));
+                let remove = small_btn("Remove").on_click_stop(move |_| match secrets::clear(p) {
+                    Ok(()) => {
+                        stored.set(None);
+                        error.set(String::new());
+                    }
+                    Err(e) => error.set(e),
+                });
+                stack((masked, replace, remove))
+                    .style(|s| s.items_center().gap(6.0))
+                    .into_any()
+            } else {
+                small_btn("Add key…")
+                    .on_click_stop(move |_| editing.set(true))
+                    .into_any()
+            }
+        },
+    );
+
+    let err = label(move || error.get()).style(move |s| {
+        let s = s
+            .font_size(11.0)
+            .color(Color::from_rgb8(0xd6, 0x7a, 0x7a))
+            .margin_top(2.0);
+        if error.with(|e| e.is_empty()) {
+            s.hide()
+        } else {
+            s
+        }
+    });
+
+    let note: &'static str = match p {
+        secrets::Provider::Anthropic => {
+            "ANTHROPIC_API_KEY · console.anthropic.com. Stored in the Keychain."
+        }
+        secrets::Provider::OpenAi => {
+            "OPENAI_API_KEY · platform.openai.com. Stored in the Keychain."
+        }
+        secrets::Provider::Gemini => {
+            "GEMINI_API_KEY · aistudio.google.com. Stored in the Keychain."
+        }
+        secrets::Provider::Grok => "XAI_API_KEY · console.x.ai. Stored in the Keychain.",
+    };
+    let title: &'static str = match p {
+        secrets::Provider::Anthropic => "Anthropic API key",
+        secrets::Provider::OpenAi => "OpenAI API key",
+        secrets::Provider::Gemini => "Gemini API key",
+        secrets::Provider::Grok => "Grok (xAI) API key",
+    };
+    stack((
+        row_label(title, note, false),
+        stack((controls, err)).style(|s| s.flex_col().items_end()),
+    ))
+    .style(row_style)
+}
+
 /// A labelled number row with − / + steppers.
 fn number_row(
     text: &'static str,
@@ -587,20 +721,19 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
     push(5, "Default agent", "", default_agent_row(s).into_any());
     push(
         5,
-        "Native Elyra chat (experimental)",
-        "Render Elyra as a native chat panel instead of the terminal. Off by default.",
+        "Elyra Cascade",
+        "Elyra as a chat panel — session tabs, model picker, Code/Ask — instead of the terminal. Other agents keep the terminal.",
         toggle_row(
-            "Native Elyra chat (experimental)",
-            "Render Elyra as a native chat panel instead of the terminal. Off by default.",
-            move || s.settings.get().native_agent,
-            move |v| {
-                s.settings.update(|st| st.native_agent = v);
-                config::set_bool("native_agent", v);
-                s.restart_agent();
-            },
+            "Elyra Cascade",
+            "Elyra as a chat panel — session tabs, model picker, Code/Ask — instead of the terminal. Other agents keep the terminal.",
+            move || s.settings.get().cascade,
+            move |v| s.set_cascade(v),
         )
         .into_any(),
     );
+    for p in crate::secrets::Provider::ALL {
+        push(5, p.label(), p.env_var(), api_key_row(s, p).into_any());
+    }
     push(
         5,
         "Editor integration",

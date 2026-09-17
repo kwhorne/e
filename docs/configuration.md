@@ -28,7 +28,10 @@ and `keybindings`), which is created on first use.
   "inlay_hints": true,     // show LSP inlay hints (types, parameter names)
   "sticky_scroll": true,   // pin enclosing scope lines at the top while scrolling
   "ai_completion": false,  // inline AI "ghost text" via a local Ollama code model
-  "native_agent": false,   // experimental native chat panel for Elyra (vs. terminal); see Agents
+  "cascade": false,        // Elyra Cascade: Elyra as a chat panel instead of the terminal; see Agents
+  "cascade_model": "",     // provider/model-id Cascade starts Elyra on ("" = Elyra's default)
+  "cascade_thinking": "",  // thinking level for that model ("" = Elyra's default)
+  "cascade_mode": "code",  // "code" (tools on) or "ask" (answer and plan only)
   "laravel_lsp": true,     // run the official laravel/lsp alongside intelephense
   "xdebug": false,         // enable Xdebug step-debugging via Grove (grove debug on)
   "sidebar_side": "left",  // explorer/Git panel side: "left" or "right"
@@ -52,11 +55,16 @@ and `keybindings`), which is created on first use.
 | `sticky_scroll` | bool | `true` | Pin enclosing scope at the top |
 | `ai_completion` | bool | `false` | Inline AI completion (ghost text) via a local Ollama code model; `Tab` accepts. Model via `E_COMPLETION_MODEL` (default `qwen2.5-coder`). Requires a running Ollama. |
 | `laravel_lsp` | bool | `true` | Run the official [laravel/lsp](https://github.com/laravel/lsp) alongside Intelephense in Laravel projects (and give Blade a language server). Off falls back to `e`'s built-in Laravel intelligence. Restart to apply. See [Languages & LSP](languages-and-lsp.md#the-laravel-language-server). |
-| `native_agent` | bool | `false` | Experimental: render Elyra as a native chat panel (streaming markdown, tool cards, composer) instead of the terminal panel. Off by default; other agents always use the terminal. See [AI Agents](agents.md). |
+| `cascade` | bool | `false` | Elyra Cascade: render Elyra as a chat panel (session tab, model picker, Code/Ask, streaming markdown, tool cards) instead of the terminal. Other agents always use the terminal. The older `native_agent` key is still read. See [AI Agents](agents.md#elyra-cascade). |
+| `cascade_model` | string | `""` | `provider/model-id` Cascade starts Elyra on, as picked from the model chip; empty for Elyra's default. |
+| `cascade_thinking` | string | `""` | Thinking level (`off` … `xhigh`) Cascade starts Elyra on; empty for Elyra's default. |
+| `cascade_mode` | string | `"code"` | `code` (tools on) or `ask` (answer and plan, change nothing). |
 | `xdebug` | bool | `false` | Toggling this runs `grove debug on`/`off` to load Xdebug for step-debugging (see [Debugging](debugging.md)) |
 | `sidebar_side` | string | `"left"` | Side of the explorer/Git sidebar (`"left"` or `"right"`) |
 | `agent_side` | string | `"right"` | Side of the agent panel (`"right"` or `"left"`) |
 | `agents` | object | built-ins | AI agent configuration |
+
+API keys for Anthropic, OpenAI, Gemini and Grok are **not** in this file: they are entered in **Settings → Agents** and kept in the macOS Keychain (elsewhere `~/.config/e/secrets.json`, mode 0600). See [AI Agents](agents.md#api-keys).
 
 > **Panel layout** (`sidebar_side`, `agent_side`) is read at startup — restart
 > `e` after changing it. By default the explorer/Git sidebar is on the left and

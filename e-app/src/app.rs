@@ -425,6 +425,14 @@ fn app_view() -> impl IntoView {
                 Err(_) => return,
             };
             if !drained.is_empty() {
+                // `E_DEBUG_CASCADE=1`: every event elyra sends, one line each.
+                if std::env::var_os("E_DEBUG_CASCADE").is_some() {
+                    for ev in &drained {
+                        let line = format!("{ev:?}");
+                        let cut: String = line.chars().take(220).collect();
+                        eprintln!("e: agent event: {cut}");
+                    }
+                }
                 chat.update(|c| {
                     for ev in drained {
                         c.apply(ev);

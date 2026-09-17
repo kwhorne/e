@@ -70,11 +70,13 @@ pub enum AgentEvent {
         steering: Vec<String>,
         follow_up: Vec<String>,
     },
-    /// A command acknowledgement (`{"type":"response",...}`).
+    /// A command acknowledgement (`{"type":"response",...}`), with whatever
+    /// `data` the command returned (a model, a model list, the session state).
     Response {
         id: Option<String>,
         command: String,
         success: bool,
+        data: Value,
     },
     /// The agent finished the whole prompt (idle again).
     AgentEnd,
@@ -201,6 +203,7 @@ pub fn parse_event(line: &str) -> Option<AgentEvent> {
             id: v.get("id").and_then(Value::as_str).map(str::to_string),
             command: str_field(&v, "command"),
             success: v.get("success").and_then(Value::as_bool).unwrap_or(false),
+            data: v.get("data").cloned().unwrap_or(Value::Null),
         },
         "agent_end" => AgentEvent::AgentEnd,
         "error" => AgentEvent::Error {

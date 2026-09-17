@@ -19,9 +19,18 @@ pub struct Settings {
     pub sticky_scroll: bool,
     /// Inline AI completion ("ghost text") via a local Ollama code model.
     pub ai_completion: bool,
-    /// Experimental (off by default): render Elyra as a native chat panel (elyra
-    /// RPC) instead of the terminal. Other agents always use the terminal.
-    pub native_agent: bool,
+    /// Elyra Cascade (off by default): render Elyra as a chat panel driving
+    /// `elyra --mode rpc` instead of the terminal. Other agents always use the
+    /// terminal. Read from `cascade`, falling back to the older `native_agent`.
+    pub cascade: bool,
+    /// The model Cascade starts Elyra on, as `provider/model-id`; empty for
+    /// Elyra's own default.
+    pub cascade_model: String,
+    /// The thinking level Cascade starts Elyra on (`off` … `xhigh`); empty for
+    /// Elyra's default.
+    pub cascade_thinking: String,
+    /// `code` (tools on) or `ask` (answer and plan only).
+    pub cascade_mode: String,
     /// File-level editor integration for the agent/terminal: click file paths in
     /// output to open them, and “Send selection to agent”. On by default.
     pub editor_integration: bool,
@@ -59,7 +68,10 @@ impl Default for Settings {
             inlay_hints: true,
             sticky_scroll: true,
             ai_completion: false,
-            native_agent: false,
+            cascade: false,
+            cascade_model: String::new(),
+            cascade_thinking: String::new(),
+            cascade_mode: "code".to_string(),
             editor_integration: true,
             laravel: true,
             laravel_lsp: true,
@@ -93,6 +105,7 @@ pub fn load_settings() -> Settings {
     let v = read();
     let d = Settings::default();
     let bool_of = |k: &str, def: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(def);
+    let str_of = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     let usize_of = |k: &str, def: usize| {
         v.get(k)
             .and_then(|x| x.as_u64())
@@ -111,7 +124,20 @@ pub fn load_settings() -> Settings {
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         ai_completion: bool_of("ai_completion", d.ai_completion),
-        native_agent: bool_of("native_agent", d.native_agent),
+        cascade: v
+            .get("cascade")
+            .and_then(|x| x.as_bool())
+            .unwrap_or_else(|| bool_of("native_agent", d.cascade)),
+        cascade_model: str_of("cascade_model"),
+        cascade_thinking: str_of("cascade_thinking"),
+        cascade_mode: {
+            let m = str_of("cascade_mode");
+            if m == "ask" {
+                m
+            } else {
+                "code".to_string()
+            }
+        },
         editor_integration: bool_of("editor_integration", d.editor_integration),
         laravel: bool_of("laravel", d.laravel),
         laravel_lsp: bool_of("laravel_lsp", d.laravel_lsp),

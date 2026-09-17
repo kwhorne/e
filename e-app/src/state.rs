@@ -440,6 +440,8 @@ pub struct AgentPanel {
     pub mark: RwSignal<Option<(PathBuf, usize)>>,
     /// A pending edit the agent proposed, awaiting per-hunk review.
     pub edit: RwSignal<Option<AgentEdit>>,
+    /// Cascade's mode: `code` (tools on) or `ask` (answer and plan only).
+    pub mode: RwSignal<String>,
 }
 
 impl AgentPanel {
@@ -466,6 +468,7 @@ impl AgentPanel {
             log_open: RwSignal::new(false),
             mark: RwSignal::new(None),
             edit: RwSignal::new(None),
+            mode: RwSignal::new(config::load_settings().cascade_mode),
         }
     }
 }
@@ -3220,7 +3223,7 @@ impl AppState {
         // Opt-in (experimental, off by default): only Elyra speaks the RPC
         // protocol the native chat panel renders. Every other agent, and Elyra
         // when the toggle is off, uses the terminal (PTY) panel.
-        if !self.settings.get_untracked().native_agent {
+        if !self.settings.get_untracked().cascade {
             return false;
         }
         let Some(agent) = self.current_agent() else {
@@ -3234,6 +3237,13 @@ impl AppState {
     /// The reader thread pushes decoded events onto a shared queue and nudges a
     /// wake channel; the UI-thread drain (installed in `app`) applies them.
     pub fn start_native_agent(&self) {
+        self.start_native_agent_with(None);
+    }
+
+    /// Start Elyra headless, on the model and thinking level Cascade remembers,
+    /// with the API keys from Settings in its environment — and, given a
+    /// session file, resuming that conversation.
+    pub(crate) fn start_native_agent_with(&self, session: Option<&std::path::Path>) {
         let Some(agent) = self.current_agent() else {
             return;
         };
@@ -3248,12 +3258,41 @@ impl AppState {
         // only a minimal PATH, so `elyra` (and the `node` its shebang needs)
         // wouldn't be found by a direct spawn. This mirrors the terminal agent.
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        let cmdline = format!("{} --mode rpc", agent.command.trim());
+        let settings = self.settings.get_untracked();
+        let mut cmdline = format!("{} --mode rpc", agent.command.trim());
+        if let Some((provider, model)) = settings.cascade_model.split_once('/') {
+            cmdline.push_str(&format!(
+                " --provider {} --model {}",
+                crate::cascade::shell_quote(provider),
+                crate::cascade::shell_quote(model)
+            ));
+        }
+        if !settings.cascade_thinking.is_empty() {
+            cmdline.push_str(&format!(
+                " --thinking {}",
+                crate::cascade::shell_quote(&settings.cascade_thinking)
+            ));
+        }
+        if let Some(path) = session {
+            cmdline.push_str(&format!(
+                " --session {}",
+                crate::cascade::shell_quote(&path.to_string_lossy())
+            ));
+        }
         let shell_args = vec!["-lc".to_string(), cmdline];
+        // The keys from Settings, as the environment variables elyra reads.
+        let env = crate::secrets::elyra_env();
 
-        match AgentClient::spawn(&shell, &shell_args, &cwd, &[]) {
+        match AgentClient::spawn(&shell, &shell_args, &cwd, &env) {
             Ok((client, rx)) => {
                 self.agent.chat.set(ChatState::new());
+                // What model are we on, what else is there — and, when resuming,
+                // the conversation so far.
+                let _ = client.get_state();
+                let _ = client.get_available_models();
+                if session.is_some() {
+                    let _ = client.get_messages();
+                }
                 let queue = self.agent.events.get_untracked();
                 let wake = self.agent.wake_tx.get_untracked();
                 std::thread::Builder::new()
@@ -3308,6 +3347,17 @@ impl AppState {
             return;
         };
         let streaming = busy.then_some(Streaming::Steer);
+        // Ask mode: the same agent, told to keep its hands off the files.
+        let ask = self.agent.mode.get_untracked() == "ask";
+        let text = if ask {
+            format!(
+                "[Ask mode] Answer, explain or plan only. Do not edit, create or delete files, \
+                 and do not run commands that change anything.\n\n{text}"
+            )
+        } else {
+            text.to_string()
+        };
+        let text = text.as_str();
         if let Err(e) = client.prompt(text, streaming) {
             eprintln!("e: agent prompt failed: {e:#}");
         }

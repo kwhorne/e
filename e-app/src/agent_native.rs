@@ -1,10 +1,11 @@
-//! The native agent chat panel.
+//! The native chat transcript and composer input behind Elyra Cascade.
 //!
-//! Renders [`AppState::agent_chat`] (folded from elyra's RPC event stream by the
-//! `e-agent` crate) with native floem views — streaming assistant text, tool-call
-//! cards, and a composer — instead of running the agent's terminal UI in a PTY.
-//! This is what makes ⌘L feel responsive: we append only the changed text rather
-//! than re-parsing a whole ANSI grid every frame.
+//! Renders the conversation folded from elyra's RPC event stream by the
+//! `e-agent` crate with native floem views — streaming assistant text, tool-call
+//! cards, a multi-line composer — instead of running the agent's terminal UI in
+//! a PTY. This is what makes ⌘L feel responsive: we append only the changed text
+//! rather than re-parsing a whole ANSI grid every frame. The panel around it
+//! (header, empty state, composer card, footer) lives in [`crate::cascade`].
 
 use std::rc::Rc;
 
@@ -249,7 +250,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
 }
 
 /// The scrollable transcript.
-fn transcript(state: AppState) -> impl IntoView {
+pub(crate) fn transcript(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || 0..state.agent.chat.with(|c| c.items.len()),
         |i| *i,
@@ -275,14 +276,14 @@ fn transcript(state: AppState) -> impl IntoView {
         })
 }
 
-/// The composer: a padded input box with a toolbar row below (model + send/stop),
-/// styled after Zed's agent panel so it sits comfortably above the window edge
-/// instead of being flush at the very bottom.
-fn composer(state: AppState) -> impl IntoView {
-    // Multi-line, word-wrapped editor so long prompts wrap and stay visible.
-    // Kept deliberately minimal (no reactive mirror, no placeholder overlay) and
-    // all mutation is deferred out of the key handler (see send_composer), which
-    // is what previously aborted on Enter.
+/// The multi-line composer input, shared by the classic native panel and
+/// Cascade: word-wrapped, auto-growing (one to ~7 lines, then scrolling), Enter
+/// sends and Shift+Enter breaks the line, focused when the panel opens.
+/// `framed` draws its own border and background; Cascade's card supplies those.
+pub(crate) fn composer_input(state: AppState, placeholder: &str, framed: bool) -> impl IntoView {
+    // Kept deliberately minimal (no reactive mirror) and all mutation is
+    // deferred out of the key handler (see send_composer), which is what
+    // previously aborted on Enter.
     let doc = Rc::new(TextDocument::new(state.cx, String::new()));
     state.agent.composer_doc.set(Some(doc.clone()));
 
@@ -313,10 +314,10 @@ fn composer(state: AppState) -> impl IntoView {
     // Grab the editor handle before styling so the height closure can read the
     // current visual-line count.
     let ed = te.editor().clone();
+    doc.add_placeholder(ed.id(), placeholder.to_string());
 
     // Auto-grow: the box height follows the number of *visual* (soft-wrapped)
-    // lines, clamped between one line and ~7, then it scrolls internally. This
-    // is the professional chat-composer behaviour (grows as you type).
+    // lines, clamped between one line and ~7, then it scrolls internally.
     let ed_h = ed.clone();
     let doc_h = doc.clone();
     let te = te.style(move |s| {
@@ -326,16 +327,22 @@ fn composer(state: AppState) -> impl IntoView {
         let line_h = (ed_h.line_height(0) as f64).max(16.0);
         let lines = (ed_h.last_vline().get() + 1).clamp(1, 7);
         let height = lines as f64 * line_h + 16.0; // + vertical padding
-        s.flex_grow(1.0_f32)
+        let s = s
+            .flex_grow(1.0_f32)
             .min_width(0.0)
+            .width_full()
             .height(height)
             .font_size(13.0)
             .padding_horiz(10.0)
-            .padding_vert(8.0)
-            .border(1.0)
-            .border_color(theme::border())
-            .border_radius(10.0)
-            .background(theme::bg_panel())
+            .padding_vert(8.0);
+        if framed {
+            s.border(1.0)
+                .border_color(theme::border())
+                .border_radius(10.0)
+                .background(theme::bg_panel())
+        } else {
+            s
+        }
     });
 
     // Focus the field when the panel opens / the agent (re)starts. The focusable
@@ -348,61 +355,5 @@ fn composer(state: AppState) -> impl IntoView {
             vid.request_focus();
         }
     });
-    let input = te;
-
-    // Stop while running, Send otherwise — sits to the *right* of the input on
-    // the same row so it never gets pushed below the window edge.
-    let action_btn = label(move || {
-        if state.agent.chat.with(|c| c.running) {
-            "Stop".to_string()
-        } else {
-            "Send".to_string()
-        }
-    })
-    .style(move |s| {
-        let running = state.agent.chat.with(|c| c.running);
-        let bg = if running {
-            Color::from_rgb8(0x6a, 0x3a, 0x3a)
-        } else {
-            theme::accent()
-        };
-        s.height(40.0)
-            .items_center()
-            .justify_center()
-            .padding_horiz(16.0)
-            .margin_left(8.0)
-            .border_radius(10.0)
-            .font_size(13.0)
-            .color(Color::WHITE)
-            .background(bg)
-            .cursor(floem::style::CursorStyle::Pointer)
-            .hover(move |s| {
-                s.background(if running {
-                    Color::from_rgb8(0x7a, 0x44, 0x44)
-                } else {
-                    Color::from_rgb8(0x4a, 0x7c, 0xe0)
-                })
-            })
-    })
-    .on_click_stop(move |_| {
-        if state.agent.chat.with_untracked(|c| c.running) {
-            state.native_agent_abort();
-        } else {
-            state.send_composer();
-        }
-    });
-
-    stack((input, action_btn)).style(|s| {
-        s.items_end()
-            .width_full()
-            .padding(10.0)
-            .border_top(1.0)
-            .border_color(theme::border())
-            .background(theme::bg())
-    })
-}
-
-/// The native agent panel body (transcript + composer).
-pub fn agent_native_body(state: AppState) -> impl IntoView {
-    stack((transcript(state), composer(state))).style(|s| s.flex_col().size_full())
+    te
 }

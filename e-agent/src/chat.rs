@@ -40,16 +40,62 @@ pub enum ChatItem {
 /// Maximum characters kept for a tool-result preview.
 const RESULT_PREVIEW_LIMIT: usize = 2000;
 
+/// One model the agent can run on, as elyra describes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelInfo {
+    /// elyra's provider id: `anthropic`, `openai`, `google`, `xai`, …
+    pub provider: String,
+    pub id: String,
+    pub name: String,
+    /// Whether the model has a thinking level to set.
+    pub reasoning: bool,
+}
+
+impl ModelInfo {
+    fn from_value(v: &Value) -> Option<ModelInfo> {
+        let id = v.get("id")?.as_str()?.to_string();
+        let provider = v
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let name = v
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| id.clone());
+        Some(ModelInfo {
+            provider,
+            id,
+            name,
+            reasoning: v.get("reasoning").and_then(Value::as_bool).unwrap_or(false),
+        })
+    }
+}
+
 /// The running conversation state.
 #[derive(Clone, Debug, Default)]
 pub struct ChatState {
     pub items: Vec<ChatItem>,
     /// True while the agent is actively working on the current prompt.
     pub running: bool,
+    /// Every model the agent offers (`get_available_models`).
+    pub models: Vec<ModelInfo>,
+    /// The model in use, once the agent has told us (`get_state`/`set_model`).
+    pub model: Option<ModelInfo>,
+    /// The thinking level in use (`off` … `xhigh`), empty until known.
+    pub thinking: String,
+    pub session_id: String,
+    /// The session file on disk, when the session is persisted.
+    pub session_file: Option<String>,
     /// Index of the assistant item currently receiving text deltas.
     cur_assistant: Option<usize>,
     /// Index of the reasoning item currently receiving deltas.
     cur_reasoning: Option<usize>,
+    /// Role of the message elyra is currently emitting. elyra echoes the user's
+    /// own message as a `message_start`/`message_end` pair too; that one is
+    /// already in the transcript (pushed on send) and must not become a reply.
+    cur_role: String,
 }
 
 impl ChatState {
@@ -69,12 +115,14 @@ impl ChatState {
     /// Fold one event into the transcript.
     pub fn apply(&mut self, ev: AgentEvent) {
         match ev {
-            AgentEvent::Session { .. } | AgentEvent::TurnStart | AgentEvent::TurnEnd => {}
+            AgentEvent::Session { id, .. } => self.session_id = id,
+            AgentEvent::TurnStart | AgentEvent::TurnEnd => {}
             AgentEvent::AgentStart => self.running = true,
-            AgentEvent::MessageStart { .. } => {
-                // A fresh assistant turn: subsequent deltas start a new bubble.
+            AgentEvent::MessageStart { role } => {
+                // A fresh turn: subsequent deltas start a new bubble.
                 self.cur_assistant = None;
                 self.cur_reasoning = None;
+                self.cur_role = role;
             }
             AgentEvent::TextDelta { delta } => {
                 let idx = match self.cur_assistant {
@@ -111,6 +159,11 @@ impl ChatState {
                 }
             }
             AgentEvent::MessageEnd { text } => {
+                // The echo of the user's message ends here; nothing to draw.
+                if self.cur_role == "user" {
+                    self.cur_role.clear();
+                    return;
+                }
                 // Reconcile with the authoritative final text and stop streaming.
                 if let Some(final_text) = text {
                     match self.cur_assistant {
@@ -198,7 +251,17 @@ impl ChatState {
                 error: true,
             }),
             AgentEvent::RetryEnd { .. } => {}
-            AgentEvent::QueueUpdate { .. } | AgentEvent::Response { .. } => {}
+            AgentEvent::QueueUpdate { .. } => {}
+            AgentEvent::Response {
+                command,
+                success,
+                data,
+                ..
+            } => {
+                if success {
+                    self.apply_response(&command, &data);
+                }
+            }
             AgentEvent::AgentEnd => {
                 self.running = false;
                 self.stop_all_streaming();
@@ -213,6 +276,148 @@ impl ChatState {
                 });
             }
             AgentEvent::Other { .. } => {}
+        }
+    }
+
+    /// Fold the data a command answered with: the model list, the state, a
+    /// model change, or a whole conversation (`get_messages`, for a resumed
+    /// session).
+    fn apply_response(&mut self, command: &str, data: &Value) {
+        match command {
+            "get_available_models" => {
+                if let Some(list) = data.get("models").and_then(Value::as_array) {
+                    self.models = list.iter().filter_map(ModelInfo::from_value).collect();
+                }
+            }
+            "get_state" => {
+                if let Some(m) = data.get("model").and_then(ModelInfo::from_value) {
+                    self.model = Some(m);
+                }
+                if let Some(t) = data.get("thinkingLevel").and_then(Value::as_str) {
+                    self.thinking = t.to_string();
+                }
+                if let Some(id) = data.get("sessionId").and_then(Value::as_str) {
+                    self.session_id = id.to_string();
+                }
+                self.session_file = data
+                    .get("sessionFile")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
+            "set_model" => {
+                if let Some(m) = ModelInfo::from_value(data) {
+                    self.model = Some(m);
+                }
+            }
+            "cycle_model" => {
+                if let Some(m) = data.get("model").and_then(ModelInfo::from_value) {
+                    self.model = Some(m);
+                }
+                if let Some(t) = data.get("thinkingLevel").and_then(Value::as_str) {
+                    self.thinking = t.to_string();
+                }
+            }
+            "cycle_thinking_level" => {
+                if let Some(t) = data.get("level").and_then(Value::as_str) {
+                    self.thinking = t.to_string();
+                }
+            }
+            "get_messages" => {
+                if let Some(list) = data.get("messages").and_then(Value::as_array) {
+                    self.load_messages(list);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Replace the transcript with a stored conversation (elyra's
+    /// `AgentMessage` objects): user text, assistant text and tool calls, and
+    /// the tool results that answer them.
+    pub fn load_messages(&mut self, messages: &[Value]) {
+        self.items.clear();
+        self.cur_assistant = None;
+        self.cur_reasoning = None;
+        for m in messages {
+            let role = m.get("role").and_then(Value::as_str).unwrap_or("");
+            match role {
+                "user" => {
+                    let text = extract_text(m).unwrap_or_default();
+                    if !text.trim().is_empty() {
+                        self.items.push(ChatItem::User { text });
+                    }
+                }
+                "assistant" => {
+                    let Some(blocks) = m.get("content").and_then(Value::as_array) else {
+                        if let Some(text) = m.get("content").and_then(Value::as_str) {
+                            self.items.push(ChatItem::Assistant {
+                                text: text.to_string(),
+                                streaming: false,
+                            });
+                        }
+                        continue;
+                    };
+                    let mut text = String::new();
+                    for b in blocks {
+                        match b.get("type").and_then(Value::as_str) {
+                            Some("text") => {
+                                text.push_str(b.get("text").and_then(Value::as_str).unwrap_or(""))
+                            }
+                            Some("toolCall") => {
+                                if !text.trim().is_empty() {
+                                    self.items.push(ChatItem::Assistant {
+                                        text: std::mem::take(&mut text),
+                                        streaming: false,
+                                    });
+                                }
+                                let name = b
+                                    .get("name")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_string();
+                                let args = b.get("arguments").cloned().unwrap_or(Value::Null);
+                                self.items.push(ChatItem::Tool(ToolCall {
+                                    id: b
+                                        .get("id")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    summary: summarize_args(&name, &args),
+                                    name,
+                                    args,
+                                    status: ToolStatus::Done,
+                                    result: None,
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                    if !text.trim().is_empty() {
+                        self.items.push(ChatItem::Assistant {
+                            text,
+                            streaming: false,
+                        });
+                    }
+                }
+                "toolResult" => {
+                    let id = m.get("toolCallId").and_then(Value::as_str).unwrap_or("");
+                    let is_error = m.get("isError").and_then(Value::as_bool).unwrap_or(false);
+                    if let Some(ChatItem::Tool(tc)) = self
+                        .items
+                        .iter_mut()
+                        .rev()
+                        .find(|it| matches!(it, ChatItem::Tool(tc) if tc.id == id))
+                    {
+                        tc.status = if is_error {
+                            ToolStatus::Error
+                        } else {
+                            ToolStatus::Done
+                        };
+                        tc.result = Some(preview_result(m));
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -530,5 +735,133 @@ mod tests {
         } else {
             panic!();
         }
+    }
+
+    #[test]
+    fn responses_fill_models_state_and_model_changes() {
+        let mut st = ChatState::new();
+        let models = serde_json::json!({"models": [
+            {"id": "claude-opus-5", "name": "Claude Opus 5", "provider": "anthropic", "reasoning": true},
+            {"id": "gpt-5", "name": "GPT-5", "provider": "openai"}
+        ]});
+        st.apply(AgentEvent::Response {
+            id: None,
+            command: "get_available_models".into(),
+            success: true,
+            data: models,
+        });
+        assert_eq!(st.models.len(), 2);
+        assert!(st.models[0].reasoning && !st.models[1].reasoning);
+        st.apply(AgentEvent::Response {
+            id: None,
+            command: "get_state".into(),
+            success: true,
+            data: serde_json::json!({
+                "model": {"id": "gpt-5", "name": "GPT-5", "provider": "openai"},
+                "thinkingLevel": "high", "sessionId": "s9", "sessionFile": "/tmp/s9.jsonl"
+            }),
+        });
+        assert_eq!(st.model.as_ref().map(|m| m.id.as_str()), Some("gpt-5"));
+        assert_eq!(st.thinking, "high");
+        assert_eq!(st.session_file.as_deref(), Some("/tmp/s9.jsonl"));
+        st.apply(AgentEvent::Response {
+            id: None,
+            command: "set_model".into(),
+            success: true,
+            data: serde_json::json!({"id": "claude-opus-5", "provider": "anthropic"}),
+        });
+        assert_eq!(
+            st.model.as_ref().map(|m| m.name.as_str()),
+            Some("claude-opus-5")
+        );
+        // A failed command changes nothing.
+        st.apply(AgentEvent::Response {
+            id: None,
+            command: "set_model".into(),
+            success: false,
+            data: serde_json::json!({"id": "nope"}),
+        });
+        assert_eq!(
+            st.model.as_ref().map(|m| m.id.as_str()),
+            Some("claude-opus-5")
+        );
+    }
+
+    #[test]
+    fn a_stored_conversation_is_replayed_into_items() {
+        let mut st = ChatState::new();
+        let messages = serde_json::json!([
+            {"role": "user", "content": "Fix the bug"},
+            {"role": "assistant", "content": [
+                {"type": "text", "text": "Reading the file."},
+                {"type": "toolCall", "id": "t1", "name": "read", "arguments": {"path": "a.php"}}
+            ]},
+            {"role": "toolResult", "toolCallId": "t1", "toolName": "read", "content": [{"type": "text", "text": "<?php"}], "isError": false},
+            {"role": "assistant", "content": [{"type": "text", "text": "Done."}]}
+        ]);
+        st.apply(AgentEvent::Response {
+            id: None,
+            command: "get_messages".into(),
+            success: true,
+            data: serde_json::json!({"messages": messages}),
+        });
+        assert_eq!(st.items.len(), 4);
+        assert_eq!(
+            st.items[0],
+            ChatItem::User {
+                text: "Fix the bug".into()
+            }
+        );
+        assert!(
+            matches!(&st.items[1], ChatItem::Assistant { text, streaming: false } if text == "Reading the file.")
+        );
+        match &st.items[2] {
+            ChatItem::Tool(tc) => {
+                assert_eq!((tc.name.as_str(), tc.summary.as_str()), ("read", "a.php"));
+                assert_eq!(tc.status, ToolStatus::Done);
+                assert_eq!(tc.result.as_deref(), Some("<?php"));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(&st.items[3], ChatItem::Assistant { text, .. } if text == "Done."));
+    }
+
+    #[test]
+    fn the_echoed_user_message_is_not_drawn_as_a_reply() {
+        let mut st = ChatState::new();
+        st.push_user("Say hi");
+        for ev in [
+            AgentEvent::AgentStart,
+            AgentEvent::TurnStart,
+            AgentEvent::MessageStart {
+                role: "user".into(),
+            },
+            AgentEvent::MessageEnd {
+                text: Some("Say hi".into()),
+            },
+            AgentEvent::MessageStart {
+                role: "assistant".into(),
+            },
+            AgentEvent::TextDelta { delta: "hi".into() },
+            AgentEvent::MessageEnd {
+                text: Some("hi".into()),
+            },
+            AgentEvent::TurnEnd,
+            AgentEvent::AgentEnd,
+        ] {
+            st.apply(ev);
+        }
+        assert_eq!(
+            st.items,
+            vec![
+                ChatItem::User {
+                    text: "Say hi".into()
+                },
+                ChatItem::Assistant {
+                    text: "hi".into(),
+                    streaming: false
+                },
+            ]
+        );
     }
 }

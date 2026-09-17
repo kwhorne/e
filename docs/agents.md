@@ -8,35 +8,63 @@ next to your code.
 
 - **`⌘L`** toggles the agent panel on the right (it opens at 600px, resizable).
 - Every agent runs in an **embedded terminal** by default. Elyra can optionally
-  use an experimental [native chat panel](#native-chat-panel-elyra-experimental).
+  use [Elyra Cascade](#elyra-cascade), a chat panel.
 - **`⌘W`** (while the panel is focused) closes it; the agent keeps running, so
   `⌘L` reopens the same session.
 
-## Native chat panel (Elyra, experimental)
+## Elyra Cascade
 
 By default the agent panel is a terminal for **every** agent, including Elyra.
-Elyra can *optionally* be rendered as a native chat panel instead: turn on
-**Settings → Agents → “Native Elyra chat”** (or set `"native_agent": true` in
-[`config.json`](configuration.md)). It is **off by default** while the underlying
-text/input views mature.
+**Elyra Cascade** is the alternative: Elyra as a chat panel, drawn the way Devin
+Local and Windsurf's Cascade draw theirs. Turn it on with **Settings → Agents →
+Elyra Cascade**, the palette command **Agent: Elyra Cascade on/off**, or
+`"cascade": true` in [`config.json`](configuration.md); the panel's **⋯** menu
+has *Use the terminal panel instead* to go back. Other agents (Claude Code,
+Codex) always use the terminal.
 
-When enabled, Elyra runs headless over its structured RPC protocol
-(`elyra --mode rpc`) and the conversation is drawn with native views instead of a
-terminal, so it stays fast and readable no matter how long the transcript gets:
+Underneath, Elyra runs headless over its RPC protocol (`elyra --mode rpc`), so
+the conversation is drawn with native views and stays fast however long it
+gets — and every provider and model Elyra knows is available.
 
-- **Streaming replies** render as formatted **markdown** — headings, lists,
-  inline code, fenced code blocks and links.
-- **Tool-call cards** show each tool, a one-line summary of its arguments, its
-  status (running / done / error) and a compact result preview.
-- The **composer** is multi-line and word-wrapped, and **grows** as you type
-  (then scrolls). **Enter** sends, **Shift+Enter** inserts a newline. It is
-  focused automatically when the panel opens.
-- **Stop** aborts the current turn; typing while it runs **steers** it. **New
-  Chat** (in the header menu) starts a fresh session.
-- **Copy** buttons sit on every code block and under each reply.
+**The header** is a session tab with **＋** (new session), **◷** (this
+project's earlier sessions — pick one to resume it, with the conversation
+redrawn), **⋯** (new session, compact context, restart, terminal panel,
+settings) and **✕**.
 
-Other agents (Claude Code, Codex) always use the terminal panel. Turn the toggle
-back off to run Elyra in the terminal too (the default).
+**The empty state** shows the Elyra mark and *Describe your task to Elyra*;
+before any API key is stored it says where to add one.
+
+**The transcript**: streaming replies rendered as **markdown**, **tool-call
+cards** (tool, one-line summary, running / done / error, a result preview),
+dimmed reasoning, and **Copy** on every code block and reply.
+
+**The composer card** at the bottom:
+
+- The input is multi-line and word-wrapped and **grows** as you type (then
+  scrolls). **Enter** sends, **Shift+Enter** inserts a newline. Typing while
+  Elyra runs **steers** it.
+- **＋** attaches context: the **active file** (`@path`, which Elyra reads), the
+  **selection** (file and line range), or **all open files**.
+- **‹/› Code / ◇ Ask**: Code lets Elyra read, edit and run; Ask asks it to
+  answer and plan without touching anything.
+- **The model chip** (`Claude Opus 5 · high ▾`) lists every model Elyra offers,
+  grouped by provider, and the **thinking level** for models that have one.
+  The choice is remembered and Elyra starts on it next time.
+- **↑** sends, **■** stops the current turn.
+
+Under the card: `⌂ Local  ▭ <project>` — where the agent runs and on what.
+
+### API keys
+
+**Settings → Agents** has a key field for **Anthropic**, **OpenAI**, **Gemini**
+and **Grok (xAI)**. A key is stored in the macOS Keychain (elsewhere in
+`~/.config/e/secrets.json`, mode 0600), never in `config.json`, and is shown
+masked once saved (`••••1234`, with *Replace* and *Remove*). Cascade hands the
+stored keys to Elyra as its environment variables (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`) when it starts, so a key
+entered once is all it takes; a variable already exported in your shell still
+wins. Elyra's own credentials (`/login` for Claude Pro/Max, ChatGPT or Copilot
+subscriptions, and `~/.elyra/agent/auth.json`) keep working alongside.
 
 ## Switching agents
 

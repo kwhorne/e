@@ -50,6 +50,11 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("tinker-selection", "Tinker: Run Selection"),
     ("laravel-map", "Laravel: Architecture Map"),
     ("agent-log", "Agent: Timeline / Audit Log"),
+    (
+        "toggle-cascade",
+        "Agent: Elyra Cascade on/off (chat panel vs terminal)",
+    ),
+    ("cascade-new-session", "Agent: New Cascade Session"),
     ("agent-send-selection", "Agent: Send Selection to Agent"),
     ("move-class", "Refactor: Move Class…"),
     ("session-review", "Review: Session Changes"),

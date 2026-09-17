@@ -152,7 +152,7 @@ pub(crate) fn runs_text(runs: &[Vec<e_term::Run>]) -> String {
 }
 
 /// 1-based line number of byte `offset` in `text`.
-fn line_of(text: &str, offset: usize) -> usize {
+pub(crate) fn line_of(text: &str, offset: usize) -> usize {
     let end = offset.min(text.len());
     text[..end].bytes().filter(|&b| b == b'\n').count() + 1
 }
@@ -249,8 +249,7 @@ impl AppState {
             self.agent.open.set(true);
         }
         if self.use_native_agent() {
-            self.agent.composer.update(|c| c.push_str(msg));
-            self.agent.focus_pulse.update(|x| *x += 1);
+            self.cascade_insert(msg);
             return;
         }
         let just_started = self.agent.term.get_untracked().is_none();

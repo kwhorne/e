@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.21] - 2026-09-17
+
 ### Added
 
 - **Elyra Cascade.** Elyra as a chat panel instead of the terminal, drawn the

@@ -20,13 +20,13 @@ pub struct OutlineItem {
 fn kind_icon(kind: i64) -> (&'static str, Color) {
     match kind {
         // Class, Struct, Interface, Enum
-        5 | 23 | 11 | 10 => ("C", Color::from_rgb8(0xe5, 0xc0, 0x7b)),
+        5 | 23 | 11 | 10 => ("C", theme::warning()),
         // Method, Function, Constructor
-        6 | 12 | 9 => ("ƒ", Color::from_rgb8(0x61, 0xaf, 0xef)),
+        6 | 12 | 9 => ("ƒ", theme::info()),
         // Property, Field, Variable
-        7 | 8 | 13 => ("$", Color::from_rgb8(0xe0, 0x6c, 0x75)),
+        7 | 8 | 13 => ("$", theme::error()),
         // Constant, EnumMember
-        14 | 22 => ("π", Color::from_rgb8(0xd1, 0x9a, 0x66)),
+        14 | 22 => ("π", theme::number()),
         // Namespace, Module, Package
         2..=4 => ("{}", theme::fg_dim()),
         _ => ("•", theme::fg_dim()),

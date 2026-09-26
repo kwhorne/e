@@ -10,9 +10,9 @@ use crate::theme;
 
 fn severity_color(severity: Option<DiagnosticSeverity>) -> Color {
     match severity {
-        Some(DiagnosticSeverity::ERROR) => Color::from_rgb8(0xe0, 0x6c, 0x75),
-        Some(DiagnosticSeverity::WARNING) => Color::from_rgb8(0xe5, 0xc0, 0x7b),
-        _ => Color::from_rgb8(0x61, 0xaf, 0xef),
+        Some(DiagnosticSeverity::ERROR) => theme::error(),
+        Some(DiagnosticSeverity::WARNING) => theme::warning(),
+        _ => theme::info(),
     }
 }
 

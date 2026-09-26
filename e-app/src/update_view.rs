@@ -46,7 +46,7 @@ fn btn(text: &'static str, primary: bool) -> impl IntoView {
             .cursor(floem::style::CursorStyle::Pointer);
         if primary {
             s.background(theme::accent())
-                .color(floem::peniko::Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .hover(|s| s.background(theme::accent()))
         } else {
             s.background(theme::bg())

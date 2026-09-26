@@ -85,8 +85,8 @@ pub fn request_view(state: AppState) -> impl IntoView {
             .padding_vert(2.0)
             .border_radius(4.0);
         match state.req_status.get() {
-            Some(c) if (200..300).contains(&c) => s.color(Color::from_rgb8(0x9e, 0xce, 0x6a)),
-            Some(_) => s.color(Color::from_rgb8(0xf7, 0x76, 0x8e)),
+            Some(c) if (200..300).contains(&c) => s.color(theme::success()),
+            Some(_) => s.color(theme::error()),
             None => s.color(theme::fg_dim()),
         }
     });
@@ -201,7 +201,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
             counts.values().any(|&c| c > 1)
         });
         if has_dupe {
-            s.color(Color::from_rgb8(0xe5, 0xc0, 0x7b))
+            s.color(theme::warning())
         } else {
             s.color(theme::fg_dim())
         }
@@ -254,7 +254,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
             .padding_vert(5.0)
             .font_size(12.0)
             .font_bold()
-            .color(Color::from_rgb8(0x61, 0xaf, 0xef))
+            .color(theme::info())
             .cursor(floem::style::CursorStyle::Pointer)
             .border_top(1.0)
             .border_color(theme::border())
@@ -346,7 +346,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
             .padding_horiz(12.0)
             .padding_vert(4.0)
             .font_size(11.0)
-            .color(Color::from_rgb8(0xf7, 0x76, 0x8e));
+            .color(theme::error());
         if state.req_error.get().is_some() {
             s
         } else {

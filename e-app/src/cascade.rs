@@ -687,7 +687,7 @@ fn composer_card(state: AppState) -> impl IntoView {
         let (bg, fg) = if running {
             (Color::from_rgb8(0x8a, 0x3c, 0x3c), Color::WHITE)
         } else if theme::is_dark() {
-            (theme::fg(), Color::from_rgb8(0x14, 0x16, 0x1b))
+            (theme::fg(), theme::on_accent())
         } else {
             (theme::fg(), Color::WHITE)
         };

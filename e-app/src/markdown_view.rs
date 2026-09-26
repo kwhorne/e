@@ -16,7 +16,9 @@ use e_core::markdown::{self, heading_size, Block, Span};
 use crate::state::AppState;
 use crate::theme;
 
-const CODE_COLOR: Color = Color::from_rgb8(0xd1, 0x9a, 0x66);
+fn code_color() -> Color {
+    theme::number()
+}
 
 fn layout(spans: &[Span], size: f32, base_bold: bool) -> TextLayout {
     let sans: Vec<FamilyOwned> = FamilyOwned::parse_list("sans-serif").collect();
@@ -40,7 +42,7 @@ fn layout(spans: &[Span], size: f32, base_bold: bool) -> TextLayout {
             .font_size(size)
             .line_height(LineHeightValue::Normal(1.45));
         if sp.code {
-            a = a.family(&mono).color(CODE_COLOR);
+            a = a.family(&mono).color(code_color());
         } else {
             a = a.family(&sans).color(if sp.link {
                 theme::accent()

@@ -5,7 +5,6 @@
 use floem::reactive::{SignalGet, SignalUpdate};
 
 use crate::state::AppState;
-use crate::theme;
 
 /// Run the command with id `id`. Returns `true` if it was a known command.
 pub fn dispatch(state: AppState, id: &str) -> bool {
@@ -124,7 +123,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         }
         "restart-agent" => state.restart_agent(),
         "markdown" => state.toggle_md_preview(),
-        "theme" => theme::toggle(),
+        "theme" => state.toggle_theme(),
         "zoom-in" => state.zoom(1),
         "zoom-out" => state.zoom(-1),
         "zoom-reset" => state.zoom_reset(),

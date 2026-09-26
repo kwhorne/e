@@ -16,9 +16,9 @@ use crate::theme;
 /// The accent colour for a connection's environment (green / amber / red).
 fn env_color(env: e_db::Environment) -> Color {
     match env {
-        e_db::Environment::Local => Color::from_rgb8(0x98, 0xc3, 0x79),
-        e_db::Environment::Staging => Color::from_rgb8(0xe5, 0xc0, 0x7b),
-        e_db::Environment::Production => Color::from_rgb8(0xe0, 0x6c, 0x75),
+        e_db::Environment::Local => theme::success(),
+        e_db::Environment::Staging => theme::warning(),
+        e_db::Environment::Production => theme::error(),
     }
 }
 
@@ -113,7 +113,7 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
         s.font_size(10.0)
             .cursor(floem::style::CursorStyle::Pointer)
             .color(if ro {
-                Color::from_rgb8(0xe5, 0xc0, 0x7b)
+                theme::warning()
             } else {
                 theme::fg_dim()
             })
@@ -181,7 +181,7 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
     let e_err = entry.clone();
     let err = label(move || e_err.error.get().unwrap_or_default()).style(move |s| {
         let s = s
-            .color(Color::from_rgb8(0xf7, 0x76, 0x8e))
+            .color(theme::error())
             .font_size(11.0)
             .padding_horiz(22.0)
             .padding_vert(2.0);
@@ -410,8 +410,7 @@ fn add_form(state: AppState) -> impl IntoView {
                     .font_size(11.0)
                     .cursor(floem::style::CursorStyle::Pointer);
                 if active {
-                    s.background(theme::accent())
-                        .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                    s.background(theme::accent()).color(theme::on_accent())
                 } else {
                     s.border(1.0)
                         .border_color(theme::border())
@@ -453,7 +452,7 @@ fn add_form(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| {
@@ -517,8 +516,7 @@ fn add_form(state: AppState) -> impl IntoView {
                     .font_size(11.0)
                     .cursor(floem::style::CursorStyle::Pointer);
                 if active {
-                    s.background(theme::accent())
-                        .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                    s.background(theme::accent()).color(theme::on_accent())
                 } else {
                     s.border(1.0)
                         .border_color(theme::border())
@@ -603,9 +601,9 @@ fn add_form(state: AppState) -> impl IntoView {
         let st = state.db.test_state.get();
         let s = s.font_size(11.0).items_center();
         match st.as_str() {
-            "ok" => s.color(Color::from_rgb8(0x9e, 0xce, 0x6a)),
+            "ok" => s.color(theme::success()),
             "" | "testing" => s.color(theme::fg_dim()),
-            _ => s.color(Color::from_rgb8(0xf7, 0x76, 0x8e)),
+            _ => s.color(theme::error()),
         }
     });
     let test_row = stack((test, test_status)).style(|s| s.flex_row().gap(8.0).items_center());
@@ -817,7 +815,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_run_query());
@@ -918,7 +916,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
     .style(move |s| {
         let s = s.padding_horiz(12.0).padding_vert(4.0).font_size(11.0);
         if state.db.result_error.get().is_some() {
-            s.color(Color::from_rgb8(0xf7, 0x76, 0x8e))
+            s.color(theme::error())
         } else {
             s.color(theme::fg_dim())
         }
@@ -957,7 +955,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .padding_horiz(8.0)
                 .padding_vert(2.0)
                 .border_radius(4.0)
-                .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                .color(theme::error())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()));
             if state.db.result_loading.get() {
@@ -981,8 +979,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                     .font_size(11.0)
                     .cursor(floem::style::CursorStyle::Pointer);
                 if active {
-                    s.background(theme::accent())
-                        .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                    s.background(theme::accent()).color(theme::on_accent())
                 } else {
                     s.color(theme::fg_dim()).hover(|s| s.color(theme::fg()))
                 }
@@ -1517,7 +1514,7 @@ pub fn db_params_dialog(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_params_run());
@@ -1608,7 +1605,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             label(move || stmt.clone()).style(|s| {
                 s.font_family(theme::mono_family())
                     .font_size(12.0)
-                    .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                    .color(theme::error())
                     .padding_vert(2.0)
                     .width_full()
                     .text_ellipsis()
@@ -1687,7 +1684,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             .border_radius(5.0)
             .font_size(12.0)
             .background(color)
-            .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+            .color(theme::on_accent())
             .cursor(floem::style::CursorStyle::Pointer)
     })
     .on_click_stop(move |_| state.db_confirm_run());
@@ -1764,7 +1761,7 @@ pub fn db_consent_dialog(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_consent_allow());
@@ -1863,7 +1860,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_commit_edit());
@@ -1891,7 +1888,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
                 .font_size(12.0)
                 .border(1.0)
                 .border_color(Color::from_rgb8(0x6b, 0x2b, 0x2b))
-                .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                .color(theme::error())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(Color::from_rgba8(0xe0, 0x6c, 0x75, 30)))
         })
@@ -2089,7 +2086,7 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_commit_insert());
@@ -2450,11 +2447,7 @@ fn db_history_panel(state: AppState) -> impl IntoView {
                         .font_family(theme::mono_family())
                         .font_size(12.0)
                         .text_ellipsis()
-                        .color(if ok {
-                            theme::fg()
-                        } else {
-                            Color::from_rgb8(0xe0, 0x6c, 0x75)
-                        })
+                        .color(if ok { theme::fg() } else { theme::error() })
                 }),
                 label(move || meta.clone())
                     .style(|s| s.font_size(10.5).color(theme::fg_dim()).margin_top(2.0)),
@@ -2524,11 +2517,7 @@ fn pending_bar(state: AppState) -> impl IntoView {
             if d == 1 { "" } else { "s" },
         )
     })
-    .style(|s| {
-        s.flex_grow(1.0_f32)
-            .font_size(12.0)
-            .color(Color::from_rgb8(0xe5, 0xc0, 0x7b))
-    });
+    .style(|s| s.flex_grow(1.0_f32).font_size(12.0).color(theme::warning()));
     let revert = label(|| "Revert".to_string())
         .style(|s| {
             s.padding_horiz(12.0)
@@ -2551,7 +2540,7 @@ fn pending_bar(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.db_submit_changes());
@@ -2592,7 +2581,7 @@ fn explain_banner(state: AppState) -> impl IntoView {
     .style(|s| {
         s.flex_grow(1.0_f32)
             .font_size(11.0)
-            .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+            .color(theme::error())
             .text_ellipsis()
     });
     let hint = label(|| "Suggest Index → ask the agent".to_string()).style(|s| {
@@ -2639,7 +2628,7 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
                 .style(move |s| {
                     s.font_size(11.0)
                         .color(if pinned {
-                            Color::from_rgb8(0xe5, 0xc0, 0x7b)
+                            theme::warning()
                         } else {
                             theme::fg_dim()
                         })
@@ -2648,11 +2637,8 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
                 })
                 .on_click_stop(move |_| state.db_toggle_pin(i));
             let name = label(move || title.clone()).style(move |s| {
-                s.font_size(12.0).color(if is_err {
-                    Color::from_rgb8(0xe0, 0x6c, 0x75)
-                } else {
-                    theme::fg()
-                })
+                s.font_size(12.0)
+                    .color(if is_err { theme::error() } else { theme::fg() })
             });
             let close = label(|| "✕".to_string())
                 .style(|s| {
@@ -2794,7 +2780,7 @@ fn result_grid(state: AppState) -> impl IntoView {
                             // Colour: deleted row (red) > pending edit (amber) >
                             // NULL (dim) > normal.
                             let s = if pending_del {
-                                s.color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+                                s.color(theme::error())
                             } else if is_null {
                                 s.color(theme::fg_dim())
                             } else {
@@ -2959,7 +2945,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
                         .padding_vert(4.0)
                         .font_size(10.5)
                         .color(if ix.unique {
-                            Color::from_rgb8(0xe5, 0xc0, 0x7b)
+                            theme::warning()
                         } else {
                             theme::fg_dim()
                         })

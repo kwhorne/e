@@ -12,18 +12,19 @@ use e_lsp::path_to_uri;
 
 use crate::state::AppState;
 use crate::theme;
-
-const GREEN: Color = Color::from_rgb8(0x9e, 0xce, 0x6a);
-const AMBER: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
+fn green() -> Color {
+    theme::success()
+}
+fn amber() -> Color {
+    theme::warning()
+}
 const BLUE: Color = Color::from_rgb8(0x7a, 0xa2, 0xf7);
 
 fn status_color(status: &str) -> Color {
     match status {
-        "paused" => AMBER,
-        "running" => GREEN,
-        s if s.starts_with("error") || s.contains("No ") || s.contains("failed") => {
-            Color::from_rgb8(0xf7, 0x76, 0x8e)
-        }
+        "paused" => amber(),
+        "running" => green(),
+        s if s.starts_with("error") || s.contains("No ") || s.contains("failed") => theme::error(),
         _ => theme::fg_dim(),
     }
 }
@@ -220,7 +221,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
                 .style(|s| {
                     s.font_size(11.5)
                         .font_family(theme::mono_family())
-                        .color(Color::from_rgb8(0xf7, 0x76, 0x8e))
+                        .color(theme::error())
                         .padding_horiz(12.0)
                         .padding_vert(2.0)
                         .width_full()

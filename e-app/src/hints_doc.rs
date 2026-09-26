@@ -22,12 +22,14 @@ use floem::views::editor::text::{Document, DocumentPhantom, PreeditData};
 use floem::views::editor::text_document::TextDocument;
 use floem::views::editor::{Editor, EditorStyle};
 
+use crate::theme;
+
 fn hint_color() -> Color {
     Color::from_rgb8(0x6b, 0x73, 0x80)
 }
 
 fn ghost_color() -> Color {
-    Color::from_rgb8(0x5c, 0x63, 0x70)
+    theme::fg_dim()
 }
 
 pub struct HintsDoc {

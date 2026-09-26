@@ -20,8 +20,7 @@ fn pill(text: &'static str, primary: bool, on: impl Fn() + 'static) -> impl Into
                 .font_size(12.0)
                 .cursor(floem::style::CursorStyle::Pointer);
             if primary {
-                s.background(theme::accent())
-                    .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                s.background(theme::accent()).color(theme::on_accent())
             } else {
                 s.border(1.0)
                     .border_color(theme::border())
@@ -49,8 +48,8 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .padding_vert(2.0)
             .border_radius(4.0);
         match state.tdd_status.get() {
-            TddStatus::Passed => s.color(Color::from_rgb8(0x9e, 0xce, 0x6a)),
-            TddStatus::Failed => s.color(Color::from_rgb8(0xf7, 0x76, 0x8e)),
+            TddStatus::Passed => s.color(theme::success()),
+            TddStatus::Failed => s.color(theme::error()),
             TddStatus::Running => s.color(theme::accent()),
             TddStatus::Idle => s.color(theme::fg_dim()),
         }
@@ -112,11 +111,10 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .cursor(floem::style::CursorStyle::Pointer);
         if state.tdd_loop.get() {
             base.border(1.0)
-                .border_color(Color::from_rgb8(0xf7, 0x76, 0x8e))
-                .color(Color::from_rgb8(0xf7, 0x76, 0x8e))
+                .border_color(theme::error())
+                .color(theme::error())
         } else {
-            base.background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+            base.background(theme::accent()).color(theme::on_accent())
         }
     })
     .on_click_stop(move |_| {
@@ -144,7 +142,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .font_size(12.0)
             .color(theme::fg_dim());
         if state.tdd_results.with(|r| r.failed() > 0) {
-            s.color(Color::from_rgb8(0xe0, 0x6c, 0x75))
+            s.color(theme::error())
         } else {
             s
         }
@@ -188,11 +186,8 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             let errored = case.outcome == crate::testrun::Outcome::Errored;
 
             stack((
-                label(move || if errored { "!" } else { "\u{00d7}" }.to_string()).style(move |s| {
-                    s.width(14.0)
-                        .font_size(12.0)
-                        .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
-                }),
+                label(move || if errored { "!" } else { "\u{00d7}" }.to_string())
+                    .style(move |s| s.width(14.0).font_size(12.0).color(theme::error())),
                 stack((
                     label(move || name.clone()).style(|s| s.font_size(12.0).color(theme::fg())),
                     label(move || detail.clone()).style(|s| {

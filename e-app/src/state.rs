@@ -1811,6 +1811,29 @@ impl AppState {
         self.repaint_all_buffers();
     }
 
+    /// Switch the colour theme (UI, editor chrome, syntax colours) and remember
+    /// it. Editors re-lay out so the code colours change at once.
+    pub fn set_theme(&self, id: &str) {
+        let Some(t) = crate::theme::by_id(id) else {
+            return;
+        };
+        crate::theme::set_theme(t.id);
+        self.settings.update(|s| {
+            s.theme = t.id.to_string();
+            s.dark = t.dark;
+        });
+        config::set_str("theme", t.id);
+        config::set_bool("dark", t.dark);
+        self.repaint_all_buffers();
+        self.term_tick.update(|t| *t += 1);
+    }
+
+    /// `F8`: between the current dark theme and light, and back.
+    pub fn toggle_theme(&self) {
+        let next = crate::theme::toggle_target();
+        self.set_theme(next);
+    }
+
     /// Switch the code font (editor, terminal, code in panels) and remember it.
     /// Empty means the system monospace.
     pub fn set_font_family(&self, name: &str) {

@@ -92,7 +92,7 @@ fn toggle_row(
         s.width(16.0)
             .height(16.0)
             .border_radius(8.0)
-            .background(Color::from_rgb8(0x14, 0x16, 0x1b))
+            .background(theme::bg_deep())
             .margin_left(if on { 18.0 } else { 2.0 })
             .margin_top(2.0)
     });
@@ -239,10 +239,7 @@ fn api_key_row(state: AppState, p: crate::secrets::Provider) -> impl IntoView {
     );
 
     let err = label(move || error.get()).style(move |s| {
-        let s = s
-            .font_size(11.0)
-            .color(Color::from_rgb8(0xd6, 0x7a, 0x7a))
-            .margin_top(2.0);
+        let s = s.font_size(11.0).color(theme::error()).margin_top(2.0);
         if error.with(|e| e.is_empty()) {
             s.hide()
         } else {
@@ -273,6 +270,72 @@ fn api_key_row(state: AppState, p: crate::secrets::Provider) -> impl IntoView {
         stack((controls, err)).style(|s| s.flex_col().items_end()),
     ))
     .style(row_style)
+}
+
+/// The colour theme: one card per theme — its background, its name, and dots
+/// in its keyword, string, function and accent colours — the current one
+/// outlined in the accent.
+fn theme_row(state: AppState) -> impl IntoView {
+    let cards: Vec<AnyView> = theme::THEMES
+        .iter()
+        .map(|t| {
+            let id = t.id;
+            let pal = t.palette;
+            let dot = move |c: Color| {
+                empty().style(move |s| s.width(10.0).height(10.0).border_radius(5.0).background(c))
+            };
+            let dots = stack((
+                dot(pal.keyword),
+                dot(pal.string),
+                dot(pal.function),
+                dot(pal.accent),
+            ))
+            .style(|s| s.gap(4.0).margin_top(8.0));
+            let sample = label(|| "fn x() { \"y\" }".to_string()).style(move |s| {
+                s.font_family(theme::mono_family())
+                    .font_size(10.5)
+                    .color(pal.fg)
+                    .margin_top(4.0)
+            });
+            let name = label(move || t.name.to_string())
+                .style(move |s| s.font_size(12.0).font_bold().color(pal.fg));
+            stack((name, sample, dots))
+                .style(move |s| {
+                    let current = theme::current_id() == id;
+                    s.flex_col()
+                        .width(118.0)
+                        .padding(10.0)
+                        .border_radius(8.0)
+                        .background(pal.editor_bg)
+                        .border(2.0)
+                        .border_color(if current { theme::accent() } else { pal.border })
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(move |s| s.border_color(theme::accent()))
+                })
+                .on_click_stop(move |_| state.set_theme(id))
+                .into_any()
+        })
+        .collect();
+    let grid = stack_from_iter(cards).style(|s| {
+        s.flex_row()
+            .flex_wrap(floem::style::FlexWrap::Wrap)
+            .gap(8.0)
+    });
+    stack((
+        row_label(
+            "Theme",
+            "F8 switches between the dark theme in use and Light.",
+            false,
+        ),
+        grid,
+    ))
+    .style(|s| {
+        row_style(s)
+            .flex_col()
+            .items_start()
+            .gap(10.0)
+            .padding_vert(10.0)
+    })
 }
 
 /// The code font: a menu of the usual programming fonts (installed ones
@@ -379,10 +442,7 @@ fn font_family_row(state: AppState) -> impl IntoView {
         }
     })
     .style(move |s| {
-        let s = s
-            .font_size(11.0)
-            .color(Color::from_rgb8(0xe5, 0xc0, 0x7b))
-            .margin_top(4.0);
+        let s = s.font_size(11.0).color(theme::warning()).margin_top(4.0);
         let name = theme::mono_family_name();
         if name.is_empty() || fonts::is_installed(&name) {
             s.hide()
@@ -484,8 +544,7 @@ fn segmented_row(
                     .font_size(12.0)
                     .cursor(floem::style::CursorStyle::Pointer);
                 if active {
-                    s.background(theme::accent())
-                        .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                    s.background(theme::accent()).color(theme::on_accent())
                 } else {
                     s.color(theme::fg())
                         .hover(|s| s.background(theme::bg_hover()))
@@ -567,18 +626,9 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
     // 0 — Appearance
     push(
         0,
-        "Dark theme",
-        "",
-        toggle_row(
-            "Dark theme",
-            "",
-            move || s.settings.get().dark,
-            move |v| {
-                s.settings.update(|st| st.dark = v);
-                theme::set_dark(v);
-            },
-        )
-        .into_any(),
+        "Theme",
+        "Dark, Light, Tokyo Night, Darcula, Material, Nord, Palenight. F8 switches between the dark theme in use and Light.",
+        theme_row(s).into_any(),
     );
 
     // 1 — Editor

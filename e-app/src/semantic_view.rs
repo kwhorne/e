@@ -98,7 +98,7 @@ pub fn semantic_panel(state: AppState) -> impl IntoView {
                 label(move || title.clone()).style(|s| {
                     s.font_size(12.0)
                         .font_family(theme::mono_family())
-                        .color(Color::from_rgb8(0x61, 0xaf, 0xef))
+                        .color(theme::info())
                 }),
                 label(move || snip.clone()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
             ))

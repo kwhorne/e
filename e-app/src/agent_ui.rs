@@ -8,9 +8,12 @@ use floem::IntoView;
 
 use crate::state::{AppState, EditSeg};
 use crate::theme;
-
-const RED: Color = Color::from_rgb8(0xf7, 0x76, 0x8e);
-const GREEN: Color = Color::from_rgb8(0x9e, 0xce, 0x6a);
+fn red() -> Color {
+    theme::error()
+}
+fn green() -> Color {
+    theme::success()
+}
 
 fn code_block(text: String, color: Color, bg: Color) -> impl IntoView {
     label(move || text.trim_end_matches('\n').to_string()).style(move |s| {
@@ -85,7 +88,7 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
                     .font_size(11.0)
                     .cursor(floem::style::CursorStyle::Pointer);
                 if accepted.get() {
-                    s.color(GREEN)
+                    s.color(green())
                 } else {
                     s.color(theme::fg_dim())
                 }
@@ -95,12 +98,12 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
             let mut blocks: Vec<floem::AnyView> = Vec::new();
             if !old.trim().is_empty() {
                 blocks.push(
-                    code_block(old, RED, Color::from_rgba8(0xf7, 0x76, 0x8e, 0x22)).into_any(),
+                    code_block(old, red(), Color::from_rgba8(0xf7, 0x76, 0x8e, 0x22)).into_any(),
                 );
             }
             if !new.trim().is_empty() {
                 blocks.push(
-                    code_block(new, GREEN, Color::from_rgba8(0x9e, 0xce, 0x6a, 0x22)).into_any(),
+                    code_block(new, green(), Color::from_rgba8(0x9e, 0xce, 0x6a, 0x22)).into_any(),
                 );
             }
             let diff = floem::views::stack_from_iter(blocks).style(|s| s.flex_col().width_full());
@@ -180,8 +183,7 @@ fn pill(text: &'static str, primary: bool, on: impl Fn() + 'static) -> impl Into
                 .font_size(12.0)
                 .cursor(floem::style::CursorStyle::Pointer);
             if primary {
-                s.background(theme::accent())
-                    .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                s.background(theme::accent()).color(theme::on_accent())
             } else {
                 s.border(1.0)
                     .border_color(theme::border())

@@ -17,7 +17,8 @@ and `keybindings`), which is created on first use.
 
 ```jsonc
 {
-  "dark": true,            // dark theme (false = light)
+  "theme": "dark",         // dark, light, tokyo-night, darcula, material, nord, palenight
+  "dark": true,            // kept in step with the theme for older versions
   "font_size": 14,
   "font_family": "JetBrains Mono", // the code font; "" = the system monospace; see Editing → Fonts         // editor font size (8–40)
   "tab_width": 4,          // spaces per indent level (1–16)
@@ -44,7 +45,8 @@ and `keybindings`), which is created on first use.
 
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `dark` | bool | `true` | Dark or light theme |
+| `theme` | string | `"dark"` | The colour theme: `dark`, `light`, `tokyo-night`, `darcula`, `material`, `nord` or `palenight`. Pick one in **Settings → Appearance**; see [Themes](#themes). |
+| `dark` | bool | `true` | Whether the theme is dark; written alongside `theme`, and read when `theme` is absent (older configs). |
 | `font_size` | int | `14` | Editor font size (clamped 8–40) |
 | `font_family` | string | `"JetBrains Mono"` | The code font for the editor, the terminal and code in panels. `""` means the system monospace (Menlo on macOS). Pick one in **Settings → Editor → Font**; see [Editing → Fonts](editing.md#fonts). |
 | `tab_width` | int | `4` | Indent width (clamped 1–16) |
@@ -92,9 +94,14 @@ See [Keybindings](keybindings.md) for the syntax and the full command list.
 
 ## Themes
 
-`e` ships with a light and a dark theme. Toggle between them with **`F8`**; the
-choice is saved to `config.json`. The theme is fully reactive — the whole UI and
-editor update instantly.
+`e` ships seven themes — its own **Dark** and **Light**, **Tokyo Night**,
+**Darcula**, **Material** (Oceanic), **Nord** and **Palenight** — each a full
+palette: the UI chrome, the editor (background, gutter, cursor, selection,
+current line), the syntax colours, and the error/warning/success colours used
+across panels. Pick one from the cards in **Settings → Appearance → Theme**;
+the choice is saved to `config.json` as `theme` and the whole window
+re-themes at once. **`F8`** switches between the dark theme in use and Light,
+and back.
 
 ## Zoom & word wrap
 

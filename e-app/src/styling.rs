@@ -256,6 +256,7 @@ impl Styling for SyntaxStyling {
             }
         }
 
+        let palette = theme::palette_untracked();
         // Matching-bracket highlight (subtle box behind the bracket chars).
         for (start, end) in self.brackets.borrow().get(line).into_iter().flatten() {
             let color = Color::from_rgba8(0x80, 0x90, 0xa0, 0x55);
@@ -266,9 +267,9 @@ impl Styling for SyntaxStyling {
         // Find-match highlights (drawn first, behind text).
         for span in self.find.borrow().get(line).into_iter().flatten() {
             let color = if span.current {
-                Color::from_rgb8(0xc8, 0x8a, 0x3a)
+                palette.find_current
             } else {
-                Color::from_rgb8(0x5a, 0x53, 0x2a)
+                palette.find_other
             };
             let styles = range_styles(&layout_line.text, span.start, span.end, Some(color), None);
             layout_line.extra_style.extend(styles);
@@ -286,7 +287,7 @@ impl Styling for SyntaxStyling {
                     y,
                     width: Some(size),
                     height: size,
-                    bg_color: Some(Color::from_rgb8(0xf7, 0x76, 0x8e)),
+                    bg_color: Some(palette.error),
                     under_line: None,
                     wave_line: None,
                 });
@@ -296,8 +297,8 @@ impl Styling for SyntaxStyling {
         // Git change bar at the left edge of the line.
         if let Some(mark) = self.git.borrow().get(line).copied().flatten() {
             let color = match mark {
-                LineMark::Added => Color::from_rgb8(0x6a, 0xb0, 0x4a),
-                LineMark::Modified => Color::from_rgb8(0x4a, 0x7c, 0xc0),
+                LineMark::Added => palette.git_added,
+                LineMark::Modified => palette.git_modified,
             };
             for run in layout_line.text.layout_runs() {
                 let height = (run.max_ascent + run.max_descent) as f64;
@@ -320,9 +321,9 @@ impl Styling for SyntaxStyling {
         };
         for span in spans {
             let color = if span.error {
-                Color::from_rgb8(0xe0, 0x6c, 0x75)
+                palette.error
             } else {
-                Color::from_rgb8(0xe5, 0xc0, 0x7b)
+                palette.warning
             };
             let styles = range_styles(&layout_line.text, span.start, span.end, None, Some(color));
             layout_line.extra_style.extend(styles);
@@ -330,23 +331,8 @@ impl Styling for SyntaxStyling {
     }
 }
 
-/// Map a semantic token class to a colour. `None` keeps the default foreground.
+/// Map a semantic token class to the theme's colour. `None` keeps the default
+/// foreground.
 fn color_for(kind: HighlightKind) -> Option<Color> {
-    use HighlightKind::*;
-    let c = match kind {
-        Keyword => Color::from_rgb8(0xc6, 0x78, 0xdd), // purple
-        Function | Constructor => Color::from_rgb8(0x61, 0xaf, 0xef), // blue
-        Type => Color::from_rgb8(0xe5, 0xc0, 0x7b),    // yellow
-        String => Color::from_rgb8(0x98, 0xc3, 0x79),  // green
-        Number | Constant => Color::from_rgb8(0xd1, 0x9a, 0x66), // orange
-        Comment => Color::from_rgb8(0x5c, 0x63, 0x70), // gray
-        Property => Color::from_rgb8(0xe0, 0x6c, 0x75), // red
-        Operator | Escape => Color::from_rgb8(0x56, 0xb6, 0xc2), // cyan
-        Namespace => Color::from_rgb8(0xe5, 0xc0, 0x7b),
-        Attribute => Color::from_rgb8(0x61, 0xaf, 0xef),
-        Label | Tag => Color::from_rgb8(0xe0, 0x6c, 0x75),
-        Punctuation => theme::fg_dim(),
-        Variable => return None,
-    };
-    Some(c)
+    theme::syntax_color_untracked(kind)
 }

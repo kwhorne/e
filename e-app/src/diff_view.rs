@@ -42,12 +42,12 @@ pub fn diff_view(state: AppState) -> impl IntoView {
                     let (sign, color, bg) = match dl.kind {
                         DiffKind::Added => (
                             "+",
-                            Color::from_rgb8(0x98, 0xc3, 0x79),
+                            theme::success(),
                             Color::from_rgba8(0x6a, 0xb0, 0x4a, 0x22),
                         ),
                         DiffKind::Removed => (
                             "-",
-                            Color::from_rgb8(0xe0, 0x6c, 0x75),
+                            theme::error(),
                             Color::from_rgba8(0xe0, 0x6c, 0x75, 0x22),
                         ),
                         DiffKind::Context => {
@@ -131,12 +131,12 @@ pub fn file_diff_view(state: AppState) -> impl IntoView {
             let (sign, color, bg) = match dl.kind {
                 DiffKind::Added => (
                     "+",
-                    Color::from_rgb8(0x98, 0xc3, 0x79),
+                    theme::success(),
                     Color::from_rgba8(0x6a, 0xb0, 0x4a, 0x22),
                 ),
                 DiffKind::Removed => (
                     "-",
-                    Color::from_rgb8(0xe0, 0x6c, 0x75),
+                    theme::error(),
                     Color::from_rgba8(0xe0, 0x6c, 0x75, 0x22),
                 ),
                 DiffKind::Context => ("\u{00a0}", theme::fg_dim(), Color::from_rgba8(0, 0, 0, 0)),

@@ -11,9 +11,12 @@ use floem::IntoView;
 
 use crate::state::AppState;
 use crate::theme;
-
-const GREEN: Color = Color::from_rgb8(0x9e, 0xce, 0x6a);
-const AMBER: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
+fn green() -> Color {
+    theme::success()
+}
+fn amber() -> Color {
+    theme::warning()
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Migration {
@@ -197,8 +200,8 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
             .font_size(11.0)
             .color(theme::fg_dim())
     });
-    let run = pill("▶ Migrate", GREEN, move || state.migrations_run());
-    let rollback = pill("↶ Rollback last batch", AMBER, move || {
+    let run = pill("▶ Migrate", green(), move || state.migrations_run());
+    let rollback = pill("↶ Rollback last batch", amber(), move || {
         state.migrations_rollback()
     });
     let refresh = pill("↻", theme::fg_dim(), move || state.refresh_migrations());
@@ -222,7 +225,7 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
     });
 
     let error = label(move || state.migrations_error.get()).style(move |s| {
-        let s = s.padding(14.0).color(AMBER).font_size(12.0);
+        let s = s.padding(14.0).color(amber()).font_size(12.0);
         if state.migrations_error.with(|e| e.is_empty()) {
             s.hide()
         } else {
@@ -253,7 +256,7 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
                 }),
                 label(move || status.clone()).style(move |s| {
                     s.font_size(11.0)
-                        .color(if pending { AMBER } else { GREEN })
+                        .color(if pending { amber() } else { green() })
                         .flex_shrink(0.0_f32)
                 }),
             ))

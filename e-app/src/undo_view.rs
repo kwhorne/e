@@ -139,7 +139,7 @@ pub fn undo_tree_panel(state: AppState) -> impl IntoView {
                         .cursor(floem::style::CursorStyle::Pointer)
                         .hover(|s| s.background(theme::bg_hover()));
                     if cur {
-                        s.color(Color::from_rgb8(0x61, 0xaf, 0xef)).font_bold()
+                        s.color(theme::info()).font_bold()
                     } else {
                         s.color(theme::fg())
                     }

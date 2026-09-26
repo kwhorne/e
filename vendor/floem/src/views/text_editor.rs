@@ -140,6 +140,19 @@ impl View for TextEditor {
 pub struct EditorCustomStyle(pub(crate) Style);
 
 impl EditorCustomStyle {
+    /// The text colour and the background of the editor and its gutter — what
+    /// a colour theme sets before the per-element colours below.
+    pub fn text_colors(mut self, fg: crate::peniko::Color, bg: crate::peniko::Color) -> Self {
+        self.0 = self
+            .0
+            .color(fg)
+            .background(bg)
+            .class(crate::views::editor::gutter::GutterClass, move |s| {
+                s.background(bg)
+            });
+        self
+    }
+
     /// Sets whether the gutter should be hidden.
     pub fn hide_gutter(mut self, hide: bool) -> Self {
         self.0 = self

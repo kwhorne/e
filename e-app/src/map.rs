@@ -12,8 +12,9 @@ use crate::theme;
 
 /// A resolved route row: `(name, methods, uri, action, views, middleware, unprotected)`.
 type MapRow = (String, String, String, String, Vec<String>, String, bool);
-
-const WARN: Color = Color::from_rgb8(0xf7, 0x76, 0x8e);
+fn warn() -> Color {
+    theme::error()
+}
 
 fn card(text: String, accent: bool, pointer: bool) -> impl IntoView {
     label(move || text.clone()).style(move |s| {
@@ -64,7 +65,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
         }
     })
     .style(move |s| {
-        let s = s.margin_right(10.0).font_size(12.0).color(WARN);
+        let s = s.margin_right(10.0).font_size(12.0).color(warn());
         let n = state
             .laravel
             .get()
@@ -178,7 +179,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                     if chip_text.is_empty() {
                         s.hide()
                     } else if unprotected {
-                        s.color(WARN)
+                        s.color(warn())
                             .cursor(floem::style::CursorStyle::Pointer)
                             .hover(|s| s.background(theme::bg_hover()))
                     } else {

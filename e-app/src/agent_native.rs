@@ -11,7 +11,6 @@ use std::rc::Rc;
 
 use e_agent::{ChatItem, ToolStatus};
 use floem::keyboard::{Key, NamedKey};
-use floem::peniko::Color;
 use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::CommandExecuted;
 use floem::views::editor::keypress::default_key_handler;
@@ -165,7 +164,7 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
         Some(ChatItem::Notice { error, .. }) => label(move || item_text(state, i))
             .style(move |s| {
                 let c = if error {
-                    Color::from_rgb8(0xd6, 0x7a, 0x7a)
+                    theme::error()
                 } else {
                     theme::fg_dim()
                 };
@@ -206,7 +205,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
             Some(ChatItem::Tool(tc)) => match tc.status {
                 ToolStatus::Running => theme::accent(),
                 ToolStatus::Done => theme::fg_dim(),
-                ToolStatus::Error => Color::from_rgb8(0xd6, 0x7a, 0x7a),
+                ToolStatus::Error => theme::error(),
             },
             _ => theme::fg_dim(),
         });

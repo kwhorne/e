@@ -249,7 +249,7 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
         .style(|s| {
             s.size_full()
                 .flex_grow(1.0_f32)
-                .background(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .background(theme::bg_deep())
         })
         .on_resize(move |rect| {
             let (cw, lh) = char_size();

@@ -372,12 +372,10 @@ fn app_view() -> impl IntoView {
     crate::snippets::set_user(crate::config::load_user_snippets());
     crate::keymap::load(crate::config::load_user_keybindings());
 
-    // Restore the saved theme, and persist it whenever it changes.
-    theme::set_dark(crate::config::load_dark());
+    // Restore the saved theme and code font (persisted on change by
+    // `AppState::set_theme` / `set_font_family`).
+    theme::set_theme(&state.settings.get_untracked().theme);
     theme::set_mono_family(&state.settings.get_untracked().font_family);
-    create_effect(|_| {
-        crate::config::save_dark(theme::is_dark());
-    });
 
     // Bridge the LSP reader threads' events (diagnostics, edits, messages,
     // progress, exits) into the UI thread.

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Themes.** Besides `e`'s own Dark and Light: **Tokyo Night**, **Darcula**,
+  **Material** (Oceanic), **Nord** and **Palenight**, picked from cards in
+  **Settings → Appearance → Theme**. A theme is a whole palette — UI chrome,
+  editor background, gutter, cursor, selection and current line, the syntax
+  colours, and the error/warning/success colours every panel uses — and the
+  window re-themes at once. Saved as `theme` in `config.json`; `F8` switches
+  between the dark theme in use and Light. The Light theme's code colours are
+  now a light palette (they were the dark one's), and its terminal is light.
+
+### Fixed
+
+- **Tab names vanished while the terminal was open.** With the terminal and
+  problems panels open the editor column overflowed and the tab strip was
+  squeezed to two thirds of its height, clipping the names away. It no longer
+  shrinks.
+
 - **Choose the code font.** **Settings → Editor → Font** lists the fonts
   programmers use — JetBrains Mono, Fira Code, Cascadia Code, Source Code Pro,
   IBM Plex Mono, Hack, Inconsolata, Monaco, Menlo, SF Mono, Consolas, Ubuntu

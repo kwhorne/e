@@ -27,8 +27,7 @@ pub(crate) fn opt_toggle(
                 .border_radius(4.0)
                 .cursor(floem::style::CursorStyle::Pointer);
             if sig.get() {
-                s.background(theme::accent())
-                    .color(floem::peniko::Color::from_rgb8(0x14, 0x16, 0x1b))
+                s.background(theme::accent()).color(theme::on_accent())
             } else {
                 s.color(theme::fg_dim())
                     .hover(|s| s.background(theme::bg_hover()))

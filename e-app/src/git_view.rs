@@ -130,9 +130,9 @@ fn badge_color(entry: &StatusEntry) -> Color {
         theme::fg_dim()
     } else {
         match entry.badge() {
-            'M' | 'R' => Color::from_rgb8(0xe5, 0xc0, 0x7b), // yellow
-            'A' => Color::from_rgb8(0x98, 0xc3, 0x79),       // green
-            'D' => Color::from_rgb8(0xe0, 0x6c, 0x75),       // red
+            'M' | 'R' => theme::warning(), // yellow
+            'A' => theme::success(),       // green
+            'D' => theme::error(),         // red
             _ => theme::fg_dim(),
         }
     }
@@ -336,7 +336,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .background(theme::accent())
-                .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                .color(theme::on_accent())
                 .cursor(floem::style::CursorStyle::Pointer)
         })
         .on_click_stop(move |_| state.git_commit());

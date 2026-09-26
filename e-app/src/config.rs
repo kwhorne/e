@@ -8,6 +8,9 @@ use serde_json::{json, Value};
 #[derive(Clone)]
 pub struct Settings {
     pub dark: bool,
+    /// The colour theme's id (`dark`, `light`, `tokyo-night`, `darcula`,
+    /// `material`, `nord`, `palenight`). Older configs only have `dark`.
+    pub theme: String,
     pub font_size: usize,
     /// The code font's family name; empty means the system monospace. Absent
     /// from the file means the bundled default (JetBrains Mono).
@@ -61,6 +64,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             dark: true,
+            theme: "dark".to_string(),
             font_size: 14,
             font_family: crate::fonts::DEFAULT_FONT.to_string(),
             tab_width: 4,
@@ -118,6 +122,16 @@ pub fn load_settings() -> Settings {
     };
     Settings {
         dark: bool_of("dark", d.dark),
+        theme: match v.get("theme").and_then(|x| x.as_str()) {
+            Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+            _ => {
+                if bool_of("dark", d.dark) {
+                    "dark".to_string()
+                } else {
+                    "light".to_string()
+                }
+            }
+        },
         font_size: usize_of("font_size", d.font_size).clamp(8, 40),
         font_family: v
             .get("font_family")
@@ -425,23 +439,4 @@ pub fn load_user_snippets() -> std::collections::HashMap<String, Vec<(String, St
         }
     }
     out
-}
-
-/// Whether dark mode is enabled (defaults to true).
-pub fn load_dark() -> bool {
-    read().get("dark").and_then(|v| v.as_bool()).unwrap_or(true)
-}
-
-pub fn save_dark(dark: bool) {
-    let Some(path) = config_path() else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let mut value = read();
-    value["dark"] = json!(dark);
-    if let Ok(text) = serde_json::to_string_pretty(&value) {
-        let _ = std::fs::write(path, text);
-    }
 }

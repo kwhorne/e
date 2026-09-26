@@ -9,8 +9,9 @@ use floem::IntoView;
 use crate::grove_state::GroveTab;
 use crate::state::AppState;
 use crate::theme;
-
-const AMBER: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
+fn amber() -> Color {
+    theme::warning()
+}
 
 fn tab(state: AppState, which: GroveTab, text: &'static str) -> impl IntoView {
     label(move || text.to_string())
@@ -107,7 +108,7 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
                 .padding_vert(3.0)
                 .border_radius(4.0)
                 .font_size(11.0)
-                .color(AMBER)
+                .color(amber())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()));
             match state.grove_selected.get() {

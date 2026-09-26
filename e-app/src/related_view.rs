@@ -53,11 +53,8 @@ pub fn related_panel(state: AppState) -> impl IntoView {
                 .to_string();
             let p = path.clone();
             stack((
-                label(move || kind.clone()).style(|s| {
-                    s.width(90.0)
-                        .font_size(11.0)
-                        .color(Color::from_rgb8(0x61, 0xaf, 0xef))
-                }),
+                label(move || kind.clone())
+                    .style(|s| s.width(90.0).font_size(11.0).color(theme::info())),
                 label(move || rel.clone()).style(|s| {
                     s.flex_grow(1.0_f32)
                         .font_size(12.0)

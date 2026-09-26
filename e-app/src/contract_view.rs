@@ -8,10 +8,15 @@ use floem::IntoView;
 
 use crate::state::AppState;
 use crate::theme;
-
-const AMBER: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
-const RED: Color = Color::from_rgb8(0xf7, 0x76, 0x8e);
-const GREEN: Color = Color::from_rgb8(0x9e, 0xce, 0x6a);
+fn amber() -> Color {
+    theme::warning()
+}
+fn red() -> Color {
+    theme::error()
+}
+fn green() -> Color {
+    theme::success()
+}
 
 pub fn contract_panel(state: AppState) -> impl IntoView {
     let title = label(move || {
@@ -112,9 +117,9 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
                     .padding_vert(2.0)
                     .width_full();
                 if unused {
-                    s.color(AMBER)
+                    s.color(amber())
                 } else {
-                    s.color(GREEN)
+                    s.color(green())
                 }
             })
         },
@@ -140,7 +145,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
                     .padding_horiz(16.0)
                     .padding_vert(2.0)
                     .width_full()
-                    .color(RED)
+                    .color(red())
             })
         },
     )
@@ -183,7 +188,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
                                 .font_family(theme::mono_family())
                                 .padding_horiz(16.0)
                                 .padding_vert(1.0)
-                                .color(AMBER)
+                                .color(amber())
                         })
                         .into_any(),
                 );
@@ -197,7 +202,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
                                 .font_family(theme::mono_family())
                                 .padding_horiz(16.0)
                                 .padding_vert(1.0)
-                                .color(RED)
+                                .color(red())
                         })
                         .into_any(),
                 );

@@ -51,7 +51,7 @@ pub fn event_graph_panel(state: AppState) -> impl IntoView {
                     let s = s
                         .font_size(13.0)
                         .font_bold()
-                        .color(Color::from_rgb8(0xe5, 0xc0, 0x7b))
+                        .color(theme::warning())
                         .padding_vert(2.0);
                     if event_file.is_some() {
                         s.cursor(floem::style::CursorStyle::Pointer)

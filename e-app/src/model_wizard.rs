@@ -1048,8 +1048,7 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
                 .font_size(12.0)
                 .cursor(floem::style::CursorStyle::Pointer);
             if state.model_wizard_errors.with(|e| e.is_empty()) {
-                base.background(theme::accent())
-                    .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                base.background(theme::accent()).color(theme::on_accent())
             } else {
                 base.background(theme::bg_hover()).color(theme::fg_dim())
             }
@@ -1128,7 +1127,7 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
                     .padding_vert(2.0)
                     .width_full()
                     .color(if is_error {
-                        Color::from_rgb8(0xe5, 0xc0, 0x7b)
+                        theme::warning()
                     } else {
                         theme::fg_dim()
                     })

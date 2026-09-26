@@ -9,8 +9,9 @@ use floem::IntoView;
 
 use crate::state::AppState;
 use crate::theme;
-
-const WARN: Color = Color::from_rgb8(0xf7, 0x76, 0x8e);
+fn warn() -> Color {
+    theme::error()
+}
 
 fn tool(text: &'static str, on: impl Fn() + 'static) -> impl IntoView {
     label(move || text.to_string())
@@ -47,7 +48,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
         }
     })
     .style(move |s| {
-        let s = s.margin_right(8.0).font_size(12.0).color(WARN);
+        let s = s.margin_right(8.0).font_size(12.0).color(warn());
         let n = state.rel_graph.with(|g| {
             g.iter()
                 .flat_map(|m| &m.relations)
@@ -100,7 +101,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
                 .style(|s| {
                     s.font_size(13.0)
                         .font_bold()
-                        .color(Color::from_rgb8(0x61, 0xaf, 0xef))
+                        .color(theme::info())
                         .cursor(floem::style::CursorStyle::Pointer)
                         .hover(|s| s.color(theme::fg()))
                 })
@@ -147,7 +148,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
                             if ok {
                                 s.color(theme::fg())
                             } else {
-                                s.color(WARN)
+                                s.color(warn())
                             }
                         })
                         .on_click_stop(move |_| {

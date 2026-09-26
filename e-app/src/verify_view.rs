@@ -10,17 +10,22 @@ use crate::state::AppState;
 use crate::theme;
 use crate::verify::{summary, verdict_label, VerifyPhase};
 use e_verify::{Comparison, RequestMetrics, Verdict};
-
-const GREEN: Color = Color::from_rgb8(0x9e, 0xce, 0x6a);
-const RED: Color = Color::from_rgb8(0xf7, 0x76, 0x8e);
-const AMBER: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
+fn green() -> Color {
+    theme::success()
+}
+fn red() -> Color {
+    theme::error()
+}
+fn amber() -> Color {
+    theme::warning()
+}
 
 fn verdict_color(v: Verdict) -> Color {
     match v {
-        Verdict::Improved => GREEN,
+        Verdict::Improved => green(),
         Verdict::NoChange => theme::fg_dim(),
-        Verdict::Regressed => AMBER,
-        Verdict::Broke => RED,
+        Verdict::Regressed => amber(),
+        Verdict::Broke => red(),
     }
 }
 
@@ -60,7 +65,7 @@ fn metrics_block(title: &'static str, m: &RequestMetrics) -> impl IntoView {
     } else {
         "no".to_string()
     };
-    let n1_color = if m.has_n_plus_one() { AMBER } else { GREEN };
+    let n1_color = if m.has_n_plus_one() { amber() } else { green() };
     stack((
         label(move || title.to_string()).style(|s| {
             s.color(theme::fg())

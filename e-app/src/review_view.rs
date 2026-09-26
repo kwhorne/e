@@ -11,25 +11,30 @@ use floem::IntoView;
 
 use crate::state::AppState;
 use crate::theme;
-
-const GREEN: Color = Color::from_rgb8(0x98, 0xc3, 0x79);
-const RED: Color = Color::from_rgb8(0xe0, 0x6c, 0x75);
-const AMBER: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
+fn green() -> Color {
+    theme::success()
+}
+fn red() -> Color {
+    theme::error()
+}
+fn amber() -> Color {
+    theme::warning()
+}
 const ADD_BG: Color = Color::from_rgba8(0x6a, 0xb0, 0x4a, 0x22);
 const DEL_BG: Color = Color::from_rgba8(0xe0, 0x6c, 0x75, 0x22);
 
 fn risk_color(r: Risk) -> Color {
     match r {
-        Risk::High => RED,
-        Risk::Medium => AMBER,
+        Risk::High => red(),
+        Risk::Medium => amber(),
         Risk::Low => theme::fg_dim(),
     }
 }
 
 fn severity_color(s: Severity) -> Color {
     match s {
-        Severity::Danger => RED,
-        Severity::Warn => AMBER,
+        Severity::Danger => red(),
+        Severity::Warn => amber(),
         Severity::Info => theme::fg_dim(),
     }
 }
@@ -89,7 +94,7 @@ fn file_row(state: AppState, r: Row) -> impl IntoView {
             String::new()
         }
     })
-    .style(move |s| s.width(14.0).font_size(11.0).color(GREEN));
+    .style(move |s| s.width(14.0).font_size(11.0).color(green()));
     let kind = label(move || kind_glyph(r.kind).to_string())
         .style(move |s| s.width(12.0).font_size(10.0).color(theme::fg_dim()));
     let name = label(move || path_text.clone()).style(move |s| {
@@ -269,8 +274,8 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
                 (theme::accent(), Color::TRANSPARENT)
             } else {
                 match text.as_bytes().first() {
-                    Some(b'+') => (GREEN, ADD_BG),
-                    Some(b'-') => (RED, DEL_BG),
+                    Some(b'+') => (green(), ADD_BG),
+                    Some(b'-') => (red(), DEL_BG),
                     _ => (theme::fg_dim(), Color::TRANSPARENT),
                 }
             };
@@ -313,7 +318,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
         s.flex_grow(1.0_f32)
             .margin_left(10.0)
             .font_size(11.0)
-            .color(if all { GREEN } else { theme::fg_dim() })
+            .color(if all { green() } else { theme::fg_dim() })
     });
     let ask = btn("Summarize", false).on_click_stop(move |_| state.review_ask_summary());
     let refresh = btn("Refresh", false).on_click_stop(move |_| state.refresh_review());
@@ -424,9 +429,9 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let color = match state.review_ship_verdict().readiness {
-            Readiness::Ready => GREEN,
-            Readiness::Warn => AMBER,
-            Readiness::Blocked => RED,
+            Readiness::Ready => green(),
+            Readiness::Warn => amber(),
+            Readiness::Blocked => red(),
         };
         s.padding_horiz(8.0)
             .padding_vert(2.0)
@@ -494,7 +499,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
             .font_bold()
             .color(Color::WHITE)
             .cursor(floem::style::CursorStyle::Pointer)
-            .background(if blocked { AMBER } else { theme::accent() })
+            .background(if blocked { amber() } else { theme::accent() })
     })
     .on_click_stop(move |_| state.review_commit_and_pr(true));
     let ship_bar =

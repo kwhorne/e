@@ -89,8 +89,13 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
     .style(|s| s.items_center());
 
     scroll(tabs).style(|s| {
+        // Never shrink: with the terminal and problems panels open the editor
+        // column overflows, and flex used to squeeze the strip to ~24px, which
+        // clipped the tab names away.
         s.width_full()
             .height(34.0)
+            .min_height(34.0)
+            .flex_shrink(0.0_f32)
             .background(theme::bg_panel())
             .border_bottom(1.0)
             .border_color(theme::border())

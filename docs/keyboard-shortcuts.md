@@ -75,7 +75,7 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | `⌘=` / `⌘-` | Zoom in / out |
 | `⌘0`     | Reset zoom |
 | `⌥Z`     | Toggle word wrap |
-| `F8`     | Toggle light / dark theme |
+| `F8`     | Switch between the dark theme in use and Light (themes: Settings → Appearance) |
 | `⌘,`     | Open settings |
 
 ## AI & Laravel

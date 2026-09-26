@@ -8,9 +8,12 @@ use floem::IntoView;
 
 use crate::state::AppState;
 use crate::theme;
-
-const RED: Color = Color::from_rgb8(0xf7, 0x76, 0x8e);
-const YELLOW: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
+fn red() -> Color {
+    theme::error()
+}
+fn yellow() -> Color {
+    theme::warning()
+}
 
 /// Parse a PHP stack-trace frame `#N /abs/File.php(123): …` → `(path, line)`.
 fn parse_frame(line: &str) -> Option<(String, usize)> {
@@ -29,9 +32,9 @@ fn parse_frame(line: &str) -> Option<(String, usize)> {
 
 fn line_color(line: &str) -> Color {
     if line.contains(".ERROR") || line.contains(".CRITICAL") || line.contains(".EMERGENCY") {
-        RED
+        red()
     } else if line.contains(".WARNING") {
-        YELLOW
+        yellow()
     } else if line.trim_start().starts_with('#') {
         theme::fg_dim()
     } else {

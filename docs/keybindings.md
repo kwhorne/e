@@ -82,7 +82,7 @@ Examples: `cmd+shift+p`, `ctrl+g`, `alt+up`, `cmd+/`, `f12`, `shift+f12`.
 | `agent-send-selection` | `cmd+alt+s` | Send editor selection to the agent |
 | `session-review` | `cmd+alt+v` | Review what the agent changed this session |
 | `markdown` | `cmd+shift+m` | Markdown preview |
-| `theme` | `f8` | Light / dark theme |
+| `theme` | `f8` | Dark ↔ light theme |
 | `zoom-in` / `zoom-out` / `zoom-reset` | `cmd+=` / `cmd+-` / `cmd+0` | Zoom |
 | `word-wrap` | `alt+z` | Toggle word wrap |
 | `settings` | `cmd+,` | Open settings |

@@ -10,7 +10,9 @@ use crate::state::AppState;
 use crate::theme;
 
 /// Colour for a language server that isn't running (missing, crashed, given up).
-const LSP_WARN: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
+fn lsp_warn() -> Color {
+    theme::warning()
+}
 
 pub fn status_bar(state: AppState) -> impl IntoView {
     let left = label(move || match state.active_buffer() {
@@ -54,7 +56,7 @@ pub fn status_bar(state: AppState) -> impl IntoView {
             if ok {
                 s
             } else {
-                s.color(LSP_WARN)
+                s.color(lsp_warn())
             }
         })
         .on_click_stop(move |_| state.retry_lsp_for_active());

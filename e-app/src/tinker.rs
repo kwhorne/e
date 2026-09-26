@@ -33,8 +33,7 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
             if state.tinker_running.get() {
                 base.background(theme::bg_hover()).color(theme::fg_dim())
             } else {
-                base.background(theme::accent())
-                    .color(Color::from_rgb8(0x14, 0x16, 0x1b))
+                base.background(theme::accent()).color(theme::on_accent())
             }
         })
         .on_click_stop(move |_| state.run_tinker(doc_run.text().to_string()));

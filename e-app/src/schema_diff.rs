@@ -265,9 +265,9 @@ pub fn schema_diff_panel(state: AppState) -> impl IntoView {
                 _ => "differs",
             };
             let color = if row.in_db {
-                Color::from_rgb8(0xe5, 0xc0, 0x7b)
+                theme::warning()
             } else {
-                Color::from_rgb8(0x61, 0xaf, 0xef)
+                theme::info()
             };
             let name = format!("{}.{}", row.table, row.column);
             stack((

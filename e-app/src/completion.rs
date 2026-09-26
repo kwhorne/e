@@ -83,20 +83,20 @@ impl HoverState {
 fn kind_icon(kind: Option<CompletionItemKind>) -> (&'static str, Color) {
     match kind {
         Some(CompletionItemKind::FUNCTION) | Some(CompletionItemKind::METHOD) => {
-            ("ƒ", Color::from_rgb8(0x61, 0xaf, 0xef))
+            ("ƒ", theme::info())
         }
         Some(CompletionItemKind::VARIABLE) | Some(CompletionItemKind::FIELD) => {
-            ("$", Color::from_rgb8(0xe0, 0x6c, 0x75))
+            ("$", theme::error())
         }
         Some(CompletionItemKind::CLASS)
         | Some(CompletionItemKind::INTERFACE)
         | Some(CompletionItemKind::STRUCT)
-        | Some(CompletionItemKind::ENUM) => ("C", Color::from_rgb8(0xe5, 0xc0, 0x7b)),
+        | Some(CompletionItemKind::ENUM) => ("C", theme::warning()),
         Some(CompletionItemKind::CONSTANT) | Some(CompletionItemKind::ENUM_MEMBER) => {
-            ("π", Color::from_rgb8(0xd1, 0x9a, 0x66))
+            ("π", theme::number())
         }
-        Some(CompletionItemKind::KEYWORD) => ("k", Color::from_rgb8(0xc6, 0x78, 0xdd)),
-        Some(CompletionItemKind::SNIPPET) => ("▢", Color::from_rgb8(0x98, 0xc3, 0x79)),
+        Some(CompletionItemKind::KEYWORD) => ("k", theme::keyword()),
+        Some(CompletionItemKind::SNIPPET) => ("▢", theme::success()),
         _ => ("•", theme::fg_dim()),
     }
 }

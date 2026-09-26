@@ -16,8 +16,7 @@ fn button(text: &'static str, primary: bool) -> impl IntoView {
             .font_size(13.0)
             .cursor(floem::style::CursorStyle::Pointer);
         if primary {
-            s.background(theme::accent())
-                .color(floem::peniko::Color::from_rgb8(0x14, 0x16, 0x1b))
+            s.background(theme::accent()).color(theme::on_accent())
         } else {
             s.background(theme::bg())
                 .color(theme::fg())

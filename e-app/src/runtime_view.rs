@@ -13,10 +13,15 @@ use floem::IntoView;
 use crate::runtime::{DetailLine, RuntimeReq};
 use crate::state::AppState;
 use crate::theme;
-
-const GREEN: Color = Color::from_rgb8(0x9e, 0xce, 0x6a);
-const RED: Color = Color::from_rgb8(0xf7, 0x76, 0x8e);
-const AMBER: Color = Color::from_rgb8(0xe5, 0xc0, 0x7b);
+fn green() -> Color {
+    theme::success()
+}
+fn red() -> Color {
+    theme::error()
+}
+fn amber() -> Color {
+    theme::warning()
+}
 
 /// Normalise a query so repeated queries with different literals group together.
 fn normalize(sql: &str) -> String {
@@ -92,14 +97,18 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
         chip(
             format!("{status}"),
             if (200..300).contains(&status) {
-                GREEN
+                green()
             } else {
-                RED
+                red()
             },
         ),
         chip(
             format!("{dur:.0}ms"),
-            if dur > 200.0 { AMBER } else { theme::fg_dim() },
+            if dur > 200.0 {
+                amber()
+            } else {
+                theme::fg_dim()
+            },
         ),
         chip(
             if dup > 1 {
@@ -107,7 +116,7 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
             } else {
                 format!("Q:{qn}")
             },
-            if dup > 1 { RED } else { theme::fg_dim() },
+            if dup > 1 { red() } else { theme::fg_dim() },
         ),
         chip(format!("C:{cache_h}/{cache_m}"), theme::fg_dim()),
         chip(
@@ -116,7 +125,7 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
             } else {
                 String::new()
             },
-            AMBER,
+            amber(),
         ),
         chip(
             if events > 0 {
@@ -210,8 +219,8 @@ fn detail_row(state: AppState, line: DetailLine) -> impl IntoView {
             };
             (text, theme::fg_dim(), Some(sql))
         }
-        DetailLine::Mail(m) => (format!("✉ {m}"), AMBER, None),
-        DetailLine::Log(l) => (format!("⚠ {l}"), RED, None),
+        DetailLine::Mail(m) => (format!("✉ {m}"), amber(), None),
+        DetailLine::Log(l) => (format!("⚠ {l}"), red(), None),
         DetailLine::Note(n) => (n, theme::fg_dim(), None),
     };
     let has_sql = explain_sql.is_some();
@@ -289,7 +298,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
             .cursor(floem::style::CursorStyle::Pointer)
             .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
         match state.grove_sql_capture.get() {
-            Some(true) => s.color(GREEN),
+            Some(true) => s.color(green()),
             _ => s.color(theme::fg_dim()),
         }
     })

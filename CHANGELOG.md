@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.22] - 2026-09-26
+
 ### Added
 
 - **Themes.** Besides `e`'s own Dark and Light: **Tokyo Night**, **Darcula**,

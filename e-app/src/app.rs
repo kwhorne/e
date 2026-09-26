@@ -48,6 +48,8 @@ pub fn launch() {
     // tool lookup below wants the shell's.
     crate::shell_env::adopt_login_path();
     detach_from_terminal();
+    // JetBrains Mono ships with e; register it before anything is laid out.
+    crate::fonts::install_bundled();
     install_crash_logger();
     // exit_on_close defaults to false on macOS, which leaves the process (and its
     // Dock icon) alive after the window closes. e is single-window, so quit for
@@ -372,6 +374,7 @@ fn app_view() -> impl IntoView {
 
     // Restore the saved theme, and persist it whenever it changes.
     theme::set_dark(crate::config::load_dark());
+    theme::set_mono_family(&state.settings.get_untracked().font_family);
     create_effect(|_| {
         crate::config::save_dark(theme::is_dark());
     });

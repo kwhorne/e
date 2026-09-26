@@ -214,7 +214,7 @@ fn api_key_row(state: AppState, p: crate::secrets::Provider) -> impl IntoView {
                 let masked =
                     label(move || stored.get().map(|k| secrets::mask(&k)).unwrap_or_default())
                         .style(|s| {
-                            s.font_family("monospace".to_string())
+                            s.font_family(theme::mono_family())
                                 .font_size(12.0)
                                 .color(theme::fg_dim())
                                 .padding_horiz(6.0)
@@ -273,6 +273,152 @@ fn api_key_row(state: AppState, p: crate::secrets::Provider) -> impl IntoView {
         stack((controls, err)).style(|s| s.flex_col().items_end()),
     ))
     .style(row_style)
+}
+
+/// The code font: a menu of the usual programming fonts (installed ones
+/// selectable, the rest listed greyed so nothing silently falls back), the
+/// system monospace, and a free-text "Other…" for anything else.
+fn font_family_row(state: AppState) -> impl IntoView {
+    use crate::fonts;
+    let other_open: RwSignal<bool> = create_rw_signal(false);
+    let draft: RwSignal<String> = create_rw_signal(String::new());
+
+    let menu_btn = label(move || format!("{}  ▾", fonts::display_name(&theme::mono_family_name())))
+        .style(move |s| {
+            s.padding_horiz(12.0)
+                .height(26.0)
+                .items_center()
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(6.0)
+                .color(theme::fg())
+                .font_size(12.0)
+                .font_family(theme::mono_family())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .popout_menu(move || {
+            use floem::menu::{Menu, MenuItem};
+            let current = theme::mono_family_name();
+            let mark = |name: &str| if name == current { "● " } else { "   " };
+            let mut m = Menu::new("").entry(
+                MenuItem::new(format!("{}System monospace", mark("")))
+                    .action(move || state.set_font_family("")),
+            );
+            m = m.separator();
+            let (installed, missing): (Vec<&str>, Vec<&str>) = fonts::PROGRAMMING_FONTS
+                .iter()
+                .copied()
+                .partition(|f| fonts::is_installed(f));
+            for f in installed {
+                let name = f.to_string();
+                m = m.entry(
+                    MenuItem::new(format!("{}{f}", mark(f)))
+                        .action(move || state.set_font_family(&name)),
+                );
+            }
+            if !missing.is_empty() {
+                m = m.separator();
+                for f in missing {
+                    m = m.entry(MenuItem::new(format!("   {f} — not installed")).enabled(false));
+                }
+            }
+            m.separator().entry(MenuItem::new("Other…").action(move || {
+                draft.set(theme::mono_family_name());
+                other_open.set(true);
+            }))
+        });
+
+    let apply_other = move || {
+        let name = draft.get_untracked();
+        state.set_font_family(&name);
+        other_open.set(false);
+    };
+    let other = dyn_container(
+        move || other_open.get(),
+        move |open| {
+            if !open {
+                return empty().into_any();
+            }
+            let input = text_input(draft)
+                .placeholder("Family name, e.g. Comic Mono")
+                .on_enter(apply_other)
+                .style(|s| {
+                    theme::input_colors(s)
+                        .width(220.0)
+                        .min_width(0.0)
+                        .font_size(12.0)
+                        .padding_horiz(8.0)
+                        .padding_vert(4.0)
+                });
+            let ok = label(|| "Use".to_string())
+                .style(|s| {
+                    s.padding_horiz(10.0)
+                        .height(26.0)
+                        .items_center()
+                        .border(1.0)
+                        .border_color(theme::border())
+                        .border_radius(6.0)
+                        .font_size(12.0)
+                        .color(theme::fg())
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.background(theme::bg_hover()))
+                })
+                .on_click_stop(move |_| apply_other());
+            stack((input, ok))
+                .style(|s| s.items_center().gap(6.0).margin_top(6.0))
+                .into_any()
+        },
+    );
+    let warning = label(move || {
+        let name = theme::mono_family_name();
+        if name.is_empty() || fonts::is_installed(&name) {
+            String::new()
+        } else {
+            format!("“{name}” isn't installed — the system monospace is shown instead.")
+        }
+    })
+    .style(move |s| {
+        let s = s
+            .font_size(11.0)
+            .color(Color::from_rgb8(0xe5, 0xc0, 0x7b))
+            .margin_top(4.0);
+        let name = theme::mono_family_name();
+        if name.is_empty() || fonts::is_installed(&name) {
+            s.hide()
+        } else {
+            s
+        }
+    });
+
+    stack((
+        row_label(
+            "Font",
+            "The code font: editor, terminal and code in panels. JetBrains Mono ships with e.",
+            false,
+        ),
+        stack((menu_btn, other, warning)).style(|s| s.flex_col().items_end()),
+    ))
+    .style(row_style)
+}
+
+/// A line of code in the chosen font at the chosen size.
+fn font_preview_row(state: AppState) -> impl IntoView {
+    let sample =
+        label(|| "let x = 0O1lI; if x != 1 { println!(\"{x}\") } // <= >= -> !==".to_string())
+            .style(move |s| {
+                s.font_family(theme::mono_family())
+                    .font_size(state.settings.get().font_size as f32)
+                    .color(theme::fg())
+                    .padding(10.0)
+                    .border(1.0)
+                    .border_color(theme::border())
+                    .border_radius(6.0)
+                    .background(theme::bg())
+                    .width_full()
+                    .min_width(0.0)
+            });
+    stack((sample,)).style(|s| row_style(s).padding_vert(10.0))
 }
 
 /// A labelled number row with − / + steppers.
@@ -436,6 +582,13 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
     );
 
     // 1 — Editor
+    push(
+        1,
+        "Font",
+        "The code font: editor, terminal and code in panels. JetBrains Mono ships with e.",
+        font_family_row(s).into_any(),
+    );
+    push(1, "Font preview", "", font_preview_row(s).into_any());
     push(
         1,
         "Font size",

@@ -1811,6 +1811,18 @@ impl AppState {
         self.repaint_all_buffers();
     }
 
+    /// Switch the code font (editor, terminal, code in panels) and remember it.
+    /// Empty means the system monospace.
+    pub fn set_font_family(&self, name: &str) {
+        let name = name.trim().to_string();
+        self.settings.update(|s| s.font_family = name.clone());
+        config::set_str("font_family", &name);
+        crate::theme::set_mono_family(&name);
+        self.repaint_all_buffers();
+        // Terminal cells are measured from the font; redraw them too.
+        self.term_tick.update(|t| *t += 1);
+    }
+
     /// Whether any focus-grabbing overlay (palette, find, prompt, dialog) is
     /// open. The editor must not steal keyboard focus while one of these is up.
     pub fn any_overlay_open(&self) -> bool {

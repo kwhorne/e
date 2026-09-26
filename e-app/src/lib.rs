@@ -47,6 +47,7 @@ mod evidence;
 mod file_ops;
 mod file_tree;
 mod find;
+mod fonts;
 mod framework_completion;
 mod fuzzy;
 mod ghost;

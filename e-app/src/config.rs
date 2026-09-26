@@ -9,6 +9,9 @@ use serde_json::{json, Value};
 pub struct Settings {
     pub dark: bool,
     pub font_size: usize,
+    /// The code font's family name; empty means the system monospace. Absent
+    /// from the file means the bundled default (JetBrains Mono).
+    pub font_family: String,
     pub tab_width: usize,
     pub format_on_save: bool,
     pub trim_on_save: bool,
@@ -59,6 +62,7 @@ impl Default for Settings {
         Self {
             dark: true,
             font_size: 14,
+            font_family: crate::fonts::DEFAULT_FONT.to_string(),
             tab_width: 4,
             format_on_save: true,
             trim_on_save: true,
@@ -115,6 +119,11 @@ pub fn load_settings() -> Settings {
     Settings {
         dark: bool_of("dark", d.dark),
         font_size: usize_of("font_size", d.font_size).clamp(8, 40),
+        font_family: v
+            .get("font_family")
+            .and_then(|x| x.as_str())
+            .map(|s| s.trim().to_string())
+            .unwrap_or(d.font_family),
         tab_width: usize_of("tab_width", d.tab_width).clamp(1, 16),
         format_on_save: bool_of("format_on_save", d.format_on_save),
         trim_on_save: bool_of("trim_on_save", d.trim_on_save),

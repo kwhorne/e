@@ -153,7 +153,7 @@ pub fn replace_confirm_dialog(state: AppState) -> impl IntoView {
         label(files).style(|s| {
             s.color(theme::fg_dim())
                 .font_size(12.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .margin_top(12.0)
         }),
         label(|| "This rewrites files on disk and cannot be undone.".to_string())
@@ -258,7 +258,7 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
         floem::views::scroll(label(sites).style(|s| {
             s.color(theme::fg_dim())
                 .font_size(12.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .padding(8.0)
         }))
         .style(|s| s.max_height(300.0).width_full().margin_top(12.0)),
@@ -346,13 +346,13 @@ pub fn move_class_dialog(state: AppState) -> impl IntoView {
         label(subtitle).style(|s| {
             s.color(theme::fg_dim())
                 .font_size(12.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .margin_top(4.0)
         }),
         floem::views::scroll(label(files).style(|s| {
             s.color(theme::fg_dim())
                 .font_size(12.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .padding(8.0)
         }))
         .style(|s| s.max_height(240.0).width_full().margin_top(12.0)),

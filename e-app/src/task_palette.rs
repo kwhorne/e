@@ -132,7 +132,7 @@ pub fn task_palette(state: AppState) -> impl IntoView {
                 label(move || cmd.clone()).style(|s| {
                     s.color(theme::fg_dim())
                         .font_size(11.0)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                 }),
             ))
             .style(move |s| {

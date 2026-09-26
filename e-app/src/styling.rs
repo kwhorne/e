@@ -64,7 +64,9 @@ pub struct SyntaxStyling {
     brackets: BracketMarks,
     breakpoints: BpMarks,
     stop_line: StopLine,
-    family: Vec<FamilyOwned>,
+    /// `(family list as a string, parsed)` — re-parsed only when the chosen
+    /// font changes, since this is read for every line laid out.
+    family: std::cell::RefCell<(String, Vec<FamilyOwned>)>,
     font_size: floem::reactive::RwSignal<usize>,
     tab_width: usize,
 }
@@ -90,7 +92,7 @@ impl SyntaxStyling {
             brackets,
             breakpoints,
             stop_line,
-            family: vec![FamilyOwned::Monospace],
+            family: std::cell::RefCell::new((String::new(), vec![FamilyOwned::Monospace])),
             font_size,
             tab_width,
         }
@@ -198,7 +200,12 @@ impl Styling for SyntaxStyling {
     }
 
     fn font_family(&self, _edid: EditorId, _line: usize) -> Cow<'_, [FamilyOwned]> {
-        Cow::Borrowed(&self.family)
+        let want = crate::theme::mono_family_untracked();
+        let mut cache = self.family.borrow_mut();
+        if cache.0 != want {
+            *cache = (want.clone(), FamilyOwned::parse_list(&want).collect());
+        }
+        Cow::Owned(cache.1.clone())
     }
 
     fn tab_width(&self, _edid: EditorId, _line: usize) -> usize {

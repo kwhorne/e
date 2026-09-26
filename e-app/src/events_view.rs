@@ -83,7 +83,7 @@ pub fn event_graph_panel(state: AppState) -> impl IntoView {
                         .style(move |s| {
                             let s = s
                                 .font_size(12.0)
-                                .font_family("monospace".to_string())
+                                .font_family(theme::mono_family())
                                 .padding_left(16.0)
                                 .padding_vert(1.0)
                                 .color(theme::fg());

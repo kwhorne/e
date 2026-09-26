@@ -245,7 +245,7 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
             stack((
                 label(move || name.clone()).style(|s| {
                     s.font_size(12.0)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .color(theme::fg())
                         .flex_grow(1.0_f32)
                         .min_width(0.0)

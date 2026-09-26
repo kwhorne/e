@@ -67,7 +67,7 @@ fn row(
         }),
         label(move || secondary.clone()).style(|s| {
             s.font_size(11.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .color(theme::fg_dim())
                 .flex_shrink(0.0_f32)
         }),
@@ -200,7 +200,7 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
 
     let detail = scroll(label(move || state.grove_detail.get()).style(|s| {
         s.font_size(12.0)
-            .font_family("monospace".to_string())
+            .font_family(theme::mono_family())
             .color(theme::fg())
             .padding(12.0)
             .width_full()

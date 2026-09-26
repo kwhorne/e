@@ -276,7 +276,7 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
             };
             label(move || text.clone()).style(move |s| {
                 s.width_full()
-                    .font_family("monospace".to_string())
+                    .font_family(theme::mono_family())
                     .font_size(12.0)
                     .padding_horiz(12.0)
                     .color(color)

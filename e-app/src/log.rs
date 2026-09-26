@@ -84,7 +84,7 @@ pub fn laravel_log_panel(state: AppState) -> impl IntoView {
             label(move || line.clone())
                 .style(move |s| {
                     let s = s
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .font_size(11.5)
                         .padding_horiz(12.0)
                         .padding_vert(1.0)

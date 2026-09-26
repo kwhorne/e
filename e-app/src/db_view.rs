@@ -1398,7 +1398,7 @@ pub fn db_erd_panel(state: AppState) -> impl IntoView {
                 fk.table, fk.column, fk.ref_table, fk.ref_column
             );
             label(move || text.clone()).style(|s| {
-                s.font_family("monospace".to_string())
+                s.font_family(theme::mono_family())
                     .font_size(12.0)
                     .color(theme::fg())
                     .width_full()
@@ -1465,7 +1465,7 @@ pub fn db_params_dialog(state: AppState) -> impl IntoView {
                 label(move || format!(":{label_name}")).style(|s| {
                     s.width(120.0)
                         .flex_shrink(0.0_f32)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .font_size(12.0)
                         .color(theme::accent())
                 }),
@@ -1606,7 +1606,7 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
         |(i, _)| *i,
         move |(_, stmt)| {
             label(move || stmt.clone()).style(|s| {
-                s.font_family("monospace".to_string())
+                s.font_family(theme::mono_family())
                     .font_size(12.0)
                     .color(Color::from_rgb8(0xe0, 0x6c, 0x75))
                     .padding_vert(2.0)
@@ -1736,7 +1736,7 @@ pub fn db_consent_dialog(state: AppState) -> impl IntoView {
     let sql = label(move || state.db.consent.get().map(|c| c.sql).unwrap_or_default()).style(|s| {
         theme::input_colors(s)
             .width_full()
-            .font_family("monospace".to_string())
+            .font_family(theme::mono_family())
             .font_size(12.0)
             .padding(10.0)
             .margin_bottom(12.0)
@@ -1816,7 +1816,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             let s = theme::input_colors(s)
                 .width_full()
                 .min_height(34.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .font_size(13.0)
                 .padding_horiz(8.0)
                 .padding_vert(6.0);
@@ -2178,7 +2178,7 @@ fn db_value_viewer(state: AppState) -> impl IntoView {
         None => String::new(),
     })
     .style(|s| {
-        s.font_family("monospace".to_string())
+        s.font_family(theme::mono_family())
             .font_size(12.0)
             .color(theme::fg())
             .padding(10.0)
@@ -2302,7 +2302,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
             stack((
                 label(move || fwd.clone()).style(|s| {
                     s.flex_grow(1.0_f32)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .font_size(12.0)
                         .color(theme::fg())
                         .text_ellipsis()
@@ -2447,7 +2447,7 @@ fn db_history_panel(state: AppState) -> impl IntoView {
             stack((
                 label(move || sanitize_cell(&sql)).style(move |s| {
                     s.width_full()
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .font_size(12.0)
                         .text_ellipsis()
                         .color(if ok {
@@ -2978,7 +2978,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
                         .padding_horiz(8.0)
                         .padding_vert(4.0)
                         .font_size(12.0)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .color(theme::fg_dim())
                         .text_ellipsis()
                 }),

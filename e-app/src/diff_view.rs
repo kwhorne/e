@@ -58,7 +58,7 @@ pub fn diff_view(state: AppState) -> impl IntoView {
                     label(move || text.clone()).style(move |s| {
                         s.width_full()
                             .padding_horiz(12.0)
-                            .font_family("monospace".to_string())
+                            .font_family(theme::mono_family())
                             .font_size(13.0)
                             .line_height(1.4)
                             .color(color)
@@ -145,7 +145,7 @@ pub fn file_diff_view(state: AppState) -> impl IntoView {
             label(move || text.clone()).style(move |s| {
                 s.width_full()
                     .padding_horiz(12.0)
-                    .font_family("monospace".to_string())
+                    .font_family(theme::mono_family())
                     .font_size(12.5)
                     .color(color)
                     .background(bg)

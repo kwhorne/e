@@ -215,7 +215,7 @@ pub fn signature_popup(state: AppState) -> impl IntoView {
             .items_center()
             .padding_horiz(8.0)
             .height(24.0)
-            .font_family("monospace".to_string())
+            .font_family(theme::mono_family())
             .font_size(13.0)
             .background(theme::bg_panel())
             .border(1.0)

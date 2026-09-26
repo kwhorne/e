@@ -30,7 +30,7 @@ fn cheat(key: &'static str, desc: &'static str) -> impl IntoView {
         label(move || key.to_string()).style(|s| {
             s.width(64.0)
                 .justify_end()
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .font_size(12.0)
                 .color(theme::fg())
         }),
@@ -247,7 +247,7 @@ fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
                         .padding_left(58.0)
                         .padding_right(10.0)
                         .padding_vert(2.0)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .font_size(state.font_size.get() as f32)
                         .color(theme::fg())
                         .text_ellipsis()

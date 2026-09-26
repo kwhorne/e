@@ -1079,7 +1079,7 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
             s.flex_grow(1.0_f32)
                 .min_width(0.0)
                 .height_full()
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .font_size(13.0)
                 .padding(8.0)
         })
@@ -1122,7 +1122,7 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
         |(i, _)| *i,
         move |(_, (is_error, text))| {
             label(move || text.clone()).style(move |s| {
-                s.font_family("monospace".to_string())
+                s.font_family(theme::mono_family())
                     .font_size(11.5)
                     .padding_horiz(10.0)
                     .padding_vert(2.0)

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Choose the code font.** **Settings → Editor → Font** lists the fonts
+  programmers use — JetBrains Mono, Fira Code, Cascadia Code, Source Code Pro,
+  IBM Plex Mono, Hack, Inconsolata, Monaco, Menlo, SF Mono, Consolas, Ubuntu
+  Mono, Roboto Mono, DejaVu Sans Mono, Courier New and more — with the ones
+  installed selectable and the rest greyed, plus *System monospace* and
+  *Other…* for any installed family, and a preview line. The choice applies to
+  the editor, the terminal and code in every panel, live, and is `font_family`
+  in `config.json`.
+
+- **JetBrains Mono ships with `e`** (SIL Open Font License) and is the default
+  code font, so code looks the same on every machine. *System monospace* brings
+  back the platform font (Menlo on macOS).
+
 ## [0.9.21] - 2026-09-17
 
 ### Added

@@ -14,6 +14,39 @@ use floem::views::EditorCustomStyle;
 
 thread_local! {
     static DARK: RefCell<Option<RwSignal<bool>>> = const { RefCell::new(None) };
+    /// The chosen code font (a family name; empty = the system monospace).
+    static MONO: RefCell<Option<RwSignal<String>>> = const { RefCell::new(None) };
+}
+
+fn mono_signal() -> RwSignal<String> {
+    MONO.with(|c| {
+        *c.borrow_mut()
+            .get_or_insert_with(|| RwSignal::new(crate::fonts::DEFAULT_FONT.to_string()))
+    })
+}
+
+/// Change the code font. Every style closure that read [`mono_family`]
+/// re-runs; editors are re-laid-out by the caller (`repaint_all_buffers`).
+pub fn set_mono_family(name: &str) {
+    mono_signal().set(name.trim().to_string());
+}
+
+/// The chosen code font's name (empty = system monospace). Tracks the signal.
+pub fn mono_family_name() -> String {
+    mono_signal().get()
+}
+
+/// The family list for code — the chosen font, then the system monospace —
+/// for `.font_family(...)` and `FamilyOwned::parse_list`. Tracks the signal,
+/// so a style closure re-themes when the font changes.
+pub fn mono_family() -> String {
+    crate::fonts::family_list(&mono_signal().get())
+}
+
+/// [`mono_family`] without tracking, for layout code outside effects.
+pub fn mono_family_untracked() -> String {
+    use floem::reactive::SignalWith;
+    mono_signal().with_untracked(|n| crate::fonts::family_list(n))
 }
 
 fn dark_signal() -> RwSignal<bool> {

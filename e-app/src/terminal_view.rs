@@ -112,7 +112,7 @@ fn terminal_tabs(state: AppState) -> impl IntoView {
 
 /// Pixel size of one monospace cell at the terminal's font size.
 pub(crate) fn char_size() -> (f64, f64) {
-    let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
+    let family: Vec<FamilyOwned> = FamilyOwned::parse_list(&theme::mono_family()).collect();
     let attrs = Attrs::new().family(&family).font_size(13.0);
     let mut layout = TextLayout::new();
     layout.set_text("W", AttrsList::new(attrs), None);
@@ -158,7 +158,7 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
     let content = rich_text(move || {
         state.term_tick.get();
         let runs = state.term_runs_of(id_sig.get());
-        let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
+        let family: Vec<FamilyOwned> = FamilyOwned::parse_list(&theme::mono_family()).collect();
         let default = Attrs::new()
             .family(&family)
             .font_size(13.0)

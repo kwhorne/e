@@ -61,7 +61,7 @@ pub fn related_panel(state: AppState) -> impl IntoView {
                 label(move || rel.clone()).style(|s| {
                     s.flex_grow(1.0_f32)
                         .font_size(12.0)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .color(theme::fg())
                         .text_ellipsis()
                 }),

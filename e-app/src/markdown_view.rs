@@ -20,7 +20,7 @@ const CODE_COLOR: Color = Color::from_rgb8(0xd1, 0x9a, 0x66);
 
 fn layout(spans: &[Span], size: f32, base_bold: bool) -> TextLayout {
     let sans: Vec<FamilyOwned> = FamilyOwned::parse_list("sans-serif").collect();
-    let mono: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
+    let mono: Vec<FamilyOwned> = FamilyOwned::parse_list(&theme::mono_family()).collect();
 
     let mut base = Attrs::new()
         .family(&sans)
@@ -109,7 +109,8 @@ fn block_view(block: Block) -> impl IntoView {
         Block::Code(code) => {
             let body = code.clone();
             let code_text = rich_text(move || {
-                let mono: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
+                let mono: Vec<FamilyOwned> =
+                    FamilyOwned::parse_list(&theme::mono_family()).collect();
                 let attrs = Attrs::new()
                     .family(&mono)
                     .font_size(13.0)

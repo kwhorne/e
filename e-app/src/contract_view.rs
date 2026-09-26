@@ -81,7 +81,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
         s.padding_horiz(12.0)
             .padding_vert(6.0)
             .font_size(11.0)
-            .font_family("monospace".to_string())
+            .font_family(theme::mono_family())
             .color(theme::fg_dim())
     });
 
@@ -107,7 +107,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
             label(move || text.clone()).style(move |s| {
                 let s = s
                     .font_size(12.0)
-                    .font_family("monospace".to_string())
+                    .font_family(theme::mono_family())
                     .padding_horiz(16.0)
                     .padding_vert(2.0)
                     .width_full();
@@ -136,7 +136,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
             let text = format!("{key}  ⚠ used but never sent");
             label(move || text.clone()).style(move |s| {
                 s.font_size(12.0)
-                    .font_family("monospace".to_string())
+                    .font_family(theme::mono_family())
                     .padding_horiz(16.0)
                     .padding_vert(2.0)
                     .width_full()
@@ -180,7 +180,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
                     label(move || t.clone())
                         .style(|s| {
                             s.font_size(12.0)
-                                .font_family("monospace".to_string())
+                                .font_family(theme::mono_family())
                                 .padding_horiz(16.0)
                                 .padding_vert(1.0)
                                 .color(AMBER)
@@ -194,7 +194,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
                     label(move || t.clone())
                         .style(|s| {
                             s.font_size(12.0)
-                                .font_family("monospace".to_string())
+                                .font_family(theme::mono_family())
                                 .padding_horiz(16.0)
                                 .padding_vert(1.0)
                                 .color(RED)

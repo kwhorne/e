@@ -14,7 +14,7 @@ const GREEN: Color = Color::from_rgb8(0x9e, 0xce, 0x6a);
 
 fn code_block(text: String, color: Color, bg: Color) -> impl IntoView {
     label(move || text.trim_end_matches('\n').to_string()).style(move |s| {
-        s.font_family("monospace".to_string())
+        s.font_family(theme::mono_family())
             .font_size(12.0)
             .padding_horiz(8.0)
             .padding_vert(3.0)

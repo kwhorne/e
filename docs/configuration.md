@@ -18,7 +18,8 @@ and `keybindings`), which is created on first use.
 ```jsonc
 {
   "dark": true,            // dark theme (false = light)
-  "font_size": 14,         // editor font size (8–40)
+  "font_size": 14,
+  "font_family": "JetBrains Mono", // the code font; "" = the system monospace; see Editing → Fonts         // editor font size (8–40)
   "tab_width": 4,          // spaces per indent level (1–16)
   "format_on_save": true,  // format via the language server on save
   "trim_on_save": true,    // trim trailing whitespace + ensure final newline
@@ -45,6 +46,7 @@ and `keybindings`), which is created on first use.
 | --- | ---- | ------- | ----------- |
 | `dark` | bool | `true` | Dark or light theme |
 | `font_size` | int | `14` | Editor font size (clamped 8–40) |
+| `font_family` | string | `"JetBrains Mono"` | The code font for the editor, the terminal and code in panels. `""` means the system monospace (Menlo on macOS). Pick one in **Settings → Editor → Font**; see [Editing → Fonts](editing.md#fonts). |
 | `tab_width` | int | `4` | Indent width (clamped 1–16) |
 | `format_on_save` | bool | `true` | Format the document on save |
 | `trim_on_save` | bool | `true` | Trim trailing whitespace on save |

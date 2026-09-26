@@ -135,7 +135,7 @@ pub fn undo_tree_panel(state: AppState) -> impl IntoView {
                         .padding_vert(3.0)
                         .width_full()
                         .font_size(12.0)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .cursor(floem::style::CursorStyle::Pointer)
                         .hover(|s| s.background(theme::bg_hover()));
                     if cur {

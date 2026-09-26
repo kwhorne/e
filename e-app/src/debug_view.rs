@@ -63,7 +63,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
         s.flex_grow(1.0_f32)
             .margin_left(10.0)
             .font_size(11.0)
-            .font_family("monospace".to_string())
+            .font_family(theme::mono_family())
             .color(status_color(&state.debug_status.get()))
     });
 
@@ -131,7 +131,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
             label(move || text.clone())
                 .style(|s| {
                     s.font_size(11.5)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .color(theme::fg())
                         .padding_horiz(12.0)
                         .padding_vert(3.0)
@@ -171,13 +171,13 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
             stack((
                 label(move || name.clone()).style(|s| {
                     s.font_size(11.5)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .color(BLUE)
                         .min_width(120.0)
                 }),
                 label(move || value.clone()).style(|s| {
                     s.font_size(11.5)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .color(theme::fg())
                         .flex_grow(1.0_f32)
                         .text_ellipsis()
@@ -219,7 +219,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
             label(move || text.clone())
                 .style(|s| {
                     s.font_size(11.5)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .color(Color::from_rgb8(0xf7, 0x76, 0x8e))
                         .padding_horiz(12.0)
                         .padding_vert(2.0)

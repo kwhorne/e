@@ -9,6 +9,25 @@
   reopens the file with the right language, LSP, and git support.
 - **`⌘⇧S`** is Save As… for any buffer.
 
+## Fonts
+
+**Settings → Editor → Font** picks the code font for the editor, the terminal
+and code shown in panels, with a preview line underneath. The menu lists the
+fonts programmers use — JetBrains Mono, Fira Code, Cascadia Code, Source Code
+Pro, IBM Plex Mono, Hack, Inconsolata, Monaco, Menlo, SF Mono, Consolas,
+Ubuntu Mono, Roboto Mono, DejaVu Sans Mono, Courier New, Andale Mono, PT Mono,
+Iosevka, Victor Mono, Geist Mono, Monaspace Neon, Berkeley Mono, Input Mono,
+Noto Sans Mono, Liberation Mono — with the ones installed on your machine
+selectable and the rest listed greyed, so a choice never silently falls back
+to another font. **System monospace** uses the platform's default (Menlo on
+macOS), and **Other…** takes any installed family by name.
+
+**JetBrains Mono ships with `e`** (SIL Open Font License, see
+`fonts/JetBrainsMono/OFL.txt`) and is the default, so code looks the same on
+every machine. The setting is `font_family` in
+[`config.json`](configuration.md); the size is `⌘=` / `⌘-` or **Font size** in
+the same section.
+
 ## Line operations
 
 | Action | Shortcut |

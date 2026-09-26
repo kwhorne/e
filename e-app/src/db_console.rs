@@ -133,7 +133,7 @@ pub fn sql_console(state: AppState) -> impl IntoView {
     })
     .style(|s| {
         s.size_full()
-            .font_family("monospace".to_string())
+            .font_family(theme::mono_family())
             .font_size(13.0)
             .padding_horiz(10.0)
             .padding_vert(8.0)

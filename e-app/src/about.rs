@@ -15,8 +15,7 @@ fn line(text: &'static str, accent: bool, url: Option<&'static str>) -> impl Int
         .style(move |s| {
             let s = s.font_size(14.0);
             let s = if accent {
-                s.color(theme::accent())
-                    .font_family("monospace".to_string())
+                s.color(theme::accent()).font_family(theme::mono_family())
             } else {
                 s.color(theme::fg_dim())
             };
@@ -37,7 +36,7 @@ pub fn about_dialog(state: AppState) -> impl IntoView {
     let content = stack((
         img(|| ICON_PNG.to_vec()).style(|s| s.width(84.0).height(84.0).margin_bottom(10.0)),
         label(|| format!("Version {}", env!("CARGO_PKG_VERSION"))).style(|s| {
-            s.font_family("monospace".to_string())
+            s.font_family(theme::mono_family())
                 .font_size(13.0)
                 .color(theme::fg_dim())
                 .margin_bottom(16.0)

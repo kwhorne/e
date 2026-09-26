@@ -67,7 +67,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
     let title = label(move || state.req_url.get()).style(|s| {
         s.flex_grow(1.0_f32)
             .font_size(12.0)
-            .font_family("monospace".to_string())
+            .font_family(theme::mono_family())
             .color(theme::fg())
             .text_ellipsis()
     });
@@ -221,7 +221,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
             stack((
                 label(move || sql.clone()).style(|s| {
                     s.flex_grow(1.0_f32)
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .font_size(11.0)
                         .color(theme::fg())
                         .text_ellipsis()
@@ -295,7 +295,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
         move |(_, (depth, text))| {
             let indent = 10.0 + depth as f64 * 14.0;
             label(move || text.clone()).style(move |s| {
-                s.font_family("monospace".to_string())
+                s.font_family(theme::mono_family())
                     .font_size(11.5)
                     .padding_left(indent)
                     .padding_right(12.0)
@@ -320,7 +320,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
             inertia_tree,
             label(move || state.req_body.get()).style(move |s| {
                 let s = s
-                    .font_family("monospace".to_string())
+                    .font_family(theme::mono_family())
                     .font_size(12.0)
                     .padding(10.0)
                     .color(theme::fg());

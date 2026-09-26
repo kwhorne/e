@@ -198,7 +198,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
                     label(move || detail.clone()).style(|s| {
                         s.font_size(11.0)
                             .color(theme::fg_dim())
-                            .font_family("monospace".to_string())
+                            .font_family(theme::mono_family())
                     }),
                 ))
                 .style(|s| s.flex_col().gap(1.0).flex_grow(1.0_f32)),
@@ -238,7 +238,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
     });
 
     let output = scroll(label(move || state.tdd_output.get()).style(|s| {
-        s.font_family("monospace".to_string())
+        s.font_family(theme::mono_family())
             .font_size(12.0)
             .padding(10.0)
             .color(theme::fg())

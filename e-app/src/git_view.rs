@@ -421,7 +421,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
                     label(move || hash.clone()).style(|s| {
                         s.color(theme::accent())
                             .font_size(11.0)
-                            .font_family("monospace".to_string())
+                            .font_family(theme::mono_family())
                     }),
                     label(move || summary.clone()).style(|s| {
                         s.color(theme::fg())

@@ -78,14 +78,14 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
     let head = stack((
         label(move || method.clone()).style(|s| {
             s.font_size(11.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .color(theme::fg_dim())
                 .min_width(46.0)
         }),
         label(move || uri.clone()).style(|s| {
             s.flex_grow(1.0_f32)
                 .font_size(12.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .color(theme::fg())
                 .text_ellipsis()
         }),
@@ -236,7 +236,7 @@ fn detail_row(state: AppState, line: DetailLine) -> impl IntoView {
     stack((
         label(move || text.clone()).style(move |s| {
             s.font_size(11.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .color(color)
                 .flex_grow(1.0_f32)
                 .min_width(0.0)

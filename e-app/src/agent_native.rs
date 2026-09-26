@@ -210,7 +210,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
             },
             _ => theme::fg_dim(),
         });
-        s.font_family("monospace".to_string())
+        s.font_family(theme::mono_family())
             .font_size(12.0)
             .color(color)
     });
@@ -230,7 +230,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
         })
     })
     .style(|s| {
-        s.font_family("monospace".to_string())
+        s.font_family(theme::mono_family())
             .font_size(11.0)
             .color(theme::fg_dim())
             .margin_top(4.0)

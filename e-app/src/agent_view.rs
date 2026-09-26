@@ -84,7 +84,7 @@ fn agent_body(state: AppState) -> impl IntoView {
     let content = rich_text(move || {
         state.term_tick.get();
         let runs = state.agent_runs();
-        let family: Vec<FamilyOwned> = FamilyOwned::parse_list("monospace").collect();
+        let family: Vec<FamilyOwned> = FamilyOwned::parse_list(&theme::mono_family()).collect();
         let default = Attrs::new()
             .family(&family)
             .font_size(13.0)

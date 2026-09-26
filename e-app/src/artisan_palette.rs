@@ -207,7 +207,7 @@ pub fn artisan_palette(state: AppState) -> impl IntoView {
             .unwrap_or_default()
     })
     .style(|s| {
-        s.font_family("monospace".to_string())
+        s.font_family(theme::mono_family())
             .font_size(12.0)
             .color(theme::fg())
             .padding_horiz(10.0)
@@ -272,7 +272,7 @@ pub fn artisan_palette(state: AppState) -> impl IntoView {
             stack((
                 label(move || name.clone()).style(|s| {
                     s.color(theme::fg())
-                        .font_family("monospace".to_string())
+                        .font_family(theme::mono_family())
                         .font_size(12.0)
                 }),
                 label(move || desc.clone())

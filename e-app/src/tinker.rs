@@ -61,7 +61,7 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
         .style(|s| {
             s.width_full()
                 .height(220.0)
-                .font_family("monospace".to_string())
+                .font_family(theme::mono_family())
                 .font_size(13.0)
                 .padding(8.0)
         })
@@ -72,7 +72,7 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
         );
 
     let output = scroll(label(move || state.tinker_output.get()).style(|s| {
-        s.font_family("monospace".to_string())
+        s.font_family(theme::mono_family())
             .font_size(12.0)
             .padding(10.0)
             .color(theme::fg())

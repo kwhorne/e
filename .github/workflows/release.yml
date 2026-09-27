@@ -114,6 +114,9 @@ jobs:
   dmg:
     name: Universal DMG installer
     runs-on: macos-latest
+    # Two release builds, signing and notarization: 15–20 minutes when Apple
+    # answers. Never the runner's six hours.
+    timeout-minutes: 60
     env:
       # Present only when the repo has the signing secrets configured.
       HAS_CERT: ${{ secrets.MACOS_CERTIFICATE }}

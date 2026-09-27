@@ -62,7 +62,13 @@ notarize_staple() {
     return 1
   fi
   echo "==> notarizing $target (this can take a few minutes)…"
-  xcrun notarytool submit "$target" "${args[@]}" --wait || return 1
+  # Apple's service occasionally never answers; without a bound, --wait would
+  # hold the release job for the runner's six hours. Give up after 30 minutes
+  # (a rerun of the job almost always goes through).
+  xcrun notarytool submit "$target" "${args[@]}" --wait --timeout 30m || {
+    echo "==> notarization failed or timed out after 30 minutes; rerun the DMG job" >&2
+    return 1
+  }
   echo "==> stapling $target"
   xcrun stapler staple "$target"
 }

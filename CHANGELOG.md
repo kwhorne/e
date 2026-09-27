@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.24] - 2026-09-27
+
+### Changed
+
+- **Dropping a folder or file on the window** goes through the same path as a
+  Finder open (folder → project, file → editor). Also what kept the Linux
+  build's lint green.
+
 ## [0.9.23] - 2026-09-27
 
 ### Added

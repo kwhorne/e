@@ -28,6 +28,22 @@ every machine. The setting is `font_family` in
 [`config.json`](configuration.md); the size is `⌘=` / `⌘-` or **Font size** in
 the same section.
 
+## Markdown
+
+A Markdown file wraps at the editor width, and `⌘⇧M` opens a live **preview
+beside the editor** that follows your scrolling and updates as you type:
+headings, paragraphs, quotes, bulleted, numbered and task lists (`- [ ]`,
+`- [x]`), fenced code with a Copy button, tables, horizontal rules,
+strikethrough, links (click to open — a URL in the browser, a relative `.md`
+in the editor) and local images. Text in the preview is selectable.
+
+Writing: **Enter** at the end of a list item, task or quote starts the next
+one (numbered lists count on); Enter on an empty item ends the list. **`⌘B`**
+and **`⌘I`** wrap the selection in `**`/`_` (or unwrap it), **`⌘K`** makes a
+link from the selection, using the clipboard when it holds a URL, and
+**`⌘⇧X`** toggles the task box on the line. Typing `` ` `` with a selection
+wraps it in a code span.
+
 ## Line operations
 
 | Action | Shortcut |

@@ -123,6 +123,11 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         }
         "restart-agent" => state.restart_agent(),
         "markdown" => state.toggle_md_preview(),
+        "md-bold" => state.markdown_bold(),
+        "md-italic" => state.markdown_italic(),
+        "md-code" => state.markdown_code(),
+        "md-link" => state.markdown_link(),
+        "md-task" => state.markdown_toggle_task(),
         "theme" => state.toggle_theme(),
         "zoom-in" => state.zoom(1),
         "zoom-out" => state.zoom(-1),

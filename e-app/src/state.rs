@@ -1811,6 +1811,16 @@ impl AppState {
         self.repaint_all_buffers();
     }
 
+    /// A path handed to us from outside (Finder, Dock, `open -a e`): a folder
+    /// becomes the project, a file opens in the editor.
+    pub fn open_external(&self, path: PathBuf) {
+        if path.is_dir() {
+            self.open_project(path);
+        } else {
+            self.open_path(path);
+        }
+    }
+
     /// Switch the colour theme (UI, editor chrome, syntax colours) and remember
     /// it. Editors re-lay out so the code colours change at once.
     pub fn set_theme(&self, id: &str) {

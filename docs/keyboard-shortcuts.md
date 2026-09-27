@@ -71,6 +71,9 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | `⌘⇧B`    | Run task |
 | `⌘L`     | Toggle agent panel |
 | `⌘\`     | Split editor |
+| `⌘B` / `⌘I` | Markdown: bold / italic |
+| `⌘K`     | Markdown: link |
+| `⌘⇧X`    | Markdown: toggle task checkbox |
 | `⌘⇧M`    | Toggle markdown preview |
 | `⌘=` / `⌘-` | Zoom in / out |
 | `⌘0`     | Reset zoom |

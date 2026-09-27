@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A Markdown editor.** `⌘⇧M` now opens the preview *beside* the editor,
+  live and scroll-synced, instead of over it; it renders tables, task lists,
+  numbered lists, strikethrough, local images and clickable links (a URL in
+  the browser, a relative `.md` in the editor), with selectable text and Copy
+  on code blocks. Markdown files wrap at the editor width. Writing: Enter
+  continues lists, tasks and quotes (numbers count on; an empty item ends the
+  list), `⌘B`/`⌘I` toggle bold/italic on the selection, `⌘K` makes a link
+  (from the clipboard's URL when it has one), `⌘⇧X` toggles a task box.
+
+### Fixed
+
+- **Opening a file from the Finder said "e cannot open files in the
+  “Markdown” format".** macOS hands Finder, Dock and `open -a e` documents to
+  the app as an event, not an argument, and nothing received it. `e` now
+  does: a file opens in the editor, a folder as the project, including the
+  one that launched the app.
+
 ## [0.9.22] - 2026-09-26
 
 ### Added

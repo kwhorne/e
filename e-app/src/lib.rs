@@ -66,7 +66,10 @@ mod laravel_state;
 mod livewire;
 mod log;
 mod lsp_registry;
+#[cfg(target_os = "macos")]
+mod macos_open;
 mod map;
+mod markdown_edit;
 mod markdown_view;
 mod migrations;
 mod model_wizard;

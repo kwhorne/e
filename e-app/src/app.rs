@@ -54,16 +54,20 @@ pub fn launch() {
     // exit_on_close defaults to false on macOS, which leaves the process (and its
     // Dock icon) alive after the window closes. e is single-window, so quit for
     // real when the window closes.
-    Application::new_with_config(AppConfig::default().exit_on_close(true))
-        .window(
-            move |_| app_view(),
-            Some(
-                WindowConfig::default()
-                    .size(Size::new(1280.0, 820.0))
-                    .title("e"),
-            ),
-        )
-        .run();
+    let app = Application::new_with_config(AppConfig::default().exit_on_close(true));
+    // The event loop exists now, and with it the application delegate; teach
+    // it to hand Finder/Dock/`open -a` documents to the editor.
+    #[cfg(target_os = "macos")]
+    crate::macos_open::install();
+    app.window(
+        move |_| app_view(),
+        Some(
+            WindowConfig::default()
+                .size(Size::new(1280.0, 820.0))
+                .title("e"),
+        ),
+    )
+    .run();
 }
 
 /// `e .` from a terminal should hand the shell back at once and outlive the
@@ -372,6 +376,29 @@ fn app_view() -> impl IntoView {
     crate::snippets::set_user(crate::config::load_user_snippets());
     crate::keymap::load(crate::config::load_user_keybindings());
 
+    // Files opened from the Finder, the Dock or `open -a e`: queued by the
+    // delegate method, opened here — including one that launched the app,
+    // which arrives before the window exists.
+    #[cfg(target_os = "macos")]
+    {
+        let open_queued = move || {
+            for path in crate::macos_open::take() {
+                state.open_external(path);
+            }
+        };
+        if let Some(rx) = crate::macos_open::take_wake_rx() {
+            let notif = create_signal_from_channel(rx);
+            create_effect(move |_| {
+                if notif.get().is_some() {
+                    open_queued();
+                }
+            });
+        }
+        floem::action::exec_after(std::time::Duration::from_millis(250), move |_| {
+            open_queued()
+        });
+    }
+
     // Restore the saved theme and code font (persisted on change by
     // `AppState::set_theme` / `set_font_family`).
     theme::set_theme(&state.settings.get_untracked().theme);
@@ -532,7 +559,12 @@ fn app_view() -> impl IntoView {
         breadcrumbs(state),
         disk_conflict_bar(state),
         merge_conflict_bar(state),
-        editor_area(state).style(|s| s.flex_grow(1.0_f32).width_full()),
+        // The Markdown preview sits beside the editor, live, when it's on.
+        stack((
+            editor_area(state).style(|s| s.flex_grow(1.0_f32).min_width(0.0).height_full()),
+            markdown_preview(state),
+        ))
+        .style(|s| s.flex_row().flex_grow(1.0_f32).width_full().min_height(0.0)),
         terminal_panel(state),
         problems_panel(state),
         status_bar(state),
@@ -777,7 +809,6 @@ fn app_view() -> impl IntoView {
             ]),
         ))
         .style(|s| s.size_full()),
-        markdown_preview(state),
         // Git diff + free file-comparison share one full-size wrapper (keeps the
         // top-level stack within floem's tuple arity).
         stack((diff_view(state), crate::diff_view::file_diff_view(state))).style(move |s| {

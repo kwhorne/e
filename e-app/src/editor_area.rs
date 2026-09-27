@@ -289,6 +289,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
         move |b| {
             let id = b.id;
             let win_origin = b.win_origin;
+            let is_markdown = b.file.language == e_core::language::Language::Markdown;
 
             let te = text_editor_keys("", move |editor_sig, kp, mods| {
                 // App shortcuts first (the editor otherwise swallows every key).
@@ -347,7 +348,8 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 b.tab_width,
             ))
             .editor_style(move |s| {
-                let wrap = if state.word_wrap.get() {
+                // Prose wraps: a Markdown file reads as a document.
+                let wrap = if state.word_wrap.get() || is_markdown {
                     floem::views::editor::text::WrapMethod::EditorWidth
                 } else {
                     floem::views::editor::text::WrapMethod::None
@@ -369,6 +371,15 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
             // popup. `run_command` delegates HintsDoc -> b.doc, which dispatches
             // pre-commands keyed by editor id.
             b.doc.add_pre_command(editor_handle.id(), move |pre| {
+                // Enter at the end of a list item, task or quote continues it
+                // (an empty item ends the list) — unless a completion is up.
+                if is_markdown
+                    && matches!(pre.cmd, Command::Edit(EditCommand::InsertNewLine))
+                    && !state.completion.open.get_untracked()
+                    && state.markdown_newline()
+                {
+                    return CommandExecuted::Yes;
+                }
                 if state.completion.open.get_untracked() {
                     match pre.cmd {
                         Command::Move(MoveCommand::Down) => {

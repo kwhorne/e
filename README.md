@@ -83,7 +83,7 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Refactoring** — **rename** (`F2`) through the language server, previewing every site before it writes; **Move Class** that follows PSR-4 and rewrites every `use` and fully-qualified reference; **code actions** (`⌘.`) for LSP quick fixes and extract variable/method; **compare** the active file with any other file; **EditorConfig** support
 - **Split editor** (`⌘\`), **resizable & swappable panels**, **zoom** (`⌘±`), **word wrap** (`⌥Z`)
 - **Navigation history** (`⌃-` / `⌃⇧-`), **breadcrumbs**, **outline**, **inline diagnostics**, **bracket matching**
-- **Markdown preview** (`⌘⇧M`), **seven themes** — Dark, Light, Tokyo Night, Darcula, Material, Nord, Palenight — in Settings, `F8` for dark ↔ light
+- **Markdown** — live preview beside the editor (`⌘⇧M`) with tables, task lists, images and clickable links; lists continue on Enter, `⌘B`/`⌘I`/`⌘K` for bold, italic and links — **seven themes** — Dark, Light, Tokyo Night, Darcula, Material, Nord, Palenight — in Settings, `F8` for dark ↔ light
 - **Auto-save**, **format & trim on save**, **unsaved-change & external-edit handling**
 - **Session persistence**, **workspace problems panel**
 - **Built-in auto-updater** — detects new GitHub releases, shows the changelog, and installs in place

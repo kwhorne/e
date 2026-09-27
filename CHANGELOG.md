@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.23] - 2026-09-27
+
 ### Added
 
 - **A Markdown editor.** `⌘⇧M` now opens the preview *beside* the editor,

@@ -2066,6 +2066,10 @@ impl AppState {
 
     /// Open the rename bar for the identifier under the cursor.
     pub fn open_rename(&self) {
+        self.rename.laravel.set(None);
+        if self.open_laravel_rename() {
+            return;
+        }
         let Some(buf) = self.active_buffer() else {
             return;
         };
@@ -2741,12 +2745,40 @@ impl AppState {
                         continue;
                     };
                     let updated = crate::rename_preview::apply_edits(&text, &file.edits);
-                    if updated != text && std::fs::write(&file.path, updated).is_err() {
+                    if updated != text && buffer::write(&file.path, &updated).is_err() {
                         failed.push(file.path.display().to_string());
                     } else {
                         written += 1;
                     }
                 }
+            }
+        }
+        // Then the files that move (a renamed view), after their own edits.
+        for (from, to) in &plan.moves {
+            // An open file moves with its buffer's text — the edits above may
+            // have just landed there, unsaved — and reopens at its new path.
+            let open = self.buffers.with_untracked(|bs| {
+                bs.iter()
+                    .find(|b| b.file.path.as_deref() == Some(from.as_path()))
+                    .map(|b| (b.id, b.doc.text().to_string()))
+            });
+            let moved = match &open {
+                Some((_, text)) => buffer::write(to, text)
+                    .map_err(|e| e.to_string())
+                    .and_then(|_| std::fs::remove_file(from).map_err(|e| e.to_string())),
+                None => to
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|_| std::fs::rename(from, to))
+                    .map_err(|e| e.to_string()),
+            };
+            match (moved, open) {
+                (Err(e), _) => failed.push(format!("{} ({e})", from.display())),
+                (Ok(()), Some((id, _))) => {
+                    self.force_close(id);
+                    self.open_path(to.clone());
+                }
+                (Ok(()), None) => {}
             }
         }
         self.fs_rev.update(|r| *r += 1);
@@ -2775,6 +2807,10 @@ impl AppState {
         }
         if self.rename_is_move.get_untracked() {
             self.plan_move_class(&new_name);
+            return;
+        }
+        if let Some(helper) = r.laravel.get_untracked() {
+            self.plan_laravel_rename(helper, word, new_name);
             return;
         }
         // Livewire property rename spans the class *and* the view.

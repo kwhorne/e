@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   too. `<livewire:…>` and `@livewire('…')` complete every component by the
   name Livewire uses — `pages::app.dashboard`, `billing.invoice` — and go to
   definition on one (or on `Route::livewire(…, 'name')`) opens it.
+- **Find Usages and Rename for route names, views and translation keys.**
+  On `route('users.show')`, `view('users.index')` or `__('auth.failed')`,
+  Find Usages lists every use across PHP, Blade and (for routes) Ziggy's JS,
+  with the declarations first: `->name('…')`, the view file, the key's line
+  in each language. In a Blade view, it answers "who renders this view?".
+  Rename rewrites them all through the usual preview, and moves the view's
+  file. It refuses what it couldn't do completely: a route name built from
+  a group's prefix, or a translation key moving to another file.
 
 - **Hot exit.** Unsaved edits to files are backed up with the session while you
   type and put back next launch, so quitting, restarting after an update, or a

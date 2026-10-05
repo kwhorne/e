@@ -185,6 +185,11 @@ impl AppState {
 
     /// Find references to the symbol under the cursor (Shift+F12).
     pub fn request_references(&self) {
+        // A route name, view or translation key: the language server can't
+        // follow those strings, so `e` searches the project itself.
+        if self.find_laravel_key_usages() {
+            return;
+        }
         let Some(buf) = self.active_buffer() else {
             return;
         };

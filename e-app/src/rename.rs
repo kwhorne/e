@@ -14,6 +14,9 @@ pub struct RenameState {
     pub open: RwSignal<bool>,
     pub word: RwSignal<String>,
     pub new_name: RwSignal<String>,
+    /// Set when the name is a Laravel key (route, view, translation) rather
+    /// than a PHP symbol: the rename then goes through `e_laravel::keys`.
+    pub laravel: RwSignal<Option<crate::laravel::Helper>>,
 }
 
 impl RenameState {
@@ -22,6 +25,7 @@ impl RenameState {
             open: RwSignal::new(false),
             word: RwSignal::new(String::new()),
             new_name: RwSignal::new(String::new()),
+            laravel: RwSignal::new(None),
         }
     }
 }

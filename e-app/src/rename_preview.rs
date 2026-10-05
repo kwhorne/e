@@ -46,6 +46,8 @@ pub struct RenamePlan {
     /// dropped: a rename that silently skips a file is worse than one that says
     /// it couldn't.
     pub unreadable: Vec<PathBuf>,
+    /// Files the rename moves, `(from, to)` — renaming a view moves its file.
+    pub moves: Vec<(PathBuf, PathBuf)>,
 }
 
 impl RenamePlan {
@@ -64,11 +66,19 @@ impl RenamePlan {
     /// `12 sites in 4 files`, for the dialog.
     pub fn summary(&self) -> String {
         let (s, f) = (self.site_count(), self.file_count());
-        format!(
+        let mut out = format!(
             "{s} {} in {f} {}",
             if s == 1 { "site" } else { "sites" },
             if f == 1 { "file" } else { "files" },
-        )
+        );
+        for (_, to) in &self.moves {
+            let name = to
+                .file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default();
+            out.push_str(&format!(", and the file moves to {name}"));
+        }
+        out
     }
 }
 

@@ -869,7 +869,7 @@ impl AppState {
     }
 
     /// Resolve the Laravel helper token under the cursor, if any.
-    fn laravel_token(&self) -> Option<(laravel::Helper, String, Arc<LaravelData>)> {
+    pub(crate) fn laravel_token(&self) -> Option<(laravel::Helper, String, Arc<LaravelData>)> {
         let data = self.laravel.get()?;
         let buf = self.active_buffer()?;
         let editor = buf.editor.get_untracked()?;

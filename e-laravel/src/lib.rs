@@ -16,6 +16,7 @@ pub mod events;
 pub mod ide_json;
 pub mod inertia;
 pub mod intentions;
+pub mod keys;
 pub mod laravel;
 pub mod laravel_lint;
 pub mod livewire;

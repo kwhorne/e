@@ -1414,7 +1414,7 @@ fn find_trans_line(path: &Path, key: &str) -> Option<usize> {
     find_trans_line_in(&src, key, path.extension().is_some_and(|e| e == "json"))
 }
 
-fn find_trans_line_in(src: &str, key: &str, json: bool) -> Option<usize> {
+pub fn find_trans_line_in(src: &str, key: &str, json: bool) -> Option<usize> {
     let lines: Vec<&str> = src.lines().collect();
     let has = |line: &str, k: &str| {
         line.contains(&format!("'{k}'")) || line.contains(&format!("\"{k}\""))

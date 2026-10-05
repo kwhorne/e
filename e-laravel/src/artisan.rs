@@ -187,3 +187,36 @@ mod tests {
         assert_eq!(filter(&cmds, "")[0].name, "make:model");
     }
 }
+
+/// The files `make:*` reports creating: `INFO  Controller [app/Http/…/X.php]
+/// created successfully.` — relative to the project, in the order listed.
+pub fn created_files(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter(|l| l.contains("created successfully"))
+        .filter_map(|l| {
+            let open = l.find('[')?;
+            let close = l[open..].find(']')? + open;
+            Some(l[open + 1..close].trim().to_string())
+        })
+        .filter(|p| p.contains('.'))
+        .collect()
+}
+
+#[cfg(test)]
+mod created_tests {
+    use super::created_files;
+
+    #[test]
+    fn created_files_are_read_from_make_output() {
+        let out = "\n   INFO  Model [app/Models/Invoice.php] created successfully.  \n\n   INFO  Migration [database/migrations/2026_10_05_000000_create_invoices_table.php] created successfully.\n";
+        assert_eq!(
+            created_files(out),
+            vec![
+                "app/Models/Invoice.php",
+                "database/migrations/2026_10_05_000000_create_invoices_table.php"
+            ]
+        );
+        assert!(created_files("   ERROR  Model already exists.").is_empty());
+    }
+}

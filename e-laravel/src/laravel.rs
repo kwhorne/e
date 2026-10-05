@@ -1337,7 +1337,14 @@ pub fn navigate(
             if index.is_file() {
                 return Some((index, 0, 0));
             }
-            None
+            // A class component: `<x-forms.text-input>` → `Forms/TextInput.php`.
+            let class: PathBuf = token.split('.').map(studly).collect();
+            let file = data
+                .root
+                .join("app/View/Components")
+                .join(class)
+                .with_extension("php");
+            file.is_file().then_some((file, 0, 0))
         }
     }
 }
@@ -1761,5 +1768,24 @@ mod tests {
         assert_eq!(find_trans_line_in(php, "auth.missing", false), None);
         let json = "{\n  \"Welcome\": \"Velkommen\",\n  \"Log out\": \"Logg ut\"\n}\n";
         assert_eq!(find_trans_line_in(json, "Log out", true), Some(2));
+    }
+
+    #[test]
+    fn a_class_component_is_found() {
+        let root = std::env::temp_dir().join(format!("e-xcomp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("app/View/Components/Forms")).unwrap();
+        std::fs::write(
+            root.join("app/View/Components/Forms/TextInput.php"),
+            "<?php",
+        )
+        .unwrap();
+        let data = LaravelData {
+            root: root.clone(),
+            ..Default::default()
+        };
+        let (p, _, _) = navigate(&data, Helper::Component, "forms.text-input").unwrap();
+        assert!(p.ends_with("Forms/TextInput.php"));
+        assert!(navigate(&data, Helper::Component, "missing").is_none());
     }
 }

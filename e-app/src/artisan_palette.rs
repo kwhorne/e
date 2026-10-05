@@ -130,6 +130,48 @@ impl AppState {
             return;
         }
         a.open.set(false);
+        // `make:*` runs here rather than in a terminal, so what it creates can
+        // be opened — the point of making it.
+        if cmd.name.starts_with("make:") {
+            let root = self.root.get_untracked();
+            let mut argv = vec!["artisan".to_string(), cmd.name.clone()];
+            argv.extend(args.split_whitespace().map(str::to_string));
+            argv.push("--no-ansi".to_string());
+            let state = *self;
+            self.spawn_bg(
+                move || {
+                    let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+                    crate::phptools::php(&root, &refs, std::time::Duration::from_secs(60)).map(
+                        |o| {
+                            let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
+                            text.push_str(&String::from_utf8_lossy(&o.stderr));
+                            text
+                        },
+                    )
+                },
+                move |result: Result<String, String>| {
+                    let output = match result {
+                        Ok(o) => o,
+                        Err(e) => return Self::notify(&e),
+                    };
+                    let created = crate::artisan::created_files(&output);
+                    if created.is_empty() {
+                        let msg = output
+                            .lines()
+                            .map(str::trim)
+                            .find(|l| !l.is_empty())
+                            .unwrap_or("nothing was created");
+                        return Self::notify(msg);
+                    }
+                    let root = state.root.get_untracked();
+                    for rel in created {
+                        state.open_path(root.join(rel));
+                    }
+                    state.fs_rev.update(|r| *r += 1);
+                },
+            );
+            return;
+        }
         let command = if args.is_empty() {
             format!("php artisan {}", cmd.name)
         } else {

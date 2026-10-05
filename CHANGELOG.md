@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loaded as one model — also through `['user' => …]`, `->with(…)`,
   `auth()->user()` — and a Livewire view gets its component's typed
   properties.
+- **`make:*` from the Artisan palette opens what it made** — the model, and
+  its migration, factory and so on when asked for — instead of leaving the
+  output in a terminal tab. Other commands still run in a terminal.
+- **Go to definition on a class-based `<x-…>` component** opens its class in
+  `app/View/Components` when there is no anonymous Blade file.
 
 - **Hot exit.** Unsaved edits to files are backed up with the session while you
   type and put back next launch, so quitting, restarting after an update, or a

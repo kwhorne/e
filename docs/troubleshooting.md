@@ -89,6 +89,20 @@ This shouldn't happen — if it does, please
 [open an issue](https://github.com/kwhorne/e/issues) with your OS version and
 what you were doing. Include any output from running `e` in a terminal.
 
+## A file won't open: "it looks like a binary file" / "it is … MB"
+
+`e` doesn't open binary files (a NUL byte in the first 8 KB, such as
+`database/database.sqlite`) or files over 64 MB as text: a stray keystroke and
+an auto-save would corrupt the one, and the other holds the window. Use the
+Database panel for SQLite, and `tail` or the Laravel log panel for a huge log.
+
+## Where did my unsaved changes go?
+
+Nowhere: quitting doesn't ask, it keeps them. Unsaved edits are backed up with
+the session (`~/.config/e/sessions/`) as you type and put back when you open the
+project again. If the file changed on disk meanwhile, the conflict bar asks
+which version you want.
+
 ## Reset configuration
 
 Delete `~/.config/e/config.json` to restore defaults. Session state lives in

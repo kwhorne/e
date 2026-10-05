@@ -101,7 +101,9 @@ branch isn't thrown away — it becomes a sibling you can return to.
 Press **`⌘⌥U`** to open the tree. Each node shows how long ago it was and how
 many characters changed; a `⑂` marks a branch point. Click any node to jump the
 buffer to that state ("time travel"). The tree is saved per file under
-`~/.config/e/undo/`, so history survives across sessions.
+`~/.config/e/undo/`, so history survives across sessions. It stores each
+step's edit rather than a copy of the file, and a history not touched in two
+months is forgotten.
 
 ## Rename
 
@@ -125,9 +127,16 @@ git `HEAD`, use **Show Git Diff vs HEAD**.)
 
 - **`⌘S`** saves the active file.
 - With **format on save** and **trim on save** enabled (the defaults), the file
-  is formatted via the language server and trailing whitespace is trimmed before
-  writing.
-- **Auto-save** writes dirty buffers after a short idle period.
+  is formatted and trailing whitespace is trimmed before writing. A PHP file in
+  a project that ships Pint is formatted by Pint alone; anything else by the
+  language server. Formatting runs in the background and is skipped if you
+  edit the file meanwhile.
+- **Auto-save** writes dirty buffers after a short idle period — except a file
+  that changed on disk under your edits, which waits for your choice in the
+  conflict bar.
+- Saves are **atomic**: the new text goes to a temporary file that replaces
+  the old one, keeping its permissions, symlinks and hard links, so a crash or
+  a full disk can't leave half a file. A failed save says so.
 - **EditorConfig:** if the project has an `.editorconfig`, its `indent_size` /
   `tab_width` set the buffer's tab width, and `trim_trailing_whitespace` /
   `insert_final_newline` override the on-save settings for matching files.
@@ -154,15 +163,25 @@ first sensible insertion point.
 
 The status bar shows the file encoding and line-ending style. Click the **LF /
  CRLF** indicator to convert the buffer. Non-UTF-8 files are detected on open
-(BOM or Windows-1252) and saved back in their original encoding.
+(BOM or Windows-1252) and saved back in their original encoding — a UTF-8 BOM
+is kept, UTF-16 stays UTF-16 — and a file in a legacy encoding refuses to save
+a character that encoding can't hold, rather than changing it.
+
+Binary files (a `database.sqlite`, images) and files over 64 MB aren't opened
+as text.
 
 ## Unsaved changes & external edits
 
 - Closing a tab with unsaved changes prompts you to **Save**, **Don't Save**, or
-  **Cancel**.
+  **Cancel**; with Save, the tab closes once the file is written.
+- **Quitting keeps your unsaved work** ("hot exit"): unsaved edits are backed up
+  with the session as you type and put back when you open the project again —
+  after a quit, an update restart or a crash. If the file changed on disk in
+  between, the conflict bar asks which version to keep.
 - If a file changes on disk (e.g. after `git checkout`), clean buffers reload
   automatically. If you have unsaved edits, a bar offers to **Reload** (discard
-  yours) or **Keep yours**.
+  yours) or **Keep yours**, and nothing is written over the file until you
+  choose — every save checks the disk first.
 
 ## Rename (`F2`)
 

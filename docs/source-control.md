@@ -21,7 +21,12 @@ sidebar if hidden). The panel shows:
   - **−** unstages it.
 - **CHANGES** — unstaged and untracked files. Each row:
   - **+** stages it,
-  - **↺** discards work-tree changes (`git checkout -- <file>`).
+  - **↺** discards work-tree changes (`git checkout -- <file>`) — after asking,
+    since it can't be undone.
+
+Git runs in the background, so a slow push or a pre-commit hook doesn't freeze
+the window. A failure is shown with git's own message, and a commit git
+rejects keeps your message in the box.
 
 The panel refreshes automatically after saves, file operations, and git actions.
 

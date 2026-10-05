@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+A release about trust and speed: `e` no longer loses unsaved work, typing is
+several times cheaper on large files, and the Laravel features tell the truth
+— a schema that follows migrations, every route, the right table inside a
+closure — and reach Livewire 4, Volt and the string keys no language server
+follows.
+
 ### Added
 
 - **Livewire 4 single- and multi-file components, and Volt.** A Blade file
@@ -38,7 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output in a terminal tab. Other commands still run in a terminal.
 - **Go to definition on a class-based `<x-…>` component** opens its class in
   `app/View/Components` when there is no anonymous Blade file.
-
 - **Hot exit.** Unsaved edits to files are backed up with the session while you
   type and put back next launch, so quitting, restarting after an update, or a
   crash no longer loses them. If the file changed on disk while `e` was
@@ -124,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Table names singularise consistently.** Three copies disagreed
   (`statuses` → `statuse` in one, `houses` → `hous` in another); there is
   now one.
+
+### Changed
+
+- **The Laravel intelligence is its own crate, `e-laravel`,** with no UI: its
+  tests build and run without the GUI stack, and the corpus job checks it
+  against real projects pinned to fixed commits.
+- **A release is tagged only once CI has passed on its commit**
+  (`scripts/release.sh` waits for it). CI jobs have time limits.
 
 ### Performance
 
@@ -1821,7 +1834,13 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.18...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.24...HEAD
+[0.9.24]: https://github.com/kwhorne/e/compare/v0.9.23...v0.9.24
+[0.9.23]: https://github.com/kwhorne/e/compare/v0.9.22...v0.9.23
+[0.9.22]: https://github.com/kwhorne/e/compare/v0.9.21...v0.9.22
+[0.9.21]: https://github.com/kwhorne/e/compare/v0.9.20...v0.9.21
+[0.9.20]: https://github.com/kwhorne/e/compare/v0.9.19...v0.9.20
+[0.9.19]: https://github.com/kwhorne/e/compare/v0.9.18...v0.9.19
 [0.9.18]: https://github.com/kwhorne/e/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/kwhorne/e/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/kwhorne/e/compare/v0.9.15...v0.9.16

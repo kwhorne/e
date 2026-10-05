@@ -68,6 +68,10 @@ language server, and jump to their definitions.
 | Find references | `⇧F12` |
 | Hover info | `F1` |
 
+On a Laravel route name, view or translation key, Find References searches the
+project itself, since no language server follows those strings — see
+[Laravel](laravel.md#find-usages-and-rename-for-keys).
+
 ## Navigation history
 
 After jumping (go-to-definition, find references, symbol search), retrace your

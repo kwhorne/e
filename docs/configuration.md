@@ -22,7 +22,7 @@ and `keybindings`), which is created on first use.
   "font_size": 14,
   "font_family": "JetBrains Mono", // the code font; "" = the system monospace; see Editing → Fonts         // editor font size (8–40)
   "tab_width": 4,          // spaces per indent level (1–16)
-  "format_on_save": true,  // format via the language server on save
+  "format_on_save": true,  // format on save (Pint for PHP when the project has it, else the language server)
   "trim_on_save": true,    // trim trailing whitespace + ensure final newline
   "autosave": true,        // save dirty buffers after a short idle period
   "indent_guides": true,   // show indentation guide lines
@@ -50,7 +50,7 @@ and `keybindings`), which is created on first use.
 | `font_size` | int | `14` | Editor font size (clamped 8–40) |
 | `font_family` | string | `"JetBrains Mono"` | The code font for the editor, the terminal and code in panels. `""` means the system monospace (Menlo on macOS). Pick one in **Settings → Editor → Font**; see [Editing → Fonts](editing.md#fonts). |
 | `tab_width` | int | `4` | Indent width (clamped 1–16) |
-| `format_on_save` | bool | `true` | Format the document on save |
+| `format_on_save` | bool | `true` | Format the document on save — with the project's Pint for PHP when it ships one, else the language server |
 | `trim_on_save` | bool | `true` | Trim trailing whitespace on save |
 | `autosave` | bool | `true` | Idle auto-save |
 | `indent_guides` | bool | `true` | Indentation guides |

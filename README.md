@@ -66,7 +66,9 @@ Vue, Svelte, Tailwind/CSS** — alongside general-purpose languages.
 - **Eloquent relationship graph** (`⌘⌥R`) — models vs. live foreign keys, flagging relations with no backing FK
 - **Inertia awareness** — `Inertia::render()` resolves to the page component (goto, completion, and in the map); Ziggy `route()` and shared props complete on the JS side
 - **Props contract** (`⌘⌥C`) — reconciles controller props with the page component, infers TypeScript types from the render call + live schema, flags mismatches both ways, and generates TypeScript interfaces
-- **Livewire refactoring** — `wire:model` completion, `⌘⌥J` view↔class, and `F2` renames a property across the class *and* the view
+- **Livewire refactoring** — class-based, Livewire 4 single/multi-file and Volt components: `wire:model` completion, `⌘⌥J` view↔class, and `F2` renames a property across the class *and* the view
+- **Laravel keys** — Find Usages and Rename for route names, views and translation keys, across PHP, Blade and JS
+- **Never loses work** — unsaved edits survive a quit or a crash (hot exit), saves are atomic, and auto-save never writes over a change made on disk
 - **Query-builder completion** — column names in `where()`/`orderBy()`/`select()` and relations in `with()`/`whereHas()` from the live schema, with unknown columns flagged
 - **Code intelligence** — validation-rule completion, gate/policy go-to, "generate model from table" and "generate validation rules from table" from the live schema, event dispatch graph (`⌘⌥G`), and related-files hopping (`⌘⌥E`)
 - **Runtime insight** (`⌘⌥I`) — a Telescope-style panel capturing every dev request via Clockwork: queries with N+1 warnings, cache, mails, events
@@ -258,14 +260,19 @@ Global settings live in `~/.config/e/config.json` (open it with `⌘,`):
 
 `e` is a Cargo workspace of focused crates:
 
-| Crate     | Responsibility                                                       |
-| --------- | -------------------------------------------------------------------- |
-| `e-core`  | GUI-agnostic core: rope buffers, language detection, tree-sitter syntax, git diff, markdown |
-| `e-lsp`   | Multi-server Language Server Protocol client                         |
-| `e-dap`   | Debug Adapter Protocol client (step debugging over stdio & TCP)      |
-| `e-term`  | PTY-backed terminal with a minimal VT100 screen model                |
-| `e-app`   | The UI — editor, panels, palettes, theming, state                    |
-| `e`       | The binary entry point                                               |
+| Crate       | Responsibility                                                       |
+| ----------- | -------------------------------------------------------------------- |
+| `e-core`    | GUI-agnostic core: file I/O, language detection, incremental tree-sitter highlighting, undo tree, git diff, markdown |
+| `e-laravel` | Laravel project intelligence with no UI: routes, views, Eloquent, Livewire, Inertia, lints, key usages, code generation |
+| `e-lsp`     | Multi-server Language Server Protocol client                         |
+| `e-dap`     | Debug Adapter Protocol client (step debugging over stdio & TCP)      |
+| `e-db`      | Database access for the Database panel (MySQL/MariaDB, PostgreSQL, SQLite, SSH tunnels) |
+| `e-term`    | PTY-backed terminal with a minimal VT100 screen model                |
+| `e-agent`   | Native client for AI coding agents                                   |
+| `e-verify`  | Measurement core of the "verify the fix" loop                        |
+| `e-review`  | Session changeset review                                             |
+| `e-app`     | The UI — editor, panels, palettes, theming, state                    |
+| `e`         | The binary entry point                                               |
 
 Run the test suite with:
 

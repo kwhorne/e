@@ -41,8 +41,29 @@ config, `.env`, language files and components.
   - `view('…')` → the Blade file
   - `config('…')` → the config file (and the key's line)
   - `env('…')` → the `.env` line
-  - `__('…')` → the language file
-  - `<x-…>` → the component's Blade file
+  - `__('…')` → the key's line in the language file, in the app's locale
+    (nested keys and JSON files included)
+  - `<x-…>` → the component's Blade file, or its class in
+    `app/View/Components` for a class-based component
+  - `can('update', $post)`, `@can`, `Gate::allows` → the method on the policy
+    for the model in the second argument (`PostPolicy::update`)
+  - an event class → the class itself; from where it is dispatched
+    (`event(new …)`, `…::dispatch(`), its listener
+
+## Find Usages and Rename for keys
+
+The keys Laravel resolves at runtime — route names, view names, translation
+keys — are strings no PHP language server follows. On one, **Find Usages**
+(`⇧F12`) lists every place it appears across PHP, Blade and, for routes,
+Ziggy's `route()` in your JS, declarations first: the `->name('…')`, the view
+file, the key's line in each language. In a Blade view with no key under the
+caret, it answers *who renders this view?*
+
+**Rename** (`F2`) on such a key rewrites all of them through the usual preview,
+and for a view moves its file to match. It refuses what it couldn't finish: a
+route name built from a group's `Route::name('admin.')` prefix (rename it
+where it is declared), or a translation key whose group would change (that
+would move it to another file).
 
 ## Blade templates
 
@@ -57,8 +78,12 @@ Inside a query builder, column names complete from the model's table and the
 live schema — `where('…')`, `orderBy()`, `select()`, `pluck()`, `value()`,
 `groupBy()`, `having()` — and relationship names complete inside `with('…')`,
 `load()`, `whereHas()`. The table is resolved from `Model::`, `$model`, or
-`DB::table('…')`. Columns that don't exist in the schema are underlined with a
-warning — a check PhpStorm can't do without the database.
+`DB::table('…')` — and inside a closure from what the closure queries:
+`whereHas('posts', fn ($q) => $q->where('…'))` completes `posts` columns
+(dotted relations followed), a grouped `where(fn ($q) => …)` stays on the outer
+table, and a closure that can't be told is left alone. Columns that don't exist
+in the schema are underlined with a warning — a check PhpStorm can't do without
+the database.
 
 ## Laravel lints
 
@@ -116,7 +141,9 @@ Alongside the language servers' quick fixes, the code-action picker offers
 
 ## Validation rules
 
-Rule names complete inside `validate([…])` and FormRequest `rules()`, and so do
+Rule names complete where rules are written — FormRequest `rules()`, a
+`$rules` property, `validate([…])`, `Validator::make()` and Livewire's
+`#[Validate(…)]` — and not after any `=> '` elsewhere. So do
 the tables and columns `exists:` and `unique:` name — `exists:us` offers your
 tables, `exists:users,` their columns, from the live schema; `Rule::exists('…')`
 and `Rule::unique('users', '…')` likewise. The command **Laravel: Generate
@@ -185,7 +212,9 @@ component, …), with Artisan's own usage line as the hint for the arguments.
 `⌘⇧A` opens the Artisan palette with every command the app declares (its own
 and its packages'), `make:` first. Pick one, and the usage line becomes the hint
 for an argument line: `Order -mf` for `make:model`, `--seed` for `migrate`.
-Enter runs it in a terminal tab, so prompts and output work as in a shell.
+A `make:` command runs in the background and opens what it created — the model
+and, with `-mf`, its migration and factory. Anything else runs in a terminal
+tab, so prompts and output work as in a shell.
 
 ## Eloquent helper
 
@@ -207,9 +236,10 @@ PSR-4 map.
 
 ## Route search
 
-`⌘⇧R` lists every route — `GET /users/{user}` with its name and action — and
-filters as you type on method, URI, name or controller. Enter opens the
-controller action, or the routes-file line for a closure route.
+`⌘⇧R` lists every route, named or not — `GET /users/{user}` with its name and
+action — and filters as you type on method, URI, name or controller. Enter
+opens the controller action, or the routes-file line for a closure route (also
+inside a `Route::prefix()` group).
 
 ## Find unused views
 
@@ -246,16 +276,33 @@ seeder, controller, policy, request, resource, and test — in a quick picker.
 
 ## Livewire
 
-`e` treats a Livewire component's class and Blade view as one unit:
+`e` treats a Livewire component's class and Blade view as one unit — in all
+three shapes a component can take:
 
-- `wire:model="…"` completes from the component class's public properties.
-- `F12` on a property in the view jumps to its declaration in the class;
-  `⌘⌥J` switches between the view and the class.
+- **class-based**: `app/Livewire/Admin/UserTable.php` with
+  `resources/views/livewire/admin/user-table.blade.php`;
+- **single-file** (Livewire 4, and Volt on Livewire 3): one Blade file whose
+  `<?php … ?>` block holds `new class extends Component { … }`, such as
+  `resources/views/components/⚡counter.blade.php`;
+- **multi-file** (Livewire 4): `⚡counter/counter.php` beside
+  `⚡counter/counter.blade.php`.
+
+Then:
+
+- `wire:model="…"` completes from the component's public properties — in a
+  single-file component from the buffer you're editing, unsaved changes and all.
+- `F12` on a property in the view jumps to its declaration;
+  `⌘⌥J` switches between a view and its class.
 - Renaming a property with `F2` updates **both** the class (`$prop`,
-  `$this->prop`) and every `wire:` reference in the view.
+  `$this->prop`) and every `wire:` reference and `$prop` in the view — in one
+  edit when they share a file.
 - `wire:click="…"`, `wire:submit`, `wire:change` and the other event attributes
-  complete from the class's action methods (public, minus lifecycle hooks).
-- `<livewire:…>` and `@livewire('…')` complete component names from `app/Livewire`.
+  complete from the component's action methods (public, minus lifecycle hooks).
+- `<livewire:…>` and `@livewire('…')` complete every component by the name
+  Livewire knows it by — `admin.user-table`, `counter`, `pages::dashboard`
+  (Livewire 4's `pages::` and `layouts::` namespaces; Volt pages unprefixed on
+  Livewire 3, read from `composer.lock`) — and `F12` on one, or on
+  `Route::livewire('/', 'pages::dashboard')`, opens it.
 
 ## Runtime insight
 
@@ -318,10 +365,21 @@ action.
 ## Eloquent completion (live schema)
 
 When you type `$user->` on a model instance, `e` suggests the model's real
-database columns — read from the live schema (via `.env`) at startup. It infers
-the model from `$var = Model::…` or a type hint, maps it to its table
-(`protected $table` or the snake_case + plural convention), and merges the
-columns alongside Intelephense — something Intelephense can't do on its own.
+database columns — read from the live schema (via `.env`). It infers the model
+from `$var = Model::…` or a type hint (not from `->get()`, `->paginate()` or
+`->count()`, which aren't one model), maps it to its table (`protected $table`
+or the snake_case + plural convention), and merges the columns alongside
+Intelephense — something Intelephense can't do on its own.
+
+**In Blade** the variable comes from where the view is rendered:
+`view('users.show', compact('user'))` with a type-hinted `User $user`,
+`['user' => $user]`, `->with('user', …)`, `auth()->user()`. A Livewire view
+takes its component's typed properties.
+
+The schema follows your migrations: a local database is checked every ten
+seconds and re-read when its `migrations` table changes — however the
+migration ran — and open PHP files are re-linted, so a column you just added
+is no longer "unknown".
 
 ## Relationship graph
 

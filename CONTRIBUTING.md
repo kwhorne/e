@@ -39,6 +39,9 @@ skip themselves when it isn't installed.
 - Keep commits focused and write clear, descriptive messages.
 - If your change is user-facing, add an entry to [`CHANGELOG.md`](CHANGELOG.md)
   under the `Unreleased` section.
+- Releases are cut with `scripts/release.sh <version>`: it bumps the version,
+  dates the changelog, pushes `main`, waits for CI on that commit and only then
+  tags it, which starts the release build.
 
 ## Reporting bugs & requesting features
 

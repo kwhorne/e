@@ -107,6 +107,13 @@ impl TextDocument {
         }
     }
 
+    /// The buffer's edit revision: it changes with every edit and nothing
+    /// else, unlike `cache_rev`, which a repaint request also bumps. (`e` uses
+    /// it to tell whether unsaved text changed since it was last backed up.)
+    pub fn rev(&self) -> u64 {
+        self.buffer.with_untracked(|b| b.rev())
+    }
+
     fn update_cache_rev(&self) {
         self.cache_rev.try_update(|cache_rev| {
             *cache_rev += 1;

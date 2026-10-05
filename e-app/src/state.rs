@@ -966,6 +966,8 @@ pub struct AppState {
     pub artisan_error: RwSignal<String>,
     /// Buffer id awaiting a close confirmation (unsaved changes).
     pub close_confirm: RwSignal<Option<u64>>,
+    /// A pending "are you sure?" question (see [`crate::dialogs::Confirm`]).
+    pub confirm: RwSignal<Option<crate::dialogs::Confirm>>,
     /// Most-recently-used files (newest first) and the ⌘E switcher state.
     pub recent_files: RwSignal<Vec<PathBuf>>,
     pub recent: crate::recent::RecentState,
@@ -1734,6 +1736,7 @@ impl AppState {
             artisan_loading: RwSignal::new(false),
             artisan_error: RwSignal::new(String::new()),
             close_confirm: RwSignal::new(None),
+            confirm: RwSignal::new(None),
             recent_files: RwSignal::new(Vec::new()),
             recent: crate::recent::RecentState::new(),
             settings_open: RwSignal::new(false),
@@ -1868,6 +1871,7 @@ impl AppState {
             || self.recent.open.get()
             || self.about_open.get()
             || self.close_confirm.get().is_some()
+            || self.confirm.with(Option::is_some)
             || self.term_rename_id.get().is_some()
     }
 
@@ -2740,22 +2744,35 @@ impl AppState {
         self.last_edit.set(0);
         let buffers = self.buffers.get_untracked();
         for b in &buffers {
-            if !b.dirty.get_untracked() {
+            // A file that changed on disk under unsaved edits waits for the
+            // user's call in the conflict banner; autosave never makes it.
+            if !b.dirty.get_untracked() || b.disk_changed.get_untracked() {
                 continue;
             }
             let Some(path) = b.file.path.as_ref() else {
                 continue;
             };
+            if Self::disk_changed_unnoticed(b) {
+                continue;
+            }
             let text = b.doc.text().to_string();
-            if buffer::write_with_encoding(path, &text, &b.encoding.get_untracked()).is_ok() {
-                b.dirty.set(false);
-                Self::refresh_disk_mtime(b);
-                if let Some(uri) = b.uri.as_ref() {
-                    for client in self.lsp_clients_for(b.file.language) {
-                        client.did_save(uri, &text);
+            match buffer::write_with_encoding(path, &text, &b.encoding.get_untracked()) {
+                Ok(()) => {
+                    b.dirty.set(false);
+                    Self::refresh_disk_mtime(b);
+                    if let Some(uri) = b.uri.as_ref() {
+                        for client in self.lsp_clients_for(b.file.language) {
+                            client.did_save(uri, &text);
+                        }
                     }
+                    self.request_inlay_hints(b.id);
                 }
-                self.request_inlay_hints(b.id);
+                // Reported once per pause in typing; the edits stay unsaved
+                // (and backed up in the session) until a write succeeds.
+                Err(e) => {
+                    eprintln!("e: autosave failed: {e:#}");
+                    Self::notify(&format!("Could not save {}: {e:#}", b.file.display_name()));
+                }
             }
         }
     }
@@ -3671,20 +3688,49 @@ impl AppState {
     /// Prompt for a path and save the active buffer there, then reopen it so it
     /// gets the right language, LSP, and git integration.
     pub fn save_active_as(&self) {
-        let Some(buf) = self.active_buffer() else {
-            return;
-        };
-        let content = buf.doc.text().to_string();
-        let id = buf.id;
+        if let Some(id) = self.focused_active_id() {
+            self.save_buffer_as(id, true, |_| {});
+        }
+    }
+
+    /// Prompt for a path and save buffer `id` there. The buffer is closed once
+    /// written; with `reopen` the saved file opens in its place.
+    fn save_buffer_as(&self, id: u64, reopen: bool, on_saved: impl FnOnce(bool) + 'static) {
         let state = *self;
+        // The dialog's callback may fire more than once in principle; the
+        // outcome is reported once.
+        let on_saved = RefCell::new(Some(on_saved));
+        let report = move |ok: bool| {
+            if let Some(f) = on_saved.borrow_mut().take() {
+                f(ok);
+            }
+        };
         let opts = floem::file::FileDialogOptions::new()
             .title("Save As")
             .force_starting_directory(self.root.get_untracked());
         floem::action::save_as(opts, move |info| {
-            if let Some(path) = info.and_then(|i| i.path.into_iter().next()) {
-                if buffer::write(&path, &content).is_ok() {
+            let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
+                report(false);
+                return;
+            };
+            // Read the text now, not when the sheet opened.
+            let Some(buf) = state.buffer_by_id(id) else {
+                report(false);
+                return;
+            };
+            let content = buf.doc.text().to_string();
+            match buffer::write_with_encoding(&path, &content, &buf.encoding.get_untracked()) {
+                Ok(()) => {
                     state.force_close(id);
-                    state.open_path(path);
+                    if reopen {
+                        state.open_path(path);
+                    }
+                    report(true);
+                }
+                Err(e) => {
+                    eprintln!("e: save as failed: {e:#}");
+                    Self::notify(&format!("Could not save: {e:#}"));
+                    report(false);
                 }
             }
         });
@@ -3922,6 +3968,8 @@ impl AppState {
 
     /// Relaunch the application (used after an update is installed).
     pub fn restart_app(&self) {
+        // Exiting skips the idle tick; take unsaved work along.
+        self.save_session();
         let exe = std::env::current_exe().ok();
         // If we're running inside a macOS .app bundle, relaunch the bundle so
         // the window comes to the front; otherwise relaunch the bare binary.
@@ -4033,6 +4081,7 @@ impl AppState {
         for text in &data.untitled {
             self.new_untitled_with(text.clone());
         }
+        self.restore_unsaved_edits(&data.modified);
         if let Some(a) = data
             .active
             .as_deref()
@@ -4052,8 +4101,68 @@ impl AppState {
         }
     }
 
+    /// Put unsaved edits from the last run back over their files (hot exit).
+    ///
+    /// The restored text is an ordinary edit, so the tab is dirty and one undo
+    /// returns to what is on disk. If the file changed on disk since — a `git
+    /// pull` while `e` was closed — the conflict banner comes up instead of
+    /// autosave quietly writing the old edits over it.
+    fn restore_unsaved_edits(&self, modified: &[session::ModifiedFile]) {
+        for m in modified {
+            let Some(buf) = self
+                .buffer_id_by_path(&m.path)
+                .and_then(|id| self.buffer_by_id(id))
+            else {
+                continue;
+            };
+            let current = buf.doc.text().to_string();
+            if current == m.text {
+                continue;
+            }
+            let disk_now = std::fs::metadata(&m.path)
+                .ok()
+                .and_then(|md| md.modified().ok())
+                .and_then(session::mtime_ms);
+            buf.doc.edit_single(
+                Selection::region(0, current.len()),
+                &m.text,
+                EditType::Other,
+            );
+            buf.dirty.set(true);
+            if disk_now != m.disk_mtime_ms {
+                buf.disk_changed.set(true);
+            }
+        }
+    }
+
+    /// Something that changes whenever unsaved text does: `None` when nothing
+    /// is unsaved. The idle tick backs the session up only when this moves.
+    pub fn unsaved_fingerprint(&self) -> Option<u64> {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut any = false;
+        self.buffers.with_untracked(|bs| {
+            for b in bs {
+                if b.file.path.is_none() || b.dirty.get_untracked() {
+                    any = true;
+                    (b.id, b.doc.rev(), b.dirty.get_untracked()).hash(&mut h);
+                }
+            }
+        });
+        any.then(|| h.finish())
+    }
+
     /// Persist the current session.
     pub fn save_session(&self) {
+        session::save(&self.root.get_untracked(), &self.session_data());
+    }
+
+    /// Persist the current session off the UI thread.
+    pub fn save_session_in_background(&self) {
+        session::save_in_background(self.root.get_untracked(), self.session_data());
+    }
+
+    fn session_data(&self) -> SessionData {
         let buffers = self.buffers.get_untracked();
         let path_of = |id: Option<u64>| -> Option<String> {
             id.and_then(|i| buffers.iter().find(|b| b.id == i))
@@ -4072,14 +4181,33 @@ impl AppState {
             .map(|b| b.doc.text().to_string())
             .filter(|t| !t.trim().is_empty())
             .collect();
-        let data = SessionData {
+        // Unsaved edits to real files, with the mtime the buffer last agreed
+        // with — unknown (`None`) once a conflict is already pending, so the
+        // restore raises it again.
+        let modified: Vec<session::ModifiedFile> = buffers
+            .iter()
+            .filter(|b| b.dirty.get_untracked())
+            .filter_map(|b| {
+                let path = b.file.path.as_ref()?;
+                Some(session::ModifiedFile {
+                    path: path.display().to_string(),
+                    text: b.doc.text().to_string(),
+                    disk_mtime_ms: if b.disk_changed.get_untracked() {
+                        None
+                    } else {
+                        b.disk_mtime.get_untracked().and_then(session::mtime_ms)
+                    },
+                })
+            })
+            .collect();
+        SessionData {
             open,
             untitled,
+            modified,
             active: path_of(self.active.get_untracked()),
             active2: path_of(self.active2.get_untracked()),
             split: self.split.get_untracked(),
-        };
-        session::save(&self.root.get_untracked(), &data);
+        }
     }
 
     /// Toggle the two-pane split view.
@@ -5820,10 +5948,19 @@ impl AppState {
             return;
         }
 
+        // A binary file opened as text is one keystroke and an autosave from
+        // being corrupted (`database.sqlite`), and a huge log freezes the window.
+        if let Err(why) = buffer::check_openable(&canon) {
+            let name = canon.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+            eprintln!("e: not opening {}: {why}", canon.display());
+            Self::notify(&format!("Not opening {name}: {why}"));
+            return;
+        }
         let (content, encoding) = match buffer::read_with_encoding(&canon) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("e: open failed: {e:#}");
+                Self::notify(&format!("Could not open: {e:#}"));
                 return;
             }
         };
@@ -6045,15 +6182,18 @@ impl AppState {
         }
     }
 
-    /// Save the pending buffer, then close it.
+    /// Save the pending buffer, then close it — once the write has landed.
+    /// Closing straight away lost the edits whenever saving finished later
+    /// (format on save, the Save As sheet) or failed.
     pub fn confirm_close_save(&self) {
         if let Some(id) = self.close_confirm.get_untracked() {
             self.close_confirm.set(None);
-            let prev = self.focused_active().get_untracked();
-            self.focused_active().set(Some(id));
-            self.save_active();
-            self.focused_active().set(prev);
-            self.force_close(id);
+            let app = *self;
+            self.save_buffer(id, false, move |saved| {
+                if saved {
+                    app.force_close(id);
+                }
+            });
         }
     }
 
@@ -6104,7 +6244,7 @@ impl AppState {
     }
 
     /// Format through the project's Pint, if it has one. Returns whether it ran.
-    fn format_active_with_pint(&self, buf: &Buffer) -> bool {
+    fn format_with_pint(&self, buf: &Buffer) -> bool {
         if !matches!(buf.file.language, Language::Php) {
             return false;
         }
@@ -6143,11 +6283,15 @@ impl AppState {
     /// applied. The request itself runs off the UI thread; formatting a large
     /// file used to freeze the window for as long as the server took.
     pub fn format_active_then(&self, then: impl FnOnce() + 'static) {
-        let Some(buf) = self.active_buffer() else {
-            then();
-            return;
-        };
-        if self.format_active_with_pint(&buf) {
+        match self.active_buffer() {
+            Some(buf) => self.format_buffer_then(buf, then),
+            None => then(),
+        }
+    }
+
+    /// [`Self::format_active_then`] for a given buffer, active or not.
+    fn format_buffer_then(&self, buf: Buffer, then: impl FnOnce() + 'static) {
+        if self.format_with_pint(&buf) {
             then();
             return;
         }
@@ -6155,7 +6299,8 @@ impl AppState {
             then();
             return;
         }
-        let (Some(client), Some(uri)) = (self.lsp_for_active(), buf.uri.clone()) else {
+        let (Some(client), Some(uri)) = (self.lsp_for_language(buf.file.language), buf.uri.clone())
+        else {
             then();
             return;
         };
@@ -6303,11 +6448,8 @@ impl AppState {
         );
     }
 
-    /// Strip trailing whitespace and ensure a final newline in the active buffer.
-    fn trim_active(&self) {
-        let Some(buf) = self.active_buffer() else {
-            return;
-        };
+    /// Strip trailing whitespace and ensure a final newline in a buffer.
+    fn trim_buffer(buf: &Buffer) {
         let text = buf.doc.text().to_string();
         let (edits, needs_newline) = trailing_trim_edits(&text);
         if edits.is_empty() && !needs_newline {
@@ -6327,36 +6469,52 @@ impl AppState {
 
     /// Save the active buffer to disk (formatting / trimming first, if enabled).
     pub fn save_active(&self) {
-        if self.settings.get_untracked().format_on_save {
-            // Formatting is asynchronous; the write must wait for its edits.
-            let app = *self;
-            self.format_active_then(move || app.write_active());
-            return;
+        if let Some(id) = self.focused_active_id() {
+            self.save_buffer(id, true, |_| {});
         }
-        self.write_active();
     }
 
-    /// The saving half of [`Self::save_active`]: trim, fix the final newline,
-    /// write, and tell everyone who cares.
-    fn write_active(&self) {
+    /// Save buffer `id`: format it if the settings say so, trim it, write it,
+    /// and tell `on_saved` whether it reached the disk. Everything goes by id,
+    /// never "the active buffer": formatting finishes later, and by then the
+    /// user may be in another tab — or have closed this one. An untitled
+    /// buffer goes through Save As; `reopen` decides whether the saved file
+    /// then opens in its place.
+    pub fn save_buffer(&self, id: u64, reopen: bool, on_saved: impl FnOnce(bool) + 'static) {
+        let Some(buf) = self.buffer_by_id(id) else {
+            on_saved(false);
+            return;
+        };
+        if buf.file.path.is_none() {
+            self.save_buffer_as(id, reopen, on_saved);
+            return;
+        }
+        if self.settings.get_untracked().format_on_save {
+            let app = *self;
+            self.format_buffer_then(buf, move || on_saved(app.write_buffer(id)));
+            return;
+        }
+        on_saved(self.write_buffer(id));
+    }
+
+    /// The saving half of [`Self::save_buffer`]: trim, fix the final newline,
+    /// write, and tell everyone who cares. Returns whether the file was written.
+    fn write_buffer(&self, id: u64) -> bool {
+        // Closed while a format was running: the close decided its fate.
+        let Some(buf) = self.buffer_by_id(id) else {
+            return false;
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return false;
+        };
         // EditorConfig `trim_trailing_whitespace` overrides the global setting.
-        let ec = self
-            .active_buffer()
-            .map(|b| b.editorconfig)
-            .unwrap_or_default();
+        let ec = buf.editorconfig.clone();
         let trim = ec
             .trim_trailing_whitespace
             .unwrap_or_else(|| self.settings.get_untracked().trim_on_save);
         if trim {
-            self.trim_active();
+            Self::trim_buffer(&buf);
         }
-        let Some(buf) = self.active_buffer() else {
-            return;
-        };
-        let Some(path) = buf.file.path.as_ref() else {
-            self.save_active_as();
-            return;
-        };
         // EditorConfig `insert_final_newline`: ensure exactly one trailing \n.
         if ec.insert_final_newline == Some(true) {
             let t = buf.doc.text().to_string();
@@ -6369,8 +6527,15 @@ impl AppState {
                 );
             }
         }
+        if Self::disk_changed_unnoticed(&buf) {
+            Self::notify(&format!(
+                "{} changed on disk. Reload it, or save again to keep your version.",
+                buf.file.display_name()
+            ));
+            return false;
+        }
         let text = buf.doc.text().to_string();
-        match buffer::write_with_encoding(path, &text, &buf.encoding.get_untracked()) {
+        match buffer::write_with_encoding(&path, &text, &buf.encoding.get_untracked()) {
             Ok(()) => {
                 buf.dirty.set(false);
                 buf.disk_changed.set(false);
@@ -6381,16 +6546,50 @@ impl AppState {
                 self.run_phpstan(buf.id);
                 self.request_inlay_hints(buf.id);
                 eprintln!("e: saved {}", path.display());
-                self.laravel_touch(path);
+                self.laravel_touch(&path);
                 if let Some(uri) = buf.uri.as_ref() {
                     for client in self.lsp_clients_for(buf.file.language) {
                         client.did_save(uri, &text);
                     }
                 }
                 self.request_outline();
+                true
             }
-            Err(e) => eprintln!("e: save failed: {e:#}"),
+            Err(e) => {
+                eprintln!("e: save failed: {e:#}");
+                Self::notify(&format!(
+                    "Could not save {}: {e:#}",
+                    buf.file.display_name()
+                ));
+                false
+            }
         }
+    }
+
+    /// Whether the file changed on disk since the buffer last agreed with it,
+    /// without anyone having been told. If so it raises the conflict banner and
+    /// returns true, and the write must not happen: the idle poll runs every
+    /// 500 ms, and a save inside that window would otherwise overwrite a `git
+    /// checkout` or a formatter's work unseen. Once the banner is up, an
+    /// explicit save is the user choosing their version, so it goes ahead.
+    fn disk_changed_unnoticed(buf: &Buffer) -> bool {
+        if buf.disk_changed.get_untracked() {
+            return false;
+        }
+        let Some(known) = buf.disk_mtime.get_untracked() else {
+            return false;
+        };
+        let now = buf
+            .file
+            .path
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        if now.is_some_and(|t| t != known) {
+            buf.disk_changed.set(true);
+            return true;
+        }
+        false
     }
 
     /// Rebuild a buffer's inline diagnostic spans and repaint it.

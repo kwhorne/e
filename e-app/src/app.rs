@@ -17,7 +17,7 @@ use crate::breadcrumbs::breadcrumbs;
 use crate::cmd_palette::command_palette;
 use crate::completion::{completion_popup, hover_popup, signature_popup};
 use crate::dialogs::{
-    close_confirm_dialog, disk_conflict_bar, merge_conflict_bar, move_class_dialog,
+    close_confirm_dialog, confirm_dialog, disk_conflict_bar, merge_conflict_bar, move_class_dialog,
     rename_preview_dialog, replace_confirm_dialog,
 };
 use crate::diff_view::diff_view;
@@ -524,17 +524,18 @@ fn app_view() -> impl IntoView {
             }
         });
         let ticks = create_signal_from_channel(auto_rx);
-        create_effect(move |_| {
+        create_effect(move |backed_up: Option<Option<u64>>| {
+            let mut backed_up = backed_up.flatten();
             if ticks.get().is_some() {
                 state.maybe_autosave();
-                // Persist the session while there are unsaved untitled buffers, so
-                // a quit or crash never loses scratch work. (Saved-file changes
-                // are already persisted by the open/active/split effect.)
-                if state
-                    .buffers
-                    .with_untracked(|bs| bs.iter().any(|b| b.file.path.is_none()))
-                {
-                    state.save_session();
+                // Back up unsaved text (untitled buffers and edits to files)
+                // whenever it changed, so a quit or a crash loses at most this
+                // tick's worth of typing. Quitting doesn't prompt; the next
+                // launch puts the edits back.
+                let now = state.unsaved_fingerprint();
+                if now != backed_up {
+                    state.save_session_in_background();
+                    backed_up = now;
                 }
                 state.check_external_changes();
                 state.check_laravel_freshness();
@@ -551,6 +552,7 @@ fn app_view() -> impl IntoView {
                     state.refresh_model_wizard_preview();
                 }
             }
+            backed_up
         });
     }
 
@@ -833,7 +835,15 @@ fn app_view() -> impl IntoView {
         update_notice(state),
         stack((
             goto_bar(state),
-            close_confirm_dialog(state),
+            // Two dialogs share one slot so the tuple stays within floem's arity.
+            stack((close_confirm_dialog(state), confirm_dialog(state))).style(move |s| {
+                let s = s.absolute().inset(0.0).size_full();
+                if state.close_confirm.get().is_some() || state.confirm.with(Option::is_some) {
+                    s
+                } else {
+                    s.hide()
+                }
+            }),
             replace_confirm_dialog(state),
             rename_preview_dialog(state),
             move_class_dialog(state),
@@ -858,6 +868,7 @@ fn app_view() -> impl IntoView {
             let s = s.absolute().inset(0.0).size_full();
             if state.goto.open.get()
                 || state.close_confirm.get().is_some()
+                || state.confirm.with(Option::is_some)
                 || state.replace_confirm.with(Option::is_some)
                 || state.rename_plan.with(Option::is_some)
                 || state.move_plan.with(Option::is_some)

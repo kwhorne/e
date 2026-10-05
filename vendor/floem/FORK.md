@@ -99,3 +99,7 @@ local changes forward. Record any local patches in this file as they land:
 - **`src/views/rich_text.rs`: click offsets.** Added `RichText::on_click_offset(cb)`
   which fires on a plain click (not a drag-selection) with the byte offset of the
   hit character. Used to make file paths in terminal/agent output click-to-open.
+- **`src/views/editor/text_document.rs`: `TextDocument::rev()`.** Exposes the
+  buffer's edit revision, which was private. `cache_rev` can't stand in for it
+  because a caret move bumps it too; `e`'s hot exit needs "did the text change
+  since the last backup" to decide whether to rewrite the session file.

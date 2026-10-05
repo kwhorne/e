@@ -2,7 +2,7 @@
 //! both from keybindings ([`crate::keymap`]) and the command palette. This is
 //! the single place that maps a command id to its effect.
 
-use floem::reactive::{SignalGet, SignalUpdate};
+use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 
 use crate::state::AppState;
 
@@ -175,6 +175,10 @@ fn close_focused(state: AppState) {
 
 /// Dismiss every open overlay (Escape).
 fn close_overlays(state: AppState) {
+    if state.confirm.with_untracked(Option::is_some) {
+        state.confirm_cancel();
+        return;
+    }
     if state.agent.edit.get().is_some() {
         state.agent_edit_cancel();
         return;

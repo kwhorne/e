@@ -1,6 +1,8 @@
 //! Modal confirmations: unsaved-changes-on-close and on-disk-change conflicts.
 
-use floem::reactive::{SignalGet, SignalWith};
+use std::rc::Rc;
+
+use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 use floem::views::{container, label, stack, Decorators};
 use floem::IntoView;
 
@@ -25,6 +27,88 @@ fn button(text: &'static str, primary: bool) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         }
     })
+}
+
+/// A yes/no question before something that can't be undone. Set
+/// `AppState::confirm` to show it; `on_confirm` runs if the user goes ahead.
+#[derive(Clone)]
+pub struct Confirm {
+    pub title: String,
+    pub detail: String,
+    /// The label of the button that goes ahead ("Discard").
+    pub action: &'static str,
+    pub on_confirm: Rc<dyn Fn()>,
+}
+
+impl AppState {
+    pub fn confirm_accept(&self) {
+        if let Some(c) = self.confirm.get_untracked() {
+            self.confirm.set(None);
+            (c.on_confirm)();
+        }
+    }
+
+    pub fn confirm_cancel(&self) {
+        self.confirm.set(None);
+    }
+}
+
+/// The dialog for [`Confirm`].
+pub fn confirm_dialog(state: AppState) -> impl IntoView {
+    let field = move |f: fn(&Confirm) -> String| {
+        move || {
+            state
+                .confirm
+                .with(|c| c.as_ref().map(f).unwrap_or_default())
+        }
+    };
+    let box_ = stack((
+        label(field(|c| c.title.clone())).style(|s| s.color(theme::fg()).font_size(15.0)),
+        label(field(|c| c.detail.clone()))
+            .style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_top(4.0)),
+        stack((
+            label(field(|c| c.action.to_string()))
+                .style(|s| {
+                    s.padding_horiz(16.0)
+                        .padding_vert(7.0)
+                        .border_radius(7.0)
+                        .font_size(13.0)
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .background(theme::error())
+                        .color(theme::on_accent())
+                })
+                .on_click_stop(move |_| state.confirm_accept()),
+            button("Cancel", false).on_click_stop(move |_| state.confirm_cancel()),
+        ))
+        .style(|s| s.gap(8.0).margin_top(18.0)),
+    ))
+    .style(|s| {
+        s.flex_col()
+            .width(420.0)
+            .padding(24.0)
+            .background(theme::bg_panel())
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(12.0)
+    })
+    .on_click_stop(|_| {});
+
+    container(box_)
+        .style(move |s| {
+            let s = s
+                .absolute()
+                .inset(0.0)
+                .size_full()
+                .items_center()
+                .justify_center()
+                .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
+            if state.confirm.with(Option::is_some) {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.confirm_cancel())
 }
 
 /// "Save changes before closing?" dialog.

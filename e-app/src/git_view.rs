@@ -26,78 +26,160 @@ impl AppState {
     }
 
     /// Re-read the repository status and branch.
+    ///
+    /// Off the UI thread: it is four `git` processes, and it runs on every save
+    /// while the panel is open. A refresh that finishes after a newer one has
+    /// started is dropped, so the panel never steps back to older state.
     pub fn refresh_git_status(&self) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static GENERATION: AtomicU64 = AtomicU64::new(0);
+        let gen = GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
         let root = self.root.get_untracked();
-        let repo = git::repo_root(&root);
-        self.git_root.set(repo.clone());
-        match repo {
-            Some(repo) => {
-                self.git_branch.set(git::current_branch(&repo));
-                self.git_status.set(git::status(&repo));
-                self.git_log.set(git::log(&repo, 20));
-                self.git_stash_count.set(git::stash_count(&repo));
-            }
-            None => {
-                self.git_branch.set(None);
-                self.git_status.set(Vec::new());
-                self.git_log.set(Vec::new());
-                self.git_stash_count.set(0);
-            }
-        }
+        let state = *self;
+        self.spawn_bg(
+            move || {
+                let repo = git::repo_root(&root)?;
+                Some((
+                    git::current_branch(&repo),
+                    git::status(&repo),
+                    git::log(&repo, 20),
+                    git::stash_count(&repo),
+                    repo,
+                ))
+            },
+            move |snapshot| {
+                if GENERATION.load(Ordering::Relaxed) != gen {
+                    return;
+                }
+                match snapshot {
+                    Some((branch, status, log, stashes, repo)) => {
+                        state.git_root.set(Some(repo));
+                        state.git_branch.set(branch);
+                        state.git_status.set(status);
+                        state.git_log.set(log);
+                        state.git_stash_count.set(stashes);
+                    }
+                    None => {
+                        state.git_root.set(None);
+                        state.git_branch.set(None);
+                        state.git_status.set(Vec::new());
+                        state.git_log.set(Vec::new());
+                        state.git_stash_count.set(0);
+                    }
+                }
+            },
+        );
     }
 
     pub fn git_stash(&self) {
-        self.with_repo(git::stash_push);
-        self.fs_rev.update(|r| *r += 1);
+        self.with_repo("stash", git::stash_push, |s| s.fs_rev.update(|r| *r += 1));
     }
     pub fn git_stash_pop(&self) {
-        self.with_repo(git::stash_pop);
-        self.fs_rev.update(|r| *r += 1);
+        self.with_repo("stash pop", git::stash_pop, |s| {
+            s.fs_rev.update(|r| *r += 1)
+        });
     }
 
-    fn with_repo(&self, f: impl FnOnce(&std::path::Path) -> Result<(), String>) {
-        if let Some(repo) = self.git_root.get_untracked() {
-            if let Err(e) = f(&repo) {
-                eprintln!("e: git: {e}");
-            }
-            self.refresh_git_status();
-        }
+    /// Run a git operation off the UI thread — push, pull and a commit's hooks
+    /// can take as long as the network or the hooks do — then refresh the
+    /// panel. A failure is shown, with git's own message; `on_ok` runs only
+    /// when it succeeded.
+    fn with_repo(
+        &self,
+        what: &'static str,
+        f: impl FnOnce(&std::path::Path) -> Result<(), String> + Send + 'static,
+        on_ok: impl FnOnce(&AppState) + 'static,
+    ) {
+        let Some(repo) = self.git_root.get_untracked() else {
+            return;
+        };
+        let state = *self;
+        self.spawn_bg(
+            move || f(&repo),
+            move |result: Result<(), String>| {
+                match result {
+                    Ok(()) => on_ok(&state),
+                    Err(e) => {
+                        eprintln!("e: git {what}: {e}");
+                        let first = e.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+                        Self::notify(&format!("git {what} failed: {first}"));
+                    }
+                }
+                state.refresh_git_status();
+            },
+        );
     }
 
     pub fn git_stage(&self, path: String) {
-        self.with_repo(|repo| git::stage(repo, &path));
+        self.with_repo("add", move |repo| git::stage(repo, &path), |_| {});
     }
     pub fn git_unstage(&self, path: String) {
-        self.with_repo(|repo| git::unstage(repo, &path));
+        self.with_repo(
+            "restore --staged",
+            move |repo| git::unstage(repo, &path),
+            |_| {},
+        );
     }
     pub fn git_stage_all(&self) {
-        self.with_repo(git::stage_all);
+        self.with_repo("add", git::stage_all, |_| {});
     }
+
+    /// Ask before discarding: it throws away uncommitted work for good, and the
+    /// button sits right next to "stage".
     pub fn git_discard(&self, path: String) {
-        self.with_repo(|repo| git::discard(repo, &path));
-        self.fs_rev.update(|r| *r += 1);
+        let state = *self;
+        let name = std::path::Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        self.confirm.set(Some(crate::dialogs::Confirm {
+            title: format!("Discard changes to “{name}”?"),
+            detail: "Its uncommitted changes are thrown away. This can't be undone.".into(),
+            action: "Discard",
+            on_confirm: std::rc::Rc::new(move || {
+                let path = path.clone();
+                state.with_repo(
+                    "checkout",
+                    move |repo| git::discard(repo, &path),
+                    |s| s.fs_rev.update(|r| *r += 1),
+                );
+            }),
+        }));
     }
     pub fn git_checkout(&self, branch: String) {
-        self.with_repo(|repo| git::checkout(repo, &branch));
-        self.fs_rev.update(|r| *r += 1);
+        self.with_repo(
+            "checkout",
+            move |repo| git::checkout(repo, &branch),
+            |s| s.fs_rev.update(|r| *r += 1),
+        );
     }
 
     pub fn git_push(&self) {
-        self.with_repo(git::push);
+        self.with_repo("push", git::push, |_| Self::notify("Pushed"));
     }
     pub fn git_pull(&self) {
-        self.with_repo(git::pull);
-        self.fs_rev.update(|r| *r += 1);
+        self.with_repo("pull", git::pull, |s| s.fs_rev.update(|r| *r += 1));
     }
 
+    /// Commit, and clear the message box only once the commit exists — a
+    /// rejected commit (a failing hook, nothing staged) keeps the message.
     pub fn git_commit(&self) {
         let msg = self.git_commit_msg.get_untracked();
         let msg = msg.trim().to_string();
         if msg.is_empty() {
             return;
         }
-        self.with_repo(|repo| git::commit(repo, &msg));
-        self.git_commit_msg.set(String::new());
+        let sent = msg.clone();
+        self.with_repo(
+            "commit",
+            move |repo| git::commit(repo, &msg),
+            move |s| {
+                // Only if it wasn't edited while the commit ran.
+                if s.git_commit_msg.get_untracked().trim() == sent {
+                    s.git_commit_msg.set(String::new());
+                }
+            },
+        );
     }
 
     /// Suggest a Conventional Commits message from the current changes and put

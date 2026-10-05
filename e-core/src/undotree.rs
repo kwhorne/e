@@ -165,11 +165,8 @@ impl UndoTree {
     }
 
     pub fn save(&self, path: &Path) {
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(json) = serde_json::to_string(self) {
-            let _ = std::fs::write(path, json);
+            let _ = crate::buffer::write(path, &json);
         }
     }
 

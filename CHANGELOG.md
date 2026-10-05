@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Hot exit.** Unsaved edits to files are backed up with the session while you
+  type and put back next launch, so quitting, restarting after an update, or a
+  crash no longer loses them. If the file changed on disk while `e` was
+  closed, the conflict banner comes up instead of the old edits being written
+  over it.
+- **Discarding a file's changes in Source Control asks first.** It can't be
+  undone, and the button sits next to Stage.
+
+### Fixed
+
+- **Autosave no longer overwrites changes made outside `e`.** It used to write
+  over a `git checkout`, Pint or an agent's edit that landed while a buffer had
+  unsaved edits. It now leaves those files for the conflict banner, and every
+  save checks the disk first rather than waiting for the next poll.
+- **Save in the "Save changes?" dialog closes the tab only after the save.**
+  With format on save, or Save As for an untitled tab, the tab used to close
+  first and the edits were lost; a slow format could also save into whichever
+  tab was active by then.
+- **Saves are atomic.** Files are written to a temporary file and renamed into
+  place, keeping permissions, symlinks and hard links, so a crash or a full
+  disk mid-save can't leave a truncated file. The session and undo history are
+  written the same way.
+- **Failed saves are reported** (Save, autosave, Save As) instead of only being
+  logged.
+- **Saving keeps the file's encoding.** A UTF-8 BOM is written back, UTF-16
+  stays UTF-16, and a file in a legacy encoding that can't hold a character
+  you typed refuses to save rather than turning it into `&#…;`.
+- **Binary files and files over 64 MB aren't opened as text.** Opening
+  `database.sqlite` and typing one key used to be enough for autosave to
+  corrupt it.
+- **Git operations run in the background.** Push, pull, commit and status no
+  longer freeze the window. A failure is reported with git's message, and a
+  rejected commit keeps its message.
+
 ## [0.9.24] - 2026-09-27
 
 ### Changed

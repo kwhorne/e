@@ -1484,6 +1484,15 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
 /// inline — it has to leave the UI thread.
 const SYNC_HIGHLIGHT_LIMIT: usize = 64 * 1024;
 
+/// Up to this size, a language [`e_core::syntax::SyntaxTree`] supports is
+/// highlighted incrementally on the UI thread. Typing a line into a Laravel
+/// controller measured 0.5 ms a keystroke at 18 KB (3.5 ms with a full
+/// highlight) and 1.9 ms at 70 KB, the worst keystroke — one that leaves the
+/// rest of the class unparseable — about half the full cost. Past this size
+/// that worst case passes a frame, so larger files stay on the background
+/// path above.
+const INCREMENTAL_HIGHLIGHT_LIMIT: usize = 128 * 1024;
+
 /// How long typing has to pause before a large file is re-highlighted. Long
 /// enough that a burst of keystrokes schedules one parse rather than dozens,
 /// short enough not to feel like the colours are lagging behind.
@@ -5995,11 +6004,19 @@ impl AppState {
         // Very large files skip tree-sitter highlighting (and other per-edit
         // work) to stay responsive.
         let large = content.len() > 1_000_000;
-        let highlights: Highlights = Rc::new(RefCell::new(if large {
-            Vec::new()
+        // Kept between edits for incremental highlighting, where supported.
+        let (syntax, initial_spans) = if large {
+            (None, Vec::new())
+        } else if content.len() <= INCREMENTAL_HIGHLIGHT_LIMIT {
+            match e_core::syntax::SyntaxTree::new(language, &content) {
+                Some((tree, spans)) => (Some(tree), spans),
+                None => (None, highlight_lines(language, &content)),
+            }
         } else {
-            highlight_lines(language, &content)
-        }));
+            (None, highlight_lines(language, &content))
+        };
+        let syntax = Rc::new(RefCell::new(syntax));
+        let highlights: Highlights = Rc::new(RefCell::new(initial_spans));
 
         // Git change markers vs HEAD.
         let head_text = file.path.as_ref().and_then(|p| git::head_text(p));
@@ -6062,6 +6079,7 @@ impl AppState {
             // every edit so a job that finishes after a later keystroke is dropped
             // instead of painting stale colours.
             let hl_gen: Rc<std::cell::Cell<u64>> = Rc::new(std::cell::Cell::new(0));
+            let syntax = syntax.clone();
             doc.clone().add_on_update(move |_| {
                 // Only on the change: every subscriber (title, tab, status)
                 // re-renders on a set, even to the same value.
@@ -6096,31 +6114,49 @@ impl AppState {
                         app.undo_rev.update(|r| *r += 1);
                     }
                 }
-                if !large {
-                    if text.len() <= SYNC_HIGHLIGHT_LIMIT {
-                        *highlights.borrow_mut() = highlight_lines(language, &text);
-                        if let Some(head) = &head_text {
-                            let lc = text.split_inclusive('\n').count().max(1);
-                            *git_marks.borrow_mut() = git::marks(head, &text, lc);
-                        }
-                    } else {
-                        // Too expensive to keep inline — see SYNC_HIGHLIGHT_LIMIT.
-                        // The previous colours stay on screen until the new ones
-                        // land, which reads as a brief lag rather than a freeze.
-                        let gen = hl_gen.get() + 1;
-                        hl_gen.set(gen);
-                        schedule_highlight(
-                            app.cx,
-                            gen,
-                            hl_gen.clone(),
-                            language,
-                            text.clone(),
-                            head_text.clone(),
-                            highlights.clone(),
-                            git_marks.clone(),
-                            doc.clone(),
-                        );
+                let incremental =
+                    text.len() <= INCREMENTAL_HIGHLIGHT_LIMIT && syntax.borrow().is_some();
+                if !incremental {
+                    // Grown past the limit: the tree would fall behind, so
+                    // it goes for good and the paths below take over.
+                    syntax.borrow_mut().take();
+                }
+                if large {
+                    // No highlighting for very large files.
+                } else if incremental {
+                    // Supersede any background highlight still running from
+                    // when this file was larger.
+                    hl_gen.set(hl_gen.get() + 1);
+                    if let Some(tree) = syntax.borrow_mut().as_mut() {
+                        tree.update(&text, &mut highlights.borrow_mut());
                     }
+                    if let Some(head) = &head_text {
+                        let lc = text.split_inclusive('\n').count().max(1);
+                        *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                    }
+                } else if text.len() <= SYNC_HIGHLIGHT_LIMIT {
+                    *highlights.borrow_mut() = highlight_lines(language, &text);
+                    if let Some(head) = &head_text {
+                        let lc = text.split_inclusive('\n').count().max(1);
+                        *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                    }
+                } else {
+                    // Too expensive to keep inline — see SYNC_HIGHLIGHT_LIMIT.
+                    // The previous colours stay on screen until the new ones
+                    // land, which reads as a brief lag rather than a freeze.
+                    let gen = hl_gen.get() + 1;
+                    hl_gen.set(gen);
+                    schedule_highlight(
+                        app.cx,
+                        gen,
+                        hl_gen.clone(),
+                        language,
+                        text.clone(),
+                        head_text.clone(),
+                        highlights.clone(),
+                        git_marks.clone(),
+                        doc.clone(),
+                    );
                 }
                 doc.cache_rev().update(|r| *r += 1);
 

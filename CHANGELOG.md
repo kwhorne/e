@@ -63,6 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the breadcrumb and unsaved marker don't re-render on every edit.
 - **Release builds use thin LTO; debug builds optimise dependencies**, so
   `scripts/run.sh` is no longer misleadingly slow.
+- **Syntax highlighting is incremental** for PHP, Rust, Python, Go, C, JSON
+  and CSS files up to 128 KB. The parse tree is kept between keystrokes and
+  only the lines whose syntax changed are re-coloured, instead of parsing
+  and colouring the whole file again (PHP was parsed twice). Typing a line
+  into a Laravel controller went from 3.5 ms to 0.5 ms a keystroke at 18 KB,
+  and from 13 ms to 1.9 ms at 70 KB — which also brings files between 64 and
+  128 KB back from background highlighting to immediate colours. Colours are
+  identical to before for code that parses; checked against the old
+  highlighter on 41,000 files and thousands of random edits.
 
 ## [0.9.24] - 2026-09-27
 

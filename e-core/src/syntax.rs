@@ -100,86 +100,91 @@ pub struct LineSpan {
     pub kind: HighlightKind,
 }
 
-fn build_config(language: Language) -> Option<HighlightConfiguration> {
-    // (grammar, highlights, injections, locals) — queries owned so we can
-    // concatenate (e.g. TypeScript = JavaScript + TypeScript highlights).
-    let (lang_fn, highlights, injections, locals): (tree_sitter::Language, String, String, String) =
-        match language {
-            Language::Rust => (
-                tree_sitter_rust::LANGUAGE.into(),
-                tree_sitter_rust::HIGHLIGHTS_QUERY.into(),
-                tree_sitter_rust::INJECTIONS_QUERY.into(),
-                String::new(),
-            ),
-            Language::Python => (
-                tree_sitter_python::LANGUAGE.into(),
-                tree_sitter_python::HIGHLIGHTS_QUERY.into(),
-                String::new(),
-                String::new(),
-            ),
-            Language::JavaScript => (
-                tree_sitter_javascript::LANGUAGE.into(),
-                tree_sitter_javascript::HIGHLIGHT_QUERY.into(),
-                tree_sitter_javascript::INJECTIONS_QUERY.into(),
-                tree_sitter_javascript::LOCALS_QUERY.into(),
-            ),
-            Language::TypeScript => (
-                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-                format!(
-                    "{}\n{}",
-                    tree_sitter_javascript::HIGHLIGHT_QUERY,
-                    tree_sitter_typescript::HIGHLIGHTS_QUERY
-                ),
-                tree_sitter_javascript::INJECTIONS_QUERY.into(),
-                tree_sitter_typescript::LOCALS_QUERY.into(),
-            ),
-            Language::Json => (
-                tree_sitter_json::LANGUAGE.into(),
-                tree_sitter_json::HIGHLIGHTS_QUERY.into(),
-                String::new(),
-                String::new(),
-            ),
-            Language::Go => (
-                tree_sitter_go::LANGUAGE.into(),
-                tree_sitter_go::HIGHLIGHTS_QUERY.into(),
-                String::new(),
-                String::new(),
-            ),
-            Language::C => (
-                tree_sitter_c::LANGUAGE.into(),
-                tree_sitter_c::HIGHLIGHT_QUERY.into(),
-                String::new(),
-                String::new(),
-            ),
-            Language::Php => (
-                tree_sitter_php::LANGUAGE_PHP.into(),
-                tree_sitter_php::HIGHLIGHTS_QUERY.into(),
-                tree_sitter_php::INJECTIONS_QUERY.into(),
-                String::new(),
-            ),
-            Language::Css => (
-                tree_sitter_css::LANGUAGE.into(),
-                tree_sitter_css::HIGHLIGHTS_QUERY.into(),
-                String::new(),
-                String::new(),
-            ),
-            // Blade (Laravel/Livewire) and Vue SFCs are HTML-dominant; use the
-            // HTML grammar so tags, attributes and Tailwind classes highlight.
-            Language::Html | Language::Blade | Language::Vue => (
-                tree_sitter_html::LANGUAGE.into(),
-                tree_sitter_html::HIGHLIGHTS_QUERY.into(),
-                tree_sitter_html::INJECTIONS_QUERY.into(),
-                String::new(),
-            ),
-            Language::Svelte => (
-                tree_sitter_svelte_ng::LANGUAGE.into(),
-                tree_sitter_svelte_ng::HIGHLIGHTS_QUERY.into(),
-                tree_sitter_svelte_ng::INJECTIONS_QUERY.into(),
-                tree_sitter_svelte_ng::LOCALS_QUERY.into(),
-            ),
-            _ => return None,
-        };
+/// A language's grammar and its (highlights, injections, locals) queries —
+/// owned so they can be concatenated (TypeScript = JavaScript + TypeScript).
+type Grammar = (tree_sitter::Language, String, String, String);
 
+fn grammar(language: Language) -> Option<Grammar> {
+    let g: Grammar = match language {
+        Language::Rust => (
+            tree_sitter_rust::LANGUAGE.into(),
+            tree_sitter_rust::HIGHLIGHTS_QUERY.into(),
+            tree_sitter_rust::INJECTIONS_QUERY.into(),
+            String::new(),
+        ),
+        Language::Python => (
+            tree_sitter_python::LANGUAGE.into(),
+            tree_sitter_python::HIGHLIGHTS_QUERY.into(),
+            String::new(),
+            String::new(),
+        ),
+        Language::JavaScript => (
+            tree_sitter_javascript::LANGUAGE.into(),
+            tree_sitter_javascript::HIGHLIGHT_QUERY.into(),
+            tree_sitter_javascript::INJECTIONS_QUERY.into(),
+            tree_sitter_javascript::LOCALS_QUERY.into(),
+        ),
+        Language::TypeScript => (
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            format!(
+                "{}\n{}",
+                tree_sitter_javascript::HIGHLIGHT_QUERY,
+                tree_sitter_typescript::HIGHLIGHTS_QUERY
+            ),
+            tree_sitter_javascript::INJECTIONS_QUERY.into(),
+            tree_sitter_typescript::LOCALS_QUERY.into(),
+        ),
+        Language::Json => (
+            tree_sitter_json::LANGUAGE.into(),
+            tree_sitter_json::HIGHLIGHTS_QUERY.into(),
+            String::new(),
+            String::new(),
+        ),
+        Language::Go => (
+            tree_sitter_go::LANGUAGE.into(),
+            tree_sitter_go::HIGHLIGHTS_QUERY.into(),
+            String::new(),
+            String::new(),
+        ),
+        Language::C => (
+            tree_sitter_c::LANGUAGE.into(),
+            tree_sitter_c::HIGHLIGHT_QUERY.into(),
+            String::new(),
+            String::new(),
+        ),
+        Language::Php => (
+            tree_sitter_php::LANGUAGE_PHP.into(),
+            tree_sitter_php::HIGHLIGHTS_QUERY.into(),
+            tree_sitter_php::INJECTIONS_QUERY.into(),
+            String::new(),
+        ),
+        Language::Css => (
+            tree_sitter_css::LANGUAGE.into(),
+            tree_sitter_css::HIGHLIGHTS_QUERY.into(),
+            String::new(),
+            String::new(),
+        ),
+        // Blade (Laravel/Livewire) and Vue SFCs are HTML-dominant; use the
+        // HTML grammar so tags, attributes and Tailwind classes highlight.
+        Language::Html | Language::Blade | Language::Vue => (
+            tree_sitter_html::LANGUAGE.into(),
+            tree_sitter_html::HIGHLIGHTS_QUERY.into(),
+            tree_sitter_html::INJECTIONS_QUERY.into(),
+            String::new(),
+        ),
+        Language::Svelte => (
+            tree_sitter_svelte_ng::LANGUAGE.into(),
+            tree_sitter_svelte_ng::HIGHLIGHTS_QUERY.into(),
+            tree_sitter_svelte_ng::INJECTIONS_QUERY.into(),
+            tree_sitter_svelte_ng::LOCALS_QUERY.into(),
+        ),
+        _ => return None,
+    };
+    Some(g)
+}
+
+fn build_config(language: Language) -> Option<HighlightConfiguration> {
+    let (lang_fn, highlights, injections, locals) = grammar(language)?;
     let mut config =
         HighlightConfiguration::new(lang_fn, language.name(), &highlights, &injections, &locals)
             .ok()?;
@@ -468,6 +473,20 @@ pub fn php_sql_range_at(text: &str, offset: usize) -> Option<(usize, usize)> {
 /// Walk the PHP tree, collecting the byte range of the SQL string argument of
 /// each recognised DB call.
 fn collect_sql_ranges(node: tree_sitter::Node, src: &[u8], out: &mut Vec<(usize, usize)>) {
+    collect_sql_ranges_in(node, src, 0..usize::MAX, out);
+}
+
+/// [`collect_sql_ranges`] for the calls overlapping `within` only, so an
+/// incremental update doesn't walk the whole tree.
+fn collect_sql_ranges_in(
+    node: tree_sitter::Node,
+    src: &[u8],
+    within: std::ops::Range<usize>,
+    out: &mut Vec<(usize, usize)>,
+) {
+    if node.end_byte() < within.start || node.start_byte() > within.end {
+        return;
+    }
     let kind = node.kind();
     if kind == "scoped_call_expression" || kind == "member_call_expression" {
         let method = node
@@ -493,7 +512,7 @@ fn collect_sql_ranges(node: tree_sitter::Node, src: &[u8], out: &mut Vec<(usize,
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_sql_ranges(child, src, out);
+        collect_sql_ranges_in(child, src, within.clone(), out);
     }
 }
 
@@ -730,6 +749,500 @@ fn push_span(
             });
         }
     }
+}
+
+// ---- Incremental highlighting ------------------------------------------------
+//
+// `highlight_lines` re-parses and re-highlights the whole file, which is what a
+// keystroke cost: ~10 ms for 60 KB of PHP (two full parses, then every capture
+// in the file). A `SyntaxTree` keeps its parse tree between edits instead, so
+// tree-sitter re-parses only what changed, and re-highlights only the lines
+// whose text or syntax changed, splicing them into the existing per-line spans.
+//
+// It reads the same highlight queries and must colour exactly as
+// `tree-sitter-highlight` does — the tests hold it to that, edit by edit:
+//   * a node captured by several patterns takes the *last* pattern's capture;
+//   * where captured nodes nest, the innermost wins;
+//   * injections are ignored (the full path passes no injection callback).
+// Languages with a locals query (JavaScript, TypeScript, Svelte) resolve
+// variable references through scopes, which this doesn't model, and the
+// HTML-family languages layer extra scanning on top; both keep the full path.
+
+/// A highlight query compiled for direct use, with each capture's colour.
+struct TreeQuery {
+    language: tree_sitter::Language,
+    query: tree_sitter::Query,
+    kinds: Vec<Option<HighlightKind>>,
+    /// How many levels above a node a pattern that involves it can be rooted:
+    /// the deepest pattern's nesting, less one.
+    reach: usize,
+}
+
+thread_local! {
+    static TREE_QUERIES: RefCell<HashMap<Language, Option<Rc<TreeQuery>>>> =
+        RefCell::new(HashMap::new());
+}
+
+fn tree_query(language: Language) -> Option<Rc<TreeQuery>> {
+    if !SyntaxTree::supports(language) {
+        return None;
+    }
+    TREE_QUERIES.with(|cell| {
+        cell.borrow_mut()
+            .entry(language)
+            .or_insert_with(|| {
+                let (lang, highlights, _, _) = grammar(language)?;
+                let query = tree_sitter::Query::new(&lang, &highlights).ok()?;
+                let kinds = query
+                    .capture_names()
+                    .iter()
+                    .map(|name| recognized_name(name).map(name_to_kind))
+                    .collect();
+                Some(Rc::new(TreeQuery {
+                    language: lang,
+                    query,
+                    kinds,
+                    reach: pattern_depth(&highlights).saturating_sub(1),
+                }))
+            })
+            .clone()
+    })
+}
+
+/// The deepest nesting of node patterns in a query: `(a (b (c)))` is 3.
+/// Predicates, strings and comments don't count.
+fn pattern_depth(query: &str) -> usize {
+    let b = query.as_bytes();
+    let (mut depth, mut max, mut parens) = (0usize, 0usize, Vec::<bool>::new());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b';' => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    if b[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            b'(' => {
+                let node = b.get(i + 1) != Some(&b'#');
+                parens.push(node);
+                if node {
+                    depth += 1;
+                    max = max.max(depth);
+                }
+            }
+            b')' if parens.pop() == Some(true) => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    max
+}
+
+/// The entry of [`NAMES`] a capture name maps to: the one with the most
+/// dot-separated parts that all occur in the capture name — exactly
+/// `HighlightConfiguration::configure`'s rule.
+fn recognized_name(capture: &str) -> Option<&'static str> {
+    let parts: Vec<&str> = capture.split('.').collect();
+    let mut best: Option<(&'static str, usize)> = None;
+    for &name in NAMES {
+        let len = name.split('.').count();
+        if name.split('.').all(|p| parts.contains(&p)) && best.is_none_or(|(_, l)| len > l) {
+            best = Some((name, len));
+        }
+    }
+    best.map(|(n, _)| n)
+}
+
+/// Highlight spans for the nodes overlapping `range`, the way
+/// `tree-sitter-highlight` would produce them for the whole file.
+fn tree_spans(
+    q: &TreeQuery,
+    tree: &tree_sitter::Tree,
+    text: &str,
+    range: std::ops::Range<usize>,
+) -> Vec<Span> {
+    use tree_sitter::StreamingIterator;
+    let mut cursor = tree_sitter::QueryCursor::new();
+    cursor.set_byte_range(range);
+    let mut captures = cursor.captures(&q.query, tree.root_node(), text.as_bytes());
+
+    let mut spans = SpanStack::default();
+    // Captures of one node arrive together, ordered by pattern; the last wins.
+    let mut pending: Option<(tree_sitter::Node, u32)> = None;
+    while let Some((m, i)) = captures.next() {
+        let c = m.captures[*i];
+        match pending {
+            Some((node, _)) if node == c.node => pending = Some((node, c.index)),
+            _ => {
+                if let Some((node, capture)) = pending.take() {
+                    spans.open(node.byte_range(), q.kinds[capture as usize]);
+                }
+                pending = Some((c.node, c.index));
+            }
+        }
+    }
+    if let Some((node, capture)) = pending {
+        spans.open(node.byte_range(), q.kinds[capture as usize]);
+    }
+    spans.finish()
+}
+
+/// Turns nested highlighted ranges, opened in document order, into flat
+/// spans where the innermost colour wins — `HighlightEvent`s, flattened.
+#[derive(Default)]
+struct SpanStack {
+    /// Open highlights: (end byte, colour), innermost last.
+    open: Vec<(usize, HighlightKind)>,
+    /// Everything before this has been emitted.
+    offset: usize,
+    out: Vec<Span>,
+}
+
+impl SpanStack {
+    /// Close the highlights that end at or before `pos`.
+    fn close_until(&mut self, pos: usize) {
+        while let Some(&(end, kind)) = self.open.last() {
+            if end > pos {
+                break;
+            }
+            if self.offset < end {
+                self.out.push((self.offset, end, kind));
+                self.offset = end;
+            }
+            self.open.pop();
+        }
+    }
+
+    /// Open a highlight over `range` (a capture without a colour opens none,
+    /// but still closes what ended before it).
+    fn open(&mut self, range: std::ops::Range<usize>, kind: Option<HighlightKind>) {
+        self.close_until(range.start);
+        let Some(kind) = kind else {
+            return;
+        };
+        if let Some(&(_, outer)) = self.open.last() {
+            if self.offset < range.start {
+                self.out.push((self.offset, range.start, outer));
+            }
+        }
+        self.offset = self.offset.max(range.start);
+        self.open.push((range.end, kind));
+    }
+
+    fn finish(mut self) -> Vec<Span> {
+        self.close_until(usize::MAX);
+        self.out
+    }
+}
+
+/// A document's parse tree, kept up to date edit by edit, for highlighting
+/// that costs what changed rather than the whole file.
+pub struct SyntaxTree {
+    language: Language,
+    query: Rc<TreeQuery>,
+    parser: tree_sitter::Parser,
+    tree: tree_sitter::Tree,
+    /// The text `tree` describes.
+    text: String,
+    /// Lines the last `update` re-highlighted (for tests and measurements).
+    redone: usize,
+}
+
+impl SyntaxTree {
+    /// Whether `language` is highlighted incrementally (see the section note).
+    pub fn supports(language: Language) -> bool {
+        matches!(
+            language,
+            Language::Php
+                | Language::Rust
+                | Language::Python
+                | Language::Go
+                | Language::C
+                | Language::Json
+                | Language::Css
+        )
+    }
+
+    /// Parse `text`, returning the tree and the per-line spans for all of it
+    /// (the same as [`highlight_lines`] would). `None` for an unsupported
+    /// language.
+    pub fn new(language: Language, text: &str) -> Option<(Self, Vec<Vec<LineSpan>>)> {
+        let query = tree_query(language)?;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&query.language).ok()?;
+        let tree = parser.parse(text, None)?;
+        let st = SyntaxTree {
+            language,
+            query,
+            parser,
+            tree,
+            text: text.to_string(),
+            redone: 0,
+        };
+        let bounds = line_bounds(text);
+        let mut lines = vec![Vec::new(); bounds.len()];
+        st.highlight_into(&bounds, 0, bounds.len() - 1, &mut lines);
+        Some((st, lines))
+    }
+
+    /// Bring the tree up to `new_text` and update `lines` (the spans this tree
+    /// last produced) to match it, re-highlighting only what changed.
+    pub fn update(&mut self, new_text: &str, lines: &mut Vec<Vec<LineSpan>>) {
+        let (at, old_end, new_end) = edit_between(&self.text, new_text);
+        if at == old_end && at == new_end {
+            return;
+        }
+        let edit = tree_sitter::InputEdit {
+            start_byte: at,
+            old_end_byte: old_end,
+            new_end_byte: new_end,
+            start_position: point_at(&self.text, at),
+            old_end_position: point_at(&self.text, old_end),
+            new_end_position: point_at(new_text, new_end),
+        };
+        let mut old = self.tree.clone();
+        old.edit(&edit);
+        // Around broken code, error recovery can settle on a different tree
+        // incrementally than a fresh parse would, so colours there may differ
+        // from `highlight_lines` until the code parses again — as in every
+        // editor that parses incrementally. They are always the colours of
+        // this tree, and identical once the code is valid.
+        let Some(tree) = self.parser.parse(new_text, Some(&old)) else {
+            return;
+        };
+        // `lines` must be what this tree last produced; if anyone replaced
+        // them, splicing would misplace colours, so start over instead.
+        let foreign = lines.len() != line_bounds(&self.text).len();
+
+        // What to redo: the edited bytes; wherever the two trees' structure
+        // differs, widened to every pattern that could see the difference
+        // (see `differing_ranges`); what tree-sitter itself reports as
+        // changed; and — for PHP — any DB call around all that, since
+        // renaming `select` changes the colour of a SQL string lines away.
+        let mut changed = Vec::new();
+        changed.push(at..new_end);
+        let mut budget = DIFF_BUDGET;
+        differing_ranges(
+            old.root_node(),
+            tree.root_node(),
+            self.query.reach,
+            &mut budget,
+            &mut changed,
+        );
+        changed.extend(old.changed_ranges(&tree).map(|r| r.start_byte..r.end_byte));
+        let whole = foreign || budget == 0;
+        let mut lo = changed.iter().map(|r| r.start).min().unwrap_or(at);
+        let mut hi = changed.iter().map(|r| r.end).max().unwrap_or(new_end);
+        self.tree = tree;
+        self.text = new_text.to_string();
+        let bounds = line_bounds(new_text);
+        if whole {
+            self.redone = bounds.len();
+            let mut all = vec![Vec::new(); bounds.len()];
+            self.highlight_into(&bounds, 0, bounds.len() - 1, &mut all);
+            *lines = all;
+            return;
+        }
+        let tree = &self.tree;
+        if self.language == Language::Php {
+            for end in [lo, hi] {
+                let mut node = tree.root_node().descendant_for_byte_range(end, end);
+                while let Some(n) = node {
+                    if matches!(
+                        n.kind(),
+                        "scoped_call_expression" | "member_call_expression"
+                    ) {
+                        lo = lo.min(n.start_byte());
+                        hi = hi.max(n.end_byte());
+                    }
+                    node = n.parent();
+                }
+            }
+        }
+
+        let old_line_count = lines.len();
+        // Lines before `first` are untouched. Lines after `last` are the old
+        // ones, shifted: `last` reaches the line holding `new_end` itself, so
+        // the next line starts inside the unchanged tail — an insertion ending
+        // in "\n" leaves the rest of its old line on a new one, which must be
+        // redone, not reused.
+        let first = line_of(&bounds, lo);
+        let last = line_of(&bounds, hi.saturating_sub(1).max(new_end)).min(bounds.len() - 1);
+        let tail = bounds.len() - (last + 1);
+        let old_end = old_line_count.saturating_sub(tail).max(first);
+        self.redone = last + 1 - first;
+        let mut fresh = vec![Vec::new(); bounds.len()];
+        self.highlight_into(&bounds, first, last, &mut fresh);
+        lines.splice(first..old_end, fresh.drain(first..=last));
+        debug_assert_eq!(lines.len(), bounds.len());
+    }
+
+    /// How many lines the last [`Self::update`] re-highlighted.
+    pub fn lines_redone(&self) -> usize {
+        self.redone
+    }
+
+    /// Whether the current text has syntax errors.
+    pub fn has_errors(&self) -> bool {
+        self.tree.root_node().has_error()
+    }
+
+    /// Every line highlighted from the current tree — what `update` keeps in
+    /// step incrementally. For tests.
+    #[doc(hidden)]
+    pub fn highlight_all(&self) -> Vec<Vec<LineSpan>> {
+        let bounds = line_bounds(&self.text);
+        let mut lines = vec![Vec::new(); bounds.len()];
+        self.highlight_into(&bounds, 0, bounds.len() - 1, &mut lines);
+        lines
+    }
+
+    /// Highlight lines `first..=last` of the current text into `lines`.
+    fn highlight_into(
+        &self,
+        bounds: &[(usize, usize)],
+        first: usize,
+        last: usize,
+        lines: &mut [Vec<LineSpan>],
+    ) {
+        let text = self.text.as_str();
+        let start = bounds[first].0;
+        let end = bounds.get(last + 1).map_or(text.len(), |b| b.0);
+        let mut spans = tree_spans(&self.query, &self.tree, text, start..end);
+        if self.language == Language::Php {
+            let mut ranges = Vec::new();
+            collect_sql_ranges_in(
+                self.tree.root_node(),
+                text.as_bytes(),
+                start..end,
+                &mut ranges,
+            );
+            let mut over = Vec::new();
+            for (s, e) in ranges {
+                if e <= s || e > text.len() {
+                    continue;
+                }
+                for (rs, re, kind) in sql_spans(&text[s..e]) {
+                    over.push((s + rs, s + re, kind));
+                }
+            }
+            spans = merge_spans(spans, over);
+        }
+        for (s, e, kind) in spans {
+            let s = s.max(start);
+            let e = e.min(end);
+            if e > s {
+                push_span(bounds, lines, s, e, kind);
+            }
+        }
+    }
+}
+
+/// Nodes [`differing_ranges`] may compare before giving up and re-highlighting
+/// the whole file; a typical edit visits a few dozen.
+const DIFF_BUDGET: usize = 20_000;
+
+/// Collect the byte ranges (in new-text coordinates — `old` has been edited)
+/// where highlighting may differ between two trees of the same text.
+///
+/// A subtree the new parse reused is the same node in both, and skipped.
+/// Elsewhere the trees are walked in step; where they part ways — a node's
+/// kind, flags, children or fields differ — the ranges covered are those of
+/// the ancestors `reach` levels up, in both trees: any pattern that involves
+/// the differing node is rooted no higher, and captures only inside its root.
+/// This is what `Tree::changed_ranges` misses: error recovery re-parenting
+/// code that didn't change, which changes its colour all the same.
+fn differing_ranges(
+    old: tree_sitter::Node,
+    new: tree_sitter::Node,
+    reach: usize,
+    budget: &mut usize,
+    out: &mut Vec<std::ops::Range<usize>>,
+) {
+    if old.id() == new.id() || *budget == 0 {
+        return;
+    }
+    *budget -= 1;
+    let same = old.kind_id() == new.kind_id()
+        && old.child_count() == new.child_count()
+        && old.is_missing() == new.is_missing()
+        && old.is_extra() == new.is_extra()
+        && old.is_error() == new.is_error();
+    if !same {
+        out.push(ancestor_range(old, reach));
+        out.push(ancestor_range(new, reach));
+        return;
+    }
+    // Same shape: a token is the same token (its text, if edited, lies in the
+    // edited range already); anything else, compare child by child.
+    let (mut oc, mut nc) = (old.walk(), new.walk());
+    let (olds, news): (Vec<_>, Vec<_>) = (
+        old.children(&mut oc).collect(),
+        new.children(&mut nc).collect(),
+    );
+    for (i, (o, n)) in olds.into_iter().zip(news).enumerate() {
+        if old.field_name_for_child(i as u32) != new.field_name_for_child(i as u32) {
+            out.push(ancestor_range(o, reach));
+            out.push(ancestor_range(n, reach));
+            continue;
+        }
+        differing_ranges(o, n, reach, budget, out);
+    }
+}
+
+/// The byte range of `node`'s ancestor `levels` up (or the root's).
+fn ancestor_range(node: tree_sitter::Node, levels: usize) -> std::ops::Range<usize> {
+    let mut top = node;
+    for _ in 0..levels {
+        match top.parent() {
+            Some(p) => top = p,
+            None => break,
+        }
+    }
+    top.byte_range()
+}
+
+/// The single edit turning `old` into `new`: `(start, old end, new end)`,
+/// trimmed to whole characters.
+fn edit_between(old: &str, new: &str) -> (usize, usize, usize) {
+    let (a, b) = (old.as_bytes(), new.as_bytes());
+    let mut pre = a.iter().zip(b).take_while(|(x, y)| x == y).count();
+    while !old.is_char_boundary(pre) || !new.is_char_boundary(pre) {
+        pre -= 1;
+    }
+    let max_suf = a.len().min(b.len()) - pre;
+    let mut suf = a
+        .iter()
+        .rev()
+        .zip(b.iter().rev())
+        .take(max_suf)
+        .take_while(|(x, y)| x == y)
+        .count();
+    while !old.is_char_boundary(a.len() - suf) || !new.is_char_boundary(b.len() - suf) {
+        suf -= 1;
+    }
+    (pre, a.len() - suf, b.len() - suf)
+}
+
+/// Row and byte column of `byte` in `text`, as tree-sitter counts them.
+fn point_at(text: &str, byte: usize) -> tree_sitter::Point {
+    let before = &text.as_bytes()[..byte];
+    let row = before.iter().filter(|&&b| b == b'\n').count();
+    let column = byte
+        - before
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map_or(0, |i| i + 1);
+    tree_sitter::Point { row, column }
 }
 
 #[cfg(test)]

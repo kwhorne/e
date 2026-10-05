@@ -1,0 +1,75 @@
+=== py
+import os
+from typing import Optional
+
+class Report:
+    """A report, with a docstring."""
+    LIMIT = 10
+
+    def __init__(self, name: str, rows: Optional[list] = None):
+        self.name = name  # trailing comment
+        self.rows = rows or []
+
+    @property
+    def title(self) -> str:
+        return f"{self.name!r} ({len(self.rows)} rows)"
+
+async def main():
+    for i, r in enumerate(range(3)):
+        print(i, r, 0x1f, 1.5e3, b"bytes", r'raw\n')
+=== go
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Greeter says hello.
+type Greeter struct {
+	Name string `json:"name"`
+}
+
+func (g *Greeter) Greet(times int) string {
+	var b strings.Builder
+	for i := 0; i < times; i++ {
+		fmt.Fprintf(&b, "hello %s %d\n", g.Name, i)
+	}
+	return b.String() + `raw ` + string('x')
+}
+
+func main() { _ = (&Greeter{Name: "e"}).Greet(3) }
+=== c
+#include <stdio.h>
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+/* A block
+   comment. */
+typedef struct { int x; const char *name; } point;
+
+static int add(int a, int b) { return a + b; }
+
+int main(void) {
+    point p = { .x = 3, .name = "origin" };
+    printf("%d %s %c\n", MAX(p.x, add(1, 2)), p.name, 'q');
+    return 0;
+}
+=== css
+@import url("theme.css");
+:root { --accent: #3b82f6; }
+/* buttons */
+.btn:hover > .icon, #main [data-x="1"]::after {
+  color: var(--accent);
+  margin: 0 auto !important;
+  transition: opacity 150ms ease-in-out;
+}
+@media (max-width: 640px) { .btn { display: none } }
+=== json
+{
+  "name": "e",
+  "version": 1.5,
+  "private": true,
+  "nothing": null,
+  "list": [1, -2, 3e4, "x\"y"],
+  "nested": { "a": { "b": [] } }
+}

@@ -30,22 +30,25 @@ fn camel(s: &str) -> String {
 
 pub fn singularize(s: &str) -> String {
     if let Some(base) = s.strip_suffix("ies") {
-        format!("{base}y")
-    } else if let Some(base) = s.strip_suffix("es") {
-        if base.ends_with('s')
-            || base.ends_with('x')
-            || base.ends_with("ch")
-            || base.ends_with("sh")
-        {
-            base.to_string()
-        } else {
-            format!("{base}e")
-        }
-    } else if let Some(base) = s.strip_suffix('s') {
-        base.to_string()
-    } else {
-        s.to_string()
+        return format!("{base}y");
     }
+    // `classes`, `boxes`: the `es` is the plural.
+    for suffix in ["sses", "shes", "ches", "xes", "zes"] {
+        if s.ends_with(suffix) {
+            return s[..s.len() - 2].to_string();
+        }
+    }
+    // `statuses`, `buses` (a consonant before `us`) — but `houses`, `causes`.
+    if let Some(stem) = s.strip_suffix("uses") {
+        if stem.chars().last().is_some_and(|c| !"aeiou".contains(c)) {
+            return s[..s.len() - 2].to_string();
+        }
+    }
+    // `class` is already singular; `houses`, `databases` drop only the `s`.
+    if s.ends_with("ss") {
+        return s.to_string();
+    }
+    s.strip_suffix('s').unwrap_or(s).to_string()
 }
 
 /// Model class name for a table (`order_items` → `OrderItem`).

@@ -4654,6 +4654,23 @@ impl AppState {
         {
             return false;
         }
+        // Only where the event is dispatched (`event(new OrderShipped`,
+        // `OrderShipped::dispatch(`): on a `use` line or a type hint, go to
+        // definition means the class, which the language server finds.
+        let (start, end) = word_range(&text, offset);
+        let constructed = text[..start].trim_end().ends_with("new")
+            && text[..start]
+                .rfind('(')
+                .map(|p| text[..p].trim_end())
+                .is_some_and(|call| {
+                    ["event", "dispatch", "Event::dispatch", "broadcast"]
+                        .iter()
+                        .any(|f| call.ends_with(f))
+                });
+        let dispatched = constructed || text[end..].starts_with("::dispatch");
+        if !dispatched {
+            return false;
+        }
         let root = self.root.get_untracked();
         if let Some(node) = crate::events::dispatch_map(&root)
             .into_iter()

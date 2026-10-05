@@ -112,6 +112,73 @@ pub fn rule_partial(line_before: &str) -> Option<String> {
     }
 }
 
+/// Whether the caret (at the end of `before`, the document up to it) is
+/// where validation rules are written: in a `rules()` method's array, a
+/// `$rules = [` property, the arguments of `validate(`, `validateWithBag(` or
+/// `Validator::make(`, or a Livewire `#[Validate(…)]` / `#[Rule(…)]`
+/// attribute. Without this, any `'key' => '` in a config file or a
+/// `create([...])` call offered the rule list.
+pub fn in_rules_context(before: &str) -> bool {
+    // A bounded look-back: rules sit close to what encloses them.
+    let mut from = before.len().saturating_sub(4000);
+    while !before.is_char_boundary(from) {
+        from += 1;
+    }
+    let w = &before[from..];
+    let b = w.as_bytes();
+
+    // The brackets still open at the caret (outermost first), skipping
+    // strings and `//` comments.
+    let mut open: Vec<usize> = Vec::new();
+    let mut quote: Option<u8> = None;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        match quote {
+            Some(q) => {
+                if c == b'\\' {
+                    i += 1;
+                } else if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                b'\'' | b'"' => quote = Some(c),
+                b'/' if b.get(i + 1) == Some(&b'/') => {
+                    while i < b.len() && b[i] != b'\n' {
+                        i += 1;
+                    }
+                }
+                b'[' | b'(' => open.push(i),
+                b']' | b')' => {
+                    open.pop();
+                }
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+
+    let in_rules_method = w
+        .rfind("function ")
+        .is_some_and(|f| w[f + 9..].trim_start().starts_with("rules("));
+    open.iter().any(|&at| {
+        let lead = w[..at].trim_end();
+        match b[at] {
+            b'(' => [
+                "validate",
+                "validateWithBag",
+                "Validator::make",
+                "#[Validate",
+                "#[Rule",
+            ]
+            .iter()
+            .any(|f| lead.ends_with(f)),
+            _ => in_rules_method || lead.ends_with("$rules =") || lead.ends_with("$rules="),
+        }
+    })
+}
+
 /// The cursor is typing a rule *parameter* that names a table or a column:
 /// `exists:` / `unique:` (table), `exists:users,` (column), and the object
 /// forms `Rule::exists('` / `Rule::unique('users', '`.
@@ -319,5 +386,33 @@ mod tests {
         );
         // Not a table/column rule.
         assert_eq!(param_context("'x' => 'max:2"), None);
+    }
+
+    #[test]
+    fn rules_are_offered_only_where_rules_are_written() {
+        let yes = [
+            "class StoreUser extends FormRequest {\n    public function rules(): array\n    {\n        return [\n            'email' => '",
+            "class StoreUser extends FormRequest {\n    public function rules(): array\n    {\n        return [\n            'name' => ['required', '",
+            "$request->validate([\n    'title' => 'required|",
+            "$v = Validator::make($request->all(), [\n    'age' => '",
+            "#[Validate('",
+            "class Form extends Component {\n    protected $rules = [\n        'body' => '",
+        ];
+        for before in yes {
+            assert!(in_rules_context(before), "should offer rules: {before}");
+        }
+        let no = [
+            "<?php\nreturn [\n    'driver' => '",
+            "User::create([\n    'name' => '",
+            "return view('users.index', ['title' => '",
+            "class StoreUser {\n    public function rules(): array { return []; }\n    public function messages(): array\n    {\n        return [\n            'email.required' => '",
+            "$request->validate(['a' => 'required']);\nUser::create(['name' => '",
+        ];
+        for before in no {
+            assert!(
+                !in_rules_context(before),
+                "should not offer rules: {before}"
+            );
+        }
     }
 }

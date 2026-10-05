@@ -56,7 +56,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
         let n = state
             .laravel
             .get()
-            .map(|d| d.routes.iter().filter(|r| r.is_unprotected()).count())
+            .map(|d| d.all_routes.iter().filter(|r| r.is_unprotected()).count())
             .unwrap_or(0);
         if n > 0 {
             format!("⚠ {n} unprotected")
@@ -69,7 +69,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
         let n = state
             .laravel
             .get()
-            .map(|d| d.routes.iter().filter(|r| r.is_unprotected()).count())
+            .map(|d| d.all_routes.iter().filter(|r| r.is_unprotected()).count())
             .unwrap_or(0);
         if n > 0 {
             s
@@ -112,7 +112,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                 return Vec::new();
             };
             let q = state.map_query.get().to_lowercase();
-            data.routes
+            data.all_routes
                 .iter()
                 .filter(|r| {
                     q.is_empty()

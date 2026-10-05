@@ -61,6 +61,17 @@ impl AppState {
                 // A project that keeps the Eloquent helper gets it refreshed
                 // from the schema it was just handed.
                 state.maybe_regenerate_eloquent_helper();
+                // The column lint ran against the old schema: a column just
+                // migrated in is no longer unknown.
+                let php: Vec<u64> = state.buffers.with_untracked(|bs| {
+                    bs.iter()
+                        .filter(|b| b.file.language == e_core::language::Language::Php)
+                        .map(|b| b.id)
+                        .collect()
+                });
+                for id in php {
+                    state.refresh_lint(id);
+                }
             },
         );
         std::thread::spawn(move || {
@@ -76,6 +87,53 @@ impl AppState {
             }
             send(map);
         });
+    }
+
+    /// Re-read the schema cache once the project's database has been
+    /// migrated — however that happened: the Migrations panel, a terminal,
+    /// Grove. Called from the idle tick and acts every ~10 s; a migration shows
+    /// up as a change in Laravel's `migrations` table. Only a local database
+    /// is polled: a remote one isn't queried behind the user's back.
+    pub fn check_db_schema_freshness(&self) {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        static TICK: AtomicU64 = AtomicU64::new(0);
+        static BUSY: AtomicBool = AtomicBool::new(false);
+        static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+        if TICK.fetch_add(1, Ordering::Relaxed) % 20 != 19 || BUSY.load(Ordering::Relaxed) {
+            return;
+        }
+        let root = self.root.get_untracked();
+        let Some(cfg) = e_db::from_env(&root).filter(|c| c.environment().is_local()) else {
+            return;
+        };
+        BUSY.store(true, Ordering::Relaxed);
+        let state = *self;
+        self.spawn_bg(
+            move || {
+                let conn = e_db::connect(&cfg).ok()?;
+                let r = e_db::query(
+                    &conn,
+                    "SELECT COUNT(*), MAX(id), MAX(batch) FROM migrations",
+                    1,
+                )
+                .ok()?;
+                Some(format!("{:?}", r.rows))
+            },
+            move |fp: Option<String>| {
+                BUSY.store(false, Ordering::Relaxed);
+                let Some(fp) = fp else {
+                    return;
+                };
+                let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+                let changed = last.as_ref().is_some_and(|prev| *prev != fp);
+                *last = Some(fp);
+                drop(last);
+                if changed {
+                    eprintln!("e: the database was migrated — reloading its schema");
+                    state.load_db_schema_cache();
+                }
+            },
+        );
     }
 
     /// Save the current query editor text under the typed name.

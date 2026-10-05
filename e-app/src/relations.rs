@@ -282,6 +282,26 @@ pub fn relation_names(root: &Path, class: &str) -> Vec<String> {
     Vec::new()
 }
 
+/// The class a relationship method on `class` returns (`posts` on `User` →
+/// `Post`), read from the model's source.
+pub fn related_model(root: &Path, class: &str, method: &str) -> Option<String> {
+    for cand in [
+        root.join(format!("app/Models/{class}.php")),
+        root.join(format!("app/{class}.php")),
+    ] {
+        if let Ok(src) = std::fs::read_to_string(&cand) {
+            let pm = parse_model(&src, &cand)?;
+            return pm
+                .rels
+                .into_iter()
+                .find(|r| r.method == method)
+                .map(|r| r.target)
+                .filter(|t| !t.is_empty());
+        }
+    }
+    None
+}
+
 fn looks_like_model(file: &Path) -> bool {
     file.components().any(|c| c.as_os_str() == "Models")
 }

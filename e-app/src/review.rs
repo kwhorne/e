@@ -197,7 +197,7 @@ impl AppState {
         self.laravel
             .get_untracked()
             .map(|d| {
-                d.routes
+                d.all_routes
                     .iter()
                     .map(|r| e_review::routes::Route {
                         name: r.name.clone(),

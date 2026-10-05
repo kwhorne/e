@@ -24,6 +24,34 @@ fn is_ident(c: char) -> bool {
 
 /// All abilities in the project: policy methods and `Gate::define()` names,
 /// as `(name, file, line)`.
+/// The model class named by the argument after the ability string the caret
+/// is in: `can('update', $post)` → `Post`, likewise `$this->post`,
+/// `$comment->post`, `Post::class` and `[$post]`. `None` without one.
+pub fn model_argument(text: &str, offset: usize) -> Option<String> {
+    let rest = text.get(offset..)?;
+    let close = rest.find(['\'', '"'])?;
+    let after = rest[close + 1..]
+        .trim_start()
+        .strip_prefix(',')?
+        .trim_start();
+    let after = after.strip_prefix('[').unwrap_or(after).trim_start();
+    let expr: String = after
+        .chars()
+        .take_while(|c| !matches!(c, ')' | ',' | ']' | '\n'))
+        .collect();
+    let expr = expr.trim();
+    let name = match expr.strip_suffix("::class") {
+        Some(class) => class.rsplit('\\').next()?.to_string(),
+        None => {
+            let last = expr.rsplit("->").next()?.trim_start_matches('$');
+            let mut c = last.chars();
+            let first = c.next()?;
+            first.to_uppercase().collect::<String>() + c.as_str()
+        }
+    };
+    (!name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')).then_some(name)
+}
+
 pub fn abilities(root: &Path) -> Vec<(String, PathBuf, usize)> {
     let mut out = Vec::new();
 
@@ -109,5 +137,27 @@ mod tests {
         assert!(names.contains(&"access-admin"));
         assert!(!names.contains(&"before")); // hook, not an ability
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_model_comes_from_the_second_argument() {
+        let at = |src: &str| model_argument(src, src.find("upd").unwrap());
+        assert_eq!(
+            at("$this->authorize('update', $post);").as_deref(),
+            Some("Post")
+        );
+        assert_eq!(
+            at("@can('update', $comment->post)").as_deref(),
+            Some("Post")
+        );
+        assert_eq!(
+            at("Gate::allows('update', [$this->invoice])").as_deref(),
+            Some("Invoice")
+        );
+        assert_eq!(
+            at("$user->can('update', \\App\\Models\\Team::class)").as_deref(),
+            Some("Team")
+        );
+        assert_eq!(at("Gate::allows('update')"), None);
     }
 }

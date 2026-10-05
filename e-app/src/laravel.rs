@@ -68,7 +68,11 @@ pub struct TransEntry {
 #[derive(Default)]
 pub struct LaravelData {
     pub root: PathBuf,
+    /// Named routes, one per name: what `route('…')` can refer to.
     pub routes: Vec<RouteInfo>,
+    /// Every route, named or not — an unnamed `POST /webhooks` is still a
+    /// route to find, and still one that may lack auth.
+    pub all_routes: Vec<RouteInfo>,
     pub views: Vec<ViewInfo>,
     pub configs: Vec<KeyValue>,
     pub envs: Vec<KeyValue>,
@@ -93,9 +97,11 @@ pub fn is_laravel(root: &Path) -> bool {
 
 /// Gather everything. Blocking — run off the UI thread.
 pub fn load(root: &Path) -> LaravelData {
+    let all_routes = load_routes(root);
     LaravelData {
         root: root.to_path_buf(),
-        routes: load_routes(root),
+        routes: named_routes(&all_routes),
+        all_routes,
         views: load_views(root),
         configs: load_configs(root),
         envs: load_envs(root),
@@ -148,38 +154,36 @@ fn load_routes(root: &Path) -> Vec<RouteInfo> {
     let Some(value) = parse_json(&output.stdout) else {
         return Vec::new();
     };
-    let mut routes: Vec<RouteInfo> = value
+    parse_routes(&value)
+}
+
+/// Every route in `route:list --json` output, in the order listed.
+fn parse_routes(value: &serde_json::Value) -> Vec<RouteInfo> {
+    let text = |r: &serde_json::Value, key: &str| {
+        r.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    value
         .as_array()
         .map(|arr| {
             arr.iter()
-                .filter_map(|r| {
-                    let name = r.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    if name.is_empty() {
-                        return None;
-                    }
-                    Some(RouteInfo {
-                        name: name.to_string(),
-                        uri: r
-                            .get("uri")
-                            .and_then(|u| u.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        methods: r
-                            .get("method")
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        action: r
-                            .get("action")
-                            .and_then(|a| a.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        middleware: parse_middleware(r.get("middleware")),
-                    })
+                .map(|r| RouteInfo {
+                    name: text(r, "name"),
+                    uri: text(r, "uri"),
+                    methods: text(r, "method"),
+                    action: text(r, "action"),
+                    middleware: parse_middleware(r.get("middleware")),
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// The named routes, sorted by name, one per name.
+fn named_routes(all: &[RouteInfo]) -> Vec<RouteInfo> {
+    let mut routes: Vec<RouteInfo> = all.iter().filter(|r| !r.name.is_empty()).cloned().collect();
     routes.sort_by(|a, b| a.name.cmp(&b.name));
     routes.dedup_by(|a, b| a.name == b.name);
     routes
@@ -750,17 +754,27 @@ pub fn route_files(root: &Path) -> Vec<(PathBuf, String)> {
 /// The routes-file line that declares `uri` (`Route::get('/users/{user}', …)`),
 /// for a route whose action isn't a controller method.
 pub fn route_definition(files: &[(PathBuf, String)], uri: &str) -> Option<(PathBuf, usize)> {
-    let uri = uri.trim_start_matches('/');
-    let needles = [
-        format!("'/{uri}'"),
-        format!("'{uri}'"),
-        format!("\"/{uri}\""),
-        format!("\"{uri}\""),
-    ];
-    for (path, text) in files {
-        for (i, line) in text.lines().enumerate() {
-            if line.contains("Route::") && needles.iter().any(|n| line.contains(n.as_str())) {
-                return Some((path.clone(), i));
+    // Inside `Route::prefix('admin')->group(…)` the file says `users/{user}`
+    // for `admin/users/{user}`: try the whole URI, then drop leading segments
+    // — but never down to bare parameters, which would match anything.
+    let segments: Vec<&str> = uri.trim_start_matches('/').split('/').collect();
+    for skip in 0..segments.len().max(1) {
+        let rest = &segments[skip.min(segments.len())..];
+        if skip > 0 && rest.iter().all(|s| s.starts_with('{')) {
+            break;
+        }
+        let tail = rest.join("/");
+        let needles = [
+            format!("'/{tail}'"),
+            format!("'{tail}'"),
+            format!("\"/{tail}\""),
+            format!("\"{tail}\""),
+        ];
+        for (path, text) in files {
+            for (i, line) in text.lines().enumerate() {
+                if line.contains("Route::") && needles.iter().any(|n| line.contains(n.as_str())) {
+                    return Some((path.clone(), i));
+                }
             }
         }
     }
@@ -1274,8 +1288,30 @@ pub fn navigate(
             Some((v.path.clone(), 0, 0))
         }
         Helper::Trans => {
-            let t = data.translations.iter().find(|t| t.key == token)?;
-            Some((t.file.clone(), 0, 0))
+            // The app's locale first (then English), not whichever language
+            // happened to be scanned first.
+            let locale = data
+                .configs
+                .iter()
+                .find(|c| c.key == "app.locale")
+                .map(|c| c.value.trim_matches(['\'', '"']).to_string())
+                .unwrap_or_else(|| "en".to_string());
+            let in_locale = |t: &&TransEntry, loc: &str| {
+                t.file.components().any(|c| c.as_os_str() == loc)
+                    || t.file.file_stem().is_some_and(|s| s == loc)
+            };
+            let candidates: Vec<&TransEntry> = data
+                .translations
+                .iter()
+                .filter(|t| t.key == token)
+                .collect();
+            let t = candidates
+                .iter()
+                .find(|t| in_locale(t, &locale))
+                .or_else(|| candidates.iter().find(|t| in_locale(t, "en")))
+                .or_else(|| candidates.first())?;
+            let line = find_trans_line(&t.file, token).unwrap_or(0);
+            Some((t.file.clone(), line, 0))
         }
         Helper::Config => {
             // `app.name` -> config/app.php, jump to the key line if we can.
@@ -1388,6 +1424,29 @@ fn find_key_line(path: &Path, key: &str) -> Option<usize> {
         .position(|l| l.contains(&needle1) || l.contains(&needle2))
 }
 
+/// The line defining translation `key` in `path`: a JSON file holds the whole
+/// key; a PHP file is the group (`auth` for `auth.failed`) holding a — maybe
+/// nested — array, so each further segment is looked for below the last.
+fn find_trans_line(path: &Path, key: &str) -> Option<usize> {
+    let src = std::fs::read_to_string(path).ok()?;
+    find_trans_line_in(&src, key, path.extension().is_some_and(|e| e == "json"))
+}
+
+fn find_trans_line_in(src: &str, key: &str, json: bool) -> Option<usize> {
+    let lines: Vec<&str> = src.lines().collect();
+    let has = |line: &str, k: &str| {
+        line.contains(&format!("'{k}'")) || line.contains(&format!("\"{k}\""))
+    };
+    if json {
+        return lines.iter().position(|l| has(l, key));
+    }
+    let mut at = 0;
+    for seg in key.split('.').skip(1) {
+        at += lines[at..].iter().position(|l| has(l, seg))?;
+    }
+    Some(at)
+}
+
 fn find_env_line(path: &Path, key: &str) -> Option<usize> {
     let src = std::fs::read_to_string(path).ok()?;
     let needle = format!("{key}=");
@@ -1401,26 +1460,9 @@ fn find_function_line(path: &Path, method: &str) -> Option<usize> {
     src.lines().position(|l| l.contains(&needle))
 }
 
-/// Naive English singularisation of a table name segment.
+/// Singular of a table name segment, lower-cased.
 fn singularize(w: &str) -> String {
-    let lower = w.to_ascii_lowercase();
-    if let Some(stem) = lower.strip_suffix("ies") {
-        return format!("{stem}y");
-    }
-    for suf in ["ches", "shes", "sses", "xes", "zes"] {
-        if let Some(stem) = lower.strip_suffix(suf) {
-            // keep the base consonant cluster, drop the "es"
-            let keep = &suf[..suf.len() - 2];
-            return format!("{stem}{keep}");
-        }
-    }
-    if lower.ends_with("ss") {
-        return lower;
-    }
-    lower
-        .strip_suffix('s')
-        .map(|s| s.to_string())
-        .unwrap_or(lower)
+    crate::codegen::singularize(&w.to_ascii_lowercase())
 }
 
 /// Guess the Eloquent model class for a table using Laravel conventions
@@ -1693,5 +1735,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn unnamed_routes_are_kept_apart_from_the_named_list() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"[
+                {"name":"users.show","uri":"users/{user}","method":"GET|HEAD","action":"UserController@show","middleware":["web","auth"]},
+                {"name":null,"uri":"webhooks/stripe","method":"POST","action":"Closure","middleware":"api"},
+                {"name":"users.show","uri":"v2/users/{user}","method":"GET|HEAD","action":"V2\\UserController@show","middleware":[]}
+            ]"#,
+        )
+        .unwrap();
+        let all = parse_routes(&v);
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[1].uri, "webhooks/stripe");
+        assert!(all[1].name.is_empty());
+        let named = named_routes(&all);
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].name, "users.show");
+    }
+
+    #[test]
+    fn a_route_inside_a_prefix_group_is_found() {
+        let web = "<?php\nRoute::get('/', HomeController::class);\nRoute::prefix('admin')->group(function () {\n    Route::get('users/{user}', fn () => 1);\n});\n";
+        let files = vec![(PathBuf::from("routes/web.php"), web.to_string())];
+        assert_eq!(
+            route_definition(&files, "admin/users/{user}"),
+            Some((PathBuf::from("routes/web.php"), 3))
+        );
+        // Never reduced to bare parameters.
+        assert_eq!(route_definition(&files, "admin/{thing}"), None);
+    }
+
+    #[test]
+    fn translation_keys_land_on_their_line() {
+        let php = "<?php\n\nreturn [\n    'failed' => 'Nope.',\n    'throttle' => [\n        'short' => 'Wait.',\n        'failed' => 'Slow down.',\n    ],\n];\n";
+        assert_eq!(find_trans_line_in(php, "auth.failed", false), Some(3));
+        assert_eq!(
+            find_trans_line_in(php, "auth.throttle.failed", false),
+            Some(6)
+        );
+        assert_eq!(find_trans_line_in(php, "auth.missing", false), None);
+        let json = "{\n  \"Welcome\": \"Velkommen\",\n  \"Log out\": \"Logg ut\"\n}\n";
+        assert_eq!(find_trans_line_in(json, "Log out", true), Some(2));
     }
 }

@@ -249,7 +249,7 @@ impl AppState {
         std::thread::spawn(move || {
             let route_files = crate::laravel::route_files(&root);
             let items = data
-                .routes
+                .all_routes
                 .iter()
                 .map(|r| {
                     let (path, line) = crate::laravel::controller_location(&root, &r.action)

@@ -42,6 +42,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Git operations run in the background.** Push, pull, commit and status no
   longer freeze the window. A failure is reported with git's message, and a
   rejected commit keeps its message.
+- **The database schema follows migrations.** It was read once at startup, so
+  after `migrate` new columns were missing from completion and the column
+  lint flagged them. A local database is now checked every ten seconds and
+  re-read when its `migrations` table changes — whether the migration ran
+  from the Migrations panel, a terminal or Grove — and open PHP files are
+  re-linted.
+- **Route Search lists unnamed routes**, and the architecture map's
+  "unprotected" warning and the review's route attribution count them: an
+  unnamed `POST /webhooks/stripe` is exactly the route worth seeing. Routes
+  inside `Route::prefix()` groups now open on their definition instead of
+  the top of `routes/web.php`.
+- **Validation rules are offered only where rules are written** — `rules()`,
+  `$rules`, `validate()`, `Validator::make()`, `#[Validate]` — not after any
+  `=> '` in a config file or a `create([...])` call.
+- **Go to definition:**
+  - On an event class it goes to the class, and to a listener only from where
+    the event is dispatched (`event(new …)`, `…::dispatch(`).
+  - A translation key opens on its line (nested keys and JSON files
+    included), in the app's locale, instead of line 1 of whichever language
+    came first.
+  - `can('update', $post)` opens `PostPolicy::update`, not the first policy
+    that has an `update` method.
+- **Query-builder closures resolve to the right table.** In
+  `User::whereHas('posts', fn ($q) => $q->where('title'))`, `title` was
+  completed and linted against `users`; it is now `posts` (dotted relations
+  followed), grouped `where(fn …)` stays on the outer table, and a closure
+  that can't be resolved is left alone rather than checked against the wrong
+  table.
+- **Table names singularise consistently.** Three copies disagreed
+  (`statuses` → `statuse` in one, `houses` → `hous` in another); there is
+  now one.
 
 ### Performance
 

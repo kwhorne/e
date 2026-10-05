@@ -147,9 +147,192 @@ pub fn context(line_before: &str) -> Option<QueryCtx> {
     }
 }
 
+/// Builder methods whose closure argument queries a *relation*:
+/// `whereHas('posts', fn ($q) => …)`, `with(['posts' => fn ($q) => …])`.
+const RELATION_CLOSURES: &[&str] = &[
+    "wherehas",
+    "orwherehas",
+    "wheredoesnthave",
+    "orwheredoesnthave",
+    "has",
+    "orhas",
+    "doesnthave",
+    "ordoesnthave",
+    "withwherehas",
+    "with",
+    "withcount",
+    "load",
+    "loadcount",
+];
+
+/// Builder methods whose closure argument queries the *same* table:
+/// `where(fn ($q) => …)` groups conditions, `when($x, fn ($q) => …)`.
+const SAME_TABLE_CLOSURES: &[&str] = &[
+    "where",
+    "orwhere",
+    "wherenot",
+    "orwherenot",
+    "when",
+    "unless",
+    "tap",
+    "having",
+    "orhaving",
+];
+
+/// The closure the caret is in, if any, by the call it is an argument of.
+#[derive(Debug, PartialEq, Eq)]
+enum Closure {
+    /// A relation's query: `relation` is its name (maybe dotted), `call` the
+    /// offset of the call's `(`.
+    Relation { call: usize, relation: String },
+    /// The same query, grouped.
+    SameTable { call: usize },
+    /// Some other closure: what `$q` is there isn't known.
+    Other,
+}
+
+/// Find the innermost closure argument around `upto`, looking back over a
+/// bounded window and skipping strings and `//` comments.
+fn enclosing_closure(text: &str, upto: usize) -> Option<Closure> {
+    let mut from = upto.saturating_sub(4000);
+    while !text.is_char_boundary(from) {
+        from += 1;
+    }
+    let w = &text[from..upto];
+    let b = w.as_bytes();
+    let mut open: Vec<usize> = Vec::new();
+    let mut quote: Option<u8> = None;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        match quote {
+            Some(q) => {
+                if c == b'\\' {
+                    i += 1;
+                } else if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                b'\'' | b'"' => quote = Some(c),
+                b'/' if b.get(i + 1) == Some(&b'/') => {
+                    while i < b.len() && b[i] != b'\n' {
+                        i += 1;
+                    }
+                }
+                b'(' | b'[' | b'{' => open.push(i),
+                b')' | b']' | b'}' => {
+                    open.pop();
+                }
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    // From the innermost open call outwards: is a closure argument of it
+    // open around the caret? Its text then holds `fn (…) =>` or `function`.
+    for (k, &at) in open.iter().enumerate().rev() {
+        if b[at] != b'(' {
+            continue;
+        }
+        // Up to the next call opened inside it — past any array or closure
+        // body (`with(['posts' => function ($q) {`) — or the caret.
+        let seg_end = open[k + 1..]
+            .iter()
+            .copied()
+            .find(|&o| b[o] == b'(')
+            .unwrap_or(w.len());
+        let seg = &w[at + 1..seg_end];
+        let closure_at = [seg.rfind("fn ("), seg.rfind("fn("), seg.rfind("function")]
+            .into_iter()
+            .flatten()
+            .max();
+        let Some(closure_at) = closure_at else {
+            continue;
+        };
+        let body = &seg[closure_at..];
+        // An arrow function ends at the next top-level `,`: after
+        // `fn ($x) => 1, User::where('` the caret is no longer in it.
+        let is_closure = body.starts_with("function")
+            || body
+                .find("=>")
+                .is_some_and(|arrow| !has_top_level_comma(&body[arrow..]));
+        if !is_closure {
+            continue;
+        }
+        let method: String = w[..at]
+            .chars()
+            .rev()
+            .take_while(|c| is_ident(*c))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<String>()
+            .to_lowercase();
+        let call = from + at;
+        if RELATION_CLOSURES.contains(&method.as_str()) {
+            let relation = last_string(&seg[..closure_at]);
+            return Some(match relation {
+                Some(relation) => Closure::Relation { call, relation },
+                None => Closure::Other,
+            });
+        }
+        if SAME_TABLE_CLOSURES.contains(&method.as_str()) {
+            return Some(Closure::SameTable { call });
+        }
+        return Some(Closure::Other);
+    }
+    None
+}
+
+/// Whether `s` has a `,` outside any brackets or strings.
+fn has_top_level_comma(s: &str) -> bool {
+    let (mut depth, mut quote) = (0i32, None);
+    for c in s.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None => match c {
+                '\'' | '"' => quote = Some(c),
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                ',' if depth == 0 => return true,
+                _ => {}
+            },
+        }
+    }
+    false
+}
+
+/// The contents of the last quoted string in `s`.
+fn last_string(s: &str) -> Option<String> {
+    let end = s.rfind(['\'', '"'])?;
+    let q = s.as_bytes()[end] as char;
+    let start = s[..end].rfind(q)?;
+    Some(s[start + 1..end].to_string()).filter(|r| !r.is_empty())
+}
+
 /// Resolve the model/table the current query statement operates on.
 pub fn resolve_target(text: &str, offset: usize, root: &Path) -> Option<QueryTarget> {
     let upto = offset.min(text.len());
+    // Inside a closure the query is another one: a relation's, or the same
+    // query grouped — or one that can't be told, which is better left alone
+    // than checked against the wrong table.
+    match enclosing_closure(text, upto) {
+        Some(Closure::Relation { call, relation }) => {
+            let mut model = resolve_target(text, call, root)?.model?;
+            for name in relation.split('.') {
+                model = crate::relations::related_model(root, &model, name)?;
+            }
+            return Some(QueryTarget {
+                table: model_table(root, &model),
+                model: Some(model),
+            });
+        }
+        Some(Closure::SameTable { call }) => return resolve_target(text, call, root),
+        Some(Closure::Other) => return None,
+        None => {}
+    }
     let start = text[..upto]
         .rfind([';', '{', '}'])
         .map(|i| i + 1)
@@ -310,5 +493,59 @@ mod tests {
         let d = resolve_target("DB::table('orders')->where('", 28, Path::new("/tmp")).unwrap();
         assert_eq!(d.table, "orders");
         assert_eq!(d.model, None);
+    }
+
+    fn project() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("e-qc-{}", std::process::id()));
+        let models = root.join("app/Models");
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::write(
+            models.join("User.php"),
+            "<?php\nclass User extends Model {\n    public function posts() { return $this->hasMany(Post::class); }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            models.join("Post.php"),
+            "<?php\nclass Post extends Model {\n    public function comments() { return $this->hasMany(Comment::class); }\n}\n",
+        )
+        .unwrap();
+        root
+    }
+
+    fn table_at(src: &str, root: &Path) -> Option<String> {
+        resolve_target(src, src.len(), root).map(|t| t.table)
+    }
+
+    #[test]
+    fn a_relation_closure_queries_the_related_table() {
+        let root = project();
+        let t = |s: &str| table_at(s, &root);
+        assert_eq!(
+            t("User::whereHas('posts', fn ($q) => $q->where('").as_deref(),
+            Some("posts")
+        );
+        assert_eq!(
+            t("User::with(['posts' => function ($q) {\n    $q->where('").as_deref(),
+            Some("posts")
+        );
+        assert_eq!(
+            t("User::whereHas('posts.comments', fn ($q) => $q->where('").as_deref(),
+            Some("comments")
+        );
+        // Grouped conditions stay on the outer table.
+        assert_eq!(
+            t("User::where(fn ($q) => $q->where('").as_deref(),
+            Some("users")
+        );
+        // Outside any closure, as before.
+        assert_eq!(t("User::where('").as_deref(), Some("users"));
+        // An unknown relation or closure: no target rather than a wrong one.
+        assert_eq!(t("User::whereHas('teams', fn ($q) => $q->where('"), None);
+        assert_eq!(t("collect($xs)->map(fn ($q) => $q->where('"), None);
+        // An arrow function that already ended doesn't count.
+        assert_eq!(
+            t("$x = tap(fn ($u) => 1, User::where('").as_deref(),
+            Some("users")
+        );
     }
 }

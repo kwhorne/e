@@ -524,7 +524,9 @@ impl AppState {
                     return;
                 }
             }
-            if let Some(partial) = crate::validation::rule_partial(line_before) {
+            if let Some(partial) = crate::validation::rule_partial(line_before)
+                .filter(|_| crate::validation::in_rules_context(&text[..upto]))
+            {
                 let items: Vec<lsp_types::CompletionItem> = crate::validation::rule_names(&partial)
                     .into_iter()
                     .map(|r| lsp_types::CompletionItem {
@@ -904,11 +906,23 @@ impl AppState {
             return false;
         };
         let root = self.root.get_untracked();
-        if let Some((_, file, line)) = crate::policies::abilities(&root)
+        // `can('update', $post)`: the policy for the model in the second
+        // argument, when there is one — `update` exists on most policies.
+        let policy = crate::policies::model_argument(&text, offset).map(|m| format!("{m}Policy"));
+        let all: Vec<_> = crate::policies::abilities(&root)
             .into_iter()
-            .find(|(n, _, _)| *n == name)
-        {
-            self.jump_to(&path_to_uri(&file), line, 0);
+            .filter(|(n, _, _)| *n == name)
+            .collect();
+        let pick = all
+            .iter()
+            .find(|(_, file, _)| {
+                policy
+                    .as_deref()
+                    .is_some_and(|p| file.file_stem().is_some_and(|s| s == p))
+            })
+            .or_else(|| all.first());
+        if let Some((_, file, line)) = pick {
+            self.jump_to(&path_to_uri(file), *line, 0);
             true
         } else {
             false

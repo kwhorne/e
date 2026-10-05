@@ -147,25 +147,7 @@ fn pascal(s: &str) -> String {
         .collect()
 }
 
-fn singularize(s: &str) -> String {
-    if let Some(base) = s.strip_suffix("ies") {
-        format!("{base}y")
-    } else if let Some(base) = s.strip_suffix("es") {
-        if base.ends_with('s')
-            || base.ends_with('x')
-            || base.ends_with("ch")
-            || base.ends_with("sh")
-        {
-            base.to_string()
-        } else {
-            format!("{base}e")
-        }
-    } else if let Some(base) = s.strip_suffix('s') {
-        base.to_string()
-    } else {
-        s.to_string()
-    }
-}
+use crate::codegen::singularize;
 
 #[cfg(test)]
 mod tests {
@@ -200,5 +182,13 @@ mod tests {
         assert_eq!(singularize("users"), "user");
         assert_eq!(singularize("categories"), "category");
         assert_eq!(singularize("classes"), "class");
+        assert_eq!(singularize("statuses"), "status");
+        assert_eq!(singularize("houses"), "house");
+        assert_eq!(singularize("addresses"), "address");
+        assert_eq!(singularize("boxes"), "box");
+        assert_eq!(singularize("databases"), "database");
+        assert_eq!(singularize("class"), "class");
+        assert_eq!(singularize("causes"), "cause");
+        assert_eq!(singularize("campuses"), "campus");
     }
 }

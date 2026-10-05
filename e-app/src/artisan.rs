@@ -91,17 +91,11 @@ pub fn list(root: &Path) -> Result<Vec<ArtisanCmd>, String> {
             root.display()
         ));
     }
-    let out = std::process::Command::new("php")
-        .args(["-d", "error_reporting=0", "-d", "display_errors=0"])
-        .args(["artisan", "list", "--format=json"])
-        .current_dir(root)
-        .output()
-        .map_err(|e| {
-            format!(
-                "couldn't run php: {e} (PATH is {})",
-                std::env::var("PATH").unwrap_or_default()
-            )
-        })?;
+    let out = crate::phptools::php(
+        root,
+        &["artisan", "list", "--format=json"],
+        std::time::Duration::from_secs(30),
+    )?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let stdout = String::from_utf8_lossy(&out.stdout);

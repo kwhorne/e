@@ -42,6 +42,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Git operations run in the background.** Push, pull, commit and status no
   longer freeze the window. A failure is reported with git's message, and a
   rejected commit keeps its message.
+- **Pint formats in the background.** Saving a PHP file ran Pint on the UI
+  thread; it now runs alongside, its result applied if the text didn't change
+  meanwhile. A project with Pint is formatted by Pint alone — "nothing to
+  change" no longer hands the file to the language server's own style.
+- **Artisan and PHP scrapes give up after 30 seconds** instead of holding
+  their worker for good when the app hangs booting (a database that doesn't
+  answer).
+- **Notifications and Move to Trash take any text and path.** A message with
+  a backslash (every PHP namespace) failed to show; a path with a quote
+  couldn't be trashed, and trashing blocked the window and ignored failure.
+  The helpers they start are reaped instead of left as zombies.
+- **Links open on Linux too** (pull requests, Markdown links, About), and
+  Reveal in Finder opens the file manager there.
+- **More file handles:** the open-file limit is raised at launch, so a
+  Dock-launched `e` no longer runs out ("Too many open files") starting its
+  language servers.
+- **Smaller fixes:** an SSH tunnel that fails to come up is stopped rather
+  than left holding its port, and a working one's error output is drained so
+  it can't stall; the disk-change and Laravel-log polls no longer pile up
+  threads on a slow disk; `crash.log` is trimmed; a config value with a
+  multi-byte character at position 80 no longer panics the Laravel scrape.
 - **The database schema follows migrations.** It was read once at startup, so
   after `migrate` new columns were missing from completion and the column
   lint flagged them. A local database is now checked every ten seconds and

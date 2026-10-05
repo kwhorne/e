@@ -568,7 +568,19 @@ fn start_tunnel(config: &DbConfig) -> Result<SshTunnel, String> {
     if let Some(p) = &askpass {
         let _ = std::fs::remove_file(p);
     }
-    res?;
+    if let Err(e) = res {
+        // A tunnel that never came up must not live on, holding the port.
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(e);
+    }
+    // Drain stderr for the tunnel's lifetime: unread, a long session's
+    // "channel open failed" messages fill the pipe and stall ssh.
+    if let Some(mut err) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut err, &mut std::io::sink());
+        });
+    }
     Ok(SshTunnel { child, local_port })
 }
 

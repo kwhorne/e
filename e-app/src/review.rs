@@ -379,7 +379,7 @@ impl AppState {
             match res {
                 Ok(url) if !url.is_empty() => {
                     Self::notify(&format!("Pull request opened: {url}"));
-                    let _ = std::process::Command::new("open").arg(&url).spawn();
+                    crate::platform::open_url(&url);
                 }
                 Ok(_) => Self::notify("Committed and pushed"),
                 Err(e) => Self::notify(&format!("Ship failed: {e}")),

@@ -1324,6 +1324,7 @@ dependencies = [
  "floem",
  "floem-editor-core",
  "ignore",
+ "libc",
  "lsp-types",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",

@@ -66,12 +66,11 @@ pub fn parse_status(text: &str) -> Vec<Migration> {
 
 /// Run `migrate:status` in `root`. Blocking (boots the app); off the UI thread.
 pub fn status(root: &Path) -> Result<Vec<Migration>, String> {
-    let out = std::process::Command::new("php")
-        .args(["-d", "error_reporting=0", "-d", "display_errors=0"])
-        .args(["artisan", "migrate:status", "--no-ansi"])
-        .current_dir(root)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = crate::phptools::php(
+        root,
+        &["artisan", "migrate:status", "--no-ansi"],
+        std::time::Duration::from_secs(30),
+    )?;
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);

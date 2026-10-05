@@ -51,6 +51,7 @@ pub fn launch() {
     // JetBrains Mono ships with e; register it before anything is laid out.
     crate::fonts::install_bundled();
     install_crash_logger();
+    raise_open_file_limit();
     // exit_on_close defaults to false on macOS, which leaves the process (and its
     // Dock icon) alive after the window closes. e is single-window, so quit for
     // real when the window closes.
@@ -213,10 +214,51 @@ mod detach_tests {
     }
 }
 
+/// Raise the soft limit on open files. Launched from the Dock it is 256, and
+/// a Laravel project's language servers, file watchers, terminals and agent
+/// socket run out of that — `e.log` had intelephense and laravel-lsp failing
+/// to start with "Too many open files". macOS caps a process at 10240
+/// whatever the hard limit claims.
+fn raise_open_file_limit() {
+    #[cfg(unix)]
+    unsafe {
+        let mut lim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) != 0 {
+            return;
+        }
+        let want = lim.rlim_max.min(10240);
+        if lim.rlim_cur < want {
+            lim.rlim_cur = want;
+            libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
+        }
+    }
+}
+
+/// Keep only the newest `keep` bytes of a log that has grown past `max`.
+fn trim_log(path: &std::path::Path, max: u64, keep: usize) {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return;
+    };
+    if meta.len() <= max {
+        return;
+    }
+    if let Ok(bytes) = std::fs::read(path) {
+        let tail = &bytes[bytes.len().saturating_sub(keep)..];
+        let _ = std::fs::write(path, tail);
+    }
+}
+
 /// Append panics (message + location + backtrace) to `~/.config/e/crash.log`
 /// before the default hook runs. GUI apps don't surface stderr, so this is how
 /// we recover the actual panic behind a macOS "quit unexpectedly" abort.
 fn install_crash_logger() {
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = std::path::PathBuf::from(home).join(".config/e/crash.log");
+        trim_log(&path, 1 << 20, 256 << 10);
+    }
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         if let Some(home) = std::env::var_os("HOME") {

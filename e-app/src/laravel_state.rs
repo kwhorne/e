@@ -190,9 +190,17 @@ impl AppState {
 
     /// Read the tail of the project's Laravel log (off the UI thread).
     pub fn refresh_laravel_log(&self) {
+        // One read at a time (it runs every tick while the panel is open).
+        static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if BUSY.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
         let root = self.root.get_untracked();
         let sig = self.log_lines;
-        let send = create_ext_action(self.cx, move |lines: Vec<String>| sig.set(lines));
+        let send = create_ext_action(self.cx, move |lines: Vec<String>| {
+            BUSY.store(false, std::sync::atomic::Ordering::Release);
+            sig.set(lines);
+        });
         std::thread::spawn(move || {
             let lines = find_laravel_log(&root)
                 .map(|p| tail_lines(&p, 64 * 1024, 600))

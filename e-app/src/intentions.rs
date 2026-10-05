@@ -191,7 +191,7 @@ fn scope_attribute(text: &str, offset: usize) -> Vec<LocalAction> {
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .count();
-    if name_len == 0 || !rest[..1].chars().all(|c| c.is_ascii_uppercase()) {
+    if name_len == 0 || !rest.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
         return Vec::new();
     }
     let camel = &rest[..name_len];

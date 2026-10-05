@@ -137,6 +137,84 @@ pub fn diagnostics_for(report: &Report, file: &Path) -> Vec<Diagnostic> {
         .collect()
 }
 
+/// Run `php <args>` in `dir`, quietly (no deprecation noise on stdout), and
+/// give up after `timeout`. Anything that boots the app can hang — a database
+/// that doesn't answer — and must not hold its worker thread for good.
+/// Blocking: off the UI thread.
+pub fn php(
+    dir: &Path,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = std::process::Command::new("php")
+        .args(["-d", "error_reporting=0", "-d", "display_errors=0"])
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            format!(
+                "couldn't run php: {e} (PATH is {})",
+                std::env::var("PATH").unwrap_or_default()
+            )
+        })?;
+    // Read both pipes while waiting, or a chatty command blocks on a full one.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let out = drain(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let err = drain(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if start.elapsed() < timeout => {
+                std::thread::sleep(std::time::Duration::from_millis(25))
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "php {} gave no answer in {} s",
+                    args.join(" "),
+                    timeout.as_secs()
+                ));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
+}
+
+/// Whether the project ships Pint (then Pint alone formats its PHP).
+pub fn has_pint(root: &Path) -> bool {
+    pint_binary(root).is_some()
+}
+
 /// Format `text` with the project's Pint.
 ///
 /// Pint rewrites files in place and resolves `pint.json` from the file's
@@ -144,12 +222,14 @@ pub fn diagnostics_for(report: &Report, file: &Path) -> Vec<Diagnostic> {
 /// than in the system temp directory — a preset configured for `app/` has to
 /// see the file as being in `app/`.
 ///
-/// Returns `None` when Pint isn't installed, fails, or changes nothing, so the
-/// caller can fall through to the language server's formatter.
+/// Returns `None` when Pint isn't installed, fails, or changes nothing.
 pub fn pint_format(root: &Path, file: &Path, text: &str) -> Option<String> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let pint = pint_binary(root)?;
     let dir = file.parent().unwrap_or(root);
-    let tmp = dir.join(format!(".e-pint-{}.php", std::process::id()));
+    // Unique per run: two saves can be formatting at once.
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".e-pint-{}-{seq}.php", std::process::id()));
     std::fs::write(&tmp, text).ok()?;
 
     let status = std::process::Command::new(&pint)
@@ -375,5 +455,32 @@ mod live_php {
             .filter(|e| e.file_name().to_string_lossy().starts_with(".e-pint-"))
             .collect();
         assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+    }
+
+    #[test]
+    fn php_that_hangs_is_given_up_on() {
+        if std::process::Command::new("php")
+            .arg("-v")
+            .output()
+            .is_err()
+        {
+            return; // no PHP on this machine
+        }
+        let dir = std::env::temp_dir();
+        let t = std::time::Instant::now();
+        let r = php(
+            &dir,
+            &["-r", "sleep(30);"],
+            std::time::Duration::from_millis(300),
+        );
+        assert!(r.is_err());
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        let ok = php(
+            &dir,
+            &["-r", "echo 'hi';"],
+            std::time::Duration::from_secs(10),
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8_lossy(&ok.stdout), "hi");
     }
 }

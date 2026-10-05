@@ -79,6 +79,7 @@ mod outline;
 mod palette;
 mod phptools;
 mod picker;
+mod platform;
 mod policies;
 mod problems;
 mod querycomplete;

@@ -10,7 +10,6 @@
 //! and scanning the filesystem, mirroring how the extension gathers its data.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use lsp_types::{CompletionItem, CompletionItemKind};
 
@@ -112,9 +111,8 @@ pub fn load(root: &Path) -> LaravelData {
 
 // ---- Routes ---------------------------------------------------------------
 
-/// PHP flags that silence deprecation/warning noise (PHP 8.x writes these to
-/// stdout in CLI, which would otherwise corrupt the JSON output).
-const PHP_QUIET: [&str; 4] = ["-d", "error_reporting=0", "-d", "display_errors=0"];
+/// How long a scrape that boots the app may take before it is given up on.
+const ARTISAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Parse the first JSON value embedded in `bytes`, tolerating leading noise.
 fn parse_json(bytes: &[u8]) -> Option<serde_json::Value> {
@@ -143,11 +141,7 @@ fn parse_middleware(v: Option<&serde_json::Value>) -> String {
 }
 
 fn load_routes(root: &Path) -> Vec<RouteInfo> {
-    let output = Command::new("php")
-        .args(PHP_QUIET)
-        .args(["artisan", "route:list", "--json"])
-        .current_dir(root)
-        .output();
+    let output = crate::phptools::php(root, &["artisan", "route:list", "--json"], ARTISAN_TIMEOUT);
     let Ok(output) = output else {
         return Vec::new();
     };
@@ -274,13 +268,7 @@ fn php_dump_config(root: &Path) -> Option<Vec<KeyValue>> {
         $app = require 'bootstrap/app.php';\
         $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap();\
         echo json_encode(Illuminate\\Support\\Arr::dot(config()->all()));";
-    let output = Command::new("php")
-        .args(PHP_QUIET)
-        .arg("-r")
-        .arg(code)
-        .current_dir(root)
-        .output()
-        .ok()?;
+    let output = crate::phptools::php(root, &["-r", code], ARTISAN_TIMEOUT).ok()?;
     let value = parse_json(&output.stdout)?;
     let obj = value.as_object()?;
     let mut out: Vec<KeyValue> = obj
@@ -302,10 +290,10 @@ fn json_scalar(v: &serde_json::Value) -> String {
         serde_json::Value::String(s) => s.clone(),
         other => {
             let s = other.to_string();
-            if s.len() > 80 {
-                format!("{}…", &s[..80])
-            } else {
-                s
+            // By characters: a byte cut can land inside "ø" and panic.
+            match s.char_indices().nth(80) {
+                Some((cut, _)) => format!("{}…", &s[..cut]),
+                None => s,
             }
         }
     }
@@ -440,13 +428,7 @@ fn php_dump_array(cwd: &Path, file: &Path) -> Option<Vec<(String, String)>> {
     );
     // Needs the autoloader for Arr::dot.
     let full = format!("require 'vendor/autoload.php';{code}");
-    let output = Command::new("php")
-        .args(PHP_QUIET)
-        .arg("-r")
-        .arg(&full)
-        .current_dir(cwd)
-        .output()
-        .ok()?;
+    let output = crate::phptools::php(cwd, &["-r", &full], ARTISAN_TIMEOUT).ok()?;
     let value = parse_json(&output.stdout)?;
     let obj = value.as_object()?;
     Some(

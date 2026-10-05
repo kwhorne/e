@@ -27,7 +27,7 @@ fn line(text: &'static str, accent: bool, url: Option<&'static str>) -> impl Int
         })
         .on_click_stop(move |_| {
             if let Some(u) = url {
-                let _ = std::process::Command::new("open").arg(u).spawn();
+                crate::platform::open_url(u);
             }
         })
 }

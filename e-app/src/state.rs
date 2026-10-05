@@ -1976,23 +1976,29 @@ impl AppState {
     }
 
     /// Move a path to the Trash (recoverable) and close any open buffer for it.
+    /// Move a file or folder to the trash — off the UI thread, since Finder
+    /// can take its time — and close its tab once it is gone.
     pub fn delete_path(&self, path: PathBuf) {
-        let script = format!(
-            "tell application \"Finder\" to delete POSIX file \"{}\"",
-            path.display()
+        let state = *self;
+        let target = path.clone();
+        self.spawn_bg(
+            move || crate::platform::trash(&target),
+            move |result: Result<(), String>| {
+                if let Err(e) = result {
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                    Self::notify(&format!("Could not move {name} to the trash: {e}"));
+                    return;
+                }
+                if let Some(id) = state.buffers.with_untracked(|bs| {
+                    bs.iter()
+                        .find(|b| b.file.path.as_deref() == Some(path.as_path()))
+                        .map(|b| b.id)
+                }) {
+                    state.close(id);
+                }
+                state.fs_rev.update(|r| *r += 1);
+            },
         );
-        let _ = std::process::Command::new("osascript")
-            .arg("-e")
-            .arg(script)
-            .output();
-        if let Some(id) = self.buffers.with(|bs| {
-            bs.iter()
-                .find(|b| b.file.path.as_deref() == Some(path.as_path()))
-                .map(|b| b.id)
-        }) {
-            self.close(id);
-        }
-        self.fs_rev.update(|r| *r += 1);
     }
 
     pub fn copy_path_to_clipboard(&self, path: &std::path::Path) {
@@ -2000,10 +2006,7 @@ impl AppState {
     }
 
     pub fn reveal_in_finder(&self, path: &std::path::Path) {
-        let _ = std::process::Command::new("open")
-            .arg("-R")
-            .arg(path)
-            .spawn();
+        crate::platform::reveal(path);
     }
 
     pub fn toggle_md_preview(&self) {
@@ -2916,7 +2919,10 @@ impl AppState {
                 items.push((b.id, path.clone(), b.disk_mtime.get_untracked()));
             }
         }
-        if items.is_empty() {
+        // One check at a time: on a hung network mount the `stat`s block, and
+        // a new thread every tick would pile up behind them.
+        static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if items.is_empty() || BUSY.swap(true, std::sync::atomic::Ordering::AcqRel) {
             return;
         }
         let state = *self;
@@ -2924,6 +2930,7 @@ impl AppState {
         let send = create_ext_action(
             self.cx,
             move |changed: Vec<(u64, std::time::SystemTime, bool)>| {
+                BUSY.store(false, std::sync::atomic::Ordering::Release);
                 for (id, mtime, first) in changed {
                     let Some(b) = state.buffer_by_id(id) else {
                         continue;
@@ -3827,33 +3834,9 @@ impl AppState {
         }
     }
 
-    /// Show a native macOS notification banner.
-    /// Show a native notification banner: macOS through `osascript`, Linux
-    /// through `notify-send`; anywhere else it goes to stderr, where the same
-    /// text is already written by the caller in most cases.
+    /// Show a desktop notification (see [`crate::platform::notify`]).
     pub(crate) fn notify(message: &str) {
-        #[cfg(target_os = "macos")]
-        {
-            let script = format!(
-                "display notification \"{}\" with title \"e\"",
-                message.replace('"', "'")
-            );
-            let _ = std::process::Command::new("osascript")
-                .arg("-e")
-                .arg(script)
-                .spawn();
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let _ = std::process::Command::new("notify-send")
-                .arg("e")
-                .arg(message)
-                .spawn();
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        {
-            eprintln!("e: {message}");
-        }
+        crate::platform::notify(message);
     }
 
     /// Add another root folder to the workspace (multi-root).
@@ -6327,32 +6310,6 @@ impl AppState {
             .with(|bs| bs.iter().find(|b| b.id == active).cloned())
     }
 
-    /// Format through the project's Pint, if it has one. Returns whether it ran.
-    fn format_with_pint(&self, buf: &Buffer) -> bool {
-        if !matches!(buf.file.language, Language::Php) {
-            return false;
-        }
-        let Some(path) = buf.file.path.clone() else {
-            return false;
-        };
-        let root = self.root.get_untracked();
-        let text = buf.doc.text().to_string();
-        let Some(formatted) = crate::phptools::pint_format(&root, &path, &text) else {
-            return false;
-        };
-        // One whole-document edit, so it lands in the undo tree as a single step.
-        let Some(editor) = buf.editor.get_untracked() else {
-            return false;
-        };
-        let end = text.len();
-        editor.doc().edit_single(
-            floem::views::editor::core::selection::Selection::region(0, end),
-            &formatted,
-            floem_editor_core::editor::EditType::Other,
-        );
-        true
-    }
-
     /// Format the active buffer in place.
     ///
     /// A Laravel project's formatting is whatever Pint says it is — that is what
@@ -6375,9 +6332,36 @@ impl AppState {
 
     /// [`Self::format_active_then`] for a given buffer, active or not.
     fn format_buffer_then(&self, buf: Buffer, then: impl FnOnce() + 'static) {
-        if self.format_with_pint(&buf) {
-            then();
-            return;
+        // Pint, off the UI thread: it is a PHP process per save. Its result is
+        // applied only if the text hasn't changed meanwhile — as one edit, so
+        // it is a single undo step. When the project has Pint, Pint alone
+        // decides: "nothing to change" must not hand the file to the
+        // language server, which formats PHP to its own taste.
+        let root = self.root.get_untracked();
+        if let (Language::Php, Some(path)) = (buf.file.language, buf.file.path.clone()) {
+            if crate::phptools::has_pint(&root) {
+                let text = buf.doc.text().to_string();
+                let rev = buf.doc.rev();
+                self.spawn_bg(
+                    move || crate::phptools::pint_format(&root, &path, &text),
+                    move |formatted: Option<String>| {
+                        if let Some(formatted) = formatted {
+                            if buf.doc.rev() == rev {
+                                let end = buf.doc.text().len();
+                                buf.doc.edit_single(
+                                    Selection::region(0, end),
+                                    &formatted,
+                                    EditType::Other,
+                                );
+                            } else {
+                                Self::notify("Formatting skipped: the file changed meanwhile");
+                            }
+                        }
+                        then();
+                    },
+                );
+                return;
+            }
         }
         if self.lsp_language_id(buf.file.language).is_none() {
             then();

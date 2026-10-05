@@ -352,7 +352,7 @@ pub fn markdown_body_selectable(text: &str) -> impl IntoView {
 /// A URL goes to the browser (or mail client); anything else is left alone.
 fn open_external_link(href: &str) {
     if href.starts_with("http://") || href.starts_with("https://") || href.starts_with("mailto:") {
-        let _ = std::process::Command::new("open").arg(href).spawn();
+        crate::platform::open_url(href);
     }
 }
 

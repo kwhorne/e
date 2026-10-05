@@ -113,6 +113,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Smaller per-keystroke costs:** SQL completion no longer parses the file
   when no database schema is loaded, inlay hints aren't cloned per line, and
   the breadcrumb and unsaved marker don't re-render on every edit.
+- **The window opens before the restored tabs are loaded.** Only the tab on
+  screen (two, with the split) opens at launch; the rest follow one at a
+  time once the window is up, in their saved order. Each used to be read,
+  highlighted and diffed against git before the first frame. Opening any
+  file no longer waits for `git show HEAD:` either: the change markers
+  appear when it lands.
+- **The file tree lists folders in the background and builds only the rows
+  in view.** Every save re-read every expanded folder on the UI thread, and
+  expanding `vendor/` built thousands of rows. A folder's icon now follows it
+  opening and closing.
+- **Blade views with many `{{ }}` type smoothly.** Each echo was a separate
+  PHP parse on every keystroke — 34 ms for 600 echoes in a 16 KB view; the
+  results are now kept per fragment, so a keystroke costs 2 ms.
+- **The Markdown preview re-renders when the text changes and typing
+  pauses**, not on every keystroke and caret move.
+- **Smaller:** the merge-conflict bar no longer copies the file on every
+  caret move, and Problems panel rows no longer show a stale message after
+  the list changes beneath them.
 - **Release builds use thin LTO; debug builds optimise dependencies**, so
   `scripts/run.sh` is no longer misleadingly slow.
 - **Syntax highlighting is incremental** for PHP, Rust, Python, Go, C, JSON

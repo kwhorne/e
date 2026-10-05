@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use e_core::language::Language;
 use floem::menu::{Menu, MenuItem};
-use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
-use floem::views::{dyn_stack, label, scroll, stack, Decorators};
+use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
+use floem::views::{label, scroll, stack, virtual_stack, Decorators};
 use floem::IntoView;
 
 use crate::file_ops::FileOpKind;
@@ -178,11 +178,9 @@ fn walk(dir: &PathBuf, depth: usize, expanded: &HashSet<PathBuf>, out: &mut Vec<
         })
         .collect();
 
-    // Directories first, then alphabetical.
-    entries.sort_by(|a, b| {
-        b.1.cmp(&a.1)
-            .then_with(|| a.2.to_lowercase().cmp(&b.2.to_lowercase()))
-    });
+    // Directories first, then alphabetical (each name lower-cased once, not
+    // per comparison).
+    entries.sort_by_cached_key(|(_, is_dir, name)| (!*is_dir, name.to_lowercase()));
 
     for (path, is_dir, name) in entries {
         let is_expanded = expanded.contains(&path);
@@ -216,12 +214,32 @@ pub fn file_tree(state: AppState) -> impl IntoView {
             .font_size(11.0)
     });
 
-    let rows = dyn_stack(
-        move || {
-            state.fs_rev.get(); // refresh after filesystem operations
-            flatten(&state.roots.get(), &expanded.get())
-        },
-        |r| r.path.clone(),
+    // The rows are listed off the UI thread: every expanded folder is read
+    // again after each filesystem change (a save included), and expanding
+    // `vendor/` is thousands of entries. A listing that finishes after a
+    // newer one started is dropped.
+    let listed: RwSignal<Vec<Row>> = RwSignal::new(Vec::new());
+    let generation = std::rc::Rc::new(std::cell::Cell::new(0u64));
+    create_effect(move |_| {
+        state.fs_rev.get(); // refresh after filesystem operations
+        let roots = state.roots.get();
+        let open = expanded.get();
+        let g = generation.get() + 1;
+        generation.set(g);
+        let current = generation.clone();
+        let send = floem::ext_event::create_ext_action(state.cx, move |rows: Vec<Row>| {
+            if current.get() == g {
+                listed.set(rows);
+            }
+        });
+        std::thread::spawn(move || send(flatten(&roots, &open)));
+    });
+
+    // Only the rows in view are built. Keyed by expansion too, so a folder's
+    // icon follows it opening and closing.
+    let rows = virtual_stack(
+        move || listed,
+        |r| (r.path.clone(), r.expanded),
         move |r| {
             let path = r.path.clone();
             let menu_path = r.path.clone();
@@ -259,6 +277,7 @@ pub fn file_tree(state: AppState) -> impl IntoView {
             .context_menu(move || item_menu(state, menu_path.clone()))
         },
     )
+    .item_size_fixed(|| 24.0)
     .style(|s| s.flex_col().width_full());
 
     stack((

@@ -1482,6 +1482,10 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
 /// figure the tree-sitter parse alone is 45 ms and the query pass most of the
 /// rest, so there is no arrangement of this work that is cheap enough to keep
 /// inline — it has to leave the UI thread.
+/// Set while restored tabs are still being opened (see `restore_session`):
+/// the session isn't saved until they are all back.
+static RESTORING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 const SYNC_HIGHLIGHT_LIMIT: usize = 64 * 1024;
 
 /// Up to this size, a language [`e_core::syntax::SyntaxTree`] supports is
@@ -2860,10 +2864,25 @@ impl AppState {
     }
 
     /// Whether the active buffer contains conflict markers.
+    ///
+    /// Asked on every caret move (the conflict bar follows the caret), so the
+    /// answer is kept per text revision instead of copying the file each time.
     pub fn active_has_conflicts(&self) -> bool {
-        self.active_buffer()
-            .map(|b| b.doc.text().to_string().contains("<<<<<<<"))
-            .unwrap_or(false)
+        thread_local! {
+            static LAST: std::cell::Cell<Option<(u64, u64, bool)>> = const { std::cell::Cell::new(None) };
+        }
+        let Some(b) = self.active_buffer() else {
+            return false;
+        };
+        let rev = b.doc.rev();
+        if let Some((id, r, has)) = LAST.get() {
+            if id == b.id && r == rev {
+                return has;
+            }
+        }
+        let has = b.doc.text().to_string().contains("<<<<<<<");
+        LAST.set(Some((b.id, rev, has)));
+        has
     }
 
     /// The conflict block containing the caret: `(start, end, current, incoming)`.
@@ -4087,7 +4106,25 @@ impl AppState {
         let Some(data) = session::load(&self.root.get_untracked()) else {
             return;
         };
-        for p in &data.open {
+        // The tabs on screen open now; the rest after the window is up, one
+        // per turn of the event loop. Each open reads, highlights and parses
+        // its file, which with a dozen tabs held the first frame back.
+        let mut visible = vec![data.active.clone()];
+        if data.split {
+            visible.push(data.active2.clone());
+        }
+        let (now, later): (Vec<String>, Vec<String>) = data
+            .open
+            .iter()
+            .cloned()
+            .partition(|p| visible.iter().any(|v| v.as_deref() == Some(p.as_str())));
+        let now = if now.is_empty() {
+            data.open.first().cloned().into_iter().collect()
+        } else {
+            now
+        };
+        let later: Vec<String> = later.into_iter().filter(|p| !now.contains(p)).collect();
+        for p in &now {
             self.open_path(PathBuf::from(p));
         }
         for text in &data.untitled {
@@ -4111,6 +4148,43 @@ impl AppState {
                 self.active2.set(Some(a2));
             }
         }
+        if !later.is_empty() {
+            // Until every tab is back, a saved session would be missing the
+            // rest — and their unsaved edits.
+            RESTORING.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.open_restored_later(later.into(), data.open, data.modified);
+        }
+    }
+
+    /// Open the remaining restored tabs one at a time without taking focus,
+    /// then put the tabs back in their saved order.
+    fn open_restored_later(
+        &self,
+        mut rest: VecDeque<String>,
+        order: Vec<String>,
+        modified: Vec<session::ModifiedFile>,
+    ) {
+        let state = *self;
+        let Some(next) = rest.pop_front() else {
+            let rank = |b: &Buffer| {
+                b.file
+                    .path
+                    .as_ref()
+                    .and_then(|p| order.iter().position(|o| std::path::Path::new(o) == p))
+                    .unwrap_or(usize::MAX)
+            };
+            self.buffers.update(|bs| bs.sort_by_key(rank));
+            RESTORING.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.save_session();
+            return;
+        };
+        floem::action::exec_after(std::time::Duration::from_millis(15), move |_| {
+            let focus = state.focused_active().get_untracked();
+            state.open_path(PathBuf::from(&next));
+            state.focused_active().set(focus);
+            state.restore_unsaved_edits(&modified);
+            state.open_restored_later(rest, order, modified);
+        });
     }
 
     /// Put unsaved edits from the last run back over their files (hot exit).
@@ -4166,11 +4240,17 @@ impl AppState {
 
     /// Persist the current session.
     pub fn save_session(&self) {
+        if RESTORING.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         session::save(&self.root.get_untracked(), &self.session_data());
     }
 
     /// Persist the current session off the UI thread.
     pub fn save_session_in_background(&self) {
+        if RESTORING.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         session::save_in_background(self.root.get_untracked(), self.session_data());
     }
 
@@ -6018,17 +6098,30 @@ impl AppState {
         let syntax = Rc::new(RefCell::new(syntax));
         let highlights: Highlights = Rc::new(RefCell::new(initial_spans));
 
-        // Git change markers vs HEAD.
-        let head_text = file.path.as_ref().and_then(|p| git::head_text(p));
-        let line_count = content.split_inclusive('\n').count().max(1);
-        let git_marks: GitMarks = Rc::new(RefCell::new(match &head_text {
-            Some(h) => git::marks(h, &content, line_count),
-            None => Vec::new(),
-        }));
-
         let doc = Rc::new(TextDocument::new(self.cx, content.clone()));
         // Keep/auto-indent on newline (matches editor expectations).
         doc.auto_indent.set(true);
+
+        // Git change markers vs HEAD. Reading HEAD's copy is a `git`
+        // process, so it happens in the background; the markers appear when
+        // it lands (and every edit after recomputes them against it).
+        let head_text: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+        let git_marks: GitMarks = Rc::new(RefCell::new(Vec::new()));
+        if let Some(path) = file.path.clone() {
+            let (head, marks, doc) = (head_text.clone(), git_marks.clone(), doc.clone());
+            self.spawn_bg(
+                move || git::head_text(&path),
+                move |text: Option<String>| {
+                    if let Some(h) = &text {
+                        let now = doc.text().to_string();
+                        let lc = now.split_inclusive('\n').count().max(1);
+                        *marks.borrow_mut() = git::marks(h, &now, lc);
+                        doc.cache_rev().update(|r| *r += 1);
+                    }
+                    *head.borrow_mut() = text;
+                },
+            );
+        }
         let dirty = RwSignal::new(false);
         let version = RwSignal::new(1i64);
 
@@ -6130,13 +6223,13 @@ impl AppState {
                     if let Some(tree) = syntax.borrow_mut().as_mut() {
                         tree.update(&text, &mut highlights.borrow_mut());
                     }
-                    if let Some(head) = &head_text {
+                    if let Some(head) = &*head_text.borrow() {
                         let lc = text.split_inclusive('\n').count().max(1);
                         *git_marks.borrow_mut() = git::marks(head, &text, lc);
                     }
                 } else if text.len() <= SYNC_HIGHLIGHT_LIMIT {
                     *highlights.borrow_mut() = highlight_lines(language, &text);
-                    if let Some(head) = &head_text {
+                    if let Some(head) = &*head_text.borrow() {
                         let lc = text.split_inclusive('\n').count().max(1);
                         *git_marks.borrow_mut() = git::marks(head, &text, lc);
                     }
@@ -6152,7 +6245,7 @@ impl AppState {
                         hl_gen.clone(),
                         language,
                         text.clone(),
-                        head_text.clone(),
+                        head_text.borrow().clone(),
                         highlights.clone(),
                         git_marks.clone(),
                         doc.clone(),

@@ -553,14 +553,38 @@ fn first_string_range(arguments: tree_sitter::Node) -> Option<(usize, usize)> {
 
 /// Highlight a fragment of PHP (no `<?php` tag) by wrapping it, mapping the
 /// resulting spans back into the original document at `base`.
+///
+/// Each fragment is its own PHP parse, so a view with hundreds of `{{ }}`
+/// cost tens of milliseconds a keystroke (36 ms for 600 echoes in 16 KB).
+/// Between keystrokes all but the edited fragment are unchanged — and
+/// `{{ $user->name }}` recurs — so results are cached by fragment text.
 fn php_fragment_spans(inner: &str, base: usize, out: &mut Vec<Span>) {
     const PREFIX: &str = "<?php ";
-    let wrapped = format!("{PREFIX}{inner}");
-    for (s, e, k) in ts_spans(Language::Php, &wrapped) {
-        if s >= PREFIX.len() {
-            out.push((base + s - PREFIX.len(), base + e - PREFIX.len(), k));
-        }
+    thread_local! {
+        static FRAGMENTS: RefCell<HashMap<String, Rc<Vec<Span>>>> =
+            RefCell::new(HashMap::new());
     }
+    let spans = FRAGMENTS.with(|cell| {
+        if let Some(hit) = cell.borrow().get(inner) {
+            return hit.clone();
+        }
+        let wrapped = format!("{PREFIX}{inner}");
+        let spans: Rc<Vec<Span>> = Rc::new(
+            ts_spans(Language::Php, &wrapped)
+                .into_iter()
+                .filter(|(s, _, _)| *s >= PREFIX.len())
+                .map(|(s, e, k)| (s - PREFIX.len(), e - PREFIX.len(), k))
+                .collect(),
+        );
+        let mut cache = cell.borrow_mut();
+        // Bounded: a big edit session shouldn't grow it without limit.
+        if cache.len() >= 4096 {
+            cache.clear();
+        }
+        cache.insert(inner.to_string(), spans.clone());
+        spans
+    });
+    out.extend(spans.iter().map(|&(s, e, k)| (base + s, base + e, k)));
 }
 
 /// Blade = HTML + embedded PHP (`@php…@endphp`, `{{ }}`, `{!! !!}`) + directives.

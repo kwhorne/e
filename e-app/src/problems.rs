@@ -29,6 +29,22 @@ enum Row {
     },
 }
 
+impl Row {
+    /// What the row shows, as an identity for the list.
+    fn key(&self) -> String {
+        match self {
+            Row::Header(rel, errors, warnings) => format!("{rel}\u{1}{errors}\u{1}{warnings}"),
+            Row::Item {
+                uri,
+                line,
+                col,
+                msg,
+                severity,
+            } => format!("{uri}\u{1}{line}\u{1}{col}\u{1}{msg}\u{1}{severity:?}"),
+        }
+    }
+}
+
 fn rows(state: AppState) -> Vec<Row> {
     let mut rows = Vec::new();
     for (uri, diags) in state.all_diagnostics() {
@@ -69,7 +85,9 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
 
     let list = dyn_stack(
         move || rows(state).into_iter().enumerate().collect::<Vec<_>>(),
-        |(i, _)| *i,
+        // By content too: keyed by position alone, a row kept showing the
+        // message it was built with after the list beneath it changed.
+        |(i, row)| (*i, row.key()),
         move |(_, row)| match row {
             Row::Header(rel, errors, warnings) => {
                 label(move || format!("{rel}   ⨯ {errors}  ⚠ {warnings}"))

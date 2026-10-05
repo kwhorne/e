@@ -416,17 +416,37 @@ impl AppState {
 /// is Markdown, re-rendered as the text changes, scrolled with the editor.
 pub fn markdown_preview(state: AppState) -> impl IntoView {
     let visible = move || state.md_preview.get() && is_markdown(state);
+
+    // Re-render when the text has changed and typing has paused — not on
+    // every keystroke, and not on caret moves, which bump `cache_rev` too.
+    // Each render re-parses the document and rebuilds every block.
+    let rendered = RwSignal::new(0u64);
+    let pending = Rc::new(std::cell::Cell::new(0u64));
+    floem::reactive::create_effect(move |last: Option<(u64, u64)>| {
+        use floem::views::editor::text::Document;
+        let Some(b) = state.active_buffer() else {
+            return (0, 0);
+        };
+        b.doc.cache_rev().get();
+        let now = (b.id, b.doc.rev());
+        if last.is_some_and(|(id, rev)| id == now.0 && rev != now.1) {
+            let g = pending.get() + 1;
+            pending.set(g);
+            let pending = pending.clone();
+            floem::action::exec_after(std::time::Duration::from_millis(180), move |_| {
+                if pending.get() == g {
+                    rendered.update(|r| *r += 1);
+                }
+            });
+        }
+        now
+    });
+
     dyn_container(
         move || {
             let on = visible();
-            let (rev, id) = state
-                .active_buffer()
-                .map(|b| {
-                    use floem::views::editor::text::Document;
-                    (b.doc.cache_rev().get(), b.id)
-                })
-                .unwrap_or((0, 0));
-            (on, rev, id)
+            let id = state.active_buffer().map(|b| b.id).unwrap_or(0);
+            (on, rendered.get(), id)
         },
         move |(on, _rev, _id)| {
             if !on {

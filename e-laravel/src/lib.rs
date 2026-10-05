@@ -1,0 +1,28 @@
+//! Laravel project intelligence for `e`, with no UI: what a project's routes,
+//! views, config, translations, models, Livewire and Inertia components are,
+//! and the completions, lints, navigation and code generation built on them.
+//!
+//! Kept apart from the editor so it builds and tests without the GUI stack,
+//! and runs against real projects in the corpus job.
+
+pub mod artisan;
+pub mod codegen;
+pub mod contract;
+#[cfg(test)]
+mod corpus;
+pub mod eloquent;
+pub mod eloquent_helper;
+pub mod events;
+pub mod ide_json;
+pub mod inertia;
+pub mod intentions;
+pub mod laravel;
+pub mod laravel_lint;
+pub mod livewire;
+pub mod move_class;
+pub mod phptools;
+pub mod policies;
+pub mod querycomplete;
+pub mod relatedfiles;
+pub mod relations;
+pub mod validation;

@@ -1377,7 +1377,7 @@ pub fn route_views(data: &LaravelData, action: &str) -> Vec<String> {
 }
 
 /// Turn `App\Http\Controllers\UserController@index` into a file + method line.
-pub(crate) fn controller_location(root: &Path, action: &str) -> Option<(PathBuf, usize, usize)> {
+pub fn controller_location(root: &Path, action: &str) -> Option<(PathBuf, usize, usize)> {
     let (class, method) = match action.split_once('@') {
         Some((c, m)) => (c, Some(m)),
         None => (action, None),

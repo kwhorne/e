@@ -104,4 +104,4 @@ jobs:
       - name: Run parsers over the corpus
         env:
           E_CORPUS_DIR: ${{ github.workspace }}/corpus
-        run: cargo test -p e-app corpus -- --ignored --nocapture
+        run: cargo test -p e-laravel corpus -- --ignored --nocapture

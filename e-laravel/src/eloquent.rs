@@ -99,7 +99,7 @@ fn starts_upper(s: &str) -> bool {
 
 /// Map a model class to its table: honour `protected $table`, else the Laravel
 /// snake_case + pluralise convention.
-pub(crate) fn model_table(root: &Path, class: &str) -> String {
+pub fn model_table(root: &Path, class: &str) -> String {
     for cand in [
         root.join(format!("app/Models/{class}.php")),
         root.join(format!("app/{class}.php")),
@@ -127,7 +127,7 @@ fn find_table_property(src: &str) -> Option<String> {
     Some(inner[..end].to_string())
 }
 
-pub(crate) fn snake_case(s: &str) -> String {
+pub fn snake_case(s: &str) -> String {
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
         if c.is_uppercase() {
@@ -142,7 +142,7 @@ pub(crate) fn snake_case(s: &str) -> String {
     out
 }
 
-pub(crate) fn pluralize(s: &str) -> String {
+pub fn pluralize(s: &str) -> String {
     if s.ends_with('y')
         && !s.ends_with("ay")
         && !s.ends_with("ey")

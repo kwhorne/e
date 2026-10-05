@@ -14,7 +14,7 @@ name = "e"
 path = "e-app/src/bin/e.rs"
 
 [workspace]
-members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term", "e-agent", "e-verify", "e-review"]
+members  = ["e-app", "e-core", "e-db", "e-dap", "e-lsp", "e-term", "e-agent", "e-verify", "e-review", "e-laravel"]
 # The vendored Floem fork (vendor/floem) is its own workspace; keep it out of
 # ours so the two don't collide. We depend on it via path below.
 exclude  = ["vendor/floem"]
@@ -48,6 +48,7 @@ e-verify    = { path = "./e-verify" }
 e-review    = { path = "./e-review" }
 e-core      = { path = "./e-core" }
 e-db        = { path = "./e-db" }
+e-laravel   = { path = "./e-laravel" }
 e-dap       = { path = "./e-dap" }
 e-lsp       = { path = "./e-lsp" }
 e-term      = { path = "./e-term" }

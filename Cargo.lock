@@ -1317,6 +1317,7 @@ dependencies = [
  "e-core",
  "e-dap",
  "e-db",
+ "e-laravel",
  "e-lsp",
  "e-review",
  "e-term",
@@ -1384,6 +1385,17 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+]
+
+[[package]]
+name = "e-laravel"
+version = "0.9.24"
+dependencies = [
+ "e-core",
+ "e-db",
+ "lsp-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

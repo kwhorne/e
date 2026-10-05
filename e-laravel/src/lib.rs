@@ -6,6 +6,7 @@
 //! and runs against real projects in the corpus job.
 
 pub mod artisan;
+pub mod blade_vars;
 pub mod codegen;
 pub mod contract;
 #[cfg(test)]

@@ -45,7 +45,7 @@ fn member_access(text: &str, offset: usize) -> Option<(String, String, usize)> {
 }
 
 /// Infer the model class for `$var` from assignments and type hints above.
-pub(crate) fn resolve_model(text: &str, var: &str) -> Option<String> {
+pub fn resolve_model(text: &str, var: &str) -> Option<String> {
     let needle = format!("${var}");
     let mut found: Option<String> = None;
     let mut from = 0;
@@ -71,7 +71,29 @@ pub(crate) fn resolve_model(text: &str, var: &str) -> Option<String> {
                 .take_while(|c| is_word(*c) || *c == '\\')
                 .collect();
             let cls = cls.rsplit('\\').next().unwrap_or(&cls).to_string();
-            if starts_upper(&cls) {
+            // `User::where(…)->get()` is a collection, `->count()` a number:
+            // only an assignment that yields one model types the variable.
+            let statement = statement_of(rest);
+            let many = [
+                "->get(",
+                "::all(",
+                "->paginate(",
+                "->simplePaginate(",
+                "->cursorPaginate(",
+                "->pluck(",
+                "->count(",
+                "::count(",
+                "->sum(",
+                "->exists(",
+                "->toArray(",
+                "->map(",
+                "->chunk(",
+                "->lazy(",
+                "->cursor(",
+            ]
+            .iter()
+            .any(|m| statement.contains(m));
+            if starts_upper(&cls) && !many {
                 found = Some(cls);
             }
         }
@@ -91,6 +113,26 @@ pub(crate) fn resolve_model(text: &str, var: &str) -> Option<String> {
         }
     }
     found
+}
+
+/// `s` up to the `;` that ends its statement — not one inside a closure
+/// (`->when($x, fn ($q) => $q->where(function ($q) { …; }))->paginate()`).
+fn statement_of(s: &str) -> &str {
+    let (mut depth, mut quote) = (0i32, None);
+    for (i, c) in s.char_indices() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None => match c {
+                '\'' | '"' => quote = Some(c),
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                ';' if depth <= 0 => return &s[..i],
+                _ => {}
+            },
+        }
+    }
+    s
 }
 
 fn starts_upper(s: &str) -> bool {
@@ -158,18 +200,25 @@ pub fn pluralize(s: &str) -> String {
 }
 
 /// Column completions for `$model->…`, or `None` if it doesn't apply.
+///
+/// `file` is the document's path: in a Blade view, a variable the view itself
+/// doesn't assign is looked up where the view is rendered.
 pub fn complete(
     language: Language,
     text: &str,
     offset: usize,
     root: &Path,
+    file: Option<&Path>,
     schema: &HashMap<String, Vec<ColumnInfo>>,
 ) -> Option<(usize, Vec<CompletionItem>)> {
     if !matches!(language, Language::Php | Language::Blade) || schema.is_empty() {
         return None;
     }
     let (var, partial, start) = member_access(text, offset)?;
-    let model = resolve_model(&text[..offset.min(text.len())], &var)?;
+    let model = resolve_model(&text[..offset.min(text.len())], &var).or_else(|| {
+        let file = file.filter(|_| language == Language::Blade)?;
+        crate::blade_vars::view_var_model(root, file, &var)
+    })?;
     let table = model_table(root, &model);
     let cols = schema.get(&table)?;
     let lower = partial.to_lowercase();
@@ -212,6 +261,26 @@ mod tests {
         assert_eq!(
             resolve_model("public function show(User $user) { $user->", "user").as_deref(),
             Some("User")
+        );
+    }
+
+    #[test]
+    fn a_query_result_is_not_a_model() {
+        assert_eq!(
+            resolve_model("$posts = Post::where('a', 1)->get(); $posts->", "posts"),
+            None
+        );
+        assert_eq!(resolve_model("$n = Post::count(); $n->", "n"), None);
+        assert_eq!(
+            resolve_model(
+                "$items = User::query()->when($s, function ($q) { $q->where('a', 1); })->paginate(9); $items->",
+                "items"
+            ),
+            None
+        );
+        assert_eq!(
+            resolve_model("$post = Post::where('a', 1)->first(); $post->", "post").as_deref(),
+            Some("Post")
         );
     }
 

@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Rename rewrites them all through the usual preview, and moves the view's
   file. It refuses what it couldn't do completely: a route name built from
   a group's prefix, or a translation key moving to another file.
+- **Blade variables know their model.** `{{ $user->` in a view completes
+  the `users` columns when a controller renders it with
+  `view('users.show', compact('user'))` and `$user` was type-hinted or
+  loaded as one model — also through `['user' => …]`, `->with(…)`,
+  `auth()->user()` — and a Livewire view gets its component's typed
+  properties.
 
 - **Hot exit.** Unsaved edits to files are backed up with the session while you
   type and put back next launch, so quitting, restarting after an update, or a

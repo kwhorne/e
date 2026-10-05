@@ -595,10 +595,11 @@ impl AppState {
         let language = buf.file.language;
         let root = self.root.get_untracked();
         let schema = self.db.schema_cache.get_untracked();
+        let file = buf.file.path.clone();
         let builtin = move |text: &str| {
             let mut items = builtin_completion::items(language, &word, text);
             if let Some((_, cols)) =
-                crate::eloquent::complete(language, text, offset, &root, &schema)
+                crate::eloquent::complete(language, text, offset, &root, file.as_deref(), &schema)
             {
                 items.extend(cols);
             }

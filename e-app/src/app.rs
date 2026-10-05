@@ -471,6 +471,13 @@ fn app_view() -> impl IntoView {
     }
 
     // Scrape Laravel project data (routes/views/config/env) in the background.
+    // Forget undo histories of files not edited in two months.
+    std::thread::spawn(|| {
+        e_core::undotree::prune(
+            &crate::state::undo_store_dir(),
+            std::time::Duration::from_secs(60 * 24 * 3600),
+        )
+    });
     state.load_laravel();
     state.load_databases();
     state.load_db_schema_cache();

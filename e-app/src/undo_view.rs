@@ -44,8 +44,8 @@ fn rows(state: AppState) -> Vec<Row> {
     while let Some((id, depth)) = stack.pop() {
         let node = &t.nodes[id];
         let delta = match node.parent {
-            Some(p) => {
-                let d = node.text.len() as i64 - t.nodes[p].text.len() as i64;
+            Some(_) => {
+                let d = node.size_delta();
                 if d >= 0 {
                     format!("+{d}")
                 } else {

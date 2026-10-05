@@ -63,6 +63,19 @@ features = ["editor", "serde", "default-image-formats", "rfd-async-std"]
 path     = "vendor/floem/editor-core"
 features = ["serde"]
 
+# Release: link-time optimisation across crates (the editor's hot paths run
+# through tree-sitter, the rope and text shaping in other crates). Symbols stay
+# so crash.log backtraces keep their function names.
+[profile.release]
+lto           = "thin"
+strip         = "debuginfo"
+
+# Debug builds of the app run with optimised dependencies: an unoptimised
+# tree-sitter, rope and text shaper made `scripts/run.sh` feel far slower than
+# the release, which is not what anyone should be judging it by.
+[profile.dev.package."*"]
+opt-level = 2
+
 [patch.crates-io]
 lsp-types = { git = "https://github.com/lapce/lsp-types", rev = "feaa1e2ec80975c9dadd400a238ceacf071058e6" }
 dpi       = { git = "https://github.com/rust-windowing/winit", rev = "ee245c569d65fdeacf705ee5eedb564508d10ebe" }

@@ -90,7 +90,13 @@ impl AppState {
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return false;
         };
-        if buf.file.language != Language::Php {
+        if buf.file.language != Language::Php || buf.large {
+            return false;
+        }
+        // Finding the SQL string parses the whole file; with no schema to
+        // complete from (no database connected) there is nothing to find.
+        let schema = self.db.schema_cache.get_untracked();
+        if schema.is_empty() {
             return false;
         }
         let Some(editor) = buf.editor.get_untracked() else {
@@ -107,11 +113,6 @@ impl AppState {
         }
         let (prefix, wants_tables) = sql_prefix_and_context(&text[rs..offset]);
         let start = offset - prefix.len();
-
-        let schema = self.db.schema_cache.get_untracked();
-        if schema.is_empty() {
-            return false;
-        }
         let items = sql_completion_items(&schema, &prefix, wants_tables);
         if items.is_empty() {
             return false;

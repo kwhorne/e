@@ -1,6 +1,6 @@
 //! A breadcrumb bar: the active file's path plus the symbol at the cursor.
 
-use floem::reactive::SignalGet;
+use floem::reactive::{SignalGet, SignalWith};
 use floem::views::{label, Decorators};
 use floem::IntoView;
 
@@ -30,9 +30,14 @@ pub fn breadcrumbs(state: AppState) -> impl IntoView {
         // Nearest enclosing symbol (deepest preceding outline entry).
         if let Some(editor) = buf.editor.get() {
             let line = editor.offset_to_line_col(editor.cursor.get().offset()).0;
-            let outline = state.outline.get();
-            if let Some(sym) = outline.iter().rfind(|s| (s.line as usize) <= line) {
-                return format!("{path}  ›  {}", sym.name);
+            let sym = state.outline.with(|outline| {
+                outline
+                    .iter()
+                    .rfind(|s| (s.line as usize) <= line)
+                    .map(|s| s.name.clone())
+            });
+            if let Some(sym) = sym {
+                return format!("{path}  ›  {sym}");
             }
         }
         path

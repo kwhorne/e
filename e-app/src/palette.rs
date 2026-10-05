@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use floem::keyboard::{Key, NamedKey};
-use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate};
+use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{container, dyn_stack, label, scroll, stack, text_input, Decorators};
 use floem::IntoView;
 
@@ -189,26 +189,35 @@ pub fn palette(state: AppState) -> impl IntoView {
         }
     };
 
-    // Re-query when either the text or the tab changes.
+    // Re-query when either the text or the tab changes — once typing pauses,
+    // so a fast typist doesn't start a project-wide grep per keystroke.
     create_effect(move |_| {
         let _ = (query.get(), tab.get());
-        if state.palette_open.get_untracked() {
-            request_async();
-        }
+        let g = gen.get_untracked() + 1;
+        gen.set(g);
+        floem::action::exec_after(std::time::Duration::from_millis(120), move |_| {
+            if gen.get_untracked() == g && state.palette_open.get_untracked() {
+                request_async();
+            }
+        });
     });
 
-    let filtered = move || -> Vec<Hit> {
+    // Ranked once per change of query, tab or list, and shared by everything
+    // that shows or walks the results (ranking 40k paths used to run four
+    // times per keystroke, and twice per arrow key).
+    let ranked = floem::reactive::create_memo(move |_| -> Vec<Hit> {
         let q = query.get();
         match tab.get() {
             Tab::Files => {
-                crate::search::file_hits(&q, &files.get(), &state.root.get(), MAX_RESULTS)
+                files.with(|f| crate::search::file_hits(&q, f, &state.root.get(), MAX_RESULTS))
             }
             Tab::Actions => {
                 crate::search::action_hits(&q, crate::cmd_palette::COMMANDS, MAX_RESULTS)
             }
             Tab::Symbols | Tab::Text => async_hits.get(),
         }
-    };
+    });
+    let filtered = move || ranked.get();
 
     let run = move |hit: Hit| {
         state.palette_open.set(false);
@@ -259,7 +268,7 @@ pub fn palette(state: AppState) -> impl IntoView {
             Key::Named(NamedKey::ArrowDown),
             |_| true,
             move |_| {
-                let len = filtered().len();
+                let len = ranked.with_untracked(Vec::len);
                 if len > 0 {
                     selected.update(|i| *i = (*i + 1).min(len - 1));
                 }
@@ -360,7 +369,7 @@ pub fn palette(state: AppState) -> impl IntoView {
     // What to say when a tab has nothing to show yet.
     let hint = label(move || {
         let t = tab.get();
-        if filtered().is_empty() && query.get().trim().len() < 2 {
+        if ranked.with(Vec::is_empty) && query.get().trim().len() < 2 {
             t.empty_hint().to_string()
         } else {
             String::new()
@@ -368,7 +377,7 @@ pub fn palette(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let s = s.padding(10.0).font_size(12.0).color(theme::fg_dim());
-        if tab.get().is_async() && filtered().is_empty() {
+        if tab.get().is_async() && ranked.with(Vec::is_empty) {
             s
         } else {
             s.hide()
@@ -377,7 +386,7 @@ pub fn palette(state: AppState) -> impl IntoView {
 
     let results_scroll = scroll(results)
         .scroll_to_percent(move || {
-            let n = filtered().len().max(1) as f32;
+            let n = ranked.with(Vec::len).max(1) as f32;
             selected.get() as f32 / n
         })
         .style(|s| s.max_height(320.0).width_full());

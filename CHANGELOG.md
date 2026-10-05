@@ -43,6 +43,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer freeze the window. A failure is reported with git's message, and a
   rejected commit keeps its message.
 
+### Performance
+
+- **The undo history stores edits, not copies of the file.** Each step used to
+  hold the whole file — up to 500 of them — and the lot was rewritten to disk
+  on the UI thread every 1.5 s while typing. Now only the current text is
+  whole; histories on disk shrink accordingly (a 2.9 MB one became 58 KB),
+  are written in the background, and are forgotten after two months without
+  an edit. Existing histories are converted on load.
+- **Moving the caret no longer re-lays out every visible line.** The matching-
+  bracket highlight invalidated the whole layout cache on each caret move;
+  it now does so only when the highlight changes.
+- **Sticky scroll reads the lines it needs** instead of copying the file on
+  every scroll frame, and updates only when the headers change.
+- **Quick Open ranks once per keystroke** (it ranked the file list four times,
+  and twice per arrow key), and text search waits for a pause in typing.
+- **Smaller per-keystroke costs:** SQL completion no longer parses the file
+  when no database schema is loaded, inlay hints aren't cloned per line, and
+  the breadcrumb and unsaved marker don't re-render on every edit.
+- **Release builds use thin LTO; debug builds optimise dependencies**, so
+  `scripts/run.sh` is no longer misleadingly slow.
+
 ## [0.9.24] - 2026-09-27
 
 ### Changed

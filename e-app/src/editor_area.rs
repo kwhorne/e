@@ -6,6 +6,7 @@ use std::rc::Rc;
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::command::{Command, CommandExecuted};
+use floem::views::editor::core::buffer::rope_text::RopeText;
 use floem::views::editor::core::command::{EditCommand, MoveCommand};
 use floem::views::editor::core::cursor::{Cursor, CursorMode};
 use floem::views::editor::core::selection::Selection;
@@ -170,20 +171,30 @@ fn welcome(state: AppState) -> impl IntoView {
 /// One pane: a stack of all buffers, only this pane's active one visible.
 /// The enclosing scope lines for `top_line`, using indentation: each ancestor
 /// line has strictly smaller indentation. Outermost first.
-fn scope_headers(text: &str, top_line: usize) -> Vec<(usize, String)> {
-    let lines: Vec<&str> = text.split('\n').collect();
-    if top_line == 0 || top_line >= lines.len() {
+///
+/// `line(i)` reads one line, so this walks back from `top_line` through the
+/// rope instead of copying the file — it runs on every scroll frame. The walk
+/// gives up after a few thousand lines rather than scan a huge file to its top.
+fn scope_headers<S: AsRef<str>>(
+    line_count: usize,
+    top_line: usize,
+    line: impl Fn(usize) -> S,
+) -> Vec<(usize, String)> {
+    const MAX_LOOK_BACK: usize = 5000;
+    if top_line == 0 || top_line >= line_count {
         return Vec::new();
     }
     let indent = |l: &str| l.len() - l.trim_start().len();
-    let mut min_indent = if lines[top_line].trim().is_empty() {
+    let top = line(top_line);
+    let mut min_indent = if top.as_ref().trim().is_empty() {
         usize::MAX
     } else {
-        indent(lines[top_line])
+        indent(top.as_ref())
     };
     let mut headers = Vec::new();
-    for i in (0..top_line).rev() {
-        let l = lines[i];
+    for i in (top_line.saturating_sub(MAX_LOOK_BACK)..top_line).rev() {
+        let l = line(i);
+        let l = l.as_ref().trim_end_matches(['\n', '\r']);
         let trimmed = l.trim();
         if trimmed.is_empty() {
             continue;
@@ -233,12 +244,15 @@ fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
         let vp = editor.viewport.get();
         let top_line = (vp.y0 / lh).floor() as usize;
         buf.doc.cache_rev().get();
-        let text = buf.doc.text().to_string();
-        scope_headers(&text, top_line)
+        let rope = buf.doc.rope_text();
+        scope_headers(rope.num_lines(), top_line, |i| rope.line_content(i))
     };
+    // A memo, so the list and its visibility only update when the headers
+    // actually change — not on every scroll frame — and are computed once.
+    let headers = floem::reactive::create_memo(move |_| headers());
 
     dyn_stack(
-        move || headers().into_iter().enumerate().collect::<Vec<_>>(),
+        move || headers.get().into_iter().enumerate().collect::<Vec<_>>(),
         |(i, h)| (*i, h.0),
         move |(_, (line_idx, text))| {
             label(move || text.clone())
@@ -268,7 +282,7 @@ fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
             .border_bottom(1.0)
             .border_color(theme::border())
             .z_index(5);
-        if headers().is_empty() {
+        if headers.with(Vec::is_empty) {
             s.hide()
         } else {
             s

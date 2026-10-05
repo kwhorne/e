@@ -1082,13 +1082,13 @@ fn undo_store_path(file: &std::path::Path) -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     file.hash(&mut h);
-    let name = format!("{:016x}.json", h.finish());
+    undo_store_dir().join(format!("{:016x}.json", h.finish()))
+}
+
+/// Where per-file undo histories are kept (`~/.config/e/undo`).
+pub(crate) fn undo_store_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
-        .join(".config")
-        .join("e")
-        .join("undo")
-        .join(name)
+    PathBuf::from(home).join(".config").join("e").join("undo")
 }
 
 /// Byte offset → (line, character) both 0-based, for LSP-style ranges.
@@ -3138,9 +3138,25 @@ impl AppState {
             return;
         };
         let offset = editor.cursor.get_untracked().offset();
-        let text = buf.doc.text().to_string();
-        *buf.bracket_marks.borrow_mut() = compute_bracket_marks(&text, offset);
-        buf.doc.cache_rev().update(|r| *r += 1);
+        // Bumping `cache_rev` throws away every line's layout, so it happens
+        // only when the marks change — not on each caret move — and the file
+        // is copied only when the caret is next to a bracket at all.
+        let rope = buf.doc.text();
+        // Byte reads: a caret after "å" sits mid-character for a slice.
+        let near = [offset.checked_sub(1), Some(offset)]
+            .into_iter()
+            .flatten()
+            .filter(|&o| o < rope.len())
+            .any(|o| b"()[]{}".contains(&rope.byte_at(o)));
+        let marks = if near {
+            compute_bracket_marks(&rope.to_string(), offset)
+        } else {
+            Vec::new()
+        };
+        if *buf.bracket_marks.borrow() != marks {
+            *buf.bracket_marks.borrow_mut() = marks;
+            buf.doc.cache_rev().update(|r| *r += 1);
+        }
     }
 
     /// Load the document outline for the active buffer (LSP documentSymbol).
@@ -3630,7 +3646,11 @@ impl AppState {
             let undo = undo.clone();
             let undo_nav = undo_nav.clone();
             doc.clone().add_on_update(move |_| {
-                dirty.set(true);
+                // Only on the change: every subscriber (title, tab, status)
+                // re-renders on a set, even to the same value.
+                if !dirty.get_untracked() {
+                    dirty.set(true);
+                }
                 app.last_edit.set(now_ms());
                 let text = doc2.text().to_string();
                 *highlights.borrow_mut() = highlight_lines(Language::PlainText, &text);
@@ -6043,7 +6063,11 @@ impl AppState {
             // instead of painting stale colours.
             let hl_gen: Rc<std::cell::Cell<u64>> = Rc::new(std::cell::Cell::new(0));
             doc.clone().add_on_update(move |_| {
-                dirty.set(true);
+                // Only on the change: every subscriber (title, tab, status)
+                // re-renders on a set, even to the same value.
+                if !dirty.get_untracked() {
+                    dirty.set(true);
+                }
                 app.last_edit.set(now_ms());
                 let text = doc.text().to_string();
                 if !undo_nav.get() {
@@ -6051,16 +6075,23 @@ impl AppState {
                     // Do the recording (and any save) inside a scope so the
                     // mutable borrow is dropped before undo_rev.update runs the
                     // undo-tree view's effect, which borrows `undo` again.
-                    let recorded = {
+                    let (recorded, json) = {
                         let mut t = undo.borrow_mut();
                         let rec = t.record(&text, now, 700);
-                        if rec {
-                            if let Some(p) = &undo_path {
-                                t.maybe_save(p, now);
-                            }
-                        }
-                        rec
+                        let json = if rec && undo_path.is_some() {
+                            t.json_if_due(now)
+                        } else {
+                            None
+                        };
+                        (rec, json)
                     };
+                    // Written off the UI thread: the history is saved while
+                    // the user types.
+                    if let (Some(json), Some(p)) = (json, undo_path.clone()) {
+                        std::thread::spawn(move || {
+                            let _ = buffer::write(&p, &json);
+                        });
+                    }
                     if recorded {
                         app.undo_rev.update(|r| *r += 1);
                     }

@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use floem::keyboard::Modifiers;
 use floem::peniko::Color;
-use floem::reactive::{RwSignal, SignalGet};
+use floem::reactive::{RwSignal, SignalGet, SignalWith};
 use floem::views::editor::command::{Command, CommandExecuted};
 use floem::views::editor::core::buffer::rope_text::RopeText;
 use floem::views::editor::core::editor::EditType;
@@ -55,15 +55,14 @@ impl HintsDoc {
 impl DocumentPhantom for HintsDoc {
     fn phantom_text(&self, edid: EditorId, styling: &EditorStyle, line: usize) -> PhantomTextLine {
         let mut pl = self.inner.phantom_text(edid, styling, line);
-        let hints = self.hints.get_untracked();
-        if !hints.is_empty() {
+        // Called for every line laid out: look at the hints in place rather
+        // than cloning the whole file's list (labels and all) each time.
+        let added = self.hints.with_untracked(|hints| {
+            let mut added = false;
             let rope = self.inner.rope_text();
-            let line_start = rope.offset_of_line(line);
-            let line_end = rope.offset_of_line(line + 1);
-            for (l, ch, label) in &hints {
-                if *l as usize != line {
-                    continue;
-                }
+            for (l, ch, label) in hints.iter().filter(|h| h.0 as usize == line) {
+                let line_start = rope.offset_of_line(*l as usize);
+                let line_end = rope.offset_of_line(line + 1);
                 let off = (line_start + *ch as usize).min(line_end);
                 let (_, col) = rope.offset_to_line_col(off);
                 pl.text.push(PhantomText {
@@ -76,7 +75,11 @@ impl DocumentPhantom for HintsDoc {
                     bg: None,
                     under_line: None,
                 });
+                added = true;
             }
+            added
+        });
+        if added {
             pl.text.sort_by_key(|p| p.col);
         }
 

@@ -14,6 +14,7 @@ jobs:
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -24,6 +25,7 @@ jobs:
   build-test:
     name: Build & Test (macOS)
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -35,8 +37,6 @@ jobs:
         # everybody stops reading. The four that existed when this was turned on
         # were fixed rather than allowed.
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Build
-        run: cargo build --workspace
       - name: Test
         run: cargo test --workspace
       # `vendor/floem` is excluded from our workspace, so `--workspace` never
@@ -49,6 +49,7 @@ jobs:
   build-linux:
     name: Build & Test (Linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -66,8 +67,6 @@ jobs:
         # everybody stops reading. The four that existed when this was turned on
         # were fixed rather than allowed.
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Build
-        run: cargo build --workspace
       - name: Test
         run: cargo test --workspace
       # `vendor/floem` is excluded from our workspace, so `--workspace` never
@@ -80,6 +79,7 @@ jobs:
   corpus:
     name: Parser corpus (real Laravel projects)
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -88,13 +88,19 @@ jobs:
       # contract, query diagnostics, relationship + event graphs, Livewire) meet
       # wild PHP/Vue — not just the happy-path unit tests. We only assert "no
       # panic, sane counts".
+      # Pinned, so a run is reproducible and a corpus change is a reviewed
+      # commit here rather than whatever upstream pushed today.
       - name: Fetch corpus
         run: |
-          mkdir -p corpus
-          git clone --depth 1 https://github.com/laravel/laravel.git           corpus/laravel
-          git clone --depth 1 https://github.com/inertiajs/pingcrm.git          corpus/pingcrm
-          git clone --depth 1 https://github.com/livewire/livewire.git          corpus/livewire
-          git clone --depth 1 https://github.com/spatie/laravel-permission.git  corpus/laravel-permission
+          fetch() {
+            git init -q "corpus/$1"
+            git -C "corpus/$1" fetch -q --depth 1 "https://github.com/$2.git" "$3"
+            git -C "corpus/$1" checkout -q FETCH_HEAD
+          }
+          fetch laravel            laravel/laravel           06d016a364a37430eec9cbc52209adce3d7667ce
+          fetch pingcrm            inertiajs/pingcrm         59c77d038f47758417119c28d840025caa9aac6d
+          fetch livewire           livewire/livewire         eee4431ba2d0327876ca9801c4ddbd15c268f3ee
+          fetch laravel-permission spatie/laravel-permission 6615eefac655efcd652fe394a20cbdf4f72c609f
       - name: Run parsers over the corpus
         env:
           E_CORPUS_DIR: ${{ github.workspace }}/corpus

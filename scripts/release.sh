@@ -9,10 +9,13 @@
 #   2. Bumps the workspace version in Cargo.toml (and refreshes Cargo.lock).
 #   3. Moves the CHANGELOG "Unreleased" section under a new dated version
 #      heading and updates the comparison links.
-#   4. Commits, tags `vX.Y.Z`, and pushes main + the tag.
+#   4. Commits and pushes main, then waits for CI on that commit.
+#   5. Only when CI passes: tags `vX.Y.Z` and pushes the tag.
 #
 # The GitHub release workflow (.github/workflows/release.yml) then builds and
-# attaches the platform binaries automatically.
+# attaches the platform binaries automatically. Tagging only a commit CI has
+# passed is the point of step 4: the release workflow runs no tests of its own.
+# Without `gh`, or with E_RELEASE_NO_CI_WAIT=1, the tag goes out unchecked.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -61,13 +64,42 @@ perl -0pi -e 's/## \[Unreleased\]\n/## [Unreleased]\n\n## ['"$NEW"'] - '"$DATE"'
 # Update link references at the bottom.
 perl -0pi -e 's{\[Unreleased\]: '"$REPO"'/compare/v'"$PREV"'\.\.\.HEAD}{[Unreleased]: '"$REPO"'/compare/v'"$NEW"'...HEAD\n['"$NEW"']: '"$REPO"'/compare/v'"$PREV"'...v'"$NEW"'}' CHANGELOG.md
 
-# --- 3. commit, tag, push --------------------------------------------------
+# --- 3. commit and push main ----------------------------------------------
 git add Cargo.toml Cargo.lock CHANGELOG.md
 git commit -q -m "Release v$NEW"
-git tag -a "v$NEW" -m "e $NEW"
-
-echo "==> pushing main + v$NEW"
+echo "==> pushing main"
 git push origin main
+
+# --- 4. wait for CI on the release commit ----------------------------------
+SHA="$(git rev-parse HEAD)"
+if [[ "${E_RELEASE_NO_CI_WAIT:-}" == "1" ]]; then
+  echo "==> E_RELEASE_NO_CI_WAIT=1: not waiting for CI"
+elif ! command -v gh >/dev/null 2>&1; then
+  echo "warning: gh is not installed; tagging without waiting for CI" >&2
+else
+  echo "==> waiting for CI on ${SHA:0:7}"
+  RUN=""
+  for _ in $(seq 1 36); do
+    RUN="$(gh run list --workflow ci.yml --commit "$SHA" --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
+    [[ -n "$RUN" ]] && break
+    sleep 5
+  done
+  if [[ -z "$RUN" ]]; then
+    echo "error: no CI run started for ${SHA:0:7} within 3 minutes; not tagging." >&2
+    echo "       Once CI is green: git tag -a v$NEW -m 'e $NEW' && git push origin v$NEW" >&2
+    exit 1
+  fi
+  if ! gh run watch "$RUN" --exit-status --interval 20; then
+    echo "error: CI failed on the release commit; v$NEW was not tagged." >&2
+    echo "       Fix it on main, then tag the fixed commit:" >&2
+    echo "       git tag -a v$NEW -m 'e $NEW' && git push origin v$NEW" >&2
+    exit 1
+  fi
+fi
+
+# --- 5. tag and push the tag -----------------------------------------------
+git tag -a "v$NEW" -m "e $NEW"
+echo "==> pushing v$NEW"
 git push origin "v$NEW"
 
 echo

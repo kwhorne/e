@@ -1073,6 +1073,10 @@ impl AppState {
         if self.livewire_goto() {
             return;
         }
+        // Livewire: `<livewire:name>` / `@livewire('name')` opens the component.
+        if self.goto_livewire_component() {
+            return;
+        }
         // Inertia: caret on `Inertia::render('Page')` jumps to the component.
         if self.goto_inertia_page() {
             return;

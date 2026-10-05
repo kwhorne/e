@@ -2245,7 +2245,7 @@ impl AppState {
     ) -> Option<Vec<lsp_types::CompletionItem>> {
         let path = buf.file.path.as_ref()?;
         let comp = crate::livewire::resolve(&self.root.get_untracked(), path)?;
-        let src = std::fs::read_to_string(&comp.class_file).ok()?;
+        let src = self.livewire_class_source(&comp)?;
         let lower = partial.to_lowercase();
         let items: Vec<lsp_types::CompletionItem> = crate::livewire::properties(&src)
             .into_iter()
@@ -2262,6 +2262,46 @@ impl AppState {
             None
         } else {
             Some(items)
+        }
+    }
+
+    /// A component's class source: the open buffer's text when it is being
+    /// edited (a single-file component usually is), else the file on disk.
+    pub(crate) fn livewire_class_source(
+        &self,
+        comp: &crate::livewire::Component,
+    ) -> Option<String> {
+        let open = self.buffers.with_untracked(|bs| {
+            bs.iter()
+                .find(|b| b.file.path.as_deref() == Some(comp.class_file.as_path()))
+                .map(|b| b.doc.text().to_string())
+        });
+        open.or_else(|| std::fs::read_to_string(&comp.class_file).ok())
+    }
+
+    /// Caret on a `<livewire:name>`, `@livewire('name')` or
+    /// `Route::livewire(…, 'name')` jumps to that component.
+    pub(crate) fn goto_livewire_component(&self) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        if !matches!(buf.file.language, Language::Blade | Language::Php) {
+            return false;
+        }
+        let Some(editor) = buf.editor.get_untracked() else {
+            return false;
+        };
+        let text = buf.doc.text().to_string();
+        let offset = editor.cursor.get_untracked().offset();
+        let Some(name) = crate::livewire::component_at(&text, offset) else {
+            return false;
+        };
+        match crate::livewire::resolve_name(&self.root.get_untracked(), &name) {
+            Some(path) => {
+                self.jump_to(&path_to_uri(&path), 0, 0);
+                true
+            }
+            None => false,
         }
     }
 
@@ -2316,6 +2356,10 @@ impl AppState {
             Self::notify("Not a Livewire component");
             return;
         };
+        if comp.class_file == comp.view_file {
+            Self::notify("A single-file component: its class and view are this file");
+            return;
+        }
         let target = if path == comp.class_file {
             comp.view_file
         } else {
@@ -2350,7 +2394,7 @@ impl AppState {
         if word.is_empty() {
             return false;
         }
-        let Ok(src) = std::fs::read_to_string(&comp.class_file) else {
+        let Some(src) = self.livewire_class_source(&comp) else {
             return false;
         };
         if !crate::livewire::properties(&src).iter().any(|p| p == word) {
@@ -2373,7 +2417,7 @@ impl AppState {
         let Some(comp) = crate::livewire::resolve(&self.root.get_untracked(), &path) else {
             return false;
         };
-        let Ok(class_src) = std::fs::read_to_string(&comp.class_file) else {
+        let Some(class_src) = self.livewire_class_source(&comp) else {
             return false;
         };
         if !crate::livewire::properties(&class_src)
@@ -2381,6 +2425,18 @@ impl AppState {
             .any(|p| p == old)
         {
             return false;
+        }
+        // One file holding both halves: one rewrite, or the second would
+        // overwrite the first.
+        if comp.class_file == comp.view_file {
+            let ok = self.rewrite_file(
+                &comp.class_file,
+                crate::livewire::single_file_rename(&class_src, old, new),
+            );
+            if ok {
+                Self::notify(&format!("Renamed Livewire property `{old}` → `{new}`"));
+            }
+            return ok;
         }
         // Rewrite both files (targeted so unrelated tokens are left alone).
         let new_class = crate::livewire::class_rename(&class_src, old, new);
@@ -5069,7 +5125,7 @@ impl AppState {
                     .path
                     .as_ref()
                     .and_then(|p| crate::livewire::resolve(&root, p))
-                    .and_then(|c| std::fs::read_to_string(c.class_file).ok())
+                    .and_then(|c| self.livewire_class_source(&c))
                     .map(|src| crate::livewire::actions(&src))
                     .unwrap_or_default();
                 let items = methods

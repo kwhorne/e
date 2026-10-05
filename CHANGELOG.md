@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Livewire 4 single- and multi-file components, and Volt.** A Blade file
+  whose `<?php … ?>` block holds `new class extends Component` —
+  `⚡counter.blade.php`, a Volt page — is understood as a component:
+  `wire:model` and `wire:click` complete from its properties and actions
+  (from the buffer, unsaved edits included), go to definition finds a
+  property's declaration, and renaming a property updates class and markup
+  in one edit. Multi-file `⚡counter/counter.php` + `counter.blade.php` pairs
+  too. `<livewire:…>` and `@livewire('…')` complete every component by the
+  name Livewire uses — `pages::app.dashboard`, `billing.invoice` — and go to
+  definition on one (or on `Route::livewire(…, 'name')`) opens it.
+
 - **Hot exit.** Unsaved edits to files are backed up with the session while you
   type and put back next launch, so quitting, restarting after an update, or a
   crash no longer loses them. If the file changed on disk while `e` was

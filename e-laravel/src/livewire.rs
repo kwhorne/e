@@ -2,6 +2,13 @@
 //! be one thing, so `e` treats them that way — `wire:model` completes from the
 //! class's public properties, you can jump between the two files, and renaming a
 //! property updates both the class and every `wire:` reference in the view.
+//!
+//! Three shapes of component are understood:
+//! * class-based: `app/Livewire/Admin/UserTable.php` + `resources/views/livewire/admin/user-table.blade.php`;
+//! * single-file (Livewire 4, and Volt on Livewire 3): one Blade file whose
+//!   `<?php … ?>` block holds `new class extends Component { … }`, e.g.
+//!   `resources/views/components/⚡counter.blade.php`;
+//! * multi-file (Livewire 4): `⚡counter/counter.php` + `⚡counter/counter.blade.php`.
 
 use std::path::{Path, PathBuf};
 
@@ -44,9 +51,59 @@ fn pascal_to_kebab(seg: &str) -> String {
     out
 }
 
+/// The PHP of a single-file component — its `<?php … ?>` block holding
+/// `new class` — or all of `src` for an ordinary class file. Scanning the
+/// Blade half for `public` would find words in the markup.
+pub fn class_part(src: &str) -> &str {
+    if let Some(start) = src.find("<?php") {
+        if let Some(len) = src[start..].find("?>") {
+            let block = &src[start..start + len];
+            if block.contains("new class") {
+                return block;
+            }
+        }
+    }
+    src
+}
+
+/// Whether `src` is a single-file component (class and view in one file).
+pub fn is_single_file(src: &str) -> bool {
+    !std::ptr::eq(class_part(src), src)
+}
+
+/// A Livewire 4 multi-file component: `⚡counter/counter.php` beside
+/// `⚡counter/counter.blade.php`, from either file.
+fn multi_file(path: &Path) -> Option<Component> {
+    let dir = path.parent()?;
+    let dir_name = dir.file_name()?.to_string_lossy();
+    let name = dir_name.trim_start_matches('⚡');
+    let class_file = dir.join(format!("{name}.php"));
+    let view_file = dir.join(format!("{name}.blade.php"));
+    let is_part = path == class_file || path == view_file;
+    (is_part && class_file.is_file() && view_file.is_file()).then_some(Component {
+        class_file,
+        view_file,
+    })
+}
+
 /// Resolve the component that `path` belongs to (given either its view or class).
 pub fn resolve(root: &Path, path: &Path) -> Option<Component> {
     let rel = |base: &Path| path.strip_prefix(base).ok().map(|p| p.to_path_buf());
+
+    if let Some(c) = multi_file(path) {
+        return Some(c);
+    }
+    // A single-file component is both halves at once.
+    if path.to_string_lossy().ends_with(".blade.php") {
+        if let Ok(src) = std::fs::read_to_string(path) {
+            if is_single_file(&src) {
+                return Some(Component {
+                    class_file: path.to_path_buf(),
+                    view_file: path.to_path_buf(),
+                });
+            }
+        }
+    }
 
     // From a Blade view: resources/views/livewire/<segs>.blade.php
     let views_base = root.join("resources/views/livewire");
@@ -91,6 +148,7 @@ pub fn resolve(root: &Path, path: &Path) -> Option<Component> {
 
 /// Public properties declared on a Livewire component class.
 pub fn properties(class_src: &str) -> Vec<String> {
+    let class_src = class_part(class_src);
     let mut props = Vec::new();
     let mut search = 0;
     while let Some(rel) = class_src[search..].find("public") {
@@ -150,7 +208,7 @@ pub fn actions(class_src: &str) -> Vec<String> {
         "rendering",
         "rendered",
     ];
-    crate::laravel::public_methods(class_src)
+    crate::laravel::public_methods(class_part(class_src))
         .into_iter()
         .filter(|m| {
             !HOOKS.contains(&m.as_str())
@@ -193,41 +251,172 @@ pub fn wire_action_partial(line_before: &str) -> Option<String> {
     Some(value.to_string())
 }
 
-/// Component names Livewire would resolve from the class tree:
-/// `app/Livewire/Admin/UserTable.php` → `admin.user-table`.
-pub fn component_names(root: &Path) -> Vec<String> {
-    fn walk(base: &Path, dir: &Path, out: &mut Vec<String>, depth: usize) {
-        if depth > 6 {
-            return;
-        }
-        let Ok(rd) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                walk(base, &p, out, depth + 1);
-            } else if p.extension().map(|x| x == "php").unwrap_or(false) {
-                let Ok(rel) = p.strip_prefix(base) else {
-                    continue;
-                };
-                let parts: Vec<String> = rel
+/// The major version of Livewire the project locks, if it can be read.
+pub fn livewire_major(root: &Path) -> Option<u32> {
+    let lock = std::fs::read_to_string(root.join("composer.lock")).ok()?;
+    let at = lock.find("\"name\": \"livewire/livewire\"")?;
+    let rest = &lock[at..];
+    let v = rest.find("\"version\": \"")? + "\"version\": \"".len();
+    rest[v..]
+        .trim_start_matches('v')
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// Where single- and multi-file components live, with the prefix their names
+/// take there. Livewire 4: `views/components` and `views/livewire` unprefixed,
+/// `pages::` and `layouts::` namespaces. Volt on Livewire 3 mounts
+/// `views/livewire` and `views/pages`, both unprefixed.
+fn single_file_locations(root: &Path) -> Vec<(PathBuf, &'static str)> {
+    let views = root.join("resources/views");
+    if livewire_major(root).unwrap_or(4) >= 4 {
+        vec![
+            (views.join("components"), ""),
+            (views.join("livewire"), ""),
+            (views.join("pages"), "pages::"),
+            (views.join("layouts"), "layouts::"),
+        ]
+    } else {
+        vec![(views.join("livewire"), ""), (views.join("pages"), "")]
+    }
+}
+
+/// Every component in the project, by the name Livewire knows it by, with the
+/// file go-to-definition should open (the class, or the single file).
+pub fn components(root: &Path) -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    // Class-based components.
+    for base in ["app/Livewire", "app/Http/Livewire"] {
+        let b = root.join(base);
+        for file in php_files(&b, 0) {
+            if let Ok(rel) = file.strip_prefix(&b) {
+                let name = rel
                     .with_extension("")
                     .components()
                     .map(|c| pascal_to_kebab(&c.as_os_str().to_string_lossy()))
-                    .collect();
-                out.push(parts.join("."));
+                    .collect::<Vec<_>>()
+                    .join(".");
+                out.push((name, file));
             }
         }
     }
-    let mut out = Vec::new();
-    for base in ["app/Livewire", "app/Http/Livewire"] {
-        let b = root.join(base);
-        walk(&b, &b, &mut out, 0);
+    // Single- and multi-file components.
+    for (base, prefix) in single_file_locations(root) {
+        for file in php_files(&base, 0) {
+            let s = file.to_string_lossy();
+            let Some(stem) = s.strip_suffix(".blade.php") else {
+                continue;
+            };
+            let Ok(rel) = std::path::Path::new(stem).strip_prefix(&base) else {
+                continue;
+            };
+            let mut parts: Vec<String> = rel
+                .components()
+                .map(|c| {
+                    c.as_os_str()
+                        .to_string_lossy()
+                        .trim_start_matches('⚡')
+                        .to_string()
+                })
+                .collect();
+            // `⚡counter/counter.blade.php` is the component `counter`.
+            let multi = multi_file(&file).is_some();
+            if multi && parts.len() >= 2 && parts[parts.len() - 1] == parts[parts.len() - 2] {
+                parts.pop();
+            }
+            let single = !multi
+                && std::fs::read_to_string(&file)
+                    .map(|src| is_single_file(&src))
+                    .unwrap_or(false);
+            if multi || single {
+                out.push((format!("{prefix}{}", parts.join(".")), file));
+            }
+        }
     }
     out.sort();
-    out.dedup();
+    out.dedup_by(|a, b| a.0 == b.0);
     out
+}
+
+/// The file behind a component name (`admin.user-table`, `pages::dashboard`).
+pub fn resolve_name(root: &Path, name: &str) -> Option<PathBuf> {
+    components(root)
+        .into_iter()
+        .find(|(n, _)| n == name)
+        .map(|(_, p)| p)
+}
+
+/// `.php` files under `dir`, a few levels deep.
+fn php_files(dir: &Path, depth: usize) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if depth > 6 {
+        return out;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(php_files(&p, depth + 1));
+        } else if p.extension().is_some_and(|x| x == "php") {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// The component named at `offset` in a `<livewire:name` tag, an
+/// `@livewire('name'` directive or a `Route::livewire('uri', 'name')`.
+pub fn component_at(text: &str, offset: usize) -> Option<String> {
+    let is_name = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':');
+    let offset = offset.min(text.len());
+    let start = offset
+        - text[..offset]
+            .chars()
+            .rev()
+            .take_while(|c| is_name(*c))
+            .map(char::len_utf8)
+            .sum::<usize>();
+    let end = offset
+        + text[offset..]
+            .chars()
+            .take_while(|c| is_name(*c))
+            .map(char::len_utf8)
+            .sum::<usize>();
+    let word = &text[start..end];
+    let before = &text[..start];
+    if let Some(name) = word.strip_prefix("livewire:") {
+        return (before.ends_with('<') && !name.is_empty()).then(|| name.to_string());
+    }
+    let quoted = before.ends_with('\'') || before.ends_with('"');
+    let line = &before[before.rfind('\n').map_or(0, |i| i + 1)..];
+    let call = line.trim_end_matches(['\'', '"']).trim_end();
+    let in_call =
+        call.ends_with("@livewire(") || (line.contains("Route::livewire(") && call.ends_with(','));
+    (quoted && in_call && !word.is_empty()).then(|| word.to_string())
+}
+
+/// Rename a property in a single-file component: the class half like a
+/// class, the Blade half like a view.
+pub fn single_file_rename(src: &str, old: &str, new: &str) -> String {
+    let part = class_part(src);
+    let start = part.as_ptr() as usize - src.as_ptr() as usize;
+    let end = start + part.len();
+    format!(
+        "{}{}{}",
+        &src[..start],
+        class_rename(part, old, new),
+        view_rename(&src[end..], old, new)
+    )
+}
+
+/// Component names Livewire would resolve from the class tree:
+/// `app/Livewire/Admin/UserTable.php` → `admin.user-table`.
+pub fn component_names(root: &Path) -> Vec<String> {
+    components(root).into_iter().map(|(n, _)| n).collect()
 }
 
 /// `@livewire('adm` or `<livewire:adm` → `"adm"`.
@@ -250,8 +439,12 @@ pub fn tag_partial(line_before: &str) -> Option<String> {
 
 /// Line (0-based) of the `public $prop` declaration in the class, if present.
 pub fn property_line(class_src: &str, prop: &str) -> Option<usize> {
+    let part = class_part(class_src);
+    let skipped = class_src[..part.as_ptr() as usize - class_src.as_ptr() as usize]
+        .matches('\n')
+        .count();
     let needle = format!("${prop}");
-    for (i, line) in class_src.lines().enumerate() {
+    for (i, line) in part.lines().enumerate().map(|(i, l)| (i + skipped, l)) {
         if line.contains("public") && line.contains(&needle) {
             // Ensure it's the whole variable, not a prefix.
             if let Some(p) = line.find(&needle) {
@@ -470,5 +663,127 @@ mod tests {
         );
         assert_eq!(tag_partial("@livewire('cou").as_deref(), Some("cou"));
         assert_eq!(tag_partial("<livewire:counter />"), None);
+    }
+
+    const SFC: &str = "<?php\n\nuse Livewire\\Component;\n\nnew class extends Component\n{\n    public int $count = 0;\n    public string $label = '';\n\n    public function increment(): void { $this->count++; }\n};\n?>\n\n<div>\n    <p>A public notice for $visitors.</p>\n    <button wire:click=\"increment\">{{ $count }}</button>\n    <input wire:model=\"label\">\n</div>\n";
+
+    #[test]
+    fn a_single_file_component_reads_only_its_class_half() {
+        assert!(is_single_file(SFC));
+        assert_eq!(properties(SFC), vec!["count", "label"]);
+        assert_eq!(actions(SFC), vec!["increment"]);
+        assert_eq!(property_line(SFC, "label"), Some(7));
+        assert!(!is_single_file(
+            "<?php\nclass Counter extends Component {}\n"
+        ));
+    }
+
+    #[test]
+    fn renaming_in_a_single_file_touches_class_and_markup_once() {
+        let out = single_file_rename(SFC, "count", "total");
+        assert!(out.contains("public int $total = 0;"));
+        assert!(out.contains("$this->total++"));
+        assert!(out.contains("{{ $total }}"));
+        assert!(out.contains("$visitors"));
+        assert_eq!(out.matches("total").count(), 3);
+    }
+
+    fn project(lock_version: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("e-lw-{}-{lock_version}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let v = root.join("resources/views");
+        for dir in [
+            "components/billing",
+            "livewire/settings",
+            "pages",
+            "components/⚡stats",
+            "livewire",
+        ] {
+            std::fs::create_dir_all(v.join(dir)).unwrap();
+        }
+        std::fs::create_dir_all(root.join("app/Livewire/Admin")).unwrap();
+        std::fs::write(
+            root.join("app/Livewire/Admin/UserTable.php"),
+            "<?php class UserTable {}",
+        )
+        .unwrap();
+        std::fs::write(v.join("livewire/admin-table.blade.php"), "<div></div>").unwrap();
+        std::fs::write(v.join("components/⚡counter.blade.php"), SFC).unwrap();
+        std::fs::write(v.join("components/billing/⚡invoice.blade.php"), SFC).unwrap();
+        std::fs::write(
+            v.join("components/button.blade.php"),
+            "<button>{{ $slot }}</button>",
+        )
+        .unwrap();
+        std::fs::write(v.join("livewire/settings/profile.blade.php"), SFC).unwrap();
+        std::fs::write(v.join("pages/dashboard.blade.php"), SFC).unwrap();
+        std::fs::write(
+            v.join("components/⚡stats/stats.php"),
+            "<?php new class extends Component {};",
+        )
+        .unwrap();
+        std::fs::write(v.join("components/⚡stats/stats.blade.php"), "<div></div>").unwrap();
+        std::fs::write(
+            root.join("composer.lock"),
+            format!("{{\"packages\": [{{\"name\": \"livewire/livewire\", \"version\": \"{lock_version}\"}}]}}"),
+        )
+        .unwrap();
+        root
+    }
+
+    #[test]
+    fn livewire_4_components_are_found_by_their_names() {
+        let root = project("v4.4.1");
+        assert_eq!(livewire_major(&root), Some(4));
+        let names = component_names(&root);
+        assert_eq!(
+            names,
+            vec![
+                "admin.user-table",
+                "billing.invoice",
+                "counter",
+                "pages::dashboard",
+                "settings.profile",
+                "stats",
+            ]
+        );
+        let stats = resolve_name(&root, "stats").unwrap();
+        assert!(stats.ends_with("⚡stats/stats.blade.php"));
+        let comp = resolve(
+            &root,
+            &root.join("resources/views/components/⚡stats/stats.php"),
+        )
+        .unwrap();
+        assert!(comp.view_file.ends_with("stats.blade.php"));
+        let sfc = root.join("resources/views/livewire/settings/profile.blade.php");
+        let comp = resolve(&root, &sfc).unwrap();
+        assert_eq!(comp.class_file, comp.view_file);
+    }
+
+    #[test]
+    fn volt_pages_have_no_namespace_on_livewire_3() {
+        let root = project("v3.6.3");
+        assert!(component_names(&root).contains(&"dashboard".to_string()));
+    }
+
+    #[test]
+    fn the_component_named_under_the_caret() {
+        // `|` marks the caret.
+        let at = |src: &str| component_at(&src.replace('|', ""), src.find('|').unwrap());
+        assert_eq!(
+            at("<livewire:billing.inv|oice />").as_deref(),
+            Some("billing.invoice")
+        );
+        assert_eq!(
+            at("<livewire:pages::dash|board />").as_deref(),
+            Some("pages::dashboard")
+        );
+        assert_eq!(at("@livewire('coun|ter')").as_deref(), Some("counter"));
+        assert_eq!(
+            at("Route::livewire('settings/profile', 'settings.pro|file');").as_deref(),
+            Some("settings.profile")
+        );
+        assert_eq!(at("<x-but|ton />"), None);
+        assert_eq!(at("Route::livewire('settings/pro|file', 'x');"), None);
     }
 }

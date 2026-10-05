@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-05
+
 A release about trust and speed: `e` no longer loses unsaved work, typing is
 several times cheaper on large files, and the Laravel features tell the truth
 — a schema that follows migrations, every route, the right table inside a
@@ -1834,7 +1836,8 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.9.24...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/kwhorne/e/compare/v0.9.24...v0.10.0
 [0.9.24]: https://github.com/kwhorne/e/compare/v0.9.23...v0.9.24
 [0.9.23]: https://github.com/kwhorne/e/compare/v0.9.22...v0.9.23
 [0.9.22]: https://github.com/kwhorne/e/compare/v0.9.21...v0.9.22

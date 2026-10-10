@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`e .` no longer opens instances without end.** AppKit hands an app's
+  launch arguments back to it as "open" requests, so each window received
+  its own folder as a folder to open — in another instance, which got its
+  folder back the same way. A window now ignores a request to open the
+  project it already has, and launch arguments are no longer replayed at
+  all. Since 0.9.23.
+- **`e` from the terminal launches through the app bundle again.** Started
+  through the `/usr/local/bin/e` link, `e` looked for its bundle beside the
+  link instead of the app, so it never activated like an app or showed in
+  the Dock, and **Install `e` command** run from there could link the
+  command to itself.
+
 ## [0.10.0] - 2026-10-05
 
 A release about trust and speed: `e` no longer loses unsaved work, typing is

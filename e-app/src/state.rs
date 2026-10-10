@@ -1482,6 +1482,13 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
 /// figure the tree-sitter parse alone is 45 ms and the query pass most of the
 /// rest, so there is no arrangement of this work that is cheap enough to keep
 /// inline — it has to leave the UI thread.
+/// Whether `path` is one of the folders this window already has open.
+fn is_open_project(roots: &[PathBuf], path: &std::path::Path) -> bool {
+    let canon = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let path = canon(path);
+    roots.iter().any(|r| canon(r) == path)
+}
+
 /// Set while restored tabs are still being opened (see `restore_session`):
 /// the session isn't saved until they are all back.
 static RESTORING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1831,6 +1838,13 @@ impl AppState {
     /// becomes the project, a file opens in the editor.
     pub fn open_external(&self, path: PathBuf) {
         if path.is_dir() {
+            // AppKit hands an app's launch arguments back to it as "open"
+            // events, so `e .` delivers this window's own folder here. Opening
+            // that as "another project" started a second instance — which got
+            // its folder back the same way, and so on, by the hundred.
+            if is_open_project(&self.roots.get_untracked(), &path) {
+                return;
+            }
             self.open_project(path);
         } else {
             self.open_path(path);
@@ -3915,7 +3929,7 @@ impl AppState {
     /// Install the `e` command-line launcher into `/usr/local/bin` so the
     /// editor can be opened from any directory with `e .`.
     pub fn install_cli(&self) {
-        let Ok(exe) = std::env::current_exe() else {
+        let Ok(exe) = crate::platform::current_exe() else {
             Self::notify("Could not locate the e executable.");
             return;
         };
@@ -3980,7 +3994,7 @@ impl AppState {
 
     /// Launch a new editor instance on `path` (a project folder or a file).
     pub fn open_project(&self, path: PathBuf) {
-        let exe = std::env::current_exe().ok();
+        let exe = crate::platform::current_exe().ok();
         if let Some(exe) = exe.as_ref() {
             let bundle = exe
                 .ancestors()
@@ -4093,7 +4107,7 @@ impl AppState {
     pub fn restart_app(&self) {
         // Exiting skips the idle tick; take unsaved work along.
         self.save_session();
-        let exe = std::env::current_exe().ok();
+        let exe = crate::platform::current_exe().ok();
         // If we're running inside a macOS .app bundle, relaunch the bundle so
         // the window comes to the front; otherwise relaunch the bare binary.
         if let Some(exe) = exe.as_ref() {
@@ -7683,5 +7697,23 @@ mod fingerprint_tests {
         let c = laravel_fingerprint(&dir);
         assert_ne!(b, c);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod open_project_tests {
+    use super::is_open_project;
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_window_s_own_folder_is_not_another_project() {
+        let root = std::env::temp_dir().join(format!("e-root-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let roots = vec![root.clone()];
+        assert!(is_open_project(&roots, &root));
+        // The same folder spelled differently (`e .` from inside it).
+        assert!(is_open_project(&roots, &root.join("sub").join("..")));
+        assert!(!is_open_project(&roots, &root.join("sub")));
+        assert!(!is_open_project(&roots, &PathBuf::from("/")));
     }
 }

@@ -66,6 +66,18 @@ pub fn install() {
     if let Ok(mut slot) = WAKE_RX.lock() {
         *slot = Some(rx);
     }
+    // AppKit treats command-line arguments as documents to open and replays
+    // them through `application:openFiles:`: `e .` would have its own folder
+    // handed back as "open this folder", which opens another instance, which
+    // gets *its* argument back… Arguments are ours to read; documents come
+    // from LaunchServices as Apple Events, which this doesn't affect.
+    unsafe {
+        if let Some(defaults_class) = AnyClass::get(c"NSUserDefaults") {
+            let defaults: *mut AnyObject = msg_send![defaults_class, standardUserDefaults];
+            let key = NSString::from_str("NSTreatUnknownArgumentsAsOpen");
+            let _: () = msg_send![defaults, setBool: false, forKey: &*key];
+        }
+    }
     let app = NSApplication::sharedApplication(mtm);
     let Some(delegate) = app.delegate() else {
         eprintln!("e: no application delegate; Finder opens won't reach the editor");

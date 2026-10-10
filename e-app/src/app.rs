@@ -94,7 +94,7 @@ fn detach_from_terminal() {
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let args = absolute_args(&args, &cwd);
-    let Ok(exe) = std::env::current_exe() else {
+    let Ok(exe) = crate::platform::current_exe() else {
         return;
     };
 

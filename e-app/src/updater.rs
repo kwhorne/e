@@ -155,7 +155,7 @@ pub fn check() -> Result<Option<UpdateInfo>> {
 /// macOS "About" panel (which reads the plist, not the binary) shows the new
 /// version. Replacing the executable leaves the plist stale.
 pub fn patch_bundle_version(version: &str) {
-    let Ok(exe) = std::env::current_exe() else {
+    let Ok(exe) = crate::platform::current_exe() else {
         return;
     };
     let Some(bundle) = exe

@@ -9,6 +9,14 @@
 use std::path::Path;
 use std::process::Command;
 
+/// This program's executable, with symlinks followed. `e` is usually started
+/// through the `/usr/local/bin/e` link, and `std::env::current_exe` reports
+/// that path — outside `e.app`, so nothing looking for the bundle found it.
+pub fn current_exe() -> std::io::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?;
+    Ok(exe.canonicalize().unwrap_or(exe))
+}
+
 /// Start `cmd` and reap it in the background.
 fn spawn_detached(mut cmd: Command) {
     if let Ok(mut child) = cmd.spawn() {

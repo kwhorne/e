@@ -444,6 +444,41 @@ batch** runs `migrate:rollback --step=1`; both in a terminal tab, with the list
 re-read once they have had a moment to finish. Click a migration to open its
 file.
 
+### Before a migration runs
+
+Open or save a migration that hasn't run, and `e` asks `php artisan migrate
+--pretend` what SQL it will run. Each statement shows dimmed at the end of the
+line that produces it:
+
+```php
+$table->string('phone');   ⇂ alter table `users` add `phone` varchar(255) not null
+```
+
+Then the statements are checked against the data already in your local
+database, and what would go wrong is marked on the line:
+
+| | |
+| --- | --- |
+| A `NOT NULL` column without a default, on a table with rows | **error** on Postgres, which refuses it; on SQLite always, even on an empty table; on MySQL for a date or time column (strict mode refuses the zero date). On MySQL otherwise a **warning**: each row gets `''` or `0`. |
+| `->change()` to `NOT NULL` while rows hold `NULL` | **error**, with how many rows |
+| `->change()` to a shorter length than values already have | **error**, with how many rows |
+| A unique index over values that occur more than once | **error** |
+| A foreign key that rows have no parent for | **error** |
+| `dropColumn` / `drop` on data | **warning**: `down()` can bring back the column or table, not what was in it |
+| A type change on a table with rows | **info**: it rewrites the table, which on a large production table holds a lock |
+
+Only counts are run against the database, and nothing when the `.env`
+connection looks like production. A migration that has already run is left
+alone.
+
+On Postgres and SQLite, `⌘.` in a migration also offers **Migration: dry-run
+up() and down(), rolled back**. `e` runs `up()` then `down()` (for one that has
+run, `down()` then `up()`) inside a transaction it then rolls back, so the
+database is left exactly as it was; a method that throws gets the error on its
+line. MySQL commits schema changes as it makes them, so there it isn't offered.
+Code in a migration that reaches outside the database — files, queues, HTTP —
+does run, and isn't undone.
+
 ## Schema diff
 
 **Laravel: Schema Diff** (command palette) compares your migrations against the

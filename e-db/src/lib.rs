@@ -1254,7 +1254,7 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
 }
 
 /// Quote an identifier for the given engine.
-fn quote_ident(engine: &str, ident: &str) -> String {
+pub fn quote_ident(engine: &str, ident: &str) -> String {
     match engine {
         "postgres" | "postgresql" | "pgsql" => format!("\"{}\"", ident.replace('"', "\"\"")),
         "clickhouse" | "ch" => format!("`{}`", ident.replace('`', "``")),

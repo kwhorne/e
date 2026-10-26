@@ -351,6 +351,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 b.ghost,
                 state.runtime_lenses,
                 b.file.path.clone(),
+                b.annotations,
             )) as Rc<dyn Document>)
             .styling(SyntaxStyling::new(
                 b.highlights.clone(),

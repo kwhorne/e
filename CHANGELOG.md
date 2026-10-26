@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **What a migration will do, before it runs.** Open or save a pending
+  migration, and the SQL `migrate --pretend` says it will run shows beside
+  the line that produces it. Each statement is checked against the data in
+  the local database: a `NOT NULL` column without a default on a table with
+  rows, `->change()` to `NOT NULL` over NULLs or to a length values exceed,
+  a unique index over duplicates, a foreign key rows break, a drop that
+  takes data with it — marked on the line, with how many rows. On Postgres
+  and SQLite, `⌘.` dry-runs `up()` and `down()` inside a transaction that is
+  rolled back.
+
 - **Runtime lenses.** The running app's latest request shows at the end of
   the line of the controller method that served it —
   `⚡ 42 ms · 14 queries · N+1 orders ×12 · 2m ago` — yellow for an N+1 or a
@@ -29,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   measurement of a URL is the baseline; nothing is stashed.
 
 ### Fixed
+
+- **A file the agent opened no longer crashes `e` on its next request.** A
+  buffer opened over the agent socket — or from the Finder — had its
+  signals owned by the effect that handled the request, so the next request
+  disposed them and the next read of one panicked. Buffers are now created
+  in the app's scope, and socket requests are handled there.
+- **The agent sees what `e` found, not only what the language servers
+  did.** `diagnostics`, `context` and `wait_diagnostics` left out `e`'s own
+  findings: unknown columns, missing views and keys, PHPStan.
 
 - **Tinker runs no longer overwrite each other.** The Tinker panel and the
   agent socket wrote the code to a temp file named after the process, so

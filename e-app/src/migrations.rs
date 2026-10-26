@@ -1,11 +1,18 @@
 //! The Migrations panel: what `php artisan migrate:status` knows, as a list you
 //! can act on — run what's pending (snapshotting first when Grove can), roll
 //! the last batch back, and open any migration's file.
+//!
+//! Also what a pending migration will do before it runs: opened or saved, its
+//! SQL (from `migrate --pretend`) shows beside the lines that produce it, and
+//! what would go wrong against the data already there shows as diagnostics
+//! (see [`e_laravel::migration_check`]). ⌘. offers a dry run of `up()` and
+//! `down()` in a transaction that is rolled back, on Postgres and SQLite.
 
 use std::path::{Path, PathBuf};
 
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::views::editor::text::Document;
 use floem::views::{dyn_stack, label, scroll, stack, Decorators};
 use floem::IntoView;
 
@@ -91,7 +98,230 @@ pub fn file_for(root: &Path, name: &str) -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// Whether `path` is one of the project's migrations.
+pub fn is_migration(root: &Path, path: &Path) -> bool {
+    path.starts_with(root.join("database/migrations"))
+        && path.extension().is_some_and(|e| e == "php")
+}
+
+/// SQL beside a line is cut to this many characters.
+const ANNOTATION_MAX: usize = 140;
+
+fn annotation(sql: &str) -> String {
+    let mut s: String = sql.chars().take(ANNOTATION_MAX).collect();
+    if s.len() < sql.len() {
+        s.push('…');
+    }
+    format!("⇂ {s}")
+}
+
+/// A diagnostic over the code on `line` of `src`.
+fn diagnostic_on(
+    src: &str,
+    line: usize,
+    severity: lsp_types::DiagnosticSeverity,
+    message: String,
+) -> lsp_types::Diagnostic {
+    let text = src.lines().nth(line).unwrap_or("");
+    let indent = text.len() - text.trim_start().len();
+    let at = |character: usize| lsp_types::Position {
+        line: line as u32,
+        character: character as u32,
+    };
+    lsp_types::Diagnostic {
+        range: lsp_types::Range {
+            start: at(indent),
+            end: at(text.encode_utf16().count()),
+        },
+        severity: Some(severity),
+        source: Some("migration".to_string()),
+        message,
+        ..Default::default()
+    }
+}
+
+/// The project's database, if it can be asked without risk: local, reachable.
+fn local_database(root: &Path) -> Option<(e_db::Conn, e_db::DbConfig)> {
+    let cfg = e_db::from_env(root)?;
+    if cfg.looks_like_prod() {
+        return None;
+    }
+    let conn = e_db::connect(&cfg).ok()?;
+    Some((conn, cfg))
+}
+
 impl AppState {
+    /// Check a pending migration's buffer: place the SQL it will run beside
+    /// its lines, and mark what would go wrong against the data. Reads the
+    /// file on disk, so only for a buffer without unsaved edits — on open and
+    /// on save. A migration that has already run is left alone.
+    pub fn check_migration(&self, buffer_id: u64) {
+        let Some(buf) = self.buffer_by_id(buffer_id) else {
+            return;
+        };
+        let root = self.root.get_untracked();
+        let Some(path) = buf.file.path.clone().filter(|p| is_migration(&root, p)) else {
+            return;
+        };
+        if buf.dirty.get_untracked() || !root.join("artisan").is_file() {
+            return;
+        }
+        let app = *self;
+        self.spawn_bg(
+            move || -> Result<(String, e_laravel::migration_check::Checked), String> {
+                use e_laravel::migration_check as mc;
+                let src = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+                let sql = mc::pretend(&root, &path)?;
+                if sql.is_empty() {
+                    return Ok((src, mc::Checked::default()));
+                }
+                let db = local_database(&root);
+                let checked = match &db {
+                    Some((conn, cfg)) => {
+                        let facts = mc::DbFacts {
+                            conn,
+                            engine: &cfg.engine,
+                        };
+                        let engine = mc::Engine::from_name(&cfg.engine);
+                        mc::check(&src, &sql, engine.map(|e| (&facts as &dyn mc::Facts, e)))
+                    }
+                    None => mc::check(&src, &sql, None),
+                };
+                Ok((src, checked))
+            },
+            move |res| {
+                let Some(buf) = app.buffer_by_id(buffer_id) else {
+                    return;
+                };
+                let (src, checked) = match res {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("e: migrate --pretend: {e}");
+                        (String::new(), Default::default())
+                    }
+                };
+                use e_laravel::migration_check::Severity;
+                let diags: Vec<lsp_types::Diagnostic> = checked
+                    .risks
+                    .iter()
+                    .map(|(line, r)| {
+                        let severity = match r.severity {
+                            Severity::Error => lsp_types::DiagnosticSeverity::ERROR,
+                            Severity::Warning => lsp_types::DiagnosticSeverity::WARNING,
+                            Severity::Info => lsp_types::DiagnosticSeverity::INFORMATION,
+                        };
+                        diagnostic_on(&src, *line, severity, r.message.clone())
+                    })
+                    .collect();
+                let notes: Vec<(usize, String)> = checked
+                    .statements
+                    .iter()
+                    .map(|(line, sql)| (*line, annotation(sql)))
+                    .collect();
+                app.show_migration_check(&buf, diags, notes);
+            },
+        );
+    }
+
+    fn show_migration_check(
+        &self,
+        buf: &crate::state::Buffer,
+        diags: Vec<lsp_types::Diagnostic>,
+        notes: Vec<(usize, String)>,
+    ) {
+        let changed = *buf.migration_risks.borrow() != diags;
+        if changed {
+            *buf.migration_risks.borrow_mut() = diags;
+            if let Some(uri) = buf.uri.clone() {
+                let lsp = self
+                    .diagnostics
+                    .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
+                self.apply_diagnostics_to_buffer(&uri, &lsp);
+            }
+        }
+        if buf.annotations.get_untracked() != notes {
+            buf.annotations.set(notes);
+            buf.doc.cache_rev().update(|r| *r += 1);
+        }
+    }
+
+    /// Whether ⌘. should offer a dry run for this file: a migration, on a
+    /// database whose schema changes can be rolled back.
+    pub fn migration_dry_run_offered(&self, path: &Path) -> bool {
+        let root = self.root.get_untracked();
+        is_migration(&root, path)
+            && e_db::from_env(&root).is_some_and(|c| {
+                matches!(
+                    e_laravel::migration_check::Engine::from_name(&c.engine),
+                    Some(
+                        e_laravel::migration_check::Engine::Postgres
+                            | e_laravel::migration_check::Engine::Sqlite
+                    )
+                )
+            })
+    }
+
+    /// Run the active migration's `up()` and `down()` in a transaction that
+    /// is rolled back, and say how it went: a failure lands on the line of the
+    /// method that threw.
+    pub fn migration_dry_run(&self) {
+        let Some(buf) = self.active_buffer() else {
+            return;
+        };
+        let root = self.root.get_untracked();
+        let Some(path) = buf.file.path.clone().filter(|p| is_migration(&root, p)) else {
+            return;
+        };
+        if buf.dirty.get_untracked() {
+            Self::notify("Save the migration first: the dry run runs the file on disk");
+            return;
+        }
+        let app = *self;
+        let id = buf.id;
+        let file = path.clone();
+        self.spawn_bg(
+            move || e_laravel::migration_check::dry_run(&root, &file),
+            move |res| {
+                use e_laravel::migration_check::DryRun;
+                let Some(buf) = app.buffer_by_id(id) else {
+                    return;
+                };
+                match res {
+                    Ok(DryRun::Passed { steps, .. }) => Self::notify(&format!(
+                        "Dry run passed: {} ran, and the transaction was rolled back",
+                        steps
+                            .iter()
+                            .map(|s| format!("{s}()"))
+                            .collect::<Vec<_>>()
+                            .join(" then ")
+                    )),
+                    Ok(DryRun::Failed { step, error, .. }) => {
+                        let src = buf.doc.text().to_string();
+                        let line = src
+                            .lines()
+                            .position(|l| l.contains(&format!("function {step}")))
+                            .unwrap_or(0);
+                        let mut diags = buf.migration_risks.borrow().clone();
+                        diags.push(diagnostic_on(
+                            &src,
+                            line,
+                            lsp_types::DiagnosticSeverity::ERROR,
+                            format!("{step}() fails (dry run, rolled back): {error}"),
+                        ));
+                        let notes = buf.annotations.get_untracked();
+                        app.show_migration_check(&buf, diags, notes);
+                        Self::notify(&format!("Dry run: {step}() fails — {error}"));
+                    }
+                    Ok(DryRun::NotTransactional { driver }) => Self::notify(&format!(
+                        "No dry run on {driver}: it commits schema changes as it makes them, \
+                         so a rollback couldn't undo them"
+                    )),
+                    Err(e) => Self::notify(&format!("Dry run couldn't start: {e}")),
+                }
+            },
+        );
+    }
+
     pub fn toggle_migrations(&self) {
         let open = !self.migrations_open.get_untracked();
         self.migrations_open.set(open);

@@ -21,6 +21,7 @@ pub mod keys;
 pub mod laravel;
 pub mod laravel_lint;
 pub mod livewire;
+pub mod migration_check;
 pub mod move_class;
 pub mod phptools;
 pub mod policies;

@@ -340,6 +340,12 @@ pub struct Buffer {
     /// PHPStan findings for this file, merged with LSP. Kept apart from `lint`
     /// so a run of one never erases the other's results.
     pub analysis: Rc<RefCell<Vec<Diagnostic>>>,
+    /// A pending migration's risks against the data (see
+    /// [`crate::migrations`]), merged with LSP like `analysis`.
+    pub migration_risks: Rc<RefCell<Vec<Diagnostic>>>,
+    /// `(line, text)` shown dimmed at the end of a line: the SQL a pending
+    /// migration's line will run.
+    pub annotations: RwSignal<Vec<(usize, String)>>,
     /// Branching undo history (see [`e_core::undotree`]).
     pub undo: Rc<RefCell<e_core::undotree::UndoTree>>,
     /// When set, a text change is caused by undo-tree navigation, so it must
@@ -2910,6 +2916,7 @@ impl AppState {
                         }
                     }
                     self.request_inlay_hints(b.id);
+                    self.check_migration(b.id);
                 }
                 // Reported once per pause in typing; the edits stay unsaved
                 // (and backed up in the session) until a write succeeds.
@@ -3791,6 +3798,12 @@ impl AppState {
 
     /// Create an untitled buffer seeded with `initial` content and focus it.
     pub fn new_untitled_with(&self, initial: String) {
+        // In the app's scope, for the reason `open_path` gives.
+        let app = *self;
+        floem::reactive::with_scope(self.cx, move || app.new_untitled_in_app_scope(initial))
+    }
+
+    fn new_untitled_in_app_scope(&self, initial: String) {
         let id = self.next_id.get_untracked();
         self.next_id.set(id + 1);
 
@@ -3859,6 +3872,8 @@ impl AppState {
             encoding: RwSignal::new("UTF-8".to_string()),
             lint: Rc::new(RefCell::new(Vec::new())),
             analysis: Rc::new(RefCell::new(Vec::new())),
+            migration_risks: Rc::new(RefCell::new(Vec::new())),
+            annotations: RwSignal::new(Vec::new()),
             undo,
             undo_nav,
             tab_width: self.settings.get_untracked().tab_width,
@@ -5353,29 +5368,44 @@ impl AppState {
     /// The diagnostics for `uri` in the shape the agent socket speaks.
     pub(crate) fn diagnostics_json_for(&self, uri: &str) -> Vec<serde_json::Value> {
         let path = uri_to_path(uri).to_string_lossy().into_owned();
-        self.diagnostics.with_untracked(|map| {
-            map.get(uri)
-                .map(|diags| {
-                    diags
-                        .iter()
-                        .map(|d| {
-                            let severity = match d.severity {
-                                Some(lsp_types::DiagnosticSeverity::ERROR) => "error",
-                                Some(lsp_types::DiagnosticSeverity::WARNING) => "warning",
-                                Some(lsp_types::DiagnosticSeverity::INFORMATION) => "info",
-                                Some(lsp_types::DiagnosticSeverity::HINT) => "hint",
-                                _ => "info",
-                            };
-                            serde_json::json!({
-                                "file": path,
-                                "line": d.range.start.line + 1,
-                                "col": d.range.start.character + 1,
-                                "severity": severity,
-                                "source": d.source,
-                                "message": d.message,
-                            })
-                        })
-                        .collect()
+        let mut diags = self
+            .diagnostics
+            .with_untracked(|map| map.get(uri).cloned().unwrap_or_default());
+        diags.extend(self.own_diagnostics(uri));
+        diags
+            .iter()
+            .map(|d| {
+                let severity = match d.severity {
+                    Some(lsp_types::DiagnosticSeverity::ERROR) => "error",
+                    Some(lsp_types::DiagnosticSeverity::WARNING) => "warning",
+                    Some(lsp_types::DiagnosticSeverity::INFORMATION) => "info",
+                    Some(lsp_types::DiagnosticSeverity::HINT) => "hint",
+                    _ => "info",
+                };
+                serde_json::json!({
+                    "file": path,
+                    "line": d.range.start.line + 1,
+                    "col": d.range.start.character + 1,
+                    "severity": severity,
+                    "source": d.source,
+                    "message": d.message,
+                })
+            })
+            .collect()
+    }
+
+    /// What `e` itself found in an open file, beside the language servers:
+    /// its lints (unknown columns, missing views and keys), PHPStan, and a
+    /// pending migration's risks against the data.
+    pub(crate) fn own_diagnostics(&self, uri: &str) -> Vec<Diagnostic> {
+        self.buffers.with_untracked(|bs| {
+            bs.iter()
+                .find(|b| b.uri.as_deref() == Some(uri))
+                .map(|b| {
+                    let mut all = b.lint.borrow().clone();
+                    all.extend(b.analysis.borrow().iter().cloned());
+                    all.extend(b.migration_risks.borrow().iter().cloned());
+                    all
                 })
                 .unwrap_or_default()
         })
@@ -6159,6 +6189,15 @@ impl AppState {
 
     /// Open a file by path. If it's already open, just focus it.
     pub fn open_path(&self, path: PathBuf) {
+        // A buffer lives as long as the app, whoever opens it. Created inside
+        // an effect — the agent socket's, the Finder's — its signals would
+        // belong to that effect and be disposed the next time it ran, and
+        // reading one then panics.
+        let app = *self;
+        floem::reactive::with_scope(self.cx, move || app.open_path_in_app_scope(path))
+    }
+
+    fn open_path_in_app_scope(&self, path: PathBuf) {
         let canon = path.canonicalize().unwrap_or(path);
 
         // Already open? Focus the existing tab.
@@ -6426,6 +6465,8 @@ impl AppState {
             encoding: RwSignal::new(encoding),
             lint: Rc::new(RefCell::new(Vec::new())),
             analysis: Rc::new(RefCell::new(Vec::new())),
+            migration_risks: Rc::new(RefCell::new(Vec::new())),
+            annotations: RwSignal::new(Vec::new()),
             undo,
             undo_nav,
             tab_width: ec_tab,
@@ -6437,6 +6478,7 @@ impl AppState {
         self.load_blame(id);
         self.refresh_lint(id);
         self.request_inlay_hints(id);
+        self.check_migration(id);
     }
 
     /// Close a tab; focus a neighbour if it was active.
@@ -6633,6 +6675,19 @@ impl AppState {
             let line = text.lines().nth(sl as usize)?;
             self.runtime_lens_at(p, line)
         });
+        if buf
+            .file
+            .path
+            .as_ref()
+            .is_some_and(|p| self.migration_dry_run_offered(p))
+        {
+            local.push(e_lsp::CodeActionItem {
+                title: "Migration: dry-run up() and down(), rolled back".to_string(),
+                edits: Vec::new(),
+                command: Some(serde_json::json!({ "e": "migration.dry_run" })),
+                server: "e".to_string(),
+            });
+        }
         if let Some(lens) = lens {
             let (method, uri) = self
                 .runtime_reqs
@@ -6736,6 +6791,7 @@ impl AppState {
             match command.get("e").and_then(|v| v.as_str()) {
                 Some("runtime.open") => self.runtime_lens_open(id),
                 Some("runtime.fix") => self.runtime_fix(id),
+                Some("migration.dry_run") => self.migration_dry_run(),
                 _ => {}
             }
             return;
@@ -6859,6 +6915,7 @@ impl AppState {
                 self.load_blame(buf.id);
                 // PHPStan reads the file, so it can only run once it is written.
                 self.run_phpstan(buf.id);
+                self.check_migration(buf.id);
                 self.request_inlay_hints(buf.id);
                 eprintln!("e: saved {}", path.display());
                 self.laravel_touch(&path);
@@ -6920,6 +6977,7 @@ impl AppState {
         let mut all = diags.to_vec();
         all.extend(buf.lint.borrow().iter().cloned());
         all.extend(buf.analysis.borrow().iter().cloned());
+        all.extend(buf.migration_risks.borrow().iter().cloned());
         *buf.diag_lines.borrow_mut() = build_diag_lines(&all, &text);
         buf.doc.cache_rev().update(|r| *r += 1);
     }

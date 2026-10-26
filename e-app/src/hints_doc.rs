@@ -51,6 +51,8 @@ pub struct HintsDoc {
     lenses: RwSignal<Arc<Vec<crate::runtime_lens::Lens>>>,
     /// The buffer's file, which the lenses are looked up by.
     path: Option<PathBuf>,
+    /// `(line, text)` shown dimmed at the end of the line.
+    annotations: RwSignal<Vec<(usize, String)>>,
 }
 
 impl HintsDoc {
@@ -60,6 +62,7 @@ impl HintsDoc {
         ghost: RwSignal<Option<crate::ghost::GhostText>>,
         lenses: RwSignal<Arc<Vec<crate::runtime_lens::Lens>>>,
         path: Option<PathBuf>,
+        annotations: RwSignal<Vec<(usize, String)>>,
     ) -> Self {
         Self {
             inner,
@@ -67,7 +70,32 @@ impl HintsDoc {
             ghost,
             lenses,
             path,
+            annotations,
         }
+    }
+
+    /// The annotation for `line`, at the end of it.
+    fn annotation_on(&self, line: usize) -> Option<PhantomText> {
+        let text = self.annotations.with_untracked(|a| {
+            let on: Vec<&str> = a
+                .iter()
+                .filter(|(l, _)| *l == line)
+                .map(|(_, t)| t.as_str())
+                .collect();
+            (!on.is_empty()).then(|| on.join("  ·  "))
+        })?;
+        let rope = self.inner.rope_text();
+        let content = rope.line_content(line);
+        Some(PhantomText {
+            kind: PhantomTextKind::InlayHint,
+            col: content.trim_end_matches(['\n', '\r']).len(),
+            affinity: None,
+            text: format!("   {text}"),
+            font_size: None,
+            fg: Some(hint_color()),
+            bg: None,
+            under_line: None,
+        })
     }
 
     /// The runtime lens for `line`, at the end of it.
@@ -127,6 +155,9 @@ impl DocumentPhantom for HintsDoc {
         }
         if let Some(lens) = self.lens_on(line) {
             pl.text.push(lens);
+        }
+        if let Some(note) = self.annotation_on(line) {
+            pl.text.push(note);
         }
 
         // Inline AI suggestion ("ghost text") at the cursor, rendered grey.

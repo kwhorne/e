@@ -35,7 +35,10 @@ diagnostics:
 }
 ```
 
-`{"method":"diagnostics"}` returns just the problems list.
+`{"method":"diagnostics"}` returns just the problems list. Both include what
+`e` itself found in open files beside the language servers — unknown columns,
+missing views and translation keys, PHPStan, and a pending migration's risks
+against the data — each with its `source`.
 
 ## Driving the editor
 

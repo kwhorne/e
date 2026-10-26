@@ -244,7 +244,12 @@ pub fn start(state: AppState) {
         loop {
             let item = pending.lock().ok().and_then(|mut q| q.pop_front());
             let Some((req, reply)) = item else { break };
-            dispatch(state, &req, reply);
+            // In the app's scope, untracked: whatever a request creates (a
+            // buffer it opens, a review overlay) must outlive this effect's
+            // next run, and what it reads must not make the effect re-run.
+            floem::reactive::with_scope(state.cx, || {
+                floem::reactive::untrack(|| dispatch(state, &req, reply))
+            });
         }
     });
 }
@@ -761,29 +766,22 @@ fn context(state: AppState) -> Value {
 }
 
 fn diagnostics(state: AppState) -> Vec<Value> {
-    let mut out = Vec::new();
-    state.diagnostics.with_untracked(|map| {
-        for (uri, diags) in map {
-            let path = uri_to_path_str(uri);
-            for d in diags {
-                let severity = match d.severity {
-                    Some(lsp_types::DiagnosticSeverity::ERROR) => "error",
-                    Some(lsp_types::DiagnosticSeverity::WARNING) => "warning",
-                    Some(lsp_types::DiagnosticSeverity::INFORMATION) => "info",
-                    Some(lsp_types::DiagnosticSeverity::HINT) => "hint",
-                    _ => "info",
-                };
-                out.push(json!({
-                    "file": path,
-                    "line": d.range.start.line + 1,
-                    "col": d.range.start.character + 1,
-                    "severity": severity,
-                    "message": d.message,
-                }));
+    // The language servers' files, and the open files `e` found something in.
+    let mut uris: Vec<String> = state
+        .diagnostics
+        .with_untracked(|map| map.keys().cloned().collect());
+    state.buffers.with_untracked(|bs| {
+        for b in bs {
+            if let Some(uri) = &b.uri {
+                if !uris.contains(uri) {
+                    uris.push(uri.clone());
+                }
             }
         }
     });
-    out
+    uris.iter()
+        .flat_map(|uri| state.diagnostics_json_for(uri))
+        .collect()
 }
 
 /// The canonical `file://` URI for a path the agent named — the same spelling
@@ -794,10 +792,6 @@ fn path_to_uri(path: &str) -> String {
     } else {
         e_lsp::path_to_uri(std::path::Path::new(path))
     }
-}
-
-fn uri_to_path_str(uri: &str) -> String {
-    e_lsp::uri_to_path(uri).to_string_lossy().into_owned()
 }
 
 #[cfg(all(test, unix))]

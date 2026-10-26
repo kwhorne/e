@@ -69,6 +69,7 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
     let id_for_expand = r.id.clone();
     let id_for_explain = r.id.clone();
     let id_for_verify = r.id.clone();
+    let id_for_test = r.id.clone();
 
     let method = r.method.clone();
     let uri = r.uri.clone();
@@ -152,6 +153,14 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
                     .hover(|s| s.color(theme::accent()))
             })
             .on_click_stop(move |_| state.verify_begin(&id_for_verify)),
+        label(|| "🧪".to_string())
+            .style(|s| {
+                s.margin_left(6.0)
+                    .font_size(12.0)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.color(theme::accent()))
+            })
+            .on_click_stop(move |_| state.runtime_test(&id_for_test)),
     ))
     .style(|s| {
         s.flex_row()

@@ -30,4 +30,5 @@ pub mod project_map;
 pub mod querycomplete;
 pub mod relatedfiles;
 pub mod relations;
+pub mod request_test;
 pub mod validation;

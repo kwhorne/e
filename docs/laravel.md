@@ -317,8 +317,9 @@ Expanding a request fetches its **causal chain** from Grove: the SQL it issued
 MySQL), the mail it sent, and the matching **error-log entries**. ✨ hands the
 agent Grove's whole `explain` bundle — the request with credentials redacted, its
 queries and mail, and the stacktrace from `laravel.log` — so it can go straight
-to the cause. The replay base URL also comes from Grove (the real host, and
-`http://` for a site without HTTPS).
+to the cause. 🧪 writes a feature test from the request
+([below](#a-test-from-a-request)). The replay base URL also comes from Grove
+(the real host, and `http://` for a site without HTTPS).
 
 Without Grove, the panel polls [Clockwork](https://underground.works/clockwork)
 (`/__clockwork/latest`) as before: queries with N+1 warnings, cache hits/misses,
@@ -356,6 +357,52 @@ With Grove, the timeline is read every two seconds while a file under `app/` is
 open, so the lenses follow your browser without the Runtime panel open; with
 Clockwork, they follow while the panel is open. Turn them off under
 **Settings → Laravel → Runtime lenses**.
+
+### A test from a request
+
+Click through something in the browser, then 🧪 on its row in the Runtime
+panel (or **Runtime: write a test from …** under `⌘.` on a lens): `e` writes
+the feature test that replays it, in the project's style, and opens it.
+
+```php
+test('PUT /orders/{order}', function () {
+    $user = User::factory()->create();
+    $order = Order::factory()->create(['user_id' => $user->id]);
+
+    $this->actingAs($user)
+        ->put(route('orders.update', $order), [
+            'status' => 'paid',
+            'note' => 'Leave at the door',
+        ])
+        ->assertSessionHasNoErrors()
+        ->assertRedirect();
+
+    $this->assertDatabaseHas('orders', ['id' => $order->id, 'status' => 'paid']);
+});
+```
+
+- **Pest or PHPUnit**, whichever the project uses. The test goes in
+  `tests/Feature/` under the controller's name (`Admin/OrderControllerTest.php`),
+  at the end of the file when there is one, with the imports it lacks.
+  A new file gets `RefreshDatabase` unless the project's tests already reset the
+  database.
+- **The route's models** are made with their factories, owned by the signed-in
+  user when they belong to one (`user_id`). A `*_id` field in the body that
+  names a model gets one made too. A route behind `auth` signs a user in, on the
+  route's guard (`actingAs($user, 'sanctum')`).
+- **The status** becomes `assertOk()`, `assertRedirect()`, `assertNoContent()`…;
+  a form that redirected also asserts it came back without validation errors.
+  A request that **failed** becomes a test that expects it to succeed — red
+  until the bug is fixed.
+- **What it wrote**, with Grove's SQL capture on, becomes `assertDatabaseHas`,
+  `assertSoftDeleted` or `assertModelMissing` — only for values the request
+  sent, never ones the app made up such as ids and timestamps.
+- **A Livewire update** becomes `Livewire::test('name', [models])->set(…)->call(…)->assertHasNoErrors()`.
+- A secret Grove redacted is sent as `'password'` (the factory's) or `'secret'`.
+
+What the test could not set up — a model without a factory, one that belongs to
+a team — is in the notification. So is a warning when `phpunit.xml` names no
+test database of its own, since `RefreshDatabase` would then empty the app's.
 
 ### Mail and webhooks (Grove)
 

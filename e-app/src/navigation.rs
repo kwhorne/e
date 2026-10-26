@@ -337,7 +337,7 @@ impl AppState {
 
     /// Open a file and place the caret at `(line, col)` without touching the
     /// navigation history (used by back/forward themselves).
-    fn goto_location(&self, path: PathBuf, line: usize, col: usize) {
+    pub(crate) fn goto_location(&self, path: PathBuf, line: usize, col: usize) {
         self.open_path(path);
         // A freshly opened document's rope is populated on the next reactive
         // flush, so apply now and retry until it's ready for cold opens.

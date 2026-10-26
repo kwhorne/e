@@ -17,6 +17,10 @@
 //!   → routes, models with live columns, Livewire components, Inertia pages.
 //! - `{"method":"verify_route","uri":"/orders"}` → status, time, queries and
 //!   N+1, compared with the first measurement of that URL.
+//! - `{"method":"request_test","uri":"/orders/{order}","http_method":"PUT"}`
+//!   → a feature test made from the newest captured request to that path or
+//!   route (or the Runtime panel's `id`): the test file's path and content
+//!   with the test added, and notes. Writes nothing.
 //! - `{"method":"focus","target":"terminal|editor|agent"}`.
 //! - `{"method":"notify","message":"…"}`.
 //!
@@ -309,6 +313,7 @@ const METHODS: &[&str] = &[
     "lsp_symbols",
     "laravel_map",
     "verify_route",
+    "request_test",
     "db_schema",
     "db_query",
     "tinker",
@@ -526,6 +531,12 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
 
+        // ---- A feature test from a captured request (async) --------------
+        "request_test" => {
+            state.agent_request_test(req, reply);
+            return;
+        }
+
         // ---- Database schema (async, read-only) ---------------------------
         "db_schema" => {
             let name = req.get("connection").and_then(|c| c.as_str());
@@ -643,6 +654,12 @@ fn log_summary(req: &Value) -> String {
         "db_query" => s("sql").chars().take(60).collect(),
         "lsp_symbols" => s("query").to_string(),
         "laravel_map" => s("filter").to_string(),
+        "request_test" => match s("id") {
+            "" => format!("{} {}", s("http_method"), s("uri"))
+                .trim()
+                .to_string(),
+            id => id.to_string(),
+        },
         "verify_route" => match s("route") {
             "" => s("uri").to_string(),
             route => route.to_string(),

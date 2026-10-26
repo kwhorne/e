@@ -96,6 +96,7 @@ mod review;
 mod review_view;
 mod runtime;
 mod runtime_lens;
+mod runtime_test;
 mod runtime_view;
 mod schema_diff;
 mod search;

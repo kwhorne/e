@@ -543,6 +543,37 @@ pub fn unchecked_lookups(
     out
 }
 
+/// The models an action's route parameters become: `Order $order` in its
+/// signature, or `Order::findOrFail($id)` in its body → `("order", "Order")`.
+/// `src` is the controller's source; `is_model` says whether a short class
+/// name is one of the app's models.
+pub fn bound_models(
+    src: &str,
+    method: &str,
+    params: &[String],
+    is_model: &dyn Fn(&str) -> bool,
+) -> Vec<(String, String)> {
+    let Some(m) = methods(src).into_iter().find(|m| m.name == method) else {
+        return Vec::new();
+    };
+    // `{order_item}` binds `$orderItem`.
+    let norm = |s: &str| s.replace('_', "").to_ascii_lowercase();
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (ty, name) in typed_params(m.params) {
+        if let Some(p) = params.iter().find(|p| norm(p) == norm(&name)) {
+            if is_model(&ty) {
+                out.push((p.clone(), ty));
+            }
+        }
+    }
+    for l in lookups_in_body(m.body, params, is_model) {
+        if !out.iter().any(|(p, _)| *p == l.0) {
+            out.push(l);
+        }
+    }
+    out
+}
+
 /// What the checks need to know about a project: its models (who owns them,
 /// what confines them) and its FormRequests. Reads files as asked, once.
 pub struct Project {

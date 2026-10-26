@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A test from a request.** 🧪 on a request in the Runtime panel (or `⌘.` on
+  a runtime lens) writes the feature test that replays it — Pest or PHPUnit,
+  as the project has it — and opens it: the route's models made with their
+  factories and owned by the signed-in user, `actingAs` on the route's guard,
+  the body with redacted secrets filled in, the status asserted, and with SQL
+  capture on, the rows it wrote asserted for the values it sent. A Livewire
+  update becomes `Livewire::test()->set()->call()`; a request that failed
+  becomes a test that is red until it is fixed. `request_test` on the agent
+  socket gives an agent the same test. Tests made from real captures pass in
+  the projects they were made in.
+
 - **Unchecked lookups (IDOR).** A controller method behind `auth` that
   turns a route parameter into a model someone owns — `Order $order`,
   `Order::findOrFail($id)` — with nothing checking it is this user's gets a

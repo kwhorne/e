@@ -183,6 +183,33 @@ route now answers with an error).
 Nothing is stashed or checkpointed: the agent's work stays in the tree. The
 measurements are recorded in the **Agent Timeline**.
 
+## A test from a captured request
+
+```sh
+printf '{"method":"request_test","uri":"/orders/{order}","http_method":"PUT"}\n' | nc -U "$E_EDITOR_SOCK"
+```
+
+Writes a feature test from the newest request to that path — or, with a
+route's URI and its `{parameters}`, to that route — that Grove captured: the
+same test the Runtime panel's 🧪 writes ([below](laravel.md#a-test-from-a-request)).
+`"id": "g1254"` picks a request from the Runtime panel instead. The answer is
+the test file as it would be with the test added; nothing is written:
+
+```json
+{
+  "ok": true,
+  "file": "/path/to/app/tests/Feature/OrderControllerTest.php",
+  "line": 9,
+  "test": "PUT /orders/{order}",
+  "content": "<?php\n\nuse App\\Models\\Order;\n…",
+  "notes": ["Customer has no factory yet: php artisan make:factory CustomerFactory --model=Customer"]
+}
+```
+
+So an agent fixing a bug a request showed can first write the test that
+reproduces it, see it fail, and then make it pass. `notes` says what the test
+could not set up by itself.
+
 ## Running commands
 
 ```sh

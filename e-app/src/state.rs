@@ -3154,7 +3154,7 @@ impl AppState {
     }
 
     /// Reload a buffer's contents from disk, discarding any unsaved edits.
-    fn reload_buffer(&self, buf: &Buffer) {
+    pub(crate) fn reload_buffer(&self, buf: &Buffer) {
         let Some(path) = buf.file.path.as_ref() else {
             return;
         };
@@ -6744,6 +6744,10 @@ impl AppState {
                 format!("Runtime: ask the agent to fix {method} {uri} and measure it"),
                 "runtime.fix",
             ));
+            local.push(item(
+                format!("Runtime: write a test from {method} {uri}"),
+                "runtime.test",
+            ));
         }
         local.extend(local_code_actions(
             &text,
@@ -6824,6 +6828,7 @@ impl AppState {
             match command.get("e").and_then(|v| v.as_str()) {
                 Some("runtime.open") => self.runtime_lens_open(id),
                 Some("runtime.fix") => self.runtime_fix(id),
+                Some("runtime.test") => self.runtime_test(id),
                 Some("migration.dry_run") => self.migration_dry_run(),
                 _ => {}
             }

@@ -217,7 +217,11 @@ pub fn highlight_lines(language: Language, text: &str) -> Vec<Vec<LineSpan>> {
 
     let spans = match language {
         Language::Blade => blade_spans(text),
-        Language::Html | Language::Vue => merge_spans(ts_spans(language, text), class_spans(text)),
+        Language::Html | Language::Vue => {
+            let mut over = embedded_spans(text, language == Language::Vue);
+            over.extend(class_spans(text));
+            merge_spans(ts_spans(language, text), over)
+        }
         // Overlay SQL highlighting on raw-SQL strings (DB::select("…"), …).
         Language::Php => merge_spans(ts_spans(Language::Php, text), php_sql_spans(text)),
         // Standalone SQL (the database console) uses the SQL grammar directly.
@@ -244,6 +248,9 @@ fn class_spans(text: &str) -> Vec<Span> {
         search = pos + 5;
         if pos > 0 && is_word(bytes[pos - 1]) {
             continue; // part of a longer word
+        }
+        if pos > 0 && bytes[pos - 1] == b':' {
+            continue; // `:class` / `x-bind:class`: an expression, not classes
         }
         let mut j = pos + 5;
         while j < len && (bytes[j] == b' ' || bytes[j] == b'\t') {
@@ -559,21 +566,42 @@ fn first_string_range(arguments: tree_sitter::Node) -> Option<(usize, usize)> {
 /// Between keystrokes all but the edited fragment are unchanged — and
 /// `{{ $user->name }}` recurs — so results are cached by fragment text.
 fn php_fragment_spans(inner: &str, base: usize, out: &mut Vec<Span>) {
-    const PREFIX: &str = "<?php ";
+    fragment_spans(Language::Php, "<?php ", "", inner, base, out);
+}
+
+/// Highlight `inner` as `language`, wrapped in `prefix` and `suffix` to make
+/// it parse (`<?php `; a JavaScript expression in parentheses), and map the
+/// spans back into the document at `base`. Cached by fragment, for the
+/// reason [`php_fragment_spans`] gives.
+fn fragment_spans(
+    language: Language,
+    prefix: &str,
+    suffix: &str,
+    inner: &str,
+    base: usize,
+    out: &mut Vec<Span>,
+) {
+    /// A fragment: its language, its wrapping, its text.
+    type Key = (Language, String, String);
     thread_local! {
-        static FRAGMENTS: RefCell<HashMap<String, Rc<Vec<Span>>>> =
-            RefCell::new(HashMap::new());
+        static FRAGMENTS: RefCell<HashMap<Key, Rc<Vec<Span>>>> = RefCell::new(HashMap::new());
     }
+    let key = (
+        language,
+        format!("{prefix}\u{0}{suffix}"),
+        inner.to_string(),
+    );
     let spans = FRAGMENTS.with(|cell| {
-        if let Some(hit) = cell.borrow().get(inner) {
+        if let Some(hit) = cell.borrow().get(&key) {
             return hit.clone();
         }
-        let wrapped = format!("{PREFIX}{inner}");
+        let wrapped = format!("{prefix}{inner}{suffix}");
+        let end = prefix.len() + inner.len();
         let spans: Rc<Vec<Span>> = Rc::new(
-            ts_spans(Language::Php, &wrapped)
+            ts_spans(language, &wrapped)
                 .into_iter()
-                .filter(|(s, _, _)| *s >= PREFIX.len())
-                .map(|(s, e, k)| (s - PREFIX.len(), e - PREFIX.len(), k))
+                .filter(|(s, _, _)| *s >= prefix.len() && *s < end)
+                .map(|(s, e, k)| (s - prefix.len(), e.min(end) - prefix.len(), k))
                 .collect(),
         );
         let mut cache = cell.borrow_mut();
@@ -581,7 +609,7 @@ fn php_fragment_spans(inner: &str, base: usize, out: &mut Vec<Span>) {
         if cache.len() >= 4096 {
             cache.clear();
         }
-        cache.insert(inner.to_string(), spans.clone());
+        cache.insert(key, spans.clone());
         spans
     });
     out.extend(spans.iter().map(|&(s, e, k)| (base + s, base + e, k)));
@@ -666,7 +694,200 @@ fn blade_spans(text: &str) -> Vec<Span> {
         i += 1;
     }
     over.extend(class_spans(text));
-    merge_spans(html, over)
+    merge_spans(merge_spans(html, embedded_spans(text, false)), over)
+}
+
+/// What a `<script>` block is written in: TypeScript with `lang="ts"`, JSON
+/// for a JSON `type`, nothing for a template or other non-script `type`.
+fn script_language(start_tag: tree_sitter::Node, src: &[u8]) -> Option<Language> {
+    let mut lang = Language::JavaScript;
+    let mut cursor = start_tag.walk();
+    for attr in start_tag
+        .children(&mut cursor)
+        .filter(|n| n.kind() == "attribute")
+    {
+        let mut c = attr.walk();
+        let mut name = "";
+        let mut value = String::new();
+        for part in attr.children(&mut c) {
+            match part.kind() {
+                "attribute_name" => name = part.utf8_text(src).unwrap_or(""),
+                "attribute_value" => value = part.utf8_text(src).unwrap_or("").to_string(),
+                "quoted_attribute_value" => {
+                    value = part
+                        .utf8_text(src)
+                        .unwrap_or("")
+                        .trim_matches(['"', '\''])
+                        .to_string()
+                }
+                _ => {}
+            }
+        }
+        let value = value.to_ascii_lowercase();
+        match name {
+            "lang" if value == "ts" || value == "tsx" || value == "typescript" => {
+                lang = Language::TypeScript
+            }
+            "type" if value.contains("json") => lang = Language::Json,
+            "type" if !(value.contains("javascript") || value == "module" || value.is_empty()) => {
+                return None
+            }
+            _ => {}
+        }
+    }
+    Some(lang)
+}
+
+/// A Vue attribute that holds an expression: `v-if`, `:prop`, `@click`,
+/// `#slot`, `v-bind:…`.
+fn vue_directive(name: &str) -> bool {
+    name.starts_with("v-")
+        || name.starts_with(':')
+        || name.starts_with('@')
+        || name.starts_with('#')
+}
+
+/// Code inside markup: `<script>` blocks as JavaScript (TypeScript with
+/// `lang="ts"`), `<style>` blocks as CSS — and in a Vue component, the
+/// template's `{{ }}` interpolations and directive values as expressions in
+/// the component's script language, the directive names as keywords.
+fn embedded_spans(text: &str, vue: bool) -> Vec<Span> {
+    let mut parser = tree_sitter::Parser::new();
+    if parser
+        .set_language(&tree_sitter_html::LANGUAGE.into())
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        return Vec::new();
+    };
+    let src = text.as_bytes();
+    let root = tree.root_node();
+    // The template's expressions are in the language of the component's
+    // script, which usually comes after it.
+    let mut expr_lang = Language::JavaScript;
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "script_element" {
+            if let Some(Language::TypeScript) =
+                child.child(0).and_then(|tag| script_language(tag, src))
+            {
+                expr_lang = Language::TypeScript;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        match node.kind() {
+            "script_element" | "style_element" => {
+                let lang = if node.kind() == "style_element" {
+                    Some(Language::Css)
+                } else {
+                    node.child(0).and_then(|tag| script_language(tag, src))
+                };
+                let mut c = node.walk();
+                let raw = node.children(&mut c).find(|n| n.kind() == "raw_text");
+                if let (Some(lang), Some(raw)) = (lang, raw) {
+                    let (start, end) = (raw.start_byte(), raw.end_byte());
+                    out.extend(
+                        ts_spans(lang, &text[start..end])
+                            .into_iter()
+                            .map(|(s, e, k)| (start + s, start + e, k)),
+                    );
+                }
+                continue;
+            }
+            "attribute" if vue => {
+                let mut c = node.walk();
+                let parts: Vec<_> = node.children(&mut c).collect();
+                let name = parts.iter().find(|n| n.kind() == "attribute_name");
+                let value = parts.iter().find_map(|n| match n.kind() {
+                    "attribute_value" => Some(*n),
+                    "quoted_attribute_value" => {
+                        let mut c = n.walk();
+                        let inner = n.children(&mut c).find(|v| v.kind() == "attribute_value");
+                        inner
+                    }
+                    _ => None,
+                });
+                if let Some(name) = name {
+                    let n = name.utf8_text(src).unwrap_or("");
+                    if vue_directive(n) {
+                        // The directive itself; an argument after it (`v-on:click`,
+                        // `:class`) keeps the attribute colour.
+                        let head = if n.starts_with("v-") {
+                            n.find([':', '.']).unwrap_or(n.len())
+                        } else {
+                            1
+                        };
+                        out.push((
+                            name.start_byte(),
+                            name.start_byte() + head,
+                            HighlightKind::Keyword,
+                        ));
+                        if let Some(v) = value {
+                            vue_expression(
+                                expr_lang,
+                                n,
+                                &text[v.start_byte()..v.end_byte()],
+                                v.start_byte(),
+                                &mut out,
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
+            "text" if vue => {
+                let t = &text[node.start_byte()..node.end_byte()];
+                let mut from = 0;
+                while let Some(open) = t[from..].find("{{") {
+                    let open = from + open;
+                    let Some(close) = t[open + 2..].find("}}").map(|c| open + 2 + c) else {
+                        break;
+                    };
+                    let base = node.start_byte();
+                    out.push((base + open, base + open + 2, HighlightKind::Operator));
+                    fragment_spans(
+                        expr_lang,
+                        "(",
+                        ")",
+                        &t[open + 2..close],
+                        base + open + 2,
+                        &mut out,
+                    );
+                    out.push((base + close, base + close + 2, HighlightKind::Operator));
+                    from = close + 2;
+                }
+                continue;
+            }
+            _ => {}
+        }
+        let mut c = node.walk();
+        stack.extend(node.children(&mut c));
+    }
+    out
+}
+
+/// A directive's value as code: a handler (`@click`) as statements, the
+/// `v-for` loop's `in`/`of` as a keyword between two expressions, anything
+/// else as an expression.
+fn vue_expression(lang: Language, directive: &str, value: &str, base: usize, out: &mut Vec<Span>) {
+    if directive.starts_with('@') || directive.starts_with("v-on") {
+        fragment_spans(lang, "", "", value, base, out);
+        return;
+    }
+    if directive == "v-for" {
+        if let Some(at) = value.find(" in ").or_else(|| value.find(" of ")) {
+            fragment_spans(lang, "(", ")", &value[..at], base, out);
+            out.push((base + at + 1, base + at + 3, HighlightKind::Keyword));
+            fragment_spans(lang, "(", ")", &value[at + 4..], base + at + 4, out);
+            return;
+        }
+    }
+    fragment_spans(lang, "(", ")", value, base, out);
 }
 
 fn is_word(b: u8) -> bool {
@@ -1473,6 +1694,86 @@ mod tests {
         assert!(
             spans.iter().any(|s| s.kind == HighlightKind::Keyword),
             "php keywords"
+        );
+    }
+}
+
+#[cfg(test)]
+mod embedded_tests {
+    use super::{highlight_lines, HighlightKind};
+    use crate::language::Language;
+
+    /// The kind at the first `needle` on line `line` (0-based).
+    fn kind_at(lang: Language, src: &str, line: usize, needle: &str) -> Option<HighlightKind> {
+        let lines = highlight_lines(lang, src);
+        let at = src.lines().nth(line)?.find(needle)?;
+        lines[line]
+            .iter()
+            .find(|s| s.start <= at && at < s.end)
+            .map(|s| s.kind)
+    }
+
+    const SFC: &str = r#"<template>
+  <li v-for="item in items" :key="item.id" @click="select(item)">
+    {{ item.name.toUpperCase() }}
+  </li>
+</template>
+
+<script setup lang="ts">
+const items = defineProps<{ items: Item[] }>()
+interface Item { id: number }
+</script>
+
+<style scoped>
+.active { color: red; }
+</style>
+"#;
+
+    #[test]
+    fn a_vue_component_colours_its_script_style_and_template_expressions() {
+        let k = |line, needle| kind_at(Language::Vue, SFC, line, needle);
+        // <script setup lang="ts">: TypeScript.
+        assert_eq!(k(7, "const"), Some(HighlightKind::Keyword));
+        assert_eq!(k(8, "interface"), Some(HighlightKind::Keyword));
+        assert_eq!(k(8, "number"), Some(HighlightKind::Type));
+        // <style>: CSS.
+        assert_eq!(k(12, "color"), Some(HighlightKind::Property));
+        // Directives, and their values as code.
+        assert_eq!(k(1, "v-for"), Some(HighlightKind::Keyword));
+        assert_eq!(k(1, "in items").unwrap(), HighlightKind::Keyword);
+        assert_eq!(k(1, "select"), Some(HighlightKind::Function));
+        assert_eq!(k(1, "id\""), Some(HighlightKind::Property));
+        // A bound class is an expression, not Tailwind classes.
+        let src = "<template>\n<li :class=\"{ active: on }\">x</li>\n</template>\n";
+        assert_eq!(
+            kind_at(Language::Vue, src, 1, "active"),
+            Some(HighlightKind::Property)
+        );
+        // {{ }}: braces and the expression inside.
+        assert_eq!(k(2, "{{"), Some(HighlightKind::Operator));
+        assert_eq!(k(2, "toUpperCase"), Some(HighlightKind::Function));
+        // The markup itself is still HTML.
+        assert_eq!(k(1, "li"), Some(HighlightKind::Tag));
+    }
+
+    #[test]
+    fn script_blocks_in_html_and_blade_are_javascript() {
+        let src = "<div>{{ $x }}</div>\n<script>\nconst total = sum(1, 2);\n</script>\n<script type=\"text/template\">\nconst no = 1;\n</script>\n";
+        assert_eq!(
+            kind_at(Language::Blade, src, 2, "const"),
+            Some(HighlightKind::Keyword)
+        );
+        assert_eq!(
+            kind_at(Language::Html, src, 2, "sum"),
+            Some(HighlightKind::Function)
+        );
+        // A template isn't script.
+        assert_eq!(kind_at(Language::Html, src, 5, "const"), None);
+        // Outside Vue, `{{ }}` is Blade's (or text), not JavaScript.
+        assert_eq!(kind_at(Language::Html, src, 0, "{{"), None);
+        assert_eq!(
+            kind_at(Language::Blade, src, 0, "{{"),
+            Some(HighlightKind::Operator)
         );
     }
 }

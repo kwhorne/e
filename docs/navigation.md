@@ -102,3 +102,8 @@ running it embeds your code and query with a real embedding model
 (`nomic-embed-text` by default, override with `E_EMBED_MODEL`) for genuine
 semantic matches. Otherwise it falls back to a fast lexical index — no cloud, no
 data leaves your machine either way.
+
+Embeddings are kept between sessions in `~/.config/e/embeddings/`, one file per
+project and model, keyed by each chunk's text: opening the project again embeds
+only what changed since, so the index is ready in moments instead of minutes.
+If Ollama stops partway, what it made is kept and the next build carries on.

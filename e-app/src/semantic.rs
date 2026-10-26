@@ -187,6 +187,176 @@ pub fn embed_one(model: &str, text: &str) -> Option<Vec<f32>> {
         .next()
 }
 
+// ---- Embeddings kept on disk ----------------------------------------------
+
+/// A chunk's key in the cache: its text, under the model that embedded it.
+/// Content-addressed, so a chunk that moved, or a file that was renamed,
+/// is still found; one that changed is not.
+pub type EmbedKey = [u8; 16];
+
+pub fn embed_key(model: &str, text: &str) -> EmbedKey {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(model.as_bytes());
+    h.update([0]);
+    h.update(text.as_bytes());
+    let mut key = [0; 16];
+    key.copy_from_slice(&h.finalize()[..16]);
+    key
+}
+
+/// Where a project's embeddings under `model` are kept:
+/// `~/.config/e/embeddings/<project>-<model>.bin`.
+pub fn cache_path(roots: &[PathBuf], model: &str) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let home = std::env::var_os("HOME")?;
+    let mut h = Sha256::new();
+    for r in roots {
+        h.update(r.to_string_lossy().as_bytes());
+        h.update([0]);
+    }
+    let project: String = h.finalize()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let model: String = model
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    Some(
+        PathBuf::from(home)
+            .join(".config/e/embeddings")
+            .join(format!("{project}-{model}.bin")),
+    )
+}
+
+const CACHE_MAGIC: &[u8; 6] = b"EEMB1\n";
+
+/// The embeddings kept at `path`; empty when there are none or the file is
+/// not one this wrote.
+pub fn load_cache(path: &Path) -> HashMap<EmbedKey, Vec<f32>> {
+    let mut out = HashMap::new();
+    let Ok(bytes) = std::fs::read(path) else {
+        return out;
+    };
+    let Some(rest) = bytes.strip_prefix(CACHE_MAGIC.as_slice()) else {
+        return out;
+    };
+    if rest.len() < 8 {
+        return out;
+    }
+    let dim = u32::from_le_bytes(rest[0..4].try_into().unwrap_or_default()) as usize;
+    let count = u32::from_le_bytes(rest[4..8].try_into().unwrap_or_default()) as usize;
+    let entry = 16 + dim * 4;
+    let body = &rest[8..];
+    if dim == 0 || body.len() != count * entry {
+        return out;
+    }
+    for e in body.chunks_exact(entry) {
+        let mut key = [0; 16];
+        key.copy_from_slice(&e[..16]);
+        let v = e[16..]
+            .chunks_exact(4)
+            .map(|f| f32::from_le_bytes([f[0], f[1], f[2], f[3]]))
+            .collect();
+        out.insert(key, v);
+    }
+    out
+}
+
+/// Keep these embeddings at `path`, replacing what was there — so the file
+/// holds only chunks the project still has. Written beside and renamed into
+/// place, so a crash leaves the old file, never half a new one.
+pub fn save_cache(path: &Path, entries: &[(EmbedKey, &[f32])]) -> std::io::Result<()> {
+    let dim = entries.first().map_or(0, |(_, v)| v.len());
+    let entries: Vec<&(EmbedKey, &[f32])> =
+        entries.iter().filter(|(_, v)| v.len() == dim).collect();
+    let mut out = Vec::with_capacity(14 + entries.len() * (16 + dim * 4));
+    out.extend_from_slice(CACHE_MAGIC);
+    out.extend_from_slice(&(dim as u32).to_le_bytes());
+    out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    for (key, v) in entries {
+        out.extend_from_slice(key);
+        for f in v.iter() {
+            out.extend_from_slice(&f.to_le_bytes());
+        }
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, &out)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// What embedding the chunks came to.
+pub struct Embedded {
+    /// One per chunk, in order; empty when they couldn't all be embedded.
+    pub embeds: Vec<Vec<f32>>,
+    /// How many were in the cache.
+    pub cached: usize,
+    /// Every embedding there is now, made or found, to keep for next time —
+    /// also when the model gave out partway, so the next build resumes.
+    pub keep: Vec<(EmbedKey, Vec<f32>)>,
+}
+
+/// Embed `chunks` under `model`, asking `embed` only for those `cache` lacks,
+/// a batch at a time.
+pub fn embed_chunks(
+    model: &str,
+    chunks: &[Chunk],
+    mut cache: HashMap<EmbedKey, Vec<f32>>,
+    mut embed: impl FnMut(&[String]) -> Option<Vec<Vec<f32>>>,
+) -> Embedded {
+    let keys: Vec<EmbedKey> = chunks.iter().map(|c| embed_key(model, &c.text)).collect();
+    let cached = keys.iter().filter(|k| cache.contains_key(*k)).count();
+    // The same text twice is embedded once.
+    let mut seen = std::collections::HashSet::new();
+    let missing: Vec<usize> = (0..chunks.len())
+        .filter(|&i| !cache.contains_key(&keys[i]) && seen.insert(keys[i]))
+        .collect();
+    let mut complete = true;
+    for batch in missing.chunks(64) {
+        let texts: Vec<String> = batch.iter().map(|&i| chunks[i].text.clone()).collect();
+        match embed(&texts) {
+            Some(vs) if vs.len() == batch.len() => {
+                for (&i, v) in batch.iter().zip(vs) {
+                    cache.insert(keys[i], v);
+                }
+            }
+            _ => {
+                complete = false;
+                break;
+            }
+        }
+    }
+    let embeds: Vec<Vec<f32>> = if complete {
+        keys.iter().filter_map(|k| cache.get(k).cloned()).collect()
+    } else {
+        Vec::new()
+    };
+    let wanted: std::collections::HashSet<EmbedKey> = keys.iter().copied().collect();
+    let keep = cache
+        .into_iter()
+        .filter(|(k, _)| wanted.contains(k))
+        .collect();
+    Embedded {
+        embeds: if embeds.len() == chunks.len() {
+            embeds
+        } else {
+            Vec::new()
+        },
+        cached,
+        keep,
+    }
+}
+
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     let mut dot = 0.0;
     let mut na = 0.0;
@@ -313,6 +483,69 @@ mod tests {
         let scores = lexical_scores(&chunks, "send invoice email");
         // The invoice/mail chunk should outrank the home view chunk.
         assert!(scores[0] > scores[1]);
+    }
+
+    #[test]
+    fn only_chunks_the_cache_lacks_are_embedded_and_the_cache_survives_a_restart() {
+        let chunk = |t: &str| Chunk {
+            path: PathBuf::from("a.php"),
+            line: 1,
+            text: t.to_string(),
+        };
+        let chunks = vec![chunk("one"), chunk("two"), chunk("one"), chunk("three")];
+        let mut asked: Vec<String> = Vec::new();
+        let fake = |asked: &mut Vec<String>, texts: &[String]| {
+            asked.extend(texts.iter().cloned());
+            Some(texts.iter().map(|t| vec![t.len() as f32, 1.0]).collect())
+        };
+        let first = embed_chunks("m", &chunks, HashMap::new(), |t| fake(&mut asked, t));
+        assert_eq!(asked, ["one", "two", "three"]);
+        assert_eq!(first.cached, 0);
+        assert_eq!(first.embeds.len(), 4);
+        assert_eq!(first.embeds[2], vec![3.0, 1.0]);
+
+        let dir = std::env::temp_dir().join(format!("e-embeds-{}", std::process::id()));
+        let path = dir.join("p-m.bin");
+        let keep: Vec<(EmbedKey, &[f32])> =
+            first.keep.iter().map(|(k, v)| (*k, v.as_slice())).collect();
+        save_cache(&path, &keep).unwrap();
+        let cache = load_cache(&path);
+        assert_eq!(cache.len(), 3);
+
+        // After a restart, with "two" edited: only the new text is embedded,
+        // and the old one is not kept.
+        let chunks = vec![chunk("one"), chunk("two!"), chunk("three")];
+        asked.clear();
+        let second = embed_chunks("m", &chunks, cache, |t| fake(&mut asked, t));
+        assert_eq!(asked, ["two!"]);
+        assert_eq!(second.cached, 2);
+        assert_eq!(second.embeds[1], vec![4.0, 1.0]);
+        assert_eq!(second.keep.len(), 3);
+        // Another model's embeddings are not this one's.
+        asked.clear();
+        let other = embed_chunks("n", &chunks, load_cache(&path), |t| fake(&mut asked, t));
+        assert_eq!(other.cached, 0);
+        assert_eq!(asked.len(), 3);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_model_that_gives_out_keeps_what_it_made() {
+        let chunks: Vec<Chunk> = (0..100)
+            .map(|i| Chunk {
+                path: PathBuf::from("a.php"),
+                line: i,
+                text: format!("chunk {i}"),
+            })
+            .collect();
+        let mut calls = 0;
+        let out = embed_chunks("m", &chunks, HashMap::new(), |texts| {
+            calls += 1;
+            (calls == 1).then(|| texts.iter().map(|_| vec![1.0]).collect())
+        });
+        assert!(out.embeds.is_empty());
+        assert_eq!(out.keep.len(), 64);
+        assert!(load_cache(Path::new("/nonexistent/e-embeds.bin")).is_empty());
     }
 
     #[test]

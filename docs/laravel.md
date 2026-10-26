@@ -71,6 +71,7 @@ would move it to another file).
 HTML tags, attributes and Tailwind utility classes, Blade directives
 (`@php`, `@if`, `@foreach`, `@push`, …), `{{-- comments --}}`, and the embedded
 PHP inside `@php … @endphp` blocks, `{{ … }}` and `{!! … !!}` expressions.
+`<script>` blocks are JavaScript and `<style>` blocks CSS.
 
 ## Query-builder completion
 

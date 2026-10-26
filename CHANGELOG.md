@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Vue components coloured throughout.** `<script>` is JavaScript, or
+  TypeScript with `lang="ts"`, `<style>` is CSS, and the template's `{{ }}`
+  interpolations and directive values (`v-if`, `:class`, `@click`, `v-for`)
+  are coloured as expressions, the directives as keywords. `<script>` and
+  `<style>` blocks in Blade and HTML are coloured too. A bound `:class` is no
+  longer read as Tailwind classes.
+
+- **Semantic search remembers its embeddings.** They are kept in
+  `~/.config/e/embeddings/` by chunk text, project and model, so opening a
+  project again embeds only what changed rather than every chunk; a build that
+  Ollama gave up on partway resumes where it stopped.
+
 - **A test from a request.** 🧪 on a request in the Runtime panel (or `⌘.` on
   a runtime lens) writes the feature test that replays it — Pest or PHPUnit,
   as the project has it — and opens it: the route's models made with their

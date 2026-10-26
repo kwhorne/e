@@ -33,44 +33,56 @@ impl AppState {
         let idx_sig = self.sem_index;
         status.set("Indexing project…".to_string());
         let cx = self.cx;
-        let send = create_ext_action(cx, move |index: crate::semantic::SemIndex| {
-            let n = index.chunks.len();
-            let mode = if index.semantic() {
-                "semantic"
-            } else {
-                "lexical"
-            };
-            status.set(format!("Ready · {n} chunks · {mode}"));
-            idx_sig.set(Rc::new(RefCell::new(index)));
-        });
+        let send = create_ext_action(
+            cx,
+            move |(index, cached): (crate::semantic::SemIndex, usize)| {
+                let n = index.chunks.len();
+                let mode = if !index.semantic() {
+                    "lexical".to_string()
+                } else if cached > 0 {
+                    format!("semantic · {cached} kept from last time")
+                } else {
+                    "semantic".to_string()
+                };
+                status.set(format!("Ready · {n} chunks · {mode}"));
+                idx_sig.set(Rc::new(RefCell::new(index)));
+            },
+        );
         std::thread::spawn(move || {
             let chunks = crate::semantic::build_chunks(&roots);
             let mut embeds = Vec::new();
             let mut model = String::new();
+            let mut cached = 0;
             if crate::semantic::ollama_up() {
                 let m = crate::semantic::embed_model();
-                let mut ok = true;
-                for batch in chunks.chunks(64) {
-                    let texts: Vec<String> = batch.iter().map(|c| c.text.clone()).collect();
-                    match crate::semantic::embed_batch(&m, &texts) {
-                        Some(mut v) => embeds.append(&mut v),
-                        None => {
-                            ok = false;
-                            break;
-                        }
+                let path = crate::semantic::cache_path(&roots, &m);
+                let cache = path
+                    .as_deref()
+                    .map(crate::semantic::load_cache)
+                    .unwrap_or_default();
+                let done = crate::semantic::embed_chunks(&m, &chunks, cache, |texts| {
+                    crate::semantic::embed_batch(&m, texts)
+                });
+                if let Some(path) = &path {
+                    let keep: Vec<_> = done.keep.iter().map(|(k, v)| (*k, v.as_slice())).collect();
+                    if let Err(e) = crate::semantic::save_cache(path, &keep) {
+                        eprintln!("e: could not keep the semantic index's embeddings: {e}");
                     }
                 }
-                if ok && embeds.len() == chunks.len() {
+                if !done.embeds.is_empty() {
+                    embeds = done.embeds;
+                    cached = done.cached;
                     model = m;
-                } else {
-                    embeds.clear();
                 }
             }
-            send(crate::semantic::SemIndex {
-                chunks,
-                embeds,
-                model,
-            });
+            send((
+                crate::semantic::SemIndex {
+                    chunks,
+                    embeds,
+                    model,
+                },
+                cached,
+            ));
         });
     }
 

@@ -11,6 +11,14 @@ HTML · CSS · Blade · Vue · Svelte · Markdown · Shell
 The language is detected from the file extension (and a few special names, like
 `Cargo.lock` and `*.blade.php`).
 
+Code inside markup is coloured as the code it is. In a **Vue** component,
+`<script>` is JavaScript — TypeScript with `lang="ts"` — and `<style>` is CSS;
+in the template, `{{ }}` interpolations and directive values (`v-if`, `:prop`,
+`@click`, `v-for`'s `item in items`) are expressions in the script's language,
+and the directives themselves are keywords. In **HTML** and **Blade**,
+`<script>` and `<style>` blocks are JavaScript and CSS (`type="application/json"`
+is JSON; a `text/template` is left as text).
+
 ## Language Server Protocol
 
 When a language server is available on your `PATH`, `e` launches it automatically

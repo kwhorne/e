@@ -13,6 +13,10 @@
 //! - `{"method":"diagnostics"}` → all problems.
 //! - `{"method":"wait_diagnostics","path":"…","timeout_ms":5000}` → the file's
 //!   problems once the language servers have re-read what you just wrote.
+//! - `{"method":"laravel_map","include":["routes","models"],"filter":"order"}`
+//!   → routes, models with live columns, Livewire components, Inertia pages.
+//! - `{"method":"verify_route","uri":"/orders"}` → status, time, queries and
+//!   N+1, compared with the first measurement of that URL.
 //! - `{"method":"focus","target":"terminal|editor|agent"}`.
 //! - `{"method":"notify","message":"…"}`.
 //!
@@ -283,6 +287,29 @@ fn handle_conn(
     }
 }
 
+/// Every method `dispatch` answers, for an agent that asks for one it doesn't.
+const METHODS: &[&str] = &[
+    "context",
+    "diagnostics",
+    "wait_diagnostics",
+    "review_summary",
+    "open",
+    "mark",
+    "propose_edit",
+    "focus",
+    "notify",
+    "lsp_definition",
+    "lsp_references",
+    "lsp_hover",
+    "lsp_symbols",
+    "laravel_map",
+    "verify_route",
+    "db_schema",
+    "db_query",
+    "tinker",
+    "run",
+];
+
 /// Execute one request against the editor (runs on the UI thread).
 fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
     let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
@@ -441,6 +468,59 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
 
+        // ---- Laravel project map (async, read-only) -----------------------
+        "laravel_map" => {
+            let root = state.root.get_untracked();
+            if !e_laravel::laravel::is_laravel(&root) {
+                let _ = reply.send(json!({"ok": false, "error": "not a Laravel project"}));
+                return;
+            }
+            let include: Vec<String> = req
+                .get("include")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|s| s.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Some(bad) = include
+                .iter()
+                .find(|s| !e_laravel::project_map::SECTIONS.contains(&s.as_str()))
+            {
+                let _ = reply.send(json!({
+                    "ok": false,
+                    "error": format!("unknown section {bad}; sections are {}",
+                        e_laravel::project_map::SECTIONS.join(", ")),
+                }));
+                return;
+            }
+            let request = e_laravel::project_map::Request {
+                include,
+                filter: req
+                    .get("filter")
+                    .and_then(|f| f.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            };
+            let data = state.laravel.get_untracked();
+            let schema = state.db.schema_cache.get_untracked();
+            std::thread::spawn(move || {
+                let data = data.unwrap_or_else(|| Arc::new(e_laravel::laravel::load(&root)));
+                let mut map = e_laravel::project_map::build(&root, &data, &schema, &request);
+                map["ok"] = json!(true);
+                map["root"] = json!(root.to_string_lossy());
+                let _ = reply.send(map);
+            });
+            return;
+        }
+
+        // ---- Measure a route, against its baseline (async) ----------------
+        "verify_route" => {
+            state.agent_verify_route(req, reply);
+            return;
+        }
+
         // ---- Database schema (async, read-only) ---------------------------
         "db_schema" => {
             let name = req.get("connection").and_then(|c| c.as_str());
@@ -532,7 +612,11 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
 
-        other => json!({"ok": false, "error": format!("unknown method: {other}")}),
+        other => json!({
+            "ok": false,
+            "error": format!("unknown method: {other}"),
+            "methods": METHODS,
+        }),
     };
     let _ = reply.send(sync);
 }
@@ -553,6 +637,11 @@ fn log_summary(req: &Value) -> String {
         "tinker" => s("code").chars().take(60).collect(),
         "db_query" => s("sql").chars().take(60).collect(),
         "lsp_symbols" => s("query").to_string(),
+        "laravel_map" => s("filter").to_string(),
+        "verify_route" => match s("route") {
+            "" => s("uri").to_string(),
+            route => route.to_string(),
+        },
         _ => String::new(),
     }
 }

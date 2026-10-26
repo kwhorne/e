@@ -185,8 +185,14 @@ pub struct Comparison {
     pub verdict: Verdict,
 }
 
-/// A timing change smaller than this fraction is treated as noise.
-const MS_MARGIN: f64 = 0.05;
+/// A timing change smaller than this fraction is treated as noise. Two
+/// replays of the same unchanged route on a laptop differ by 10% easily
+/// (measured: 81 ms, then 74 ms), so a 5% margin called noise an improvement.
+const MS_MARGIN: f64 = 0.15;
+
+/// …and so is one smaller than this, however large a fraction: 4 ms against
+/// 6 ms says nothing.
+const MS_FLOOR: f64 = 10.0;
 
 /// Compare two measured requests and produce a verdict.
 pub fn compare(before: &RequestMetrics, after: &RequestMetrics) -> Comparison {
@@ -196,8 +202,9 @@ pub fn compare(before: &RequestMetrics, after: &RequestMetrics) -> Comparison {
     } else {
         1.0
     };
-    let faster = ms_ratio < 1.0 - MS_MARGIN;
-    let slower = ms_ratio > 1.0 + MS_MARGIN;
+    let significant = ms_delta.abs() >= MS_FLOOR;
+    let faster = significant && ms_ratio < 1.0 - MS_MARGIN;
+    let slower = significant && ms_ratio > 1.0 + MS_MARGIN;
     let query_delta = after.query_count as i64 - before.query_count as i64;
     let n1_before = before.has_n_plus_one();
     let n1_after = after.has_n_plus_one();
@@ -659,6 +666,24 @@ mod tests {
         assert!(c.status_changed);
         assert!(c.shape_changed);
         assert_eq!(c.verdict, Verdict::Broke);
+    }
+
+    #[test]
+    fn timing_noise_is_no_change() {
+        let at = |ms: f64| {
+            metrics_of(&RequestSample {
+                status: 200,
+                duration_ms: ms,
+                queries: vec![q("select 1", 1.0)],
+                response_shape: None,
+            })
+        };
+        // Two replays of an unchanged route, as measured.
+        assert_eq!(compare(&at(81.0), &at(74.0)).verdict, Verdict::NoChange);
+        // A big fraction of almost nothing.
+        assert_eq!(compare(&at(4.0), &at(9.0)).verdict, Verdict::NoChange);
+        assert_eq!(compare(&at(340.0), &at(95.0)).verdict, Verdict::Improved);
+        assert_eq!(compare(&at(80.0), &at(120.0)).verdict, Verdict::Regressed);
     }
 
     #[test]

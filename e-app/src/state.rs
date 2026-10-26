@@ -1361,6 +1361,11 @@ fn grove_queries_for_replay(
 ) -> Option<Vec<(String, String)>> {
     let host = base.split("://").nth(1)?.trim_end_matches('/');
     let site = crate::grove::site_by_host(host)?;
+    // With capture off Grove still has the request, just no SQL — and an
+    // empty list from it would read as "no queries" rather than "can't see".
+    if crate::grove::sql_capture() != Some(true) {
+        return None;
+    }
     let path = url
         .strip_prefix(base.trim_end_matches('/'))
         .filter(|p| p.starts_with('/'))
@@ -1372,7 +1377,17 @@ fn grove_queries_for_replay(
                 .find(|r| r.path == path && r.epoch_ms >= started_ms)
             {
                 let e = crate::grove::explain(r.id)?;
-                return Some(e.queries.into_iter().map(|q| (q, String::new())).collect());
+                let queries: Vec<(String, String)> = e
+                    .queries
+                    .into_iter()
+                    .filter(|q| !crate::grove::is_connection_setup(q))
+                    .map(|q| (q, String::new()))
+                    .collect();
+                // Nothing but the connection's setup is what Grove reports
+                // when it misses the app's statements (it logs `Query`, and
+                // PDO's prepared statements arrive as `Execute`): call that
+                // unseen, not "no queries".
+                return (!queries.is_empty()).then_some(queries);
             }
         }
         if attempt < 3 {
@@ -1385,7 +1400,11 @@ fn grove_queries_for_replay(
 /// Perform the request via the system `curl` (`-k` so Grove's private-CA HTTPS
 /// works), then fetch Clockwork query data if the app exposes it.
 fn do_http_request(base: &str, url: &str) -> RequestResult {
-    let hdr = std::env::temp_dir().join(format!("e-req-{}.hdr", std::process::id()));
+    // One file per request: the request panel, the verify loop and the
+    // agent's `verify_route` can be replaying at the same time.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let hdr = std::env::temp_dir().join(format!("e-req-{}-{seq}.hdr", std::process::id()));
     let out = std::process::Command::new("curl")
         .args([
             "-sk",

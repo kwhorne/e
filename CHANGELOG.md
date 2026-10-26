@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`laravel_map` on the agent socket.** One request answers what an agent
+  otherwise greps for over dozens of calls: the routes, the models with
+  their live columns and relationships, Livewire components with their
+  properties and actions, Inertia pages with what renders them and the
+  props they get, views and Blade components. `include` and `filter` keep
+  it small.
+- **`verify_route` on the agent socket.** An agent replays a route before
+  and after its change and gets the verdict from the same measurement as
+  the verify panel and the ship gate: time, queries, N+1, status. The first
+  measurement of a URL is the baseline; nothing is stashed.
+
+### Fixed
+
+- **Tinker runs no longer overwrite each other.** The Tinker panel and the
+  agent socket wrote the code to a temp file named after the process, so
+  two runs at once could run each other's code; the code now goes in on
+  stdin. A run that hangs is given up on after 60 seconds, and the
+  "No entry for terminal type" lines some PHP builds print are dropped.
+- **Grove's SQL capture no longer reads as "no queries".** With capture off,
+  or when it caught only the connection's `use`/`SET NAMES` and none of the
+  app's statements, the verify panel and the ship gate reported zero
+  queries and no N+1 as if measured. They now say queries weren't visible.
+- **Timing noise is no longer a verdict.** Two replays of an unchanged route
+  differ by 10% easily, and a 5% margin called that improved or regressed.
+  A change now has to be over 15% and 10 ms.
+- **An Inertia page rendered without props no longer borrows another
+  method's.** `Inertia::render('Dashboard')` took the props from the next
+  array anywhere further down the controller.
+- Replays running at the same time (request panel, verify, agent) no longer
+  share a header file.
+
 ## [0.10.1] - 2026-10-10
 
 ### Fixed

@@ -77,6 +77,13 @@ fn parsers_survive_real_projects() {
         let data = crate::laravel::load(&root);
         let models = crate::relations::build_graph(&root, &[]);
         let events = crate::events::dispatch_map(&root);
+        let map = crate::project_map::build(
+            &root,
+            &data,
+            &Default::default(),
+            &crate::project_map::Request::default(),
+        );
+        let map_bytes = map.to_string().len();
 
         // Per-file heuristics over every source file.
         let files = source_files(&root);
@@ -97,7 +104,7 @@ fn parsers_survive_real_projects() {
         }
 
         eprintln!(
-            "{}: routes={} views={} components={} models={} events={} files={}",
+            "{}: routes={} views={} components={} models={} events={} files={} map={}B",
             root.file_name().unwrap_or_default().to_string_lossy(),
             data.routes.len(),
             data.views.len(),
@@ -105,6 +112,7 @@ fn parsers_survive_real_projects() {
             models.len(),
             events.len(),
             files.len(),
+            map_bytes,
         );
 
         // Sanity: a real project should have parsed *some* source files. We keep

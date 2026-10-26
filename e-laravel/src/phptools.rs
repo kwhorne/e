@@ -156,12 +156,31 @@ pub const TINKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6
 /// stdin, not through a temp file, so runs at the same time can't overwrite
 /// each other's code. Blocking: off the UI thread.
 pub fn tinker(root: &Path, code: &str) -> Result<std::process::Output, String> {
-    php_with_input(
+    let mut out = php_with_input(
         root,
         &["artisan", "tinker"],
         Some(code.as_bytes().to_vec()),
         TINKER_TIMEOUT,
-    )
+    )?;
+    out.stderr = strip_terminfo_warning(&out.stderr);
+    Ok(out)
+}
+
+/// Drop the two lines a PHP whose readline has no terminfo database prints
+/// on every Tinker run (Grove's does: `No entry for terminal type
+/// "xterm-256color"; using dumb terminal settings.`), whatever `TERM` says.
+fn strip_terminfo_warning(stderr: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(stderr);
+    if !text.contains("No entry for terminal type") {
+        return stderr.to_vec();
+    }
+    text.lines()
+        .filter(|l| {
+            !l.starts_with("No entry for terminal type") && *l != "using dumb terminal settings."
+        })
+        .map(|l| format!("{l}\n"))
+        .collect::<String>()
+        .into_bytes()
 }
 
 /// [`php`], with `input` written to its stdin (closed after; null when `None`).
@@ -518,6 +537,16 @@ mod live_php {
         )
         .unwrap();
         assert_eq!(String::from_utf8_lossy(&ok.stdout), "hi");
+    }
+
+    #[test]
+    fn the_terminfo_warning_is_dropped_and_real_errors_kept() {
+        let err = "No entry for terminal type \"xterm-256color\";\nusing dumb terminal settings.\n   QueryException  SQLSTATE[42S02]\n";
+        assert_eq!(
+            String::from_utf8(strip_terminfo_warning(err.as_bytes())).unwrap(),
+            "   QueryException  SQLSTATE[42S02]\n"
+        );
+        assert_eq!(strip_terminfo_warning(b"boom"), b"boom");
     }
 
     #[test]

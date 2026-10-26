@@ -180,9 +180,19 @@ fn top_entries(inner: &str) -> Vec<(String, String)> {
     out
 }
 
-/// The balanced `[ … ]` array immediately following `from` in `src`.
+/// The balanced `[ … ]` array that is the next argument after `from` in `src`
+/// (`, [ … ]`). Anything else there — a variable, `compact(…)` — is `None`;
+/// so is an array further on, which belongs to some other code.
 fn array_inner_after(src: &str, from: usize) -> Option<String> {
-    let open = src[from..].find('[')? + from;
+    let rest = src[from..].trim_start().strip_prefix(',')?.trim_start();
+    if !rest.starts_with('[') {
+        return None;
+    }
+    bracket_inner(src, src.len() - rest.len())
+}
+
+/// The inside of the balanced `[ … ]` opening at `open`.
+fn bracket_inner(src: &str, open: usize) -> Option<String> {
     let bytes = src.as_bytes();
     let mut depth = 0i32;
     let mut i = open;
@@ -200,6 +210,41 @@ fn array_inner_after(src: &str, from: usize) -> Option<String> {
         i += 1;
     }
     None
+}
+
+/// An Inertia page and the controller that renders it, if one does.
+#[derive(Clone, Debug)]
+pub struct PageRender {
+    pub page: String,
+    pub controller: Option<PathBuf>,
+    /// The props the controller sends, by key.
+    pub props: Vec<String>,
+}
+
+/// Every page component in the project, with the controller that renders it
+/// and the props it sends. Blocking: reads every controller (once).
+pub fn page_renders(root: &Path) -> Vec<PageRender> {
+    let controllers: Vec<(PathBuf, String)> = collect_controllers(root)
+        .into_iter()
+        .filter_map(|p| std::fs::read_to_string(&p).ok().map(|src| (p, src)))
+        .collect();
+    crate::inertia::list_pages(root)
+        .into_iter()
+        .map(|page| {
+            let found = controllers
+                .iter()
+                .find_map(|(p, src)| render_props(src, &page).map(|e| (p.clone(), e)));
+            let (controller, props) = match found {
+                Some((p, entries)) => (Some(p), entries.into_iter().map(|(k, _)| k).collect()),
+                None => (None, Vec::new()),
+            };
+            PageRender {
+                page,
+                controller,
+                props,
+            }
+        })
+        .collect()
 }
 
 /// Parse the props sent to `page` from a controller's source.
@@ -224,6 +269,10 @@ pub fn render_props(controller_src: &str, page: &str) -> Option<Vec<(String, Str
             let name = &controller_src[vstart..vstart + close];
             if name == page {
                 let rest = vstart + close + 1;
+                // Rendered with no props at all.
+                if controller_src[rest..].trim_start().starts_with(')') {
+                    return Some(Vec::new());
+                }
                 return array_inner_after(controller_src, rest).map(|inner| top_entries(&inner));
             }
         }
@@ -346,7 +395,11 @@ fn form_request_rules(root: &Path, class: &str) -> Vec<String> {
     let Some(at) = src.find("function rules") else {
         return Vec::new();
     };
-    array_inner_after(&src[at..], 0)
+    // The array the method returns.
+    let Some(open) = src[at..].find('[').map(|i| at + i) else {
+        return Vec::new();
+    };
+    bracket_inner(&src, open)
         .map(|inner| top_entries(&inner).into_iter().map(|(k, _)| k).collect())
         .unwrap_or_default()
 }
@@ -596,6 +649,22 @@ mod tests {
         let keys: Vec<&str> = props.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(keys, vec!["users", "filters", "canEdit"]);
         assert_eq!(infer_type(&props[0].1).0, "User[]");
+    }
+
+    #[test]
+    fn a_render_without_props_takes_no_array_from_later_code() {
+        let ctrl = r#"
+        public function index() {
+            return Inertia::render('Dashboard');
+        }
+        public function store() {
+            return Inertia::render('Users/Create', compact('roles'));
+        }
+        public function rules() {
+            return ['name' => 'required'];
+        }"#;
+        assert_eq!(render_props(ctrl, "Dashboard"), Some(Vec::new()));
+        assert_eq!(render_props(ctrl, "Users/Create"), None);
     }
 
     #[test]

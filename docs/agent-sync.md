@@ -95,6 +95,91 @@ The editor shows a consent dialog with the SQL and the target connection. If you
 rows_affected, elapsed_ms}`; if you **Deny**, it returns an error. The agent
 never gets direct database access.
 
+## The Laravel project in one answer
+
+```sh
+printf '{"method":"laravel_map"}\n' | nc -U "$E_EDITOR_SOCK"
+```
+
+Everything an agent would otherwise grep its way to, in one reply: the
+app's routes (method, URI, action, middleware, and `unprotected` on a write
+route without auth), its models with their **live columns** from the
+connected database and their relationships, Livewire components with their
+public properties and actions, Inertia pages with the controller that
+renders each and the props it sends, Blade views and Blade components.
+
+```json
+{
+  "ok": true,
+  "routes": [{"method": "GET|HEAD", "uri": "orders", "name": "orders.index",
+              "action": "OrderController@index", "middleware": "web,Authenticate"}],
+  "package_routes": 14,
+  "models": [{"class": "Order", "table": "orders", "file": "app/Models/Order.php",
+              "columns": ["id:bigint unsigned", "paid_at:timestamp?"],
+              "relations": ["user: belongsTo User"]}],
+  "livewire": [{"name": "order-table", "file": "app/Livewire/OrderTable.php",
+                "properties": ["search"], "actions": ["delete"]}],
+  "inertia": [{"page": "Orders/Index", "file": "resources/js/Pages/Orders/Index.vue",
+               "controller": "app/Http/Controllers/OrderController.php", "props": ["orders"]}],
+  "views": ["orders.index"],
+  "components": ["alert"]
+}
+```
+
+Paths are relative to the project root; a column is `name:type`, with `?`
+when it's nullable. Routes packages register for themselves (Flux's and
+Livewire's assets, say) are only counted, in `package_routes`. Without a
+database the models come without columns, and `note` says so.
+
+Two options keep the answer small on a large project:
+
+| Option | Effect |
+| ------ | ------ |
+| `"include": ["routes", "models"]` | Only these sections (`routes`, `models`, `livewire`, `inertia`, `views`, `components`) |
+| `"filter": "order"` | Only entries whose name, URI, action, class or table contains this (any case) |
+
+## Measuring a route
+
+```sh
+printf '{"method":"verify_route","uri":"/orders"}\n' | nc -U "$E_EDITOR_SOCK"
+```
+
+Replays the route against the running app and answers with its status, time,
+query count and any N+1 — the same measurement as the
+[verify panel](laravel.md) and the ship gate. The first measurement of a URL
+is its **baseline**; each later one comes back compared with it:
+
+```json
+{
+  "ok": true,
+  "url": "https://shop.test/orders",
+  "metrics": {"status": 200, "ms": 41, "queries": 2, "slowest_query_ms": 1.2,
+              "n_plus_one": []},
+  "comparison": {"verdict": "Improved", "summary": "2 queries (-23) · 340ms → 41ms · N+1 removed",
+                 "ms_before": 340, "ms_after": 41, "queries_before": 25, "queries_after": 2,
+                 "n_plus_one_fixed": true, "n_plus_one_after": false, "status_changed": false}
+}
+```
+
+So an agent fixing a slow page measures it before it starts and again when it
+thinks it's done, and reports a verdict it measured rather than one it
+assumed. The verdict is `Improved`, `No change`, `Regressed` or `Broke` (the
+route now answers with an error).
+
+- Name the route instead with `"route": "orders.index"`. A route with
+  parameters needs them filled in — `"uri": "/orders/1"`.
+- Only routes that read are replayed: a POST would change data.
+- `"reset": true` makes this measurement the new baseline.
+- The editor waits 2.5 s before measuring, so PHP's opcache has seen the file
+  the agent just wrote, then takes the median of three requests after a
+  warm-up. A time difference under 15% (or 10 ms) counts as noise.
+- Query counts come from Clockwork in the app, or from Grove's SQL capture.
+  With neither, only status and time are measured, and `note` says so rather
+  than reporting zero queries.
+
+Nothing is stashed or checkpointed: the agent's work stays in the tree. The
+measurements are recorded in the **Agent Timeline**.
+
 ## Running commands
 
 ```sh
@@ -104,6 +189,10 @@ printf '{"method":"run","command":"php artisan test"}\n' | nc -U "$E_EDITOR_SOCK
 Runs a command in the workspace (or `"cwd":"…"`) through the login shell and
 returns `{code, stdout, stderr}`. This is the basis for an autonomous
 test-fix-rerun loop.
+
+`{"method":"tinker","code":"echo User::count();"}` runs PHP through
+`php artisan tinker` and returns `{code, stdout, stderr}` the same way; it is
+given up on after 60 seconds.
 
 ## Proposing edits (reviewed)
 

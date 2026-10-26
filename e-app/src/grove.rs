@@ -225,6 +225,15 @@ fn parse_request(r: &Value) -> Option<Request> {
     })
 }
 
+/// What a driver sends when it connects — `use \`db\``, `SET NAMES …` —
+/// rather than what the app asked for. The query log has both; Clockwork,
+/// which counts from inside the app, only the second, and the two should
+/// count the same.
+pub fn is_connection_setup(sql: &str) -> bool {
+    let s = sql.trim_start().to_ascii_lowercase();
+    s.starts_with("use ") || s.starts_with("set names") || s.starts_with("set session")
+}
+
 pub fn parse_sql_capture(data: &Value) -> Option<bool> {
     data.pointer("/sql_capture/enabled")
         .and_then(Value::as_bool)
@@ -529,6 +538,17 @@ pub fn parse_hooks(data: &Value) -> Vec<Request> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn connection_setup_is_not_the_apps_sql() {
+        // As captured from a Laravel request through Grove.
+        assert!(is_connection_setup("use `abonnementsoversikt_db`"));
+        assert!(is_connection_setup(
+            "SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci', SESSION sql_mode='ONLY_FULL_GROUP_BY'"
+        ));
+        assert!(!is_connection_setup("select * from `users` where `id` = 1"));
+        assert!(!is_connection_setup("update users set name = 'x'"));
+    }
 
     /// `grove list --json`, as captured on 2026-09-05.
     fn sites_json() -> Value {

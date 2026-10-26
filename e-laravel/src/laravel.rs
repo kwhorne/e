@@ -42,6 +42,19 @@ impl RouteInfo {
     pub fn is_unprotected(&self) -> bool {
         self.is_write() && !self.has_auth()
     }
+
+    /// A route a package registers for itself — Flux's and Livewire's assets,
+    /// Sanctum's CSRF cookie — rather than one of the app's: its action lives
+    /// in a namespace that isn't `App\`. Closures can't be told apart and
+    /// count as the app's, as do Laravel's own view/redirect routes and
+    /// Livewire full-page components, which the app declares.
+    pub fn is_package(&self) -> bool {
+        let a = self.action.as_str();
+        a.contains('\\')
+            && !a.starts_with("App\\")
+            && !a.starts_with("Illuminate\\Routing\\")
+            && !a.starts_with("Livewire\\Mechanisms\\HandleRouting\\")
+    }
 }
 
 #[derive(Clone, Debug)]

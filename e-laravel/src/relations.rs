@@ -194,6 +194,15 @@ fn fk_ok(kind: &str, m_table: &str, t_table: &str, fks: &[ForeignKey]) -> bool {
 
 /// Parse every model under `app/` and cross-check against `fks`.
 pub fn build_graph(root: &Path, fks: &[ForeignKey]) -> Vec<ModelNode> {
+    models(root, fks)
+        .into_iter()
+        .filter(|n| !n.relations.is_empty())
+        .collect()
+}
+
+/// Every model under `app/`, those without relationships too, with its
+/// relationships cross-checked against `fks`.
+pub fn models(root: &Path, fks: &[ForeignKey]) -> Vec<ModelNode> {
     let mut files = Vec::new();
     for dir in [root.join("app/Models"), root.join("app")] {
         collect_php(&dir, &mut files, 0);
@@ -254,7 +263,6 @@ pub fn build_graph(root: &Path, fks: &[ForeignKey]) -> Vec<ModelNode> {
                 relations,
             }
         })
-        .filter(|n| !n.relations.is_empty())
         .collect()
 }
 

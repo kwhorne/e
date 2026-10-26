@@ -24,6 +24,7 @@ pub mod livewire;
 pub mod move_class;
 pub mod phptools;
 pub mod policies;
+pub mod project_map;
 pub mod querycomplete;
 pub mod relatedfiles;
 pub mod relations;

@@ -115,6 +115,11 @@ The agent isn't just a terminal — it gets a local Unix socket
   diagnostics.
 - **Reuse the language server** — definitions, references, hover and symbols
   from the same server the editor runs.
+- **Know the Laravel project** — routes, models with their live columns,
+  Livewire components and Inertia pages in one answer, instead of grepping
+  for them.
+- **Measure its own work** — replay a route before and after a change and get
+  the verdict: faster or slower, fewer queries, N+1 gone.
 - **Query the database** through the editor's connection (consent-gated — you
   approve each query; the agent never sees your credentials).
 - **Propose edits you review** — the agent sends a new version of a file and you

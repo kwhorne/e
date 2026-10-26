@@ -325,7 +325,37 @@ Without Grove, the panel polls [Clockwork](https://underground.works/clockwork)
 sent mails, and events.
 
 **Verify the fix** (below) takes its query counts from Grove's chain too when
-the app has no Clockwork — turn on SQL capture first.
+the app has no Clockwork — turn on SQL capture first. Grove 1.12.4 or later is
+needed for it to see a Laravel app's queries; older versions missed PDO's
+prepared statements.
+
+### Runtime lenses
+
+What the running app just did shows at the end of the line of the controller
+method that did it:
+
+```php
+public function index(Request $request)   ⚡ 42 ms · 14 queries · N+1 orders ×12 · 2m ago
+```
+
+Each captured request is matched to the route the router would pick, and the
+route to its action; the newest request per action is the one shown, with the
+number of requests when there were several. A Livewire page or an invokable
+controller gets its lens on the `class` line. The lens turns yellow for an N+1
+or a request over a second, and red for a server error. Queries are shown only
+when they could be seen — Clockwork in the app, or Grove with SQL capture on —
+never as a guessed zero.
+
+`⌘.` on the line offers **Runtime: show** (the request, expanded, in the Runtime
+panel) and **Runtime: ask the agent to fix … and measure it**: the agent gets
+the request with its queries and stacktrace, and is told to measure the route
+with [`verify_route`](agent-sync.md#measuring-a-route) before and after its
+change and to report that verdict.
+
+With Grove, the timeline is read every two seconds while a file under `app/` is
+open, so the lenses follow your browser without the Runtime panel open; with
+Clockwork, they follow while the panel is open. Turn them off under
+**Settings → Laravel → Runtime lenses**.
 
 ### Mail and webhooks (Grove)
 

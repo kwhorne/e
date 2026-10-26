@@ -38,6 +38,8 @@ pub struct RuntimeReq {
     /// Whether the side effects (queries, mail, logs) have been fetched. Always
     /// true for Clockwork, which delivers everything in one payload.
     pub chain_loaded: bool,
+    /// When the request was made, in epoch milliseconds.
+    pub at_ms: u128,
 }
 
 /// One line of a request's expanded detail.
@@ -66,6 +68,7 @@ impl RuntimeReq {
             grove_id: Some(r.id),
             logs: Vec::new(),
             chain_loaded: false,
+            at_ms: r.epoch_ms,
         };
         if let Some(d) = detail {
             req.absorb(d);
@@ -197,6 +200,12 @@ fn parse_clockwork_latest(v: &serde_json::Value) -> Option<RuntimeReq> {
         grove_id: None,
         logs: Vec::new(),
         chain_loaded: true,
+        // Clockwork's `time` is the request's start, in seconds.
+        at_ms: v
+            .get("time")
+            .and_then(|t| t.as_f64())
+            .map(|t| (t * 1000.0) as u128)
+            .unwrap_or_else(crate::state::now_ms),
     })
 }
 
@@ -402,6 +411,37 @@ impl AppState {
     /// gets the whole `grove explain` bundle: the request, its SQL and mail, and
     /// the matching stacktrace from the Laravel log.
     pub fn runtime_explain(&self, id: &str) {
+        self.runtime_to_agent(id, "");
+    }
+
+    /// Hand a request to the agent to fix — an N+1, a slow or failing route —
+    /// with the means to prove it: measure the route before changing anything
+    /// and again after, with `verify_route`.
+    pub fn runtime_fix(&self, id: &str) {
+        let Some(r) = self
+            .runtime_reqs
+            .with_untracked(|list| list.iter().find(|r| r.id == id).cloned())
+        else {
+            return;
+        };
+        let path = r.uri.split('?').next().unwrap_or(&r.uri).to_string();
+        let how = if r.method.eq_ignore_ascii_case("GET") {
+            format!(
+                "\n\nThen fix it. Before you change anything, measure the route: \
+                 printf '{{\"method\":\"verify_route\",\"uri\":\"{path}\"}}\\n' | nc -U \"$E_EDITOR_SOCK\". \
+                 Measure it again the same way when you're done, and report the verdict \
+                 it gives rather than your own estimate."
+            )
+        } else {
+            "\n\nThen fix it. This route writes, so it can't be replayed to measure the \
+             fix: say what you changed and how to check it."
+                .to_string()
+        };
+        self.runtime_to_agent(id, &how);
+    }
+
+    fn runtime_to_agent(&self, id: &str, suffix: &str) {
+        let suffix = suffix.to_string();
         let req = self
             .runtime_reqs
             .with_untracked(|list| list.iter().find(|r| r.id == id).cloned());
@@ -419,12 +459,12 @@ impl AppState {
                         Some(d) => grove::explain_prompt(&d, sql_capture),
                         None => fallback,
                     };
-                    app.send_to_agent(&prompt);
+                    app.send_to_agent(&format!("{prompt}{suffix}"));
                 },
             );
             return;
         }
-        self.send_to_agent(&clockwork_prompt(&r));
+        self.send_to_agent(&format!("{}{suffix}", clockwork_prompt(&r)));
     }
 }
 

@@ -2,11 +2,14 @@
 //! phantom text, without changing how the rest of the app stores documents.
 //!
 //! Every `Document`/`DocumentPhantom` method delegates to the inner
-//! `TextDocument` except `phantom_text`, which appends inlay hints. The layout
+//! `TextDocument` except `phantom_text`, which appends inlay hints and
+//! runtime lenses (see [`crate::runtime_lens`]). The layout
 //! methods use the trait default — exactly as `TextDocument` does — so they
 //! read our `phantom_text`.
 
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use floem::keyboard::Modifiers;
 use floem::peniko::Color;
@@ -32,10 +35,22 @@ fn ghost_color() -> Color {
     theme::fg_dim()
 }
 
+fn lens_color(level: crate::runtime_lens::LensLevel) -> Color {
+    use crate::runtime_lens::LensLevel;
+    match level {
+        LensLevel::Info => hint_color(),
+        LensLevel::Warn => theme::warning(),
+        LensLevel::Error => theme::error(),
+    }
+}
+
 pub struct HintsDoc {
     inner: Rc<TextDocument>,
     hints: RwSignal<Vec<(u32, u32, String)>>,
     ghost: RwSignal<Option<crate::ghost::GhostText>>,
+    lenses: RwSignal<Arc<Vec<crate::runtime_lens::Lens>>>,
+    /// The buffer's file, which the lenses are looked up by.
+    path: Option<PathBuf>,
 }
 
 impl HintsDoc {
@@ -43,12 +58,40 @@ impl HintsDoc {
         inner: Rc<TextDocument>,
         hints: RwSignal<Vec<(u32, u32, String)>>,
         ghost: RwSignal<Option<crate::ghost::GhostText>>,
+        lenses: RwSignal<Arc<Vec<crate::runtime_lens::Lens>>>,
+        path: Option<PathBuf>,
     ) -> Self {
         Self {
             inner,
             hints,
             ghost,
+            lenses,
+            path,
         }
+    }
+
+    /// The runtime lens for `line`, at the end of it.
+    fn lens_on(&self, line: usize) -> Option<PhantomText> {
+        let path = self.path.as_ref()?;
+        self.lenses.with_untracked(|ls| {
+            if !ls.iter().any(|l| &l.file == path) {
+                return None;
+            }
+            let rope = self.inner.rope_text();
+            let content = rope.line_content(line);
+            let anchor = crate::runtime_lens::LensAnchor::of_line(&content)?;
+            let lens = ls.iter().find(|l| &l.file == path && l.anchor == anchor)?;
+            Some(PhantomText {
+                kind: PhantomTextKind::InlayHint,
+                col: content.trim_end_matches(['\n', '\r']).len(),
+                affinity: None,
+                text: format!("   {}", lens.label),
+                font_size: None,
+                fg: Some(lens_color(lens.level)),
+                bg: None,
+                under_line: None,
+            })
+        })
     }
 }
 
@@ -81,6 +124,9 @@ impl DocumentPhantom for HintsDoc {
         });
         if added {
             pl.text.sort_by_key(|p| p.col);
+        }
+        if let Some(lens) = self.lens_on(line) {
+            pl.text.push(lens);
         }
 
         // Inline AI suggestion ("ghost text") at the cursor, rendered grey.

@@ -884,6 +884,22 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
     );
     push(
         4,
+        "Runtime lenses",
+        "The latest request's time, queries and N+1 beside the controller method that served it",
+        toggle_row(
+            "Runtime lenses",
+            "The latest request's time, queries and N+1 beside the controller method that served it",
+            move || s.settings.get().runtime_lenses,
+            move |v| {
+                s.settings.update(|st| st.runtime_lenses = v);
+                config::set_bool("runtime_lenses", v);
+                s.refresh_runtime_lenses();
+            },
+        )
+        .into_any(),
+    );
+    push(
+        4,
         "Enable Xdebug",
         "Load Xdebug into Grove's PHP for step-debugging (grove debug on)",
         toggle_row(

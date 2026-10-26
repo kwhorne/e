@@ -850,6 +850,8 @@ pub struct AppState {
 
     // ---- Runtime insight (continuous Clockwork capture) ----------------
     pub runtime_open: RwSignal<bool>,
+    /// What the editor shows at controller methods; see [`crate::runtime_lens`].
+    pub runtime_lenses: RwSignal<Arc<Vec<crate::runtime_lens::Lens>>>,
     pub runtime_reqs: RwSignal<Vec<RuntimeReq>>,
     pub runtime_expanded: RwSignal<Option<String>>,
     pub runtime_polling: RwSignal<bool>,
@@ -1597,7 +1599,7 @@ pub fn now_ms_epoch() -> u64 {
     now_ms() as u64
 }
 
-fn now_ms() -> u128 {
+pub(crate) fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -1706,6 +1708,7 @@ impl AppState {
             related_open: RwSignal::new(false),
             related_items: RwSignal::new(Vec::new()),
             runtime_open: RwSignal::new(false),
+            runtime_lenses: RwSignal::new(Arc::new(Vec::new())),
             runtime_reqs: RwSignal::new(Vec::new()),
             runtime_expanded: RwSignal::new(None),
             runtime_polling: RwSignal::new(false),
@@ -6625,6 +6628,35 @@ impl AppState {
         // so they're computed right here and shown first.
         let text = buf.doc.text().to_string();
         let mut local = self.lint_fix_actions(&uri, sl, sc);
+        // On a line with a runtime lens: the request behind it.
+        let lens = buf.file.path.as_ref().and_then(|p| {
+            let line = text.lines().nth(sl as usize)?;
+            self.runtime_lens_at(p, line)
+        });
+        if let Some(lens) = lens {
+            let (method, uri) = self
+                .runtime_reqs
+                .with_untracked(|l| {
+                    l.iter()
+                        .find(|r| r.id == lens.req_id)
+                        .map(|r| (r.method.clone(), r.uri.clone()))
+                })
+                .unwrap_or_default();
+            let item = |title: String, action: &str| e_lsp::CodeActionItem {
+                title,
+                edits: Vec::new(),
+                command: Some(serde_json::json!({ "e": action, "id": lens.req_id })),
+                server: "e".to_string(),
+            };
+            local.push(item(
+                format!("Runtime: show {method} {uri}"),
+                "runtime.open",
+            ));
+            local.push(item(
+                format!("Runtime: ask the agent to fix {method} {uri} and measure it"),
+                "runtime.fix",
+            ));
+        }
         local.extend(local_code_actions(
             &text,
             buf.file.language,
@@ -6698,6 +6730,16 @@ impl AppState {
         let Some(command) = item.command.clone() else {
             return;
         };
+        // `e`'s own actions carry what to do rather than an LSP command.
+        if item.server == "e" {
+            let id = command.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match command.get("e").and_then(|v| v.as_str()) {
+                Some("runtime.open") => self.runtime_lens_open(id),
+                Some("runtime.fix") => self.runtime_fix(id),
+                _ => {}
+            }
+            return;
+        }
         let client = self
             .lsp_clients
             .with_untracked(|m| m.values().find(|c| c.name() == item.server).cloned());

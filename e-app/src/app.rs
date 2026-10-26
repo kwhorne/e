@@ -6,7 +6,9 @@ use floem::event::{Event, EventListener, EventPropagation};
 use floem::ext_event::create_signal_from_channel;
 use floem::keyboard::{Key, Modifiers};
 use floem::kurbo::Size;
-use floem::reactive::{create_effect, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
+use floem::reactive::{
+    create_effect, RwSignal, Scope, SignalGet, SignalTrack, SignalUpdate, SignalWith,
+};
 use floem::views::{dyn_container, stack, Decorators};
 use floem::window::WindowConfig;
 use floem::{AppConfig, Application, IntoView};
@@ -523,6 +525,13 @@ fn app_view() -> impl IntoView {
     state.load_laravel();
     state.load_databases();
     state.load_db_schema_cache();
+    // Runtime lenses follow the captured requests and the routes they match.
+    create_effect(move |_| {
+        state.runtime_reqs.track();
+        state.laravel.track();
+        state.grove_sql_capture.track();
+        state.refresh_runtime_lenses();
+    });
     // Reflect Grove's real Xdebug state in the setting (no-op without Grove).
     state.sync_grove_xdebug_state();
     // Which Grove site is this project? Decides the Runtime panel's source and
@@ -573,6 +582,7 @@ fn app_view() -> impl IntoView {
             }
         });
         let ticks = create_signal_from_channel(auto_rx);
+        let lens_tick = std::cell::Cell::new(0u32);
         create_effect(move |backed_up: Option<Option<u64>>| {
             let mut backed_up = backed_up.flatten();
             if ticks.get().is_some() {
@@ -594,6 +604,16 @@ fn app_view() -> impl IntoView {
                 }
                 if state.runtime_open.get_untracked() {
                     state.poll_runtime();
+                }
+                let tick = lens_tick.get().wrapping_add(1);
+                lens_tick.set(tick);
+                // Every 2 s: the timeline, for the lenses of the files open.
+                if tick.is_multiple_of(4) {
+                    state.poll_runtime_for_lenses();
+                }
+                // Every 15 s: the lenses' "2m ago".
+                if tick.is_multiple_of(30) {
+                    state.refresh_runtime_lenses();
                 }
                 if state.grove_panel_open.get_untracked() {
                     state.refresh_grove_panel();

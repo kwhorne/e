@@ -247,6 +247,7 @@ pub fn compare(before: &RequestMetrics, after: &RequestMetrics) -> Comparison {
 }
 
 /// Normalize a SQL statement to a skeleton for grouping: literals become `?`,
+/// quoted identifiers (`` `orders` ``, `"orders"`) lose their quotes but stay,
 /// case and whitespace are normalized, and repeated `?` lists (`IN (?, ?, ?)`)
 /// collapse to `(?)`. Two queries that differ only by their bound values map to
 /// the same skeleton — which is exactly how an N+1 shows up.
@@ -255,8 +256,19 @@ pub fn skeleton(sql: &str) -> String {
     let mut chars = sql.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
-            '\'' | '"' | '`' => {
-                // A quoted literal (or identifier) — collapse to a placeholder.
+            '`' | '"' => {
+                // A quoted identifier — Laravel quotes every one, with backticks
+                // on MySQL and double quotes on Postgres. It is what tells
+                // `orders` from `users`, so it stays.
+                for n in chars.by_ref() {
+                    if n == c {
+                        break;
+                    }
+                    out.push(n.to_ascii_lowercase());
+                }
+            }
+            '\'' => {
+                // A string literal — collapse to a placeholder.
                 let quote = c;
                 out.push('?');
                 for n in chars.by_ref() {
@@ -562,6 +574,24 @@ mod tests {
         assert_eq!(
             skeleton("select * from t where name = 'alice'"),
             skeleton("select * from t where name = 'bob'")
+        );
+    }
+
+    #[test]
+    fn skeleton_keeps_quoted_identifiers() {
+        // As Laravel sends them on MySQL: different tables are different
+        // queries, the same query with other values is the same one.
+        assert_eq!(
+            skeleton("select * from `orders` where `user_id` = 7"),
+            "select * from orders where user_id = ?"
+        );
+        assert_ne!(
+            skeleton("select * from `orders` where `id` = 1"),
+            skeleton("select * from `users` where `id` = 1")
+        );
+        assert_eq!(
+            skeleton(r#"select * from "posts" where "slug" = 'a'"#),
+            skeleton(r#"select * from "posts" where "slug" = 'b'"#)
         );
     }
 

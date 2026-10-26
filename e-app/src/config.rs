@@ -22,6 +22,9 @@ pub struct Settings {
     pub indent_guides: bool,
     pub auto_close: bool,
     pub inlay_hints: bool,
+    /// Runtime lenses: the running app's latest request at the end of the
+    /// controller method that served it.
+    pub runtime_lenses: bool,
     pub sticky_scroll: bool,
     /// Inline AI completion ("ghost text") via a local Ollama code model.
     pub ai_completion: bool,
@@ -74,6 +77,7 @@ impl Default for Settings {
             indent_guides: true,
             auto_close: true,
             inlay_hints: true,
+            runtime_lenses: true,
             sticky_scroll: true,
             ai_completion: false,
             cascade: false,
@@ -145,6 +149,7 @@ pub fn load_settings() -> Settings {
         indent_guides: bool_of("indent_guides", d.indent_guides),
         auto_close: bool_of("auto_close", d.auto_close),
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
+        runtime_lenses: bool_of("runtime_lenses", d.runtime_lenses),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         ai_completion: bool_of("ai_completion", d.ai_completion),
         cascade: v

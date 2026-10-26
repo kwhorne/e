@@ -57,6 +57,45 @@ impl RouteInfo {
     }
 }
 
+/// The route that served `method path` — what Laravel's router would pick.
+/// A static segment beats a parameter (`orders/create` over
+/// `orders/{order}`), so the most specific match wins. A query string and a
+/// trailing slash are ignored; `HEAD` is served by `GET` routes.
+pub fn route_for<'a>(routes: &'a [RouteInfo], method: &str, path: &str) -> Option<&'a RouteInfo> {
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let method = method.to_ascii_uppercase();
+    routes
+        .iter()
+        .filter(|r| {
+            r.methods
+                .split('|')
+                .any(|m| m.trim().eq_ignore_ascii_case(&method))
+        })
+        .filter_map(|r| uri_score(&r.uri, &segs).map(|score| (score, r)))
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, r)| r)
+}
+
+/// How well a route URI matches the request's segments — its number of
+/// static segments — or `None` when it doesn't match.
+fn uri_score(uri: &str, segs: &[&str]) -> Option<usize> {
+    let pattern: Vec<&str> = uri.split('/').filter(|s| !s.is_empty()).collect();
+    let mut score = 0;
+    for (i, p) in pattern.iter().enumerate() {
+        let param = p.starts_with('{') && p.ends_with('}');
+        match segs.get(i) {
+            Some(_) if param => {}
+            Some(seg) if p == seg => score += 1,
+            Some(_) => return None,
+            // Only an optional parameter may be left out.
+            None if param && p.ends_with("?}") => {}
+            None => return None,
+        }
+    }
+    (segs.len() <= pattern.len()).then_some(score)
+}
+
 #[derive(Clone, Debug)]
 pub struct ViewInfo {
     pub name: String,
@@ -1496,6 +1535,36 @@ pub fn model_class_from_table(table: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_finds_the_route_the_router_would_pick() {
+        let r = |methods: &str, uri: &str, name: &str| RouteInfo {
+            name: name.into(),
+            uri: uri.into(),
+            methods: methods.into(),
+            action: String::new(),
+            middleware: String::new(),
+        };
+        let routes = [
+            r("GET|HEAD", "/", "home"),
+            r("GET|HEAD", "orders", "orders.index"),
+            r("POST", "orders", "orders.store"),
+            r("GET|HEAD", "orders/{order}", "orders.show"),
+            r("GET|HEAD", "orders/create", "orders.create"),
+            r("GET|HEAD", "posts/{post}/comments/{comment?}", "comments"),
+        ];
+        let name = |m: &str, p: &str| route_for(&routes, m, p).map(|r| r.name.as_str());
+        assert_eq!(name("GET", "/"), Some("home"));
+        assert_eq!(name("GET", "/orders?page=2"), Some("orders.index"));
+        assert_eq!(name("HEAD", "/orders/"), Some("orders.index"));
+        assert_eq!(name("POST", "/orders"), Some("orders.store"));
+        assert_eq!(name("GET", "/orders/42"), Some("orders.show"));
+        assert_eq!(name("GET", "/orders/create"), Some("orders.create"));
+        assert_eq!(name("GET", "/posts/1/comments"), Some("comments"));
+        assert_eq!(name("GET", "/posts/1/comments/2"), Some("comments"));
+        assert_eq!(name("GET", "/orders/1/edit"), None);
+        assert_eq!(name("DELETE", "/orders/1"), None);
+    }
 
     #[test]
     fn model_class_guess() {

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Runtime lenses.** The running app's latest request shows at the end of
+  the line of the controller method that served it —
+  `⚡ 42 ms · 14 queries · N+1 orders ×12 · 2m ago` — yellow for an N+1 or a
+  slow request, red for a server error. `⌘.` on the line opens the request in
+  the Runtime panel, or hands it to the agent to fix and measure with
+  `verify_route`. Requests come from Grove's timeline (or Clockwork) and are
+  matched to their route the way the router would.
+
 - **`laravel_map` on the agent socket.** One request answers what an agent
   otherwise greps for over dozens of calls: the routes, the models with
   their live columns and relationships, Livewire components with their
@@ -39,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array anywhere further down the controller.
 - Replays running at the same time (request panel, verify, agent) no longer
   share a header file.
+- **Different queries are no longer counted as one N+1.** Query shapes
+  dropped quoted identifiers along with values, so `` select * from `orders`
+  where `id` = 1 `` and the same against `users` grouped together — and
+  Laravel quotes every identifier.
 
 ## [0.10.1] - 2026-10-10
 

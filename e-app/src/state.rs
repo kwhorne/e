@@ -4587,19 +4587,7 @@ impl AppState {
             running.set(false);
         });
         std::thread::spawn(move || {
-            let tmp = std::env::temp_dir().join(format!("e-tinker-{}.php", std::process::id()));
-            let _ = std::fs::write(&tmp, code);
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-            let cmd = format!(
-                "php -d error_reporting=0 -d display_errors=0 artisan tinker < {}",
-                tmp.display()
-            );
-            let text = match std::process::Command::new(shell)
-                .arg("-ilc")
-                .arg(&cmd)
-                .current_dir(&root)
-                .output()
-            {
+            let text = match crate::phptools::tinker(&root, &code) {
                 Ok(o) => {
                     let mut s = String::from_utf8_lossy(&o.stdout).to_string();
                     let err = String::from_utf8_lossy(&o.stderr);
@@ -4613,7 +4601,6 @@ impl AppState {
                 }
                 Err(e) => format!("failed to run tinker: {e}"),
             };
-            let _ = std::fs::remove_file(&tmp);
             send(text);
         });
     }

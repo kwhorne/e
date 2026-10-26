@@ -146,13 +146,42 @@ pub fn php(
     args: &[&str],
     timeout: std::time::Duration,
 ) -> Result<std::process::Output, String> {
-    use std::io::Read;
+    php_with_input(dir, args, None, timeout)
+}
+
+/// How long Tinker code may run before it's given up on.
+pub const TINKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Run `code` through `php artisan tinker` in `root`. The code goes in on
+/// stdin, not through a temp file, so runs at the same time can't overwrite
+/// each other's code. Blocking: off the UI thread.
+pub fn tinker(root: &Path, code: &str) -> Result<std::process::Output, String> {
+    php_with_input(
+        root,
+        &["artisan", "tinker"],
+        Some(code.as_bytes().to_vec()),
+        TINKER_TIMEOUT,
+    )
+}
+
+/// [`php`], with `input` written to its stdin (closed after; null when `None`).
+pub fn php_with_input(
+    dir: &Path,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, String> {
+    use std::io::{Read, Write};
     use std::process::Stdio;
     let mut child = std::process::Command::new("php")
         .args(["-d", "error_reporting=0", "-d", "display_errors=0"])
         .args(args)
         .current_dir(dir)
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -162,6 +191,13 @@ pub fn php(
                 std::env::var("PATH").unwrap_or_default()
             )
         })?;
+    // Written from a thread: input bigger than the pipe buffer would block
+    // until php reads it.
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&input);
+        });
+    }
     // Read both pipes while waiting, or a chatty command blocks on a full one.
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
@@ -482,5 +518,27 @@ mod live_php {
         )
         .unwrap();
         assert_eq!(String::from_utf8_lossy(&ok.stdout), "hi");
+    }
+
+    #[test]
+    fn php_reads_its_input_from_stdin() {
+        if std::process::Command::new("php")
+            .arg("-v")
+            .output()
+            .is_err()
+        {
+            return; // no PHP on this machine
+        }
+        let dir = std::env::temp_dir();
+        // Bigger than a pipe buffer, so a blocking write would deadlock.
+        let input = "x".repeat(200_000);
+        let out = php_with_input(
+            &dir,
+            &["-r", "echo strlen(stream_get_contents(STDIN));"],
+            Some(input.into_bytes()),
+            std::time::Duration::from_secs(10),
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "200000");
     }
 }

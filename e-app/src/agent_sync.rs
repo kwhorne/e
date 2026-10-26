@@ -495,19 +495,17 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 let _ = reply.send(json!({"ok": false, "error": "missing code"}));
                 return;
             };
-            let root = state.root.get_untracked().to_string_lossy().into_owned();
+            let root = state.root.get_untracked();
             std::thread::spawn(move || {
-                let tmp =
-                    std::env::temp_dir().join(format!("e-tinker-agent-{}.php", std::process::id()));
-                let _ = std::fs::write(&tmp, code);
-                let resp = run_command(
-                    &format!(
-                        "php -d error_reporting=0 -d display_errors=0 artisan tinker < {}",
-                        tmp.display()
-                    ),
-                    &root,
-                );
-                let _ = std::fs::remove_file(&tmp);
+                let resp = match crate::phptools::tinker(&root, &code) {
+                    Ok(o) => json!({
+                        "ok": true,
+                        "code": o.status.code(),
+                        "stdout": String::from_utf8_lossy(&o.stdout),
+                        "stderr": String::from_utf8_lossy(&o.stderr),
+                    }),
+                    Err(e) => json!({"ok": false, "error": e}),
+                };
                 let _ = reply.send(resp);
             });
             return;

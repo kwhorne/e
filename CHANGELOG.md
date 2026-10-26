@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-26
+
 ### Fixed
 
 - **The macOS installer is notarized again.** Apple stopped notarizing for
@@ -1973,7 +1975,8 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/kwhorne/e/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/kwhorne/e/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/kwhorne/e/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kwhorne/e/compare/v0.9.24...v0.10.0

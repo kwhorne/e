@@ -3,10 +3,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  # An escape hatch for when one asset fails and the rest are fine. Re-pushing
-  # the tag would rebuild everything, and Rust builds aren't reproducible, so
-  # the good assets would come back with different checksums. This rebuilds
-  # only what you ask for and attaches it to a release that already exists.
+  # An escape hatch for when one archive fails and the rest are fine: rebuild
+  # and attach them to a release that already exists. The DMG isn't built
+  # here: scripts/release.sh builds, signs and notarizes it on a Mac.
   workflow_dispatch:
     inputs:
       tag:
@@ -15,14 +14,6 @@ on:
       ref:
         description: "Commit or branch to build from. Defaults to the tag itself; point it elsewhere when the fix you need isn't in the tag."
         required: false
-      assets:
-        description: "Which assets to rebuild"
-        required: false
-        default: dmg
-        type: choice
-        options:
-          - dmg
-          - all
 
 permissions:
   contents: write
@@ -31,7 +22,6 @@ jobs:
   build:
     name: Build & upload (${{ matrix.target }})
     runs-on: macos-latest
-    if: github.event_name == 'push' || inputs.assets == 'all'
     strategy:
       fail-fast: false
       matrix:
@@ -66,7 +56,6 @@ jobs:
 
   linux:
     name: Build & upload (${{ matrix.target }})
-    if: github.event_name == 'push' || inputs.assets == 'all'
     strategy:
       fail-fast: false
       matrix:
@@ -110,62 +99,3 @@ jobs:
           files: |
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz.sha256
-
-  dmg:
-    name: Universal DMG installer
-    runs-on: macos-latest
-    # Two release builds, signing and notarization: 15–20 minutes when Apple
-    # answers. Never the runner's six hours.
-    timeout-minutes: 60
-    env:
-      # Present only when the repo has the signing secrets configured.
-      HAS_CERT: ${{ secrets.MACOS_CERTIFICATE }}
-      NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-      NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-      NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref || inputs.tag || github.ref }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Import Developer ID certificate
-        if: env.HAS_CERT != ''
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: actions-build
-        run: |
-          echo "$MACOS_CERTIFICATE" | base64 --decode > cert.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -lut 21600 build.keychain
-          security import cert.p12 -k build.keychain \
-            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" build.keychain >/dev/null
-          rm -f cert.p12
-          ID="$(security find-identity -v -p codesigning build.keychain \
-            | awk -F'"' '/Developer ID Application/{print $2; exit}')"
-          echo "CODESIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
-          echo "Using identity: $ID"
-
-      - name: Build DMG
-        run: ./scripts/bundle-dmg.sh --universal
-
-      - name: Checksum
-        run: |
-          cd dist
-          shasum -a 256 e-*-universal.dmg > "$(ls e-*-universal.dmg).sha256"
-
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          files: |
-            dist/e-*-universal.dmg
-            dist/e-*-universal.dmg.sha256

@@ -16,9 +16,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Shared signing/notarization helpers. Default to the local keychain profile.
+# Shared signing/notarization helpers. Default to the local keychain profile
+# eterm notarizes with (`xcrun notarytool store-credentials "Knut Horne" …`).
 source "$(dirname "$0")/sign.sh"
-: "${NOTARY_PROFILE:=e-notary}"
+: "${NOTARY_PROFILE:=Knut Horne}"
 
 VERSION="$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' Cargo.toml | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/')"
 UNIVERSAL=0
@@ -182,7 +183,15 @@ if [[ "$IDENTITY" != "-" ]]; then
   sign_dmg "$DMG" "$IDENTITY"
   if notarize_staple "$DMG"; then
     echo "  ✓ notarized + stapled"
+  elif [[ "${E_REQUIRE_NOTARIZATION:-}" == "1" ]]; then
+    # A release must not go out with a DMG Gatekeeper warns about, as
+    # 0.10.1's did when Apple turned the submission down.
+    echo "error: the DMG was not notarized; not releasing it" >&2
+    exit 1
   fi
+elif [[ "${E_REQUIRE_NOTARIZATION:-}" == "1" ]]; then
+  echo "error: no Developer ID to sign with; not releasing an unsigned DMG" >&2
+  exit 1
 fi
 
 echo

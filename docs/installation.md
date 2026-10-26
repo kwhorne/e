@@ -110,38 +110,33 @@ first launch macOS shows an "unidentified developer" prompt; right-click the app
 ### Signed & notarized builds
 
 `bundle-dmg.sh` and `bundle-macos.sh` sign automatically when a
-`Developer ID Application` identity is in your keychain (auto-detected, or set
-`CODESIGN_IDENTITY`). The DMG is then signed, notarized, and stapled.
+`Developer ID Application` identity is in your keychain. With several, the one
+for team `52AT44QFCM` (Knut Horne) is used, or set `CODESIGN_TEAM`, or name one
+with `CODESIGN_IDENTITY`. The DMG is then signed, notarized, and stapled.
 
 Notarization needs credentials. Store them once in the keychain (the app-specific
 password never touches disk):
 
 ```sh
-xcrun notarytool store-credentials e-notary \
-  --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
+xcrun notarytool store-credentials "Knut Horne" \
+  --apple-id you@example.com --team-id 52AT44QFCM --password <app-specific-password>
 ```
 
-Then just build — it signs, notarizes with the `e-notary` profile, and staples:
+Then just build — it signs, notarizes with the `Knut Horne` profile (or
+`NOTARY_PROFILE`), and staples:
 
 ```sh
 ./scripts/bundle-dmg.sh --universal
 ```
 
-### Signing in CI
+### Releases
 
-The release workflow signs and notarizes the universal DMG when these repository
-secrets are set (otherwise it falls back to an ad-hoc DMG):
-
-| Secret | Value |
-| ------ | ----- |
-| `MACOS_CERTIFICATE` | base64 of your Developer ID `.p12`: `base64 -i cert.p12 \| pbcopy` |
-| `MACOS_CERTIFICATE_PASSWORD` | password you set when exporting the `.p12` |
-| `NOTARY_APPLE_ID` | your Apple ID email |
-| `NOTARY_PASSWORD` | an app-specific password |
-| `NOTARY_TEAM_ID` | your team ID (e.g. `7G383N3VY7`) |
-
-Export the certificate from **Keychain Access → your Developer ID Application →
-right-click → Export** as a `.p12`, then base64-encode it for the secret.
+`scripts/release.sh` builds the release DMG on the Mac that runs it, the same
+way, after CI has passed and the tag is pushed, and attaches it to the release;
+the release workflow builds the `.tar.gz` archives. It checks for the
+notarization credentials before it commits anything, and stops rather than
+attach a DMG Apple didn't notarize. (GETS AS's team, `7G383N3VY7`, is not set
+up for notarization; Apple turns its submissions down.)
 
 ## Language servers
 

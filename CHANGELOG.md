@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The macOS installer is notarized again.** Apple stopped notarizing for
+  the team the DMG was signed with, and the release went on without it, so
+  0.10.1's DMG made Gatekeeper warn. The DMG is now signed with Knut Horne's
+  Developer ID and notarized on the Mac that cuts the release, and a release
+  stops rather than ship one Apple turned down. 0.11.0's DMG was rebuilt this
+  way.
+
 ## [0.11.0] - 2026-10-26
 
 ### Added

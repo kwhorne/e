@@ -11,9 +11,12 @@
 #      heading and updates the comparison links.
 #   4. Commits and pushes main, then waits for CI on that commit.
 #   5. Only when CI passes: tags `vX.Y.Z` and pushes the tag.
+#   6. Builds the universal DMG on this Mac, signed with Knut Horne's
+#      Developer ID and notarized with the "Knut Horne" keychain profile (as
+#      eterm's releases are), and attaches it to the release.
 #
 # The GitHub release workflow (.github/workflows/release.yml) then builds and
-# attaches the platform binaries automatically. Tagging only a commit CI has
+# attaches the platform archives automatically. Tagging only a commit CI has
 # passed is the point of step 4: the release workflow runs no tests of its own.
 # Without `gh`, or with E_RELEASE_NO_CI_WAIT=1, the tag goes out unchecked.
 
@@ -27,6 +30,20 @@ if [[ ! "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 # --- sanity checks ---------------------------------------------------------
+# The DMG is signed and notarized here, so check that this Mac can before
+# anything is committed or pushed (E_RELEASE_NO_DMG=1 skips the DMG).
+if [[ "${E_RELEASE_NO_DMG:-}" != "1" ]]; then
+  if [[ "$(uname)" != "Darwin" ]]; then
+    echo "error: the DMG is built on macOS; run this on a Mac or set E_RELEASE_NO_DMG=1" >&2
+    exit 1
+  fi
+  if ! xcrun notarytool history --keychain-profile "${NOTARY_PROFILE:-Knut Horne}" >/dev/null 2>&1; then
+    echo "error: no notarization credentials under '${NOTARY_PROFILE:-Knut Horne}'" >&2
+    echo "       xcrun notarytool store-credentials \"Knut Horne\" --apple-id … --team-id 52AT44QFCM --password …" >&2
+    exit 1
+  fi
+fi
+
 branch="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$branch" != "main" ]]; then
   echo "error: must be on 'main' (currently on '$branch')" >&2
@@ -102,8 +119,27 @@ git tag -a "v$NEW" -m "e $NEW"
 echo "==> pushing v$NEW"
 git push origin "v$NEW"
 
+# --- 6. the DMG, signed and notarized on this Mac ------------------------------
+# The workflow builds the archives in CI; the installer is made here, where the
+# Developer ID and the notarization credentials are, as eterm's is. It fails
+# rather than attach a DMG Apple hasn't notarized.
+if [[ "${E_RELEASE_NO_DMG:-}" == "1" ]]; then
+  echo "==> E_RELEASE_NO_DMG=1: no DMG"
+else
+  echo "==> building, signing and notarizing the universal DMG"
+  E_REQUIRE_NOTARIZATION=1 ./scripts/bundle-dmg.sh --universal
+  DMG="e-$NEW-universal.dmg"
+  (cd dist && shasum -a 256 "$DMG" > "$DMG.sha256")
+  # The workflow makes the release when its first archive is attached.
+  for _ in $(seq 1 90); do
+    gh release view "v$NEW" >/dev/null 2>&1 && break
+    sleep 10
+  done
+  gh release upload "v$NEW" "dist/$DMG" "dist/$DMG.sha256" --clobber
+fi
+
 echo
 echo "✓ Released v$NEW."
-echo "  → GitHub Actions is building the release binaries now:"
+echo "  → GitHub Actions is building the archives:"
 echo "    $REPO/actions"
 echo "  → Release page: $REPO/releases/tag/v$NEW"

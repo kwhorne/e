@@ -14,14 +14,21 @@
 # The signing identity is auto-detected from the keychain unless
 # CODESIGN_IDENTITY is set.
 
-# Print the Developer ID Application identity, or empty if none is available.
+# Print the Developer ID Application identity, or empty if none is available:
+# CODESIGN_IDENTITY, else the one for CODESIGN_TEAM — Knut Horne's team by
+# default, as for eterm, since Apple has GETS AS's team set aside for
+# notarization — else the first in the keychain.
 detect_identity() {
   if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
     echo "$CODESIGN_IDENTITY"
     return
   fi
-  security find-identity -v -p codesigning 2>/dev/null \
-    | awk -F'"' '/Developer ID Application/{print $2; exit}'
+  local ids team mine
+  ids="$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk -F'"' '/Developer ID Application/{print $2}')"
+  team="${CODESIGN_TEAM:-52AT44QFCM}"
+  mine="$(printf '%s\n' "$ids" | grep -F "($team)" | head -1 || true)"
+  echo "${mine:-$(printf '%s\n' "$ids" | head -1)}"
 }
 
 # sign_app <app-path> <identity>

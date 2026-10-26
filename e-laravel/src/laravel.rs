@@ -34,8 +34,7 @@ impl RouteInfo {
 
     /// Whether the middleware stack enforces authentication.
     pub fn has_auth(&self) -> bool {
-        let m = self.middleware.to_lowercase();
-        m.contains("auth") || m.contains("can:") || m.contains("verified")
+        middleware_authenticates(&self.middleware)
     }
 
     /// A write route with no authentication is the headline risk.
@@ -55,6 +54,27 @@ impl RouteInfo {
             && !a.starts_with("Illuminate\\Routing\\")
             && !a.starts_with("Livewire\\Mechanisms\\HandleRouting\\")
     }
+}
+
+/// Whether a comma-separated middleware stack (aliases, or the class names
+/// `route:list --json` gives) makes the user sign in: `auth`, `auth:sanctum`,
+/// `…\Authenticate`, `can:`, `verified`. `guest` and its class
+/// `RedirectIfAuthenticated` — which turn signed-in users *away* — don't,
+/// though the word is in the name.
+pub fn middleware_authenticates(stack: &str) -> bool {
+    stack.split(',').any(|m| {
+        let m = m.trim().to_ascii_lowercase();
+        let class = m.rsplit('\\').next().unwrap_or(&m);
+        if class.starts_with("redirectifauthenticated") || m == "guest" {
+            return false;
+        }
+        m.starts_with("auth")
+            || class.starts_with("authenticate")
+            || m.starts_with("can:")
+            || class.starts_with("authorize")
+            || m == "verified"
+            || class.starts_with("ensureemailisverified")
+    })
 }
 
 /// The route that served `method path` — what Laravel's router would pick.
@@ -1535,6 +1555,28 @@ pub fn model_class_from_table(table: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guest_middleware_is_not_authentication() {
+        for yes in [
+            "web,auth",
+            "auth:sanctum",
+            "web,Illuminate\\Auth\\Middleware\\Authenticate",
+            "App\\Http\\Middleware\\Authenticate:sanctum,api",
+            "web,can:update,post",
+            "web,verified",
+        ] {
+            assert!(middleware_authenticates(yes), "{yes}");
+        }
+        for no in [
+            "web",
+            "web,guest",
+            "web,Illuminate\\Auth\\Middleware\\RedirectIfAuthenticated,Illuminate\\Routing\\Middleware\\ValidateSignature",
+            "",
+        ] {
+            assert!(!middleware_authenticates(no), "{no}");
+        }
+    }
 
     #[test]
     fn a_request_finds_the_route_the_router_would_pick() {

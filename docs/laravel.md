@@ -427,6 +427,33 @@ badge: 🔒 when it's authenticated, ⚠ when a state-changing route (POST/PUT/P
 DELETE) has no authentication. The header counts unprotected routes, and clicking
 a ⚠ asks the agent to suggest the right middleware/policy.
 
+### Unchecked lookups (IDOR)
+
+A route behind `auth` with a `{parameter}`, and a controller method that turns
+it into a model — `Order $order`, or `Order::findOrFail($id)` — with nothing that
+asks whether this user may have that order: any signed-in user can then read or
+change anyone's by changing the id in the URL. `e` warns on the method's line:
+
+```text
+GET orders/{order} hands any signed-in user the Order {order} they ask for, and
+it belongs to someone (user_id): nothing here checks it is theirs …
+```
+
+It errs towards silence. Only a model that belongs to someone counts — a
+`user_id`, `team_id`, `owner_id`… or a `belongsTo(User::class)` (not
+`'created_by'`, which says who made the row) — and not one a global scope
+already confines, such as a tenant or team trait. Anything that looks like a
+check silences it: `authorize()`, `Gate`, `->can()`, a FormRequest whose
+`authorize()` does more than `return true`, `can:`/role/admin/signed middleware,
+`authorizeResource()` in the controller, scoping to the user
+(`$request->user()->orders()->findOrFail(…)`, `auth()->id()`, `whereBelongsTo`),
+or a helper like `$this->ensureOwns($order)`. Slugs and tokens in the URL are
+left alone. Run over 81 real projects, it raised 11 warnings in 3 of them.
+
+The same check flags a method a changeset touches in
+[session review](source-control.md#session-review-v), and marks the route
+`"unchecked"` in the agent's [`laravel_map`](agent-sync.md#the-laravel-project-in-one-answer).
+
 ## Generate a test from a replay
 
 After replaying a route (▶ in the map), the **🧪 Test** button writes a Pest

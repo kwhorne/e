@@ -158,10 +158,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                 .on_click_stop(move |_| state.send_request(&uri_for_send));
 
             // Security chip: 🔒 authed, ⚠ open (write route with no auth).
-            let mw_lower = middleware.to_lowercase();
-            let has_auth = mw_lower.contains("auth")
-                || mw_lower.contains("can:")
-                || mw_lower.contains("verified");
+            let has_auth = e_laravel::laravel::middleware_authenticates(&middleware);
             let chip_text = if unprotected {
                 "⚠ open"
             } else if has_auth {

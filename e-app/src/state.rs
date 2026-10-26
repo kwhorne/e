@@ -1237,6 +1237,39 @@ pub(crate) fn laravel_fingerprint(root: &std::path::Path) -> u64 {
 /// Unknown-column warnings for the query-builder calls in `text`, against the
 /// live schema. Pure, so it runs on any thread. Columns are UTF-8 bytes, like
 /// every other diagnostic the editor draws.
+/// A warning on each controller method that hands a signed-in user a model
+/// by its id without checking it is theirs (see [`e_laravel::authz`]).
+fn unchecked_lookup_lint(
+    text: &str,
+    root: &std::path::Path,
+    routes: &[e_laravel::laravel::RouteInfo],
+) -> Vec<Diagnostic> {
+    e_laravel::authz::Project::new(root)
+        .scan(text, routes)
+        .into_iter()
+        .map(|f| {
+            let line = text.lines().nth(f.line).unwrap_or("");
+            let indent = line.len() - line.trim_start().len();
+            Diagnostic {
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: f.line as u32,
+                        character: indent as u32,
+                    },
+                    end: lsp_types::Position {
+                        line: f.line as u32,
+                        character: line.encode_utf16().count() as u32,
+                    },
+                },
+                severity: Some(lsp_types::DiagnosticSeverity::WARNING),
+                source: Some("laravel".to_string()),
+                message: f.message(),
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
 fn column_lint(
     text: &str,
     root: &std::path::Path,
@@ -7069,7 +7102,16 @@ impl AppState {
         } else {
             self.laravel.get_untracked()
         };
-        if php_like && schema.is_empty() && laravel.is_none() {
+        // Controllers get the unchecked-lookup check whether or not
+        // laravel-lsp runs: it doesn't make it.
+        let root_now = self.root.get_untracked();
+        let controller_routes = buf
+            .file
+            .path
+            .as_ref()
+            .filter(|p| p.starts_with(root_now.join("app/Http/Controllers")))
+            .and_then(|_| self.laravel.get_untracked());
+        if php_like && schema.is_empty() && laravel.is_none() && controller_routes.is_none() {
             return;
         }
         let gen = buf.lint_gen.get() + 1;
@@ -7095,6 +7137,9 @@ impl AppState {
                         }
                         if let Some(data) = &laravel {
                             diags.extend(crate::laravel_lint::lint(&text, language, data));
+                        }
+                        if let Some(data) = &controller_routes {
+                            diags.extend(unchecked_lookup_lint(&text, &root, &data.all_routes));
                         }
                     }
                     if is_env {

@@ -97,6 +97,7 @@ above the diff, each with an **Ask** button that sends the finding to the agent:
 | `destructive-migration` | danger | `dropColumn`, `dropIfExists`, `truncate(` in a migration |
 | `env-changed` | danger | a value changed in `.env` |
 | `auth-removed` | danger | an `authorize(`/`Gate::`/`can:` line **deleted** |
+| `unchecked-lookup` | warn | a changed controller method that hands a signed-in user a model by its id without checking it is theirs — see [Unchecked lookups](laravel.md#unchecked-lookups-idor) |
 | `unsafe` | danger | `shell_exec(`, `eval(`, `unsafe {` |
 | `test-skipped` | warn | `it.only(`, `->skip(`, `#[ignore]` |
 | `verification-disabled` | warn | `rejectUnauthorized: false`, `--no-verify`, `chmod 777` |

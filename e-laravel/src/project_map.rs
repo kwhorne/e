@@ -65,6 +65,12 @@ pub fn build(
 
     if req.wants("routes") {
         let (package, app): (Vec<_>, Vec<_>) = data.all_routes.iter().partition(|r| r.is_package());
+        // `GET orders/{order}` → the models it hands out unchecked.
+        let unchecked: HashMap<String, Vec<String>> =
+            crate::authz::scan_project(root, &data.all_routes)
+                .into_iter()
+                .map(|(_, f)| (f.route, f.lookups.into_iter().map(|(_, m)| m).collect()))
+                .collect();
         let routes: Vec<Value> = app
             .into_iter()
             .filter(|r| hit(&[&r.uri, &r.name, &r.action]))
@@ -80,6 +86,10 @@ pub fn build(
                 }
                 if r.is_unprotected() {
                     o["unprotected"] = json!(true);
+                }
+                let first = r.methods.split('|').next().unwrap_or("");
+                if let Some(models) = unchecked.get(&format!("{first} {}", r.uri)) {
+                    o["unchecked"] = json!(models);
                 }
                 o
             })

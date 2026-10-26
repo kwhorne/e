@@ -16,6 +16,65 @@ use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 
 use crate::state::{AppState, TddStatus};
 
+/// Controller methods the changeset touches that hand a signed-in user a
+/// model by its id without checking it is theirs (see
+/// [`e_laravel::authz`]). Blocking: reads the changed controllers.
+fn unchecked_lookup_flags(
+    repo: &std::path::Path,
+    project: &std::path::Path,
+    cs: &e_review::Changeset,
+    routes: &[e_laravel::laravel::RouteInfo],
+) -> Vec<Flag> {
+    let controllers: Vec<&e_review::FileChange> = cs
+        .files
+        .iter()
+        .filter(|f| f.path.contains("app/Http/Controllers/") && f.path.ends_with(".php"))
+        .collect();
+    if controllers.is_empty() || routes.is_empty() {
+        return Vec::new();
+    }
+    let checker = e_laravel::authz::Project::new(project);
+    let mut out = Vec::new();
+    for f in controllers {
+        let Ok(src) = std::fs::read_to_string(repo.join(&f.path)) else {
+            continue;
+        };
+        // 1-based new-file lines the change added.
+        let touched: Vec<usize> = f
+            .hunks
+            .iter()
+            .flat_map(|h| {
+                let mut n = h.new_start;
+                let mut lines = Vec::new();
+                for l in &h.lines {
+                    match l.as_bytes().first() {
+                        Some(b'+') => {
+                            lines.push(n);
+                            n += 1;
+                        }
+                        Some(b'-') => {}
+                        _ => n += 1,
+                    }
+                }
+                lines
+            })
+            .collect();
+        for finding in checker.scan(&src, routes) {
+            let (from, to) = (finding.line + 1, finding.end_line + 1);
+            if touched.iter().any(|l| (from..=to).contains(l)) {
+                out.push(Flag {
+                    path: f.path.clone(),
+                    line: from,
+                    severity: flags::Severity::Warn,
+                    code: "unchecked-lookup",
+                    message: finding.message(),
+                });
+            }
+        }
+    }
+    out
+}
+
 impl AppState {
     /// Remember where the current agent session started, so the review shows
     /// exactly what the session changed. Called when an agent is started.
@@ -62,13 +121,27 @@ impl AppState {
         let busy = self.review_busy;
         let selected = self.review_selected;
         let flags_sig = self.review_flags;
-        let send = create_ext_action(self.cx, move |text: Result<String, String>| {
+        let routes = self
+            .laravel
+            .get_untracked()
+            .map(|d| d.all_routes.clone())
+            .unwrap_or_default();
+        let project = self.root.get_untracked();
+        let send = create_ext_action(self.cx, move |res: Result<(String, Vec<Flag>), String>| {
             busy.set(false);
-            match text {
-                Ok(diff) => {
+            match res {
+                Ok((diff, unchecked)) => {
                     let mut fresh = changeset_from_diff(&diff);
                     cs_sig.with_untracked(|old| fresh.carry_reviewed_from(old));
-                    flags_sig.set(flags::scan_changeset(&fresh));
+                    let mut all = flags::scan_changeset(&fresh);
+                    all.extend(unchecked);
+                    all.sort_by(|a, b| {
+                        b.severity
+                            .cmp(&a.severity)
+                            .then(a.path.cmp(&b.path))
+                            .then(a.line.cmp(&b.line))
+                    });
+                    flags_sig.set(all);
                     // Keep the selection if that file is still in the changeset.
                     let keep = selected
                         .get_untracked()
@@ -80,7 +153,13 @@ impl AppState {
                 Err(e) => Self::notify(&format!("Review failed: {e}")),
             }
         });
-        std::thread::spawn(move || send(e_core::git::diff_since(&root, &base)));
+        std::thread::spawn(move || {
+            send(e_core::git::diff_since(&root, &base).map(|diff| {
+                let cs = changeset_from_diff(&diff);
+                let unchecked = unchecked_lookup_flags(&root, &project, &cs, &routes);
+                (diff, unchecked)
+            }))
+        });
     }
 
     pub fn review_select(&self, path: String) {
@@ -438,5 +517,53 @@ impl AppState {
              {{\"method\":\"review_summary\",\"text\":\"...\"}} on $E_EDITOR_SOCK so it \
              becomes the pull-request description."
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_change_to_an_unchecked_method_is_flagged_an_untouched_one_is_not() {
+        let root = std::env::temp_dir().join(format!("e-review-idor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let write = |rel: &str, src: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, src).unwrap();
+        };
+        write(
+            "app/Models/Order.php",
+            "<?php\nclass Order extends Model {\n    protected $fillable = ['user_id'];\n}\n",
+        );
+        // Lines 6–9 are show(), 11–14 edit(); both unchecked.
+        write(
+            "app/Http/Controllers/OrderController.php",
+            "<?php\nnamespace App\\Http\\Controllers;\n\nclass OrderController extends Controller\n{\n    public function show(Order $order)\n    {\n        return $order;\n    }\n\n    public function edit(Order $order)\n    {\n        return view('orders.edit', compact('order'));\n    }\n}\n",
+        );
+        let route = |m: &str, uri: &str, a: &str| e_laravel::laravel::RouteInfo {
+            name: String::new(),
+            uri: uri.into(),
+            methods: m.into(),
+            action: format!("App\\Http\\Controllers\\OrderController@{a}"),
+            middleware: "web,auth".into(),
+        };
+        let routes = [
+            route("GET|HEAD", "orders/{order}", "show"),
+            route("GET|HEAD", "orders/{order}/edit", "edit"),
+        ];
+        // The change adds line 8, inside show().
+        let diff = "diff --git a/app/Http/Controllers/OrderController.php b/app/Http/Controllers/OrderController.php\n\
+--- a/app/Http/Controllers/OrderController.php\n\
++++ b/app/Http/Controllers/OrderController.php\n\
+@@ -6,4 +6,4 @@\n     public function show(Order $order)\n     {\n-        return null;\n+        return $order;\n     }\n";
+        let cs = changeset_from_diff(diff);
+        let flags = unchecked_lookup_flags(&root, &root, &cs, &routes);
+        assert_eq!(flags.len(), 1, "{flags:?}");
+        assert_eq!(flags[0].line, 6);
+        assert_eq!(flags[0].code, "unchecked-lookup");
+        assert!(flags[0].message.starts_with("GET orders/{order} hands"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

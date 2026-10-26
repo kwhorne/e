@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Unchecked lookups (IDOR).** A controller method behind `auth` that
+  turns a route parameter into a model someone owns — `Order $order`,
+  `Order::findOrFail($id)` — with nothing checking it is this user's gets a
+  warning on its line, a flag in session review when the change touches it,
+  and `"unchecked"` on its route in `laravel_map`. Authorization, FormRequests
+  that authorize, `can:`/role/signed middleware, scoping to the user, global
+  scopes and the controller's own check helpers all count; run over 81 real
+  projects it raised 11 warnings in 3.
+
 - **What a migration will do, before it runs.** Open or save a pending
   migration, and the SQL `migrate --pretend` says it will run shows beside
   the line that produces it. Each statement is checked against the data in
@@ -39,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   measurement of a URL is the baseline; nothing is stashed.
 
 ### Fixed
+
+- **Guest routes no longer count as authenticated.** `RedirectIfAuthenticated`
+  — the `guest` middleware — has "auth" in its name, so the Laravel map
+  showed 🔒 on guest routes and never warned that a guest write route was
+  open.
 
 - **A file the agent opened no longer crashes `e` on its next request.** A
   buffer opened over the agent socket — or from the Finder — had its

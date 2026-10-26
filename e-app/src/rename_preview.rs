@@ -48,6 +48,14 @@ pub struct RenamePlan {
     pub unreadable: Vec<PathBuf>,
     /// Files the rename moves, `(from, to)` — renaming a view moves its file.
     pub moves: Vec<(PathBuf, PathBuf)>,
+    /// For a plan that isn't a rename (carrying a field through the stack):
+    /// what the dialog asks, and what its button says.
+    pub title: Option<String>,
+    pub verb: Option<String>,
+    /// Files the plan creates, `(path, content)`.
+    pub creates: Vec<(PathBuf, String)>,
+    /// Said under the list: what was done already, or couldn't be.
+    pub notes: Vec<String>,
 }
 
 impl RenamePlan {
@@ -71,6 +79,11 @@ impl RenamePlan {
             if s == 1 { "site" } else { "sites" },
             if f == 1 { "file" } else { "files" },
         );
+        match self.creates.len() {
+            0 => {}
+            1 => out.push_str(", and a new file"),
+            n => out.push_str(&format!(", and {n} new files")),
+        }
         for (_, to) in &self.moves {
             let name = to
                 .file_name()
@@ -132,6 +145,47 @@ pub fn apply_edits(text: &str, edits: &[TextEdit]) -> String {
     }
     out.push_str(&text[last..]);
     out
+}
+
+/// A file's change as a plan: a row per changed line, as it reads before and
+/// after (an empty side is a line added or removed), and one edit that
+/// replaces the text — so what is written is exactly `new`.
+pub fn file_plan(path: PathBuf, old: &str, new: &str) -> FilePlan {
+    let mut sites = Vec::new();
+    let mut line = 0u32;
+    for seg in e_core::diff::edit_segments(old, new) {
+        let before: Vec<&str> = seg.old.lines().collect();
+        if !seg.equal {
+            let after: Vec<&str> = seg.new.lines().collect();
+            for i in 0..before.len().max(after.len()) {
+                sites.push(Site {
+                    line: line + i as u32,
+                    before: before.get(i).map_or("", |l| l.trim()).to_string(),
+                    after: after.get(i).map_or("", |l| l.trim()).to_string(),
+                });
+            }
+        }
+        line += before.len() as u32;
+    }
+    // Everything up to the end of the last line; what follows it (the final
+    // newline) stays, so it is left off `new` too.
+    let starts = line_starts(old);
+    let last = starts.len().saturating_sub(1) as u32;
+    let end = offset_of(old, &starts, last, u32::MAX).unwrap_or(old.len());
+    let tail = &old[end..];
+    let new_text = new.strip_suffix(tail).unwrap_or(new).to_string();
+    let edit = TextEdit {
+        range: lsp_types::Range::new(
+            lsp_types::Position::new(0, 0),
+            lsp_types::Position::new(last, u32::MAX),
+        ),
+        new_text,
+    };
+    FilePlan {
+        path,
+        sites,
+        edits: vec![edit],
+    }
 }
 
 /// Build the plan from a server's workspace edit.
@@ -379,5 +433,24 @@ mod tests {
         let text = "ab\n";
         let edits = vec![edit(0, 0, 99, "z")];
         assert_eq!(apply_edits(text, &edits), "z\n");
+    }
+
+    #[test]
+    fn a_whole_file_change_shows_its_lines_and_writes_exactly_the_new_text() {
+        let old = "[\n    'name',\n];\n";
+        let new = "[\n    'name',\n    'phone',\n];\n";
+        let fp = super::file_plan(PathBuf::from("a.php"), old, new);
+        assert_eq!(
+            fp.sites,
+            vec![Site {
+                line: 2,
+                before: String::new(),
+                after: "'phone',".into()
+            }]
+        );
+        assert_eq!(apply_edits(old, &fp.edits), new);
+        // Without a final newline, too.
+        let fp = super::file_plan(PathBuf::from("a.php"), "a\nb", "a\nc");
+        assert_eq!(apply_edits("a\nb", &fp.edits), "a\nc");
     }
 }

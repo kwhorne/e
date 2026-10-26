@@ -31,6 +31,8 @@ parses the props, and shows:
 - **Form contract** — `useForm({ … })` fields checked against the matching
   FormRequest's `rules()` (following `form.post(route('…'))` → controller →
   FormRequest): fields that aren't validated, and rules with no field.
+  `⌘.` on such a field carries it through — rule, `$fillable`, column — see
+  [Carry a field through the stack](laravel.md#carry-a-field-through-the-stack).
 
 **Generate TypeScript** writes interfaces to `resources/js/types/<Page>.d.ts`,
 expanding each model into an interface built from the real database columns

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Carry a field through the stack.** `⌘.` on a form field — `form.phone` on
+  an Inertia page, `name="phone"` in a Blade form, `wire:model="phone"` in a
+  Livewire view — follows the form to its handler and previews every edit the
+  field needs before writing any: the form's state (and its TypeScript
+  interface), the validation rule in the FormRequest, `validate()` or
+  Livewire `rules()`/`#[Validate]`, the model's `$fillable` and cast, and a
+  migration when the live schema lacks the column. The kind of field comes
+  from its name and starting value; steps already done are left alone.
+
 - **Vue components coloured throughout.** `<script>` is JavaScript, or
   TypeScript with `lang="ts"`, `<style>` is CSS, and the template's `{{ }}`
   interpolations and directive values (`v-if`, `:class`, `@click`, `v-for`)

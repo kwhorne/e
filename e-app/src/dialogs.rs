@@ -10,7 +10,12 @@ use crate::state::AppState;
 use crate::theme;
 
 fn button(text: &'static str, primary: bool) -> impl IntoView {
-    label(move || text.to_string()).style(move |s| {
+    button_dyn(move || text.to_string(), primary)
+}
+
+/// A button whose text can change.
+fn button_dyn(text: impl Fn() -> String + 'static, primary: bool) -> impl IntoView {
+    label(text).style(move |s| {
         let s = s
             .padding_horiz(16.0)
             .padding_vert(7.0)
@@ -282,7 +287,11 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
     let headline = move || {
         state.rename_plan.with(|p| {
             p.as_ref()
-                .map(|p| format!("Rename “{}” to “{}”?", p.old_name, p.new_name))
+                .map(|p| {
+                    p.title
+                        .clone()
+                        .unwrap_or_else(|| format!("Rename “{}” to “{}”?", p.old_name, p.new_name))
+                })
                 .unwrap_or_default()
         })
     };
@@ -309,12 +318,18 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
                     if shown >= 40 {
                         break;
                     }
-                    out.push_str(&format!(
-                        "  {}: {}\n     → {}\n",
-                        site.line + 1,
-                        site.before,
-                        site.after
-                    ));
+                    // A line added or removed is shown as such, not as a
+                    // change from (or to) nothing.
+                    out.push_str(&match (site.before.is_empty(), site.after.is_empty()) {
+                        (true, _) => format!("  {}: + {}\n", site.line + 1, site.after),
+                        (_, true) => format!("  {}: − {}\n", site.line + 1, site.before),
+                        _ => format!(
+                            "  {}: {}\n     → {}\n",
+                            site.line + 1,
+                            site.before,
+                            site.after
+                        ),
+                    });
                     shown += 1;
                 }
                 if shown >= 40 {
@@ -324,6 +339,16 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
                     }
                     break;
                 }
+            }
+            for (path, content) in &plan.creates {
+                let rel = path.strip_prefix(&root).unwrap_or(path);
+                out.push_str(&format!("{} (new)\n", rel.display()));
+                for line in content.lines().filter(|l| l.contains("$table->")) {
+                    out.push_str(&format!("  + {}\n", line.trim()));
+                }
+            }
+            for note in &plan.notes {
+                out.push_str(&format!("\n• {note}"));
             }
             if !plan.unreadable.is_empty() {
                 out.push_str(&format!(
@@ -346,7 +371,16 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
         }))
         .style(|s| s.max_height(300.0).width_full().margin_top(12.0)),
         stack((
-            button("Rename", true).on_click_stop(move |_| state.confirm_rename()),
+            button_dyn(
+                move || {
+                    state
+                        .rename_plan
+                        .with(|p| p.as_ref().and_then(|p| p.verb.clone()))
+                        .unwrap_or_else(|| "Rename".into())
+                },
+                true,
+            )
+            .on_click_stop(move |_| state.confirm_rename()),
             button("Cancel", false).on_click_stop(move |_| state.cancel_rename()),
         ))
         .style(|s| s.gap(8.0).margin_top(16.0)),

@@ -15,6 +15,7 @@ mod corpus;
 pub mod eloquent;
 pub mod eloquent_helper;
 pub mod events;
+pub mod heal;
 pub mod ide_json;
 pub mod inertia;
 pub mod intentions;

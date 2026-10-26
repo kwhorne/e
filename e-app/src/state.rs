@@ -2856,10 +2856,12 @@ impl AppState {
                 (Ok(()), None) => {}
             }
         }
+        // Then the files it creates (a heal's migration).
+        failed.extend(Self::create_planned_files(&plan.creates));
         self.fs_rev.update(|r| *r += 1);
         self.check_external_changes();
         if !failed.is_empty() {
-            Self::notify(&format!("rename could not write: {}", failed.join(", ")));
+            Self::notify(&format!("could not write: {}", failed.join(", ")));
         }
         eprintln!("e: renamed in {written} file(s)");
     }
@@ -6703,6 +6705,19 @@ impl AppState {
         // so they're computed right here and shown first.
         let text = buf.doc.text().to_string();
         let mut local = self.lint_fix_actions(&uri, sl, sc);
+        // On a form field: carry it through the stack.
+        if let Some(f) = crate::contract_heal::field_here(&text, buf.file.language, cursor.offset())
+        {
+            local.push(e_lsp::CodeActionItem {
+                title: format!(
+                    "Carry “{}” through the stack (rules, model, column)",
+                    f.field
+                ),
+                edits: Vec::new(),
+                command: Some(serde_json::json!({ "e": "heal" })),
+                server: "e".to_string(),
+            });
+        }
         // On a line with a runtime lens: the request behind it.
         let lens = buf.file.path.as_ref().and_then(|p| {
             let line = text.lines().nth(sl as usize)?;
@@ -6830,6 +6845,7 @@ impl AppState {
                 Some("runtime.fix") => self.runtime_fix(id),
                 Some("runtime.test") => self.runtime_test(id),
                 Some("migration.dry_run") => self.migration_dry_run(),
+                Some("heal") => self.heal_field(),
                 _ => {}
             }
             return;

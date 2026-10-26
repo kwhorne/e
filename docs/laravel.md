@@ -140,6 +140,56 @@ Alongside the language servers' quick fixes, the code-action picker offers
   with `$request->validated()`, retypes the method's `Request` parameter and adds
   the import. The new class opens.
 
+## Carry a field through the stack
+
+Add a field to a form, and `⌘.` on it offers **Carry “phone” through the stack**.
+`e` follows the form to where it is handled and shows every edit the field
+needs, in one preview, before writing any of them:
+
+```
+Carry “phone” through the stack?
+3 sites in 3 files, and a new file
+
+resources/js/Pages/Customers/Create.vue
+  4: + phone: '',
+app/Http/Requests/StoreCustomerRequest.php
+  12: + 'phone' => ['nullable', 'string', 'max:255'],
+app/Models/Customer.php
+  15: + 'phone',
+database/migrations/2026_10_26_120000_add_phone_to_customers_table.php (new)
+  + $table->string('phone')->nullable();
+```
+
+- **Where it starts:** `form.phone` (or `form.errors.phone`, or a key of the
+  `useForm({…})` itself) on an Inertia page; `name="phone"` in a Blade
+  `<form>`; `wire:model="phone"` or `wire:model="form.phone"` in a Livewire
+  view.
+- **The form itself:** an Inertia form gets the field in its `useForm({…})`,
+  and in the `useForm<CustomerForm>` interface when the page declares one. A
+  Livewire component, or its form object, gets the public property.
+- **Validation:** wherever the handler validates — the action's FormRequest
+  `rules()` (also when it builds `$rules` and returns it), a
+  `validate([…])` or `Validator::make()` in the method, a Livewire `rules()`,
+  or a `#[Validate]` on the new property when its neighbours have one. The
+  rule follows the style beside it, array or `'a|b'`. Fortify's profile and
+  registration forms go to `app/Actions/Fortify`, where the field is
+  validated and filled too.
+- **The model** the handler writes (`Customer::create()`, `$customer->update()`
+  on a bound model, `$request->user()->update()`, `->notes()->create()`): the
+  field joins `$fillable`, and gets a cast when it needs one (`is_vip` →
+  `boolean`, `shipped_at` → `datetime`).
+- **The column**, from the live schema (or, without a database, the
+  migrations): when the table lacks it, a migration adds it, with `down()`
+  dropping it again.
+
+What the field is comes from its name and the value the form starts it with:
+`customer_id` is a foreign key (`exists:customers,id`, `foreignId()->constrained()`),
+`is_…`/`has_…` or `false` a boolean, `…_at` a timestamp, `notes` text,
+`unit_price` a decimal, `0` an integer, anything else a string. Steps that are
+done already are left alone, so running it again changes nothing; what it
+couldn't do — a route handled by a package, a model it couldn't name — is
+said under the list.
+
 ## Validation rules
 
 Rule names complete where rules are written — FormRequest `rules()`, a

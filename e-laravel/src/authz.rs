@@ -258,12 +258,12 @@ fn helper_check(body: &str, params: &[String]) -> bool {
 }
 
 /// One method of a class: name, line, parameter list, body.
-struct Method<'a> {
-    name: &'a str,
-    line: usize,
-    end_line: usize,
-    params: &'a str,
-    body: &'a str,
+pub(crate) struct Method<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) params: &'a str,
+    pub(crate) body: &'a str,
 }
 
 /// Skip a string or comment starting at `i`; the index after it, or `None`
@@ -303,7 +303,7 @@ fn skip_literal(b: &[u8], i: usize) -> Option<usize> {
 }
 
 /// The index of the bracket closing the one at `open`.
-fn matching(src: &str, open: usize, (o, c): (u8, u8)) -> Option<usize> {
+pub(crate) fn matching(src: &str, open: usize, (o, c): (u8, u8)) -> Option<usize> {
     let b = src.as_bytes();
     let mut depth = 0;
     let mut i = open;
@@ -325,7 +325,7 @@ fn matching(src: &str, open: usize, (o, c): (u8, u8)) -> Option<usize> {
     None
 }
 
-fn methods(src: &str) -> Vec<Method<'_>> {
+pub(crate) fn methods(src: &str) -> Vec<Method<'_>> {
     let mut out = Vec::new();
     let mut from = 0;
     while let Some(at) = src[from..].find("function ") {
@@ -367,7 +367,7 @@ fn methods(src: &str) -> Vec<Method<'_>> {
 }
 
 /// `(type, name)` for each typed parameter: `Order $order` → `("Order", "order")`.
-fn typed_params(params: &str) -> Vec<(String, String)> {
+pub(crate) fn typed_params(params: &str) -> Vec<(String, String)> {
     params
         .split(',')
         .filter_map(|p| {

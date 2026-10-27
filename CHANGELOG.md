@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Carrying a field through no longer offers a second migration.** Applied
+  once and asked again, it proposed another migration for the same column,
+  because the database lacks the column until the first one has run. A
+  migration that adds the column now counts, with a note to run it. The
+  preview names a new file before its long path, shows only what `up()` adds,
+  and keeps its last line clear of the scrollbar.
+
 ## [0.11.1] - 2026-10-26
 
 ### Fixed

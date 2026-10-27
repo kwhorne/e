@@ -39,6 +39,7 @@ fn transcript_size(state: AppState) -> usize {
                     tc.summary.len() + tc.result.as_ref().map(String::len).unwrap_or(0)
                 }
                 ChatItem::Receipt(r) => r.files.len(),
+                ChatItem::Permission(p) => p.title.len() + usize::from(p.answered.is_some()),
             })
             .sum()
     })
@@ -164,6 +165,8 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
 
         Some(ChatItem::Receipt(_)) => receipt_card(state, i).into_any(),
 
+        Some(ChatItem::Permission(_)) => permission_card(state, i).into_any(),
+
         Some(ChatItem::Notice { error, .. }) => label(move || item_text(state, i))
             .style(move |s| {
                 let c = if error {
@@ -181,6 +184,73 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
 
         None => empty().into_any(),
     }
+}
+
+/// The agent asks before going ahead: what it wants to do, and a button for
+/// each answer it offers — then, once answered, which.
+fn permission_card(state: AppState, i: usize) -> impl IntoView {
+    let ask = move || {
+        state.agent.chat.with(|c| match c.items.get(i) {
+            Some(ChatItem::Permission(p)) => Some(p.clone()),
+            _ => None,
+        })
+    };
+    let title = label(move || {
+        ask()
+            .map(|p| match &p.answered {
+                Some(a) => format!("{} — {a}", p.title),
+                None => format!("Allow this? {}", p.title),
+            })
+            .unwrap_or_default()
+    })
+    .style(move |s| {
+        let open = ask().is_some_and(|p| p.answered.is_none());
+        s.font_size(12.0)
+            .color(if open { theme::fg() } else { theme::fg_dim() })
+    });
+    let choices = state.agent.chat.with_untracked(|c| match c.items.get(i) {
+        Some(ChatItem::Permission(p)) => p.choices.clone(),
+        _ => Vec::new(),
+    });
+    let buttons = floem::views::stack_from_iter(choices.into_iter().map(move |c| {
+        let reject = c.kind.starts_with("reject");
+        let name = c.name.clone();
+        let id = c.id.clone();
+        label(move || name.clone())
+            .style(move |s| {
+                let s = s
+                    .padding_horiz(8.0)
+                    .padding_vert(2.0)
+                    .font_size(11.0)
+                    .border(1.0)
+                    .border_color(theme::border())
+                    .border_radius(4.0)
+                    .color(if reject { theme::error() } else { theme::fg() })
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.background(theme::bg_hover()));
+                if ask().is_some_and(|p| p.answered.is_some()) {
+                    s.hide()
+                } else {
+                    s
+                }
+            })
+            .on_click_stop(move |_| {
+                if let Err(e) = state.answer_permission(i, &id) {
+                    AppState::notify(&e);
+                }
+            })
+    }))
+    .style(|s| s.gap(6.0).margin_top(6.0));
+    stack((title, buttons)).style(|s| {
+        s.flex_col()
+            .margin_vert(4.0)
+            .margin_horiz(8.0)
+            .padding(8.0)
+            .border(1.0)
+            .border_color(theme::warning())
+            .border_radius(6.0)
+            .min_width(0.0)
+    })
 }
 
 /// What a turn changed, under it: the files with their line counts, how many
@@ -393,15 +463,22 @@ pub(crate) fn queue_rows(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    let hint =
-        label(|| "↵ steers the running work · ⌥↵ runs it next".to_string()).style(move |s| {
-            let s = s.font_size(11.0).color(theme::fg_dim()).padding_vert(2.0);
-            if state.agent.chat.with(|c| c.running) {
-                s
-            } else {
-                s.hide()
-            }
-        });
+    let hint = label(move || {
+        // An ACP agent can't be steered: what is sent waits for it.
+        if state.settings.with(|s| s.cascade_agent == "elyra") {
+            "↵ steers the running work · ⌥↵ runs it next".to_string()
+        } else {
+            format!("↵ runs next, when {} is done", state.cascade_agent_name())
+        }
+    })
+    .style(move |s| {
+        let s = s.font_size(11.0).color(theme::fg_dim()).padding_vert(2.0);
+        if state.agent.chat.with(|c| c.running) {
+            s
+        } else {
+            s.hide()
+        }
+    });
 
     stack((rows, hint)).style(move |s| {
         let busy = state

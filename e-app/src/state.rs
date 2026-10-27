@@ -3581,7 +3581,15 @@ impl AppState {
         // The keys from Settings, as the environment variables elyra reads.
         let env = crate::secrets::elyra_env();
 
-        match AgentClient::spawn(&shell, &shell_args, &cwd, &env) {
+        // Another agent, over the Agent Client Protocol. It signs in by
+        // itself, so Elyra's keys stay out of its environment.
+        let spawned = match self.cascade_acp() {
+            Some((_, command)) => {
+                AgentClient::spawn_acp(&shell, &["-lc".to_string(), command], &cwd, &[])
+            }
+            None => AgentClient::spawn(&shell, &shell_args, &cwd, &env),
+        };
+        match spawned {
             Ok((client, rx)) => {
                 self.agent.chat.set(ChatState::new());
                 // What model are we on, what else is there — and, when resuming,

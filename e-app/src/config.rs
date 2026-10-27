@@ -40,6 +40,9 @@ pub struct Settings {
     pub cascade_thinking: String,
     /// `code` (tools on) or `ask` (answer and plan only).
     pub cascade_mode: String,
+    /// The agent Cascade runs: `elyra`, or an ACP agent's id (`claude`,
+    /// `codex`, … — see `agent_acp::PROVIDERS`).
+    pub cascade_agent: String,
     /// File-level editor integration for the agent/terminal: click file paths in
     /// output to open them, and “Send selection to agent”. On by default.
     pub editor_integration: bool,
@@ -84,6 +87,7 @@ impl Default for Settings {
             cascade_model: String::new(),
             cascade_thinking: String::new(),
             cascade_mode: "code".to_string(),
+            cascade_agent: "elyra".to_string(),
             editor_integration: true,
             laravel: true,
             laravel_lsp: true,
@@ -106,7 +110,7 @@ fn config_path() -> Option<PathBuf> {
     )
 }
 
-fn read() -> Value {
+pub(crate) fn read() -> Value {
     config_path()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -164,6 +168,14 @@ pub fn load_settings() -> Settings {
                 m
             } else {
                 "code".to_string()
+            }
+        },
+        cascade_agent: {
+            let a = str_of("cascade_agent");
+            if a.is_empty() {
+                d.cascade_agent.clone()
+            } else {
+                a
             }
         },
         editor_integration: bool_of("editor_integration", d.editor_integration),

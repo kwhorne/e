@@ -102,6 +102,45 @@ never touched. It needs the project to be a git repository.
 
 Under the card: `⌂ Local  ▭ <project>` — where the agent runs and on what.
 
+### Other agents in Cascade
+
+Cascade runs other agents too, through the
+[Agent Client Protocol](https://agentclientprotocol.com) (ACP). Pick one in the
+`⋯` menu under **Agent**; the choice is saved as `cascade_agent` in
+`config.json` and starts a new session.
+
+| Agent          | Runs                                                   | Needs        |
+| -------------- | ------------------------------------------------------ | ------------ |
+| Elyra          | `elyra --mode rpc` (the default)                       | `elyra`      |
+| Claude Code    | `npx -y @agentclientprotocol/claude-agent-acp@0.98.0`  | `claude`     |
+| Codex          | `npx -y @agentclientprotocol/codex-acp@2.3.0`          | `codex`      |
+| Gemini CLI     | `gemini --experimental-acp`                            | `gemini`     |
+| GitHub Copilot | `copilot --acp`                                        | `copilot`    |
+| Cursor         | `cursor-agent acp`                                     | `cursor-agent` |
+| OpenCode       | `opencode acp`                                         | `opencode`   |
+| Goose          | `goose acp`                                            | `goose`      |
+| Qwen Code      | `qwen --experimental-acp`                              | `qwen`       |
+| Kimi CLI       | `kimi acp`                                             | `kimi`       |
+
+An agent whose program isn't on your `PATH` is marked *(not installed)*; sign in
+to it once in a terminal (`claude`, `codex login`, …) before picking it. The
+adapters run through `npx` are pinned to a version, so an update doesn't change
+a session under you. Any other ACP agent works too: set `cascade_agent` to
+`"custom"` and `cascade_custom_command` to its command line, run through your
+login shell.
+
+They get the same panel as Elyra — the transcript, tool cards, turn receipts
+with **Review** and **Undo**, worktree sessions and the context meter (when the
+agent reports usage). When one asks before acting, the question is a card in
+the transcript with the agent's own choices (*Allow*, *Always allow*,
+*Reject*…); **Stop** answers an open one as cancelled. What ACP doesn't have:
+
+- **No steering.** A message sent while the agent works runs next, when it is
+  done; `↵` queues it.
+- **No model menu.** The agent's own settings choose the model.
+- **No compaction from `e`**, and Elyra's API keys aren't passed on — each
+  agent uses its own sign-in.
+
 ### API keys
 
 **Settings → Agents** has a key field for **Anthropic**, **OpenAI**, **Gemini**

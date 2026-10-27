@@ -38,6 +38,8 @@ impl Streaming {
 pub struct AgentClient {
     child: Arc<Mutex<Child>>,
     stdin: Arc<Mutex<ChildStdin>>,
+    /// Set when the agent speaks ACP rather than Elyra's RPC.
+    acp: Option<Arc<crate::acp::Acp>>,
 }
 
 impl AgentClient {
@@ -79,14 +81,80 @@ impl AgentClient {
             Self {
                 child: Arc::new(Mutex::new(child)),
                 stdin: Arc::new(Mutex::new(stdin)),
+                acp: None,
             },
             rx,
         ))
     }
 
+    /// Spawn an agent that speaks the Agent Client Protocol (Claude Code's or
+    /// Codex's adapter, `gemini --experimental-acp`, …) in `cwd`, and open a
+    /// session there. Its events arrive on the receiver as Elyra's would.
+    pub fn spawn_acp(
+        program: &str,
+        args: &[String],
+        cwd: &std::path::Path,
+        env: &[(String, String)],
+    ) -> Result<(Self, Receiver<AgentEvent>)> {
+        let mut cmd = Command::new(program);
+        cmd.args(args);
+        cmd.current_dir(cwd);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = cmd
+            .spawn()
+            .with_context(|| format!("failed to spawn agent '{program}'"))?;
+        let stdout = child.stdout.take().context("agent stdout missing")?;
+        let stdin = Arc::new(Mutex::new(
+            child.stdin.take().context("agent stdin missing")?,
+        ));
+        let (tx, rx) = unbounded();
+        let acp = Arc::new(crate::acp::Acp::new(
+            stdin.clone() as Arc<Mutex<dyn Write + Send>>,
+            tx,
+            cwd.to_string_lossy().into_owned(),
+        ));
+        let reader = acp.clone();
+        thread::Builder::new()
+            .name("e-agent-acp-reader".into())
+            .spawn(move || crate::acp::pump(BufReader::new(stdout), &reader))
+            .context("failed to start reader thread")?;
+        acp.start();
+        Ok((
+            Self {
+                child: Arc::new(Mutex::new(child)),
+                stdin,
+                acp: Some(acp),
+            },
+            rx,
+        ))
+    }
+
+    /// Whether this agent speaks ACP (and so has no Elyra-only commands:
+    /// models, thinking levels, compaction on request, steering).
+    pub fn is_acp(&self) -> bool {
+        self.acp.is_some()
+    }
+
+    /// Answer the agent's permission request `request_id` with `choice`.
+    pub fn answer_permission(&self, request_id: &str, choice: &str) {
+        if let Some(acp) = &self.acp {
+            acp.answer(request_id, choice);
+        }
+    }
+
     /// Send a user prompt. If the agent is already streaming, pass `streaming` to
     /// steer / follow-up rather than being rejected.
     pub fn prompt(&self, message: &str, streaming: Option<Streaming>) -> Result<()> {
+        // ACP has no steering: a prompt sent while the agent works waits.
+        if let Some(acp) = &self.acp {
+            acp.prompt(message);
+            return Ok(());
+        }
         let mut cmd = json!({ "type": "prompt", "message": message });
         if let Some(s) = streaming {
             cmd["streamingBehavior"] = Value::String(s.as_str().to_string());
@@ -96,21 +164,37 @@ impl AgentClient {
 
     /// Queue a steering message while the agent runs.
     pub fn steer(&self, message: &str) -> Result<()> {
+        if let Some(acp) = &self.acp {
+            acp.prompt(message);
+            return Ok(());
+        }
         self.send(&json!({ "type": "steer", "message": message }))
     }
 
     /// Queue a follow-up message, delivered when the agent goes idle.
     pub fn follow_up(&self, message: &str) -> Result<()> {
+        if let Some(acp) = &self.acp {
+            acp.prompt(message);
+            return Ok(());
+        }
         self.send(&json!({ "type": "follow_up", "message": message }))
     }
 
     /// Abort the current operation.
     pub fn abort(&self) -> Result<()> {
+        if let Some(acp) = &self.acp {
+            acp.cancel();
+            return Ok(());
+        }
         self.send(&json!({ "type": "abort" }))
     }
 
     /// Start a fresh session.
     pub fn new_session(&self) -> Result<()> {
+        if let Some(acp) = &self.acp {
+            acp.new_session();
+            return Ok(());
+        }
         self.send(&json!({ "type": "new_session" }))
     }
 
@@ -152,7 +236,12 @@ impl AgentClient {
     }
 
     /// Serialize a command and write it as one `\n`-terminated line to stdin.
+    /// For an ACP agent, an Elyra command (models, state, compaction) has no
+    /// counterpart and is dropped.
     fn send(&self, cmd: &Value) -> Result<()> {
+        if self.acp.is_some() {
+            return Ok(());
+        }
         let mut line = serde_json::to_string(cmd)?;
         line.push('\n');
         let mut stdin = self.stdin.lock().expect("agent stdin poisoned");

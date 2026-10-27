@@ -77,6 +77,19 @@ pub enum ChatItem {
     },
     /// What the turn that just ended changed.
     Receipt(TurnReceipt),
+    /// The agent asks before going ahead.
+    Permission(PermissionAsk),
+}
+
+/// A question the agent asked before acting, and how it was answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PermissionAsk {
+    /// To answer it by (the request's JSON-RPC id, as JSON).
+    pub request_id: String,
+    pub title: String,
+    pub choices: Vec<crate::protocol::PermissionChoice>,
+    /// The choice made (its name), once answered.
+    pub answered: Option<String>,
 }
 
 /// Maximum characters kept for a tool-result preview.
@@ -209,6 +222,13 @@ impl ChatState {
         self.items.push(ChatItem::Receipt(receipt));
         self.cur_assistant = None;
         self.cur_reasoning = None;
+    }
+
+    /// Record the answer to the permission request at `index`.
+    pub fn mark_answered(&mut self, index: usize, choice: String) {
+        if let Some(ChatItem::Permission(p)) = self.items.get_mut(index) {
+            p.answered = Some(choice);
+        }
     }
 
     /// Mark the receipt at `index` undone, with what the undo said.
@@ -428,6 +448,25 @@ impl ChatState {
                 error: true,
             }),
             AgentEvent::RetryEnd { .. } => {}
+            AgentEvent::Permission {
+                request_id,
+                title,
+                choices,
+            } => {
+                self.items.push(ChatItem::Permission(PermissionAsk {
+                    request_id,
+                    title,
+                    choices,
+                    answered: None,
+                }));
+                self.cur_assistant = None;
+                self.cur_reasoning = None;
+            }
+            AgentEvent::Notice { text, error } => {
+                self.items.push(ChatItem::Notice { text, error });
+                self.cur_assistant = None;
+                self.cur_reasoning = None;
+            }
             AgentEvent::QueueUpdate {
                 steering,
                 follow_up,
@@ -447,6 +486,15 @@ impl ChatState {
             }
             AgentEvent::AgentEnd => {
                 self.running = false;
+                // A question still open when the turn ends (it was stopped)
+                // can't be answered any more.
+                for it in self.items.iter_mut() {
+                    if let ChatItem::Permission(p) = it {
+                        if p.answered.is_none() {
+                            p.answered = Some("not answered: the turn ended".into());
+                        }
+                    }
+                }
                 self.stop_all_streaming();
                 self.cur_assistant = None;
                 self.cur_reasoning = None;
@@ -777,6 +825,22 @@ mod tests {
             "cost": 1.5
         })));
         assert_eq!(st.usage_label().as_deref(), Some("$1.50"));
+    }
+
+    #[test]
+    fn a_question_left_open_when_the_turn_ends_is_closed() {
+        let st = feed(&[
+            AgentEvent::AgentStart,
+            AgentEvent::Permission {
+                request_id: "7".into(),
+                title: "Run `git push`".into(),
+                choices: vec![],
+            },
+            AgentEvent::AgentEnd,
+        ]);
+        assert!(
+            matches!(&st.items[0], ChatItem::Permission(p) if p.answered.as_deref() == Some("not answered: the turn ended"))
+        );
     }
 
     #[test]

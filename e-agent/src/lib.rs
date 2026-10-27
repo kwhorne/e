@@ -12,13 +12,16 @@
 //! - [`chat`] — fold [`AgentEvent`]s into [`ChatItem`]s ([`ChatState`]).
 //! - [`client`] — spawn the process and stream events over a channel.
 
+pub mod acp;
 pub mod chat;
 pub mod client;
 pub mod protocol;
 
-pub use chat::{ChatItem, ChatState, ContextUsage, ModelInfo, ToolCall, ToolStatus, TurnReceipt};
+pub use chat::{
+    ChatItem, ChatState, ContextUsage, ModelInfo, PermissionAsk, ToolCall, ToolStatus, TurnReceipt,
+};
 pub use client::{pump, AgentClient, Streaming};
-pub use protocol::{parse_event, AgentEvent};
+pub use protocol::{parse_event, AgentEvent, PermissionChoice};
 
 /// Replay a whole JSONL transcript (as emitted by `elyra --mode json`/`rpc`)
 /// through the reducer and return the resulting conversation state. Handy for

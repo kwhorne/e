@@ -469,6 +469,24 @@ fn header(state: AppState) -> impl IntoView {
                 );
             }
         }
+        // Which agent: Elyra, or one that speaks ACP.
+        let current = state.settings.get_untracked().cascade_agent;
+        let mark = |id: &str| if current == id { "● " } else { "   " };
+        menu = menu.separator().entry(
+            MenuItem::new(format!("{}Elyra", mark("elyra")))
+                .action(move || state.set_cascade_agent("elyra")),
+        );
+        for p in crate::agent_acp::PROVIDERS {
+            let missing = if crate::agent_acp::installed(p.needs) {
+                ""
+            } else {
+                "  (not installed)"
+            };
+            menu = menu.entry(
+                MenuItem::new(format!("{}{}{missing}", mark(p.id), p.name))
+                    .action(move || state.set_cascade_agent(p.id)),
+            );
+        }
         menu.separator()
             .entry(MenuItem::new("Compact context").action(move || state.cascade_compact()))
             .entry(MenuItem::new("Restart Elyra").action(move || state.restart_agent()))
@@ -661,7 +679,7 @@ fn model_menu(state: AppState) -> Menu {
 fn composer_card(state: AppState) -> impl IntoView {
     let input = composer_input(
         state,
-        "Describe a task for Elyra — ↵ to send, ⇧↵ for a new line",
+        "Describe a task — ↵ to send, ⇧↵ for a new line",
         false,
     );
 
@@ -704,8 +722,16 @@ fn composer_card(state: AppState) -> impl IntoView {
             )
     });
 
+    // Elyra's models; an ACP agent chooses its own, in its own settings.
     let model = label(move || model_label(state))
-        .style(chip_style)
+        .style(move |s| {
+            let s = chip_style(s);
+            if state.settings.with(|st| st.cascade_agent == "elyra") {
+                s
+            } else {
+                s.hide()
+            }
+        })
         .popout_menu(move || model_menu(state));
 
     // How full the context is and what the session has cost; a click
@@ -746,8 +772,11 @@ fn composer_card(state: AppState) -> impl IntoView {
 
     let spacer = empty().style(|s| s.flex_grow(1.0_f32));
 
-    let badge = label(|| "⬡ Elyra".to_string())
-        .style(|s| s.font_size(12.0).color(theme::fg_dim()).padding_horiz(6.0));
+    let badge = label(move || {
+        let _ = state.settings.with(|s| s.cascade_agent.clone());
+        format!("⬡ {}", state.cascade_agent_name())
+    })
+    .style(|s| s.font_size(12.0).color(theme::fg_dim()).padding_horiz(6.0));
 
     let send = label(move || {
         if state.agent.chat.with(|c| c.running) {

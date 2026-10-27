@@ -232,7 +232,7 @@ q '{"method":"dialog","action":"confirm"}'
 | `{"method":"code_actions"}` | Opens the `⌘.` menu at the caret; answers with its items once the language servers have answered (`shown: false` and the notification when there are none) |
 | `{"method":"apply_code_action","index":0}` | Applies one (`"title":"…"` matches part of a title) |
 | `{"method":"dialog","action":"confirm"}` | Confirms (or `cancel`s) the dialog showing — a rename or carry-through preview, or a yes/no question |
-| `{"method":"cascade","action":"send","text":"…"}` | Cascade's controls: `send`, `steer`, `next` (queue for after the turn), `stop`, `new_session`, `compact`, `new_worktree`, `back_to_project`, `continue_in`/`take_down` (`"branch"`), `review_turn`/`undo_turn` (`"index"` of the receipt) |
+| `{"method":"cascade","action":"send","text":"…"}` | Cascade's controls: `send`, `steer`, `next` (queue for after the turn), `stop`, `new_session`, `compact`, `new_worktree`, `back_to_project`, `continue_in`/`take_down` (`"branch"`), `review_turn`/`undo_turn` (`"index"` of the receipt), `answer` (a permission card: `"index"`, `"choice"` by id or name), `agent` (`"id"`: `elyra`, `claude`, `codex`, …, `custom`) |
 | `{"method":"wait_idle","timeout_ms":120000}` | Answers once Elyra has finished its turn, with the end of the transcript |
 | `{"method":"ui_state"}` | What is on screen: open panels, the dialog and what it lists, the code-action menu, the active editor and caret, the session review, Cascade's state and transcript (tool cards, receipts, notices), and the last 20 notifications |
 

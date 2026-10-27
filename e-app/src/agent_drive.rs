@@ -98,6 +98,13 @@ fn transcript(state: AppState) -> Vec<Value> {
                 ChatItem::Notice { text, error } => {
                     json!({"index": i, "kind": "notice", "text": text, "error": error})
                 }
+                ChatItem::Permission(p) => json!({
+                    "index": i,
+                    "kind": "permission",
+                    "title": p.title,
+                    "choices": p.choices.iter().map(|c| json!({"id": c.id, "name": c.name, "kind": c.kind})).collect::<Vec<_>>(),
+                    "answered": p.answered,
+                }),
                 ChatItem::Receipt(r) => json!({
                     "index": i,
                     "kind": "receipt",
@@ -208,6 +215,7 @@ impl AppState {
         let cascade = self.agent.chat.with_untracked(|c| {
             json!({
                 "running": c.running,
+                "agent": self.cascade_agent_name(),
                 "model": c.model.as_ref().map(|m| format!("{}/{}", m.provider, m.id)),
                 "usage": c.usage_label(),
                 "steering": c.steering,
@@ -291,6 +299,16 @@ impl AppState {
                     self.cascade_enter_worktree(Some(t));
                 }
             }
+            "answer" => {
+                let Some(i) = index else {
+                    return json!({"ok": false, "error": "missing index (of the permission request in the transcript)"});
+                };
+                return match self.answer_permission(i, &s("choice")) {
+                    Ok(name) => json!({"ok": true, "answered": name}),
+                    Err(e) => json!({"ok": false, "error": e}),
+                };
+            }
+            "agent" => self.set_cascade_agent(&s("id")),
             "review_turn" | "undo_turn" => {
                 let Some(i) = index else {
                     return json!({"ok": false, "error": "missing index (of the receipt in the transcript)"});
@@ -306,7 +324,8 @@ impl AppState {
                     "ok": false,
                     "error": format!("unknown action {other:?}"),
                     "actions": ["send", "steer", "next", "stop", "new_session", "compact", "new_worktree",
-                                "back_to_project", "continue_in", "take_down", "review_turn", "undo_turn"],
+                                "back_to_project", "continue_in", "take_down", "review_turn", "undo_turn",
+                                "answer", "agent"],
                 })
             }
         }

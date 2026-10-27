@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   controls do; `wait_idle` waits for Elyra's turn; and `ui_state` reads back
   what is on screen, notifications included. An agent — or a test — can now
   use the UI end to end, and see the result, without sending keystrokes.
+- **Run Claude Code, Codex, Gemini CLI and other agents in Cascade.** Cascade
+  speaks the Agent Client Protocol, so the `⋯` menu's **Agent** section runs
+  Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, OpenCode, Goose, Qwen
+  Code or Kimi CLI — or any ACP agent, through `cascade_custom_command` — in the
+  same panel as Elyra: transcript, tool cards, turn receipts with Review and
+  Undo, worktree sessions and the context meter. When the agent asks before
+  acting, its question is a card in the transcript with its own choices.
 
 ## [0.12.0] - 2026-10-27
 

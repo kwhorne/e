@@ -80,10 +80,31 @@ pub enum AgentEvent {
     },
     /// The agent finished the whole prompt (idle again).
     AgentEnd,
+    /// The agent asks before doing something (an ACP agent's
+    /// `session/request_permission`): answer with one of `choices`.
+    Permission {
+        /// The JSON-RPC id of the request, as JSON, to answer it by.
+        request_id: String,
+        /// What it wants to do: "Edit notes.txt", "Run `git push`".
+        title: String,
+        choices: Vec<PermissionChoice>,
+    },
+    /// A line for the transcript from the agent (an ACP `notice`, a plan).
+    Notice { text: String, error: bool },
     /// A protocol-level error message.
     Error { message: String },
     /// Any event type we don't specifically model, kept verbatim.
     Other { kind: String, raw: Value },
+}
+
+/// One answer to a permission request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PermissionChoice {
+    pub id: String,
+    /// "Allow once", "Always allow", "Reject".
+    pub name: String,
+    /// `allow_once`, `allow_always`, `reject_once` or `reject_always`.
+    pub kind: String,
 }
 
 fn str_field(v: &Value, key: &str) -> String {

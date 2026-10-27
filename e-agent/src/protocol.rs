@@ -35,6 +35,9 @@ pub enum AgentEvent {
         name: String,
         args: Value,
     },
+    /// What a started tool call works on became known (ACP agents may send
+    /// it after the call starts).
+    ToolArgs { id: String, args: Value },
     /// Progress update for a running tool.
     ToolUpdate {
         id: String,

@@ -28,6 +28,9 @@ use crate::protocol::{AgentEvent, PermissionChoice};
 /// The protocol version spoken (`initialize`'s `protocolVersion`).
 pub const PROTOCOL_VERSION: u64 = 1;
 
+/// The JSON-RPC error code ACP gives `authRequired`.
+const AUTH_REQUIRED: i64 = -32000;
+
 // ---- Translating session updates -------------------------------------------
 
 /// What the agent is streaming at the moment.
@@ -59,7 +62,7 @@ fn block_text(block: &Value) -> Option<String> {
 
 /// A tool call's content as text: its text blocks, and for a diff, which
 /// file changed and by how many lines.
-fn tool_content_text(content: &Value) -> Option<String> {
+fn tool_content_text(content: &Value, relative: impl Fn(&str) -> String) -> Option<String> {
     let items = content.as_array()?;
     let mut out: Vec<String> = Vec::new();
     for item in items {
@@ -74,7 +77,7 @@ fn tool_content_text(content: &Value) -> Option<String> {
                 let old = item.get("oldText").and_then(Value::as_str).unwrap_or("");
                 let new = item.get("newText").and_then(Value::as_str).unwrap_or("");
                 let (o, n) = (old.lines().count(), new.lines().count());
-                out.push(format!("{path}: {n} line(s), was {o}"));
+                out.push(format!("{}: {n} line(s), was {o}", relative(path)));
             }
             Some("terminal") => out.push("(terminal output)".into()),
             _ => {}
@@ -154,34 +157,10 @@ impl Translator {
                     .and_then(Value::as_str)
                     .unwrap_or("tool")
                     .to_string();
-                let title = u
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                // What the card shows beside the kind: the file, the
-                // command, or else the agent's own title for the call.
-                let mut args = serde_json::Map::new();
-                if let Some(path) = u
-                    .get("locations")
-                    .and_then(Value::as_array)
-                    .and_then(|l| l.first())
-                    .and_then(|l| l.get("path"))
-                    .and_then(Value::as_str)
-                {
-                    args.insert("path".into(), Value::String(self.relative(path)));
-                }
-                if let Some(cmd) = u.get("rawInput").and_then(|r| r.get("command")) {
-                    args.insert("command".into(), cmd.clone());
-                }
-                if args.is_empty() && !title.is_empty() {
-                    args.insert("query".into(), Value::String(title.clone()));
-                }
-                args.insert("title".into(), Value::String(title));
                 out.push(AgentEvent::ToolStart {
                     id: id.clone(),
                     name: kind.clone(),
-                    args: Value::Object(args),
+                    args: self.tool_args(u),
                 });
                 out.extend(self.tool_progress(&id, &kind, u));
             }
@@ -196,6 +175,17 @@ impl Translator {
                     .and_then(Value::as_str)
                     .unwrap_or("tool")
                     .to_string();
+                // Claude Code's adapter names the file or command only now,
+                // once the call's input has streamed in.
+                if ["title", "locations", "rawInput"]
+                    .iter()
+                    .any(|k| u.get(*k).is_some_and(|v| !v.is_null()))
+                {
+                    out.push(AgentEvent::ToolArgs {
+                        id: id.clone(),
+                        args: self.tool_args(u),
+                    });
+                }
                 out.extend(self.tool_progress(&id, &kind, u));
             }
             "usage_update" => {
@@ -280,13 +270,40 @@ impl Translator {
     }
 
     /// A tool call's status and output: running with output so far, or done.
+    /// What a tool card shows beside the kind: the file, the command, or
+    /// else the agent's own title for the call.
+    fn tool_args(&self, u: &Value) -> Value {
+        let title = u.get("title").and_then(Value::as_str).unwrap_or("");
+        let mut args = serde_json::Map::new();
+        if let Some(path) = u
+            .get("locations")
+            .and_then(Value::as_array)
+            .and_then(|l| l.first())
+            .and_then(|l| l.get("path"))
+            .and_then(Value::as_str)
+        {
+            args.insert("path".into(), Value::String(self.relative(path)));
+        }
+        if let Some(cmd) = u.get("rawInput").and_then(|r| r.get("command")) {
+            args.insert("command".into(), cmd.clone());
+        }
+        if args.is_empty() && !title.is_empty() {
+            args.insert("query".into(), Value::String(title.to_string()));
+        }
+        args.insert("title".into(), Value::String(title.to_string()));
+        Value::Object(args)
+    }
+
     fn tool_progress(&self, id: &str, kind: &str, u: &Value) -> Vec<AgentEvent> {
-        let text = u.get("content").and_then(tool_content_text).or_else(|| {
-            u.get("rawOutput").map(|o| match o.as_str() {
-                Some(s) => s.to_string(),
-                None => o.to_string(),
-            })
-        });
+        let text = u
+            .get("content")
+            .and_then(|c| tool_content_text(c, |p| self.relative(p)))
+            .or_else(|| {
+                u.get("rawOutput").map(|o| match o.as_str() {
+                    Some(s) => s.to_string(),
+                    None => o.to_string(),
+                })
+            });
         match u.get("status").and_then(Value::as_str) {
             Some(s @ ("completed" | "failed")) => vec![AgentEvent::ToolEnd {
                 id: id.to_string(),
@@ -544,10 +561,16 @@ impl Acp {
                     .as_u64()
                     .and_then(|n| self.state.lock().expect("acp state").pending.remove(&n));
                 let error = msg.get("error").map(|e| {
-                    e.get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or("error")
-                        .to_string()
+                    let message = e.get("message").and_then(Value::as_str).unwrap_or("error");
+                    // ACP's `authRequired`: the agent's own sign-in is missing.
+                    if e.get("code").and_then(Value::as_i64) == Some(AUTH_REQUIRED) {
+                        format!(
+                            "{message}: the agent isn't signed in. Sign in to it in a terminal \
+                             (for Claude Code, run `claude` and /login), then send again."
+                        )
+                    } else {
+                        message.to_string()
+                    }
                 });
                 match kind {
                     Some(Pending::Initialize) => match error {
@@ -722,6 +745,27 @@ mod tests {
                 is_error: false,
             }]
         );
+    }
+
+    #[test]
+    fn a_file_named_after_the_call_started_reaches_its_card() {
+        // Claude Code's adapter starts a call before its input is known.
+        let mut tr = Translator::in_dir("/tmp/w");
+        let mut chat = crate::ChatState::default();
+        for u in [
+            json!({"sessionUpdate": "tool_call", "toolCallId": "c4", "title": "Edit", "kind": "edit", "status": "pending"}),
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "c4", "title": "Edit notes.txt",
+                   "locations": [{"path": "/private/tmp/w/notes.txt"}], "rawInput": {"file_path": "/tmp/w/notes.txt"}}),
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "c4", "title": "Edit notes.txt"}),
+        ] {
+            for e in tr.update(&u) {
+                chat.apply(e);
+            }
+        }
+        match &chat.items[..] {
+            [ChatItem::Tool(tc)] => assert_eq!(tc.summary, "notes.txt"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
@@ -900,5 +944,16 @@ mod tests {
         let cancel = wire.sent();
         assert_eq!(cancel[0]["method"], "session/cancel");
         assert_eq!(cancel[0]["params"]["sessionId"], "s1");
+
+        // A turn refused for want of a sign-in says how to sign in.
+        acp.receive(
+            &json!({"jsonrpc": "2.0", "id": next[0]["id"],
+                    "error": {"code": -32000, "message": "Authentication required"}})
+            .to_string(),
+        );
+        assert!(rx
+            .try_iter()
+            .any(|ev| matches!(ev, AgentEvent::Error { message }
+            if message.starts_with("Authentication required: the agent isn't signed in"))));
     }
 }

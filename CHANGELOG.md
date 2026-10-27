@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude Code's tool cards in Cascade name the file or command.** Its
+  adapter sends them after the call starts, and the cards stayed blank; paths
+  in edits are shown relative to the project.
+- **An agent that isn't signed in says how to sign in**, instead of a bare
+  "Authentication required".
+
 ## [0.13.0] - 2026-10-27
 
 ### Added

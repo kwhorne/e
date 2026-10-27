@@ -390,6 +390,27 @@ impl ChatState {
                 // Any text bubble is complete once tools begin.
                 self.cur_assistant = None;
             }
+            AgentEvent::ToolArgs { id, args } => {
+                if let Some(ChatItem::Tool(tc)) = self
+                    .items
+                    .iter_mut()
+                    .rev()
+                    .find(|it| matches!(it, ChatItem::Tool(tc) if tc.id == id))
+                {
+                    // Added to what was known: a later update may give the
+                    // title alone.
+                    if let (Some(old), Some(new)) = (tc.args.as_object_mut(), args.as_object()) {
+                        for (k, v) in new {
+                            if k != "query" || !old.contains_key("path") {
+                                old.insert(k.clone(), v.clone());
+                            }
+                        }
+                    } else {
+                        tc.args = args;
+                    }
+                    tc.summary = summarize_args(&tc.name, &tc.args);
+                }
+            }
             AgentEvent::ToolUpdate { id, partial, .. } => {
                 // Output so far, while the tool runs: the latest of it.
                 if let Some(ChatItem::Tool(tc)) = self

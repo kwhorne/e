@@ -657,6 +657,170 @@ pub fn restore_checkpoint(root: &Path, cp: &Checkpoint) -> Result<(), String> {
     Ok(())
 }
 
+// ---- Turn snapshots ----------------------------------------------------------
+//
+// What one agent turn changed, and undoing just that: the working tree is
+// captured as a tree object before the turn and again after it. Capturing
+// writes blobs and a tree to the object store and nothing else — not the
+// index, not HEAD, not the stash — so it is safe while the user works.
+
+/// `git` with a different index file.
+fn git_with_index(root: &Path, index: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .env("GIT_INDEX_FILE", index)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// `git` whose output is bytes, not text (a file's contents).
+fn git_bytes(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// The working tree as it is now, as a tree object: tracked files with their
+/// current contents and untracked ones that aren't ignored. Built in a copy
+/// of the index, so the real one is never touched.
+pub fn snapshot_tree(root: &Path) -> Result<String, String> {
+    let index = git_out(root, &["rev-parse", "--git-path", "index"])?;
+    let index = root.join(index);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("e-turn-index-{}-{nanos}", std::process::id()));
+    // A copy of the real index carries its stat cache: only files that changed
+    // are hashed again.
+    if index.is_file() {
+        std::fs::copy(&index, &tmp).map_err(|e| e.to_string())?;
+    }
+    let tree = git_with_index(root, &tmp, &["add", "-A", "--", "."])
+        .and_then(|_| git_with_index(root, &tmp, &["write-tree"]));
+    let _ = std::fs::remove_file(&tmp);
+    tree
+}
+
+/// One file a turn changed, with its line counts (both 0 for a binary file).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TreeChange {
+    pub path: String,
+    pub added: u32,
+    pub removed: u32,
+}
+
+/// The files that differ between two snapshots.
+pub fn tree_changes(root: &Path, before: &str, after: &str) -> Result<Vec<TreeChange>, String> {
+    let out = git_bytes(
+        root,
+        &["diff", "--numstat", "-z", "--no-renames", before, after],
+    )?;
+    let text = String::from_utf8_lossy(&out);
+    Ok(text
+        .split('\0')
+        .filter(|e| !e.is_empty())
+        .filter_map(|e| {
+            let mut parts = e.splitn(3, '\t');
+            let added = parts.next()?.parse().unwrap_or(0);
+            let removed = parts.next()?.parse().unwrap_or(0);
+            let path = parts.next()?.to_string();
+            Some(TreeChange {
+                path,
+                added,
+                removed,
+            })
+        })
+        .collect())
+}
+
+/// The unified diff between two snapshots.
+pub fn tree_diff(root: &Path, before: &str, after: &str) -> Result<String, String> {
+    let out = git_bytes(root, &["diff", "--no-renames", before, after])?;
+    Ok(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// What undoing a turn did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UndoReport {
+    /// Put back as they were before the turn (or removed, if it created them).
+    pub restored: Vec<String>,
+    /// Left alone: changed again since the turn, so undoing would lose that.
+    pub skipped: Vec<String>,
+}
+
+/// `(mode, blob)` of `path` in `tree`, or `None` when it isn't there.
+fn entry_in(root: &Path, tree: &str, path: &str) -> Option<(String, String)> {
+    let out = git_out(root, &["ls-tree", tree, "--", path]).ok()?;
+    let (meta, _) = out.split_once('\t')?;
+    let mut it = meta.split_whitespace();
+    let mode = it.next()?.to_string();
+    let _kind = it.next()?;
+    let sha = it.next()?.to_string();
+    Some((mode, sha))
+}
+
+/// Put `paths` back as they were in `before` — but only those still exactly
+/// as `after` left them. A file changed again since (by the user, or a later
+/// turn) is skipped, never overwritten.
+pub fn undo_tree_change(
+    root: &Path,
+    before: &str,
+    after: &str,
+    paths: &[String],
+) -> Result<UndoReport, String> {
+    let mut report = UndoReport::default();
+    for path in paths {
+        let file = root.join(path);
+        let now = if file.is_file() {
+            Some(git_out(root, &["hash-object", "--", path])?)
+        } else {
+            None
+        };
+        let then = entry_in(root, after, path).map(|(_, sha)| sha);
+        if now != then {
+            report.skipped.push(path.clone());
+            continue;
+        }
+        match entry_in(root, before, path) {
+            Some((mode, sha)) => {
+                let bytes = git_bytes(root, &["cat-file", "blob", &sha])?;
+                if let Some(dir) = file.parent() {
+                    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+                }
+                std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let bits = if mode == "100755" { 0o755 } else { 0o644 };
+                    let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(bits));
+                }
+            }
+            // The turn created it: undoing removes it.
+            None => {
+                let _ = std::fs::remove_file(&file);
+            }
+        }
+        report.restored.push(path.clone());
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{diff, marks, DiffKind, LineMark};
@@ -680,7 +844,9 @@ mod tests {
         assert!(d.iter().any(|l| l.kind == DiffKind::Added && l.text == "Y"));
     }
 
-    use super::{checkpoint, restore_checkpoint};
+    use super::{
+        checkpoint, restore_checkpoint, snapshot_tree, tree_changes, tree_diff, undo_tree_change,
+    };
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
@@ -795,5 +961,61 @@ mod tests {
         );
         assert!(!dir.join("new.txt").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_turn_is_captured_without_touching_the_index_and_undone_file_by_file() {
+        let dir = init_repo("turn");
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        std::fs::write(dir.join(".gitignore"), "ignored.log\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "init"]);
+        // Work in progress the user has, staged and not.
+        std::fs::write(dir.join("a.txt"), "one\nuser wip\n").unwrap();
+        std::fs::write(dir.join("notes.txt"), "mine\n").unwrap();
+        git(&dir, &["add", "notes.txt"]);
+        let index_before = std::fs::read(dir.join(".git/index")).unwrap();
+
+        let before = snapshot_tree(&dir).unwrap();
+        // The turn: edits a.txt, creates b.txt, deletes notes.txt, writes an
+        // ignored log.
+        std::fs::write(dir.join("a.txt"), "one\nuser wip\nagent\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "new\n").unwrap();
+        std::fs::remove_file(dir.join("notes.txt")).unwrap();
+        std::fs::write(dir.join("ignored.log"), "noise").unwrap();
+        let after = snapshot_tree(&dir).unwrap();
+
+        assert_eq!(std::fs::read(dir.join(".git/index")).unwrap(), index_before);
+        let changes = tree_changes(&dir, &before, &after).unwrap();
+        let paths: Vec<&str> = changes.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt", "b.txt", "notes.txt"]);
+        assert_eq!((changes[0].added, changes[0].removed), (1, 0));
+        assert!(tree_diff(&dir, &before, &after).unwrap().contains("+agent"));
+
+        // The user changes b.txt again after the turn: undo leaves it alone.
+        std::fs::write(dir.join("b.txt"), "new\nedited by me\n").unwrap();
+        let all: Vec<String> = changes.iter().map(|c| c.path.clone()).collect();
+        let report = undo_tree_change(&dir, &before, &after, &all).unwrap();
+        assert_eq!(report.restored, ["a.txt", "notes.txt"]);
+        assert_eq!(report.skipped, ["b.txt"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+            "one\nuser wip\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("notes.txt")).unwrap(),
+            "mine\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("b.txt")).unwrap(),
+            "new\nedited by me\n"
+        );
+        // Undo of a created file that is still as the turn left it removes it.
+        std::fs::write(dir.join("b.txt"), "new\n").unwrap();
+        let report = undo_tree_change(&dir, &before, &after, &["b.txt".to_string()]).unwrap();
+        assert_eq!(report.restored, ["b.txt"]);
+        assert!(!dir.join("b.txt").exists());
+        assert_eq!(std::fs::read(dir.join(".git/index")).unwrap(), index_before);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

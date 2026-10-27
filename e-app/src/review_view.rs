@@ -301,8 +301,27 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
 }
 
 pub fn review_panel(state: AppState) -> impl IntoView {
-    let title = label(|| "Session review".to_string())
-        .style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
+    let title = label(move || {
+        if state.review_turn.with(Option::is_some) {
+            "Review: one turn".to_string()
+        } else {
+            "Session review".to_string()
+        }
+    })
+    .style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
+    // Back from one turn to everything the session changed.
+    let whole = btn("Whole session", false)
+        .style(move |s| {
+            if state.review_turn.with(Option::is_some) {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| {
+            state.review_turn.set(None);
+            state.refresh_review();
+        });
     let summary = label(move || state.review_changeset.with(|cs| cs.summary()))
         .style(|s| s.font_size(11.0).color(theme::fg_dim()).margin_left(10.0));
     let progress = label(move || {
@@ -330,7 +349,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.review_open.set(false));
-    let header = stack((title, summary, progress, ask, refresh, close)).style(|s| {
+    let header = stack((title, summary, progress, whole, ask, refresh, close)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(6.0)

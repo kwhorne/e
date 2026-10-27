@@ -27,14 +27,56 @@ pub struct ToolCall {
     pub result: Option<String>,
 }
 
+/// What one turn of the agent changed in the working tree — the files, with
+/// line counts — between two snapshots of it, so it can be reviewed or undone
+/// as a unit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnReceipt {
+    /// The working tree before the turn and after it, as tree objects.
+    pub before: String,
+    pub after: String,
+    /// `(path, lines added, lines removed)`.
+    pub files: Vec<(String, u32, u32)>,
+    /// How many review flags (warnings and worse) the change raises.
+    pub flags: usize,
+    /// Once undone: what the undo said.
+    pub undone: Option<String>,
+}
+
+impl TurnReceipt {
+    /// `3 files · +42 −7`.
+    pub fn summary(&self) -> String {
+        let n = self.files.len();
+        let added: u32 = self.files.iter().map(|f| f.1).sum();
+        let removed: u32 = self.files.iter().map(|f| f.2).sum();
+        format!(
+            "{n} {} · +{added} −{removed}",
+            if n == 1 { "file" } else { "files" }
+        )
+    }
+}
+
 /// One item in the transcript, in event order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ChatItem {
-    User { text: String },
-    Assistant { text: String, streaming: bool },
-    Reasoning { text: String, streaming: bool },
+    User {
+        text: String,
+    },
+    Assistant {
+        text: String,
+        streaming: bool,
+    },
+    Reasoning {
+        text: String,
+        streaming: bool,
+    },
     Tool(ToolCall),
-    Notice { text: String, error: bool },
+    Notice {
+        text: String,
+        error: bool,
+    },
+    /// What the turn that just ended changed.
+    Receipt(TurnReceipt),
 }
 
 /// Maximum characters kept for a tool-result preview.
@@ -145,6 +187,20 @@ impl ChatState {
             shown: shown.to_string(),
             queued,
         });
+    }
+
+    /// Close a turn with what it changed.
+    pub fn push_receipt(&mut self, receipt: TurnReceipt) {
+        self.items.push(ChatItem::Receipt(receipt));
+        self.cur_assistant = None;
+        self.cur_reasoning = None;
+    }
+
+    /// Mark the receipt at `index` undone, with what the undo said.
+    pub fn mark_undone(&mut self, index: usize, said: String) {
+        if let Some(ChatItem::Receipt(r)) = self.items.get_mut(index) {
+            r.undone = Some(said);
+        }
     }
 
     /// How a queued message reads in the transcript.

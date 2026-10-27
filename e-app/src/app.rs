@@ -505,11 +505,18 @@ fn app_view() -> impl IntoView {
                         eprintln!("e: agent event: {cut}");
                     }
                 }
+                let ended = drained
+                    .iter()
+                    .any(|ev| matches!(ev, e_agent::AgentEvent::AgentEnd));
                 chat.update(|c| {
                     for ev in drained {
                         c.apply(ev);
                     }
                 });
+                // What the turn changed, under it.
+                if ended {
+                    state.turn_end();
+                }
             }
         });
     }

@@ -8,7 +8,7 @@ use std::{
 use floem_editor_core::{
     buffer::{rope_text::RopeText, Buffer, InvalLines},
     command::EditCommand,
-    cursor::Cursor,
+    cursor::{Cursor, CursorAffinity},
     editor::{Action, EditConf, EditType},
     mode::{Mode, MotionMode},
     register::Register,
@@ -259,7 +259,9 @@ impl DocumentPhantom for TextDocument {
                 text.push(PhantomText {
                     kind: PhantomTextKind::Placeholder,
                     col: 0,
-                    affinity: None,
+                    // The caret goes before the placeholder, where typing will
+                    // start: with no affinity it was drawn after it.
+                    affinity: Some(CursorAffinity::Backward),
                     text: placeholder,
                     font_size: None,
                     fg: Some(styling.placeholder_color()),

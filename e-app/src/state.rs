@@ -448,6 +448,9 @@ pub struct AgentPanel {
     pub edit: RwSignal<Option<AgentEdit>>,
     /// Cascade's mode: `code` (tools on) or `ask` (answer and plan only).
     pub mode: RwSignal<String>,
+    /// The working tree before the turn now running, as a tree object; its
+    /// receipt is made from it when the turn ends.
+    pub turn_before: RwSignal<Option<String>>,
 }
 
 impl AgentPanel {
@@ -475,6 +478,7 @@ impl AgentPanel {
             mark: RwSignal::new(None),
             edit: RwSignal::new(None),
             mode: RwSignal::new(config::load_settings().cascade_mode),
+            turn_before: RwSignal::new(None),
         }
     }
 }
@@ -894,6 +898,9 @@ pub struct AppState {
     pub review_changeset: RwSignal<e_review::Changeset>,
     /// Commit the session started at; `None` = review everything uncommitted.
     pub review_base: RwSignal<Option<String>>,
+    /// Review just one agent turn: its before and after trees. `None` reviews
+    /// the session.
+    pub review_turn: RwSignal<Option<(String, String)>>,
     pub review_selected: RwSignal<Option<String>>,
     pub review_busy: RwSignal<bool>,
     /// Automated diff inspections over the changeset.
@@ -1772,6 +1779,7 @@ impl AppState {
             review_open: RwSignal::new(false),
             review_changeset: RwSignal::new(e_review::Changeset::default()),
             review_base: RwSignal::new(None),
+            review_turn: RwSignal::new(None),
             review_selected: RwSignal::new(None),
             review_busy: RwSignal::new(false),
             review_flags: RwSignal::new(Vec::new()),
@@ -3651,9 +3659,17 @@ impl AppState {
         };
         // Idle, it shows at once; queued, where the agent takes it up.
         self.agent.chat.update(|c| c.send(&shown, &text, busy));
-        let text = text.as_str();
-        if let Err(e) = client.prompt(text, streaming) {
-            eprintln!("e: agent prompt failed: {e:#}");
+        let send = move || {
+            if let Err(e) = client.prompt(&text, streaming) {
+                eprintln!("e: agent prompt failed: {e:#}");
+            }
+        };
+        // A new turn starts from a snapshot of the tree, for its receipt; a
+        // message queued into a running turn belongs to that one.
+        if busy {
+            send();
+        } else {
+            self.turn_begin(send);
         }
         self.agent.composer.set(String::new());
     }

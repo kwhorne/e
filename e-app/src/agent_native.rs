@@ -38,6 +38,7 @@ fn transcript_size(state: AppState) -> usize {
                 ChatItem::Tool(tc) => {
                     tc.summary.len() + tc.result.as_ref().map(String::len).unwrap_or(0)
                 }
+                ChatItem::Receipt(r) => r.files.len(),
             })
             .sum()
     })
@@ -161,6 +162,8 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
 
         Some(ChatItem::Tool(_)) => tool_card(state, i).into_any(),
 
+        Some(ChatItem::Receipt(_)) => receipt_card(state, i).into_any(),
+
         Some(ChatItem::Notice { error, .. }) => label(move || item_text(state, i))
             .style(move |s| {
                 let c = if error {
@@ -178,6 +181,110 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
 
         None => empty().into_any(),
     }
+}
+
+/// What a turn changed, under it: the files with their line counts, how many
+/// review flags they raise, and **Review** / **Undo** for just this turn.
+fn receipt_card(state: AppState, i: usize) -> impl IntoView {
+    let receipt = move || {
+        state.agent.chat.with(|c| match c.items.get(i) {
+            Some(ChatItem::Receipt(r)) => Some(r.clone()),
+            _ => None,
+        })
+    };
+    let undone = move || receipt().is_some_and(|r| r.undone.is_some());
+
+    let headline = label(move || {
+        let Some(r) = receipt() else {
+            return String::new();
+        };
+        if let Some(said) = &r.undone {
+            return said.clone();
+        }
+        let flags = match r.flags {
+            0 => String::new(),
+            1 => " · ⚠ 1 flag".to_string(),
+            n => format!(" · ⚠ {n} flags"),
+        };
+        format!("This turn changed {}{flags}", r.summary())
+    })
+    .style(move |s| {
+        let flagged = receipt().is_some_and(|r| r.flags > 0 && r.undone.is_none());
+        s.flex_grow(1.0_f32)
+            .min_width(0.0)
+            .font_size(12.0)
+            .color(if flagged {
+                theme::warning()
+            } else {
+                theme::fg()
+            })
+    });
+
+    let button = |text: &'static str| {
+        label(move || text.to_string()).style(move |s| {
+            let s = s
+                .padding_horiz(8.0)
+                .padding_vert(2.0)
+                .font_size(11.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(4.0)
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()));
+            if undone() {
+                s.hide()
+            } else {
+                s
+            }
+        })
+    };
+    let review = button("Review").on_click_stop(move |_| state.turn_review(i));
+    let undo = button("Undo").on_click_stop(move |_| state.turn_undo(i));
+
+    let head = stack((headline, review, undo)).style(|s| s.items_center().width_full().gap(6.0));
+
+    // The files, a line each: path, then +added −removed.
+    let files = label(move || {
+        let Some(r) = receipt() else {
+            return String::new();
+        };
+        let mut lines: Vec<String> = r
+            .files
+            .iter()
+            .take(8)
+            .map(|(path, added, removed)| format!("{path}  +{added} −{removed}"))
+            .collect();
+        if r.files.len() > 8 {
+            lines.push(format!("… and {} more", r.files.len() - 8));
+        }
+        lines.join("\n")
+    })
+    .style(move |s| {
+        let s = s
+            .font_family(theme::mono_family())
+            .font_size(11.0)
+            .color(theme::fg_dim())
+            .margin_top(4.0);
+        if undone() {
+            s.hide()
+        } else {
+            s
+        }
+    });
+
+    // Stretched by the column to its width less the margins: `width_full()`
+    // plus margins would overflow the panel and cut off the buttons.
+    stack((head, files)).style(|s| {
+        s.flex_col()
+            .margin_vert(4.0)
+            .margin_horiz(8.0)
+            .padding(8.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(6.0)
+            .min_width(0.0)
+    })
 }
 
 /// A collapsible-looking card for one tool call: status glyph + name + summary,
@@ -248,7 +355,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
             .border_color(theme::border())
             .border_radius(6.0)
             .background(theme::bg_panel())
-            .width_full()
+            .min_width(0.0)
     })
 }
 

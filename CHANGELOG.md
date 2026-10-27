@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The caret in an empty input sits before the placeholder**, where typing
+  starts — in Cascade's composer and the SQL console — not after its text.
+- **Tool cards in Cascade fit the panel**; they ran past its right edge.
+
 ### Added
+
+- **What each turn changed, with Undo.** When Elyra finishes a turn in
+  Cascade, a card under the reply lists the files it changed with their line
+  counts and any review flags. **Review** opens the session review on just
+  that turn; **Undo** puts the turn's files back, leaving alone any changed
+  again since or open with unsaved edits. The working tree is captured before
+  and after the turn as git tree objects, without touching the index, HEAD or
+  the stash.
 
 - **Steer or queue while Elyra works.** In Cascade, Enter while Elyra runs
   steers the running work and ⌥Enter queues a message to run next; what

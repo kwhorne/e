@@ -8,6 +8,7 @@ mod about;
 mod agent_links;
 mod agent_native;
 mod agent_sync;
+mod agent_turn;
 mod agent_ui;
 mod agent_verify;
 mod agent_view;

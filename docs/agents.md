@@ -49,6 +49,23 @@ reply.
   **next**, when it is done. What waits is listed above the input (*Steer* or
   *Next*), and joins the transcript where Elyra takes it up rather than where
   you typed it.
+
+**What each turn changed.** When Elyra finishes, a card under its reply says
+what that turn changed — *This turn changed 3 files · +42 −7*, with ⚠ and
+the number of [review flags](source-control.md#session-review-v) when there
+are any — and lists the files:
+
+- **Review** opens the session review on just that turn (*Review: one turn*,
+  with **Whole session** to widen it again).
+- **Undo** puts the turn's files back as they were before it, and removes the
+  ones it created. A file changed again since — by you, or by a later turn —
+  or open with unsaved edits is left alone, and the card says which.
+
+Before a prompt goes to an idle Elyra, `e` takes a snapshot of the working
+tree (tracked files and untracked ones that aren't ignored) as a git tree
+object, and another when Elyra finishes; the card is the difference. The
+snapshot uses a copy of the index, so your staging area, HEAD and stash are
+never touched. It needs the project to be a git repository.
 - **＋** attaches context: the **active file** (`@path`, which Elyra reads), the
   **selection** (file and line range), or **all open files**.
 - **‹/› Code / ◇ Ask**: Code lets Elyra read, edit and run; Ask asks it to

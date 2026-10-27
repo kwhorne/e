@@ -95,6 +95,8 @@ impl AppState {
     pub fn toggle_review(&self) {
         let open = !self.review_open.get_untracked();
         self.review_open.set(open);
+        // Opened by hand, it reviews the session, not a turn.
+        self.review_turn.set(None);
         if open {
             self.refresh_review();
         }
@@ -153,8 +155,13 @@ impl AppState {
                 Err(e) => Self::notify(&format!("Review failed: {e}")),
             }
         });
+        let turn = self.review_turn.get_untracked();
         std::thread::spawn(move || {
-            send(e_core::git::diff_since(&root, &base).map(|diff| {
+            let diff = match &turn {
+                Some((before, after)) => e_core::git::tree_diff(&root, before, after),
+                None => e_core::git::diff_since(&root, &base),
+            };
+            send(diff.map(|diff| {
                 let cs = changeset_from_diff(&diff);
                 let unchecked = unchecked_lookup_flags(&root, &project, &cs, &routes);
                 (diff, unchecked)

@@ -103,3 +103,7 @@ local changes forward. Record any local patches in this file as they land:
   buffer's edit revision, which was private. `cache_rev` can't stand in for it
   because a caret move bumps it too; `e`'s hot exit needs "did the text change
   since the last backup" to decide whether to rewrite the session file.
+- **`src/views/editor/text_document.rs`: the caret before a placeholder.** The
+  placeholder phantom text had no cursor affinity, so in an empty editor the
+  caret was drawn after the placeholder instead of where typing starts. It is
+  `CursorAffinity::Backward` now.

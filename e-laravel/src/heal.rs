@@ -966,42 +966,76 @@ impl Planner<'_> {
             .filter(|t| !t.contains(' '))
             .unwrap_or_else(|| pluralize(&snake_case(&model)));
         match self.has_column(&table, field) {
-            Some(true) => {}
-            Some(false) => {
+            Column::Live | Column::Migrated => {}
+            Column::Pending(file) => self.note(format!(
+                "{file} adds the {field} column, but hasn't run here yet: php artisan migrate"
+            )),
+            Column::Missing => {
                 let path = self.p.root.join("database/migrations").join(format!(
                     "{}_add_{field}_to_{table}_table.php",
                     self.p.timestamp
                 ));
                 self.heal.creates.push((path, migration(&table, field, kind)));
             }
-            None => self.note(format!(
+            Column::Unknown => self.note(format!(
                 "Couldn't tell whether {table} has a {field} column: connect the database, or add the migration yourself"
             )),
         }
     }
 
-    /// Whether `table` has the column: the live schema says, or failing
-    /// that, the migrations.
-    fn has_column(&self, table: &str, field: &str) -> Option<bool> {
-        if let Some(cols) = self.p.schema.get(table) {
-            return Some(cols.iter().any(|c| c.name == field));
+    /// Whether `table` has the column. The live schema says when it knows the
+    /// table — but a migration that adds the column and hasn't run yet (one
+    /// this made a moment ago) counts too, or every run would add another.
+    fn has_column(&self, table: &str, field: &str) -> Column {
+        let live = self.p.schema.get(table);
+        if live.is_some_and(|cols| cols.iter().any(|c| c.name == field)) {
+            return Column::Live;
         }
         let dir = self.p.root.join("database/migrations");
         let mut mentioned = false;
-        for e in std::fs::read_dir(dir).ok()?.flatten() {
-            let Ok(src) = std::fs::read_to_string(e.path()) else {
+        let mut files: Vec<_> = std::fs::read_dir(dir)
+            .map(|r| r.flatten().map(|e| e.path()).collect())
+            .unwrap_or_default();
+        files.sort();
+        for path in files {
+            let Ok(src) = std::fs::read_to_string(&path) else {
                 continue;
             };
             if src.contains(&format!("'{table}'")) || src.contains(&format!("\"{table}\"")) {
                 mentioned = true;
                 if src.contains(&format!("('{field}'")) || src.contains(&format!("(\"{field}\"")) {
-                    return Some(true);
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    return if live.is_some() {
+                        Column::Pending(name)
+                    } else {
+                        Column::Migrated
+                    };
                 }
             }
         }
-        mentioned.then_some(false)
+        match (live, mentioned) {
+            (Some(_), _) | (None, true) => Column::Missing,
+            (None, false) => Column::Unknown,
+        }
     }
+}
 
+/// What the plan knows of a column.
+enum Column {
+    /// The live schema has it.
+    Live,
+    /// No database to ask, but a migration makes it.
+    Migrated,
+    /// The database lacks it, but this migration adds it and hasn't run.
+    Pending(String),
+    Missing,
+    Unknown,
+}
+
+impl Planner<'_> {
     /// The server side of a submitted form: the route's action, its
     /// validation and the model it writes.
     fn submitted(&mut self, route: &RouteInfo, field: &str, kind: Kind) {
@@ -1511,8 +1545,17 @@ mod tests {
     }
 
     fn run(root: &Path, file: &str, text: &str, f: &FieldRef) -> Heal {
+        run_with(root, file, text, f, HashMap::new())
+    }
+
+    fn run_with(
+        root: &Path,
+        file: &str,
+        text: &str,
+        f: &FieldRef,
+        schema: HashMap<String, Vec<ColumnInfo>>,
+    ) -> Heal {
         let routes = routes();
-        let schema = HashMap::new();
         let read = |p: &Path| std::fs::read_to_string(p).ok();
         let p = Project {
             root,
@@ -1576,6 +1619,69 @@ mod tests {
             &f,
         );
         assert!(again.is_empty(), "{:?}", again.changes);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_migration_that_has_not_run_yet_is_not_made_twice() {
+        let view = "<form method=\"POST\" action=\"{{ route('customers.store') }}\">\n  <input name=\"phone\">\n</form>\n";
+        let pending = "<?php\nSchema::table('customers', function (Blueprint $table) {\n    $table->string('phone')->nullable();\n});\n";
+        let root = app(&[
+            ("app/Models/Customer.php", MODEL),
+            ("app/Http/Requests/StoreCustomerRequest.php", REQUEST),
+            ("app/Http/Controllers/CustomerController.php", CONTROLLER),
+            (
+                "database/migrations/2024_01_01_000000_create_customers_table.php",
+                MIGRATION,
+            ),
+            (
+                "database/migrations/2026_10_27_000000_add_phone_to_customers_table.php",
+                pending,
+            ),
+            ("resources/views/customers/create.blade.php", view),
+        ]);
+        // The database has the table, without the column: the migration
+        // hasn't run.
+        let col = |name: &str| ColumnInfo {
+            name: name.into(),
+            data_type: "varchar(255)".into(),
+            nullable: false,
+            key: String::new(),
+        };
+        let schema: HashMap<String, Vec<ColumnInfo>> =
+            [("customers".to_string(), vec![col("id"), col("name")])]
+                .into_iter()
+                .collect();
+        let f = field_at(view, view.find("phone").unwrap(), true).unwrap();
+        let heal = run_with(
+            &root,
+            "resources/views/customers/create.blade.php",
+            view,
+            &f,
+            schema.clone(),
+        );
+        assert!(heal.creates.is_empty(), "{:?}", heal.creates);
+        assert!(
+            heal.notes
+                .iter()
+                .any(|n| n.contains("add_phone_to_customers_table.php adds the phone column")),
+            "{:?}",
+            heal.notes
+        );
+
+        // Without that migration, the live schema's word stands: one is made.
+        std::fs::remove_file(
+            root.join("database/migrations/2026_10_27_000000_add_phone_to_customers_table.php"),
+        )
+        .unwrap();
+        let heal = run_with(
+            &root,
+            "resources/views/customers/create.blade.php",
+            view,
+            &f,
+            schema,
+        );
+        assert_eq!(heal.creates.len(), 1);
         std::fs::remove_dir_all(&root).ok();
     }
 

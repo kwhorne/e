@@ -341,9 +341,13 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
                 }
             }
             for (path, content) in &plan.creates {
+                // "New" first: a migration's name is long enough that a
+                // marker after it is cut off.
                 let rel = path.strip_prefix(&root).unwrap_or(path);
-                out.push_str(&format!("{} (new)\n", rel.display()));
-                for line in content.lines().filter(|l| l.contains("$table->")) {
+                out.push_str(&format!("new file: {}\n", rel.display()));
+                // What it adds — `up()`; `down()` only undoes it.
+                let up = content.split("function down").next().unwrap_or(content);
+                for line in up.lines().filter(|l| l.contains("$table->")) {
                     out.push_str(&format!("  + {}\n", line.trim()));
                 }
             }
@@ -364,10 +368,14 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
         label(headline).style(|s| s.color(theme::fg()).font_size(15.0)),
         label(subtitle).style(|s| s.color(theme::fg_dim()).font_size(13.0).margin_top(4.0)),
         floem::views::scroll(label(sites).style(|s| {
+            // Room on the right and below for the scrollbars, so they never
+            // sit over the last line or the end of a path.
             s.color(theme::fg_dim())
                 .font_size(12.0)
                 .font_family(theme::mono_family())
                 .padding(8.0)
+                .padding_right(18.0)
+                .padding_bottom(18.0)
         }))
         .style(|s| s.max_height(300.0).width_full().margin_top(12.0)),
         stack((

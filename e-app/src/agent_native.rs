@@ -218,12 +218,16 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
         state.agent.chat.with(|c| match c.items.get(i) {
             Some(ChatItem::Tool(tc)) => {
                 let r = tc.result.clone().unwrap_or_default();
-                // Show only the first few lines to keep cards compact.
-                let mut lines: Vec<&str> = r.lines().take(8).collect();
-                if r.lines().count() > 8 {
-                    lines.push("…");
+                // A few lines keep cards compact: the first of a result, the
+                // latest of output still arriving.
+                let all: Vec<&str> = r.lines().collect();
+                if all.len() <= 8 {
+                    all.join("\n")
+                } else if tc.status == ToolStatus::Running {
+                    format!("…\n{}", all[all.len() - 8..].join("\n"))
+                } else {
+                    format!("{}\n…", all[..8].join("\n"))
                 }
-                lines.join("\n")
             }
             _ => String::new(),
         })
@@ -245,6 +249,68 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
             .border_radius(6.0)
             .background(theme::bg_panel())
             .width_full()
+    })
+}
+
+/// What waits for the agent, above the composer: messages that will steer the
+/// running work and ones that run next, and — while it works — how to send
+/// either. Empty and out of the way when the agent is idle with nothing queued.
+pub(crate) fn queue_rows(state: AppState) -> impl IntoView {
+    let rows = dyn_stack(
+        move || {
+            state.agent.chat.with(|c| {
+                c.steering
+                    .iter()
+                    .map(|t| ("Steer", t.clone()))
+                    .chain(c.follow_up.iter().map(|t| ("Next", t.clone())))
+                    .enumerate()
+                    .collect::<Vec<_>>()
+            })
+        },
+        |(i, (kind, text))| (*i, *kind, text.clone()),
+        |(_, (kind, text))| {
+            let first = text.lines().next().unwrap_or("").to_string();
+            stack((
+                label(move || kind.to_string())
+                    .style(|s| s.font_size(11.0).color(theme::accent()).min_width(40.0)),
+                label(move || first.clone()).style(|s| {
+                    s.font_size(12.0)
+                        .color(theme::fg_dim())
+                        .text_ellipsis()
+                        .flex_grow(1.0_f32)
+                        .min_width(0.0)
+                }),
+            ))
+            .style(|s| s.items_center().width_full().gap(6.0).padding_vert(2.0))
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+
+    let hint =
+        label(|| "↵ steers the running work · ⌥↵ runs it next".to_string()).style(move |s| {
+            let s = s.font_size(11.0).color(theme::fg_dim()).padding_vert(2.0);
+            if state.agent.chat.with(|c| c.running) {
+                s
+            } else {
+                s.hide()
+            }
+        });
+
+    stack((rows, hint)).style(move |s| {
+        let busy = state
+            .agent
+            .chat
+            .with(|c| c.running || !c.steering.is_empty() || !c.follow_up.is_empty());
+        let s = s
+            .flex_col()
+            .width_full()
+            .padding_horiz(10.0)
+            .padding_bottom(4.0);
+        if busy {
+            s
+        } else {
+            s.hide()
+        }
     })
 }
 
@@ -295,6 +361,16 @@ pub(crate) fn composer_input(state: AppState, placeholder: &str, framed: bool) -
                 && !mods.alt()
             {
                 state.send_composer();
+                return CommandExecuted::Yes;
+            }
+            // ⌥↵: run after the current work instead of steering it.
+            if matches!(key, Key::Named(NamedKey::Enter))
+                && mods.alt()
+                && !mods.shift()
+                && !mods.meta()
+                && !mods.control()
+            {
+                state.send_composer_next();
                 return CommandExecuted::Yes;
             }
             if handle_shortcut(state, key, Some(physical), mods) {

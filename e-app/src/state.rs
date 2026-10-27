@@ -3605,8 +3605,13 @@ impl AppState {
     }
 
     /// Send the composer text as a prompt (starting the agent if needed). While
-    /// the agent is streaming, the message is steered rather than rejected.
+    /// the agent is streaming, the message is queued rather than rejected: to
+    /// steer the running work, or — `next` — to run once it is done.
     pub fn send_native_prompt(&self, text: &str) {
+        self.send_native_prompt_as(text, false);
+    }
+
+    pub fn send_native_prompt_as(&self, text: &str, next: bool) {
         let text = text.trim();
         if text.is_empty() {
             return;
@@ -3614,12 +3619,11 @@ impl AppState {
         if self.agent.native_client.get_untracked().is_none() {
             self.start_native_agent();
         }
-        // Capture whether a turn was already running *before* we add this
-        // message (push_user flips `running` on).
+        // Whether a turn was already running before this message.
         let busy = self.agent.chat.with_untracked(|c| c.running);
-        // Always show the user's message, even if the agent isn't available.
-        self.agent.chat.update(|c| c.push_user(text));
         let Some(client) = self.agent.native_client.get_untracked() else {
+            // Show the message anyway, with why nothing will answer it.
+            self.agent.chat.update(|c| c.push_user(text));
             self.agent.chat.update(|c| {
                 c.apply(e_agent::AgentEvent::Error {
                     message: "The agent isn't running — check that `elyra` is installed and on your PATH."
@@ -3629,7 +3633,12 @@ impl AppState {
             self.agent.composer.set(String::new());
             return;
         };
-        let streaming = busy.then_some(Streaming::Steer);
+        let streaming = busy.then_some(if next {
+            Streaming::FollowUp
+        } else {
+            Streaming::Steer
+        });
+        let shown = text.to_string();
         // Ask mode: the same agent, told to keep its hands off the files.
         let ask = self.agent.mode.get_untracked() == "ask";
         let text = if ask {
@@ -3640,6 +3649,8 @@ impl AppState {
         } else {
             text.to_string()
         };
+        // Idle, it shows at once; queued, where the agent takes it up.
+        self.agent.chat.update(|c| c.send(&shown, &text, busy));
         let text = text.as_str();
         if let Err(e) = client.prompt(text, streaming) {
             eprintln!("e: agent prompt failed: {e:#}");
@@ -3652,6 +3663,16 @@ impl AppState {
     /// document from inside its own key handler is a reentrant borrow and aborts
     /// across the objc FFI boundary.
     pub fn send_composer(&self) {
+        self.send_composer_as(false);
+    }
+
+    /// Send the composer's contents to run once the agent is done with its
+    /// current work (⌥↵), rather than to steer it.
+    pub fn send_composer_next(&self) {
+        self.send_composer_as(true);
+    }
+
+    fn send_composer_as(&self, next: bool) {
         let Some(doc) = self.agent.composer_doc.get_untracked() else {
             return;
         };
@@ -3662,7 +3683,7 @@ impl AppState {
         let st = *self;
         let text = text.trim().to_string();
         floem::action::exec_after(std::time::Duration::ZERO, move |_| {
-            st.send_native_prompt(&text);
+            st.send_native_prompt_as(&text, next);
             // Clear via InsertChars (replace-all with empty), matching the SQL
             // console. EditType::Delete here left the buffer's revision history
             // inconsistent and the *next* keystroke aborted in xi-rope's

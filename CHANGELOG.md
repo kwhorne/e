@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Steer or queue while Elyra works.** In Cascade, Enter while Elyra runs
+  steers the running work and ⌥Enter queues a message to run next; what
+  waits is listed above the input, and a message joins the transcript where
+  Elyra takes it up rather than where it was typed. A running tool's card
+  shows its latest output as it arrives.
+
 ## [0.11.2] - 2026-10-27
 
 ### Fixed

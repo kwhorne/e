@@ -73,6 +73,18 @@ impl ModelInfo {
     }
 }
 
+/// A message sent while the agent was busy, or one waiting for elyra's echo.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Sent {
+    /// What went to the agent (an Ask-mode message carries a preamble).
+    sent: String,
+    /// What the transcript shows.
+    shown: String,
+    /// Queued behind the running work: shown in the transcript only once the
+    /// agent takes it up.
+    queued: bool,
+}
+
 /// The running conversation state.
 #[derive(Clone, Debug, Default)]
 pub struct ChatState {
@@ -88,6 +100,13 @@ pub struct ChatState {
     pub session_id: String,
     /// The session file on disk, when the session is persisted.
     pub session_file: Option<String>,
+    /// Messages waiting to steer the running work (delivered after its current
+    /// tool calls), as the transcript would show them.
+    pub steering: Vec<String>,
+    /// Messages waiting for the agent to finish, to run next.
+    pub follow_up: Vec<String>,
+    /// Sent messages not yet echoed back by the agent.
+    sent: Vec<Sent>,
     /// Index of the assistant item currently receiving text deltas.
     cur_assistant: Option<usize>,
     /// Index of the reasoning item currently receiving deltas.
@@ -110,6 +129,31 @@ impl ChatState {
         self.cur_assistant = None;
         self.cur_reasoning = None;
         self.running = true;
+    }
+
+    /// Record a message sent to the agent: `sent` is what went over the wire,
+    /// `shown` what the transcript says. Sent while the agent is idle, it is
+    /// shown at once; `queued` behind running work, it waits in
+    /// [`ChatState::steering`] or [`ChatState::follow_up`] and joins the
+    /// transcript where the agent takes it up.
+    pub fn send(&mut self, shown: &str, sent: &str, queued: bool) {
+        if !queued {
+            self.push_user(shown);
+        }
+        self.sent.push(Sent {
+            sent: sent.to_string(),
+            shown: shown.to_string(),
+            queued,
+        });
+    }
+
+    /// How a queued message reads in the transcript.
+    fn shown_for(&self, sent: &str) -> String {
+        self.sent
+            .iter()
+            .find(|s| s.sent == sent)
+            .map(|s| s.shown.clone())
+            .unwrap_or_else(|| sent.to_string())
     }
 
     /// Fold one event into the transcript.
@@ -159,9 +203,20 @@ impl ChatState {
                 }
             }
             AgentEvent::MessageEnd { text } => {
-                // The echo of the user's message ends here; nothing to draw.
+                // The echo of the user's message ends here. One sent while
+                // the agent was busy joins the transcript now, where it was
+                // taken up; one sent while idle is there already.
                 if self.cur_role == "user" {
                     self.cur_role.clear();
+                    let text = text.unwrap_or_default();
+                    if let Some(at) = self.sent.iter().position(|s| s.sent == text) {
+                        let s = self.sent.remove(at);
+                        if s.queued {
+                            self.items.push(ChatItem::User { text: s.shown });
+                            self.cur_assistant = None;
+                            self.cur_reasoning = None;
+                        }
+                    }
                     return;
                 }
                 // Reconcile with the authoritative final text and stop streaming.
@@ -208,7 +263,22 @@ impl ChatState {
                 // Any text bubble is complete once tools begin.
                 self.cur_assistant = None;
             }
-            AgentEvent::ToolUpdate { .. } => {}
+            AgentEvent::ToolUpdate { id, partial, .. } => {
+                // Output so far, while the tool runs: the latest of it.
+                if let Some(ChatItem::Tool(tc)) = self
+                    .items
+                    .iter_mut()
+                    .rev()
+                    .find(|it| matches!(it, ChatItem::Tool(tc) if tc.id == id))
+                {
+                    if tc.status == ToolStatus::Running {
+                        let text = extract_text(&partial).unwrap_or_default();
+                        if !text.is_empty() {
+                            tc.result = Some(truncate_head(&text, RESULT_PREVIEW_LIMIT));
+                        }
+                    }
+                }
+            }
             AgentEvent::ToolEnd {
                 id,
                 result,
@@ -251,7 +321,13 @@ impl ChatState {
                 error: true,
             }),
             AgentEvent::RetryEnd { .. } => {}
-            AgentEvent::QueueUpdate { .. } => {}
+            AgentEvent::QueueUpdate {
+                steering,
+                follow_up,
+            } => {
+                self.steering = steering.iter().map(|q| self.shown_for(q)).collect();
+                self.follow_up = follow_up.iter().map(|q| self.shown_for(q)).collect();
+            }
             AgentEvent::Response {
                 command,
                 success,
@@ -501,6 +577,17 @@ fn extract_text(v: &Value) -> Option<String> {
     None
 }
 
+/// The last `limit` characters of `s`: for output still arriving, where the
+/// newest is what matters.
+fn truncate_head(s: &str, limit: usize) -> String {
+    let n = s.chars().count();
+    if n <= limit {
+        return s.to_string();
+    }
+    let kept: String = s.chars().skip(n - limit).collect();
+    format!("…\n{kept}")
+}
+
 fn truncate(s: &str, limit: usize) -> String {
     if s.chars().count() <= limit {
         return s.to_string();
@@ -519,6 +606,128 @@ mod tests {
             st.apply(e.clone());
         }
         st
+    }
+
+    fn users(st: &ChatState) -> Vec<String> {
+        st.items
+            .iter()
+            .filter_map(|it| match it {
+                ChatItem::User { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn echo(text: &str) -> [AgentEvent; 2] {
+        [
+            AgentEvent::MessageStart {
+                role: "user".into(),
+            },
+            AgentEvent::MessageEnd {
+                text: Some(text.into()),
+            },
+        ]
+    }
+
+    #[test]
+    fn a_message_sent_while_idle_shows_at_once_and_its_echo_adds_nothing() {
+        let mut st = ChatState::new();
+        st.send("fix the N+1", "fix the N+1", false);
+        assert_eq!(users(&st), ["fix the N+1"]);
+        assert!(st.running);
+        for e in echo("fix the N+1") {
+            st.apply(e);
+        }
+        assert_eq!(users(&st), ["fix the N+1"]);
+        assert!(st.sent.is_empty());
+    }
+
+    #[test]
+    fn a_steer_waits_in_the_queue_and_joins_the_transcript_where_it_is_taken_up() {
+        let mut st = ChatState::new();
+        st.send("add tests", "add tests", false);
+        st.apply(AgentEvent::ToolStart {
+            id: "t1".into(),
+            name: "bash".into(),
+            args: serde_json::json!({"command": "php artisan test"}),
+        });
+        // Sent while the tool runs: not in the transcript yet, in the queue.
+        st.send("use Pest, not PHPUnit", "use Pest, not PHPUnit", true);
+        assert_eq!(users(&st), ["add tests"]);
+        st.apply(AgentEvent::QueueUpdate {
+            steering: vec!["use Pest, not PHPUnit".into()],
+            follow_up: vec![],
+        });
+        assert_eq!(st.steering, ["use Pest, not PHPUnit"]);
+        st.apply(AgentEvent::ToolEnd {
+            id: "t1".into(),
+            name: "bash".into(),
+            result: serde_json::json!("ok"),
+            is_error: false,
+        });
+        // The agent takes it up: it joins after the tool, the queue empties.
+        for e in echo("use Pest, not PHPUnit") {
+            st.apply(e);
+        }
+        st.apply(AgentEvent::QueueUpdate {
+            steering: vec![],
+            follow_up: vec![],
+        });
+        assert_eq!(users(&st), ["add tests", "use Pest, not PHPUnit"]);
+        assert!(matches!(st.items.last(), Some(ChatItem::User { .. })));
+        assert!(st.steering.is_empty());
+    }
+
+    #[test]
+    fn a_queued_ask_shows_what_was_typed_not_the_preamble() {
+        let mut st = ChatState::new();
+        st.send("start", "start", false);
+        st.send("why?", "[Ask mode] Answer only.\n\nwhy?", true);
+        st.apply(AgentEvent::QueueUpdate {
+            steering: vec![],
+            follow_up: vec!["[Ask mode] Answer only.\n\nwhy?".into()],
+        });
+        assert_eq!(st.follow_up, ["why?"]);
+        for e in echo("[Ask mode] Answer only.\n\nwhy?") {
+            st.apply(e);
+        }
+        assert_eq!(users(&st), ["start", "why?"]);
+    }
+
+    #[test]
+    fn a_running_tool_shows_its_latest_output() {
+        let mut st = ChatState::new();
+        st.apply(AgentEvent::ToolStart {
+            id: "t1".into(),
+            name: "bash".into(),
+            args: serde_json::json!({"command": "php artisan test"}),
+        });
+        let partial = |text: &str| AgentEvent::ToolUpdate {
+            id: "t1".into(),
+            name: "bash".into(),
+            partial: serde_json::json!({"content": [{"type": "text", "text": text}]}),
+        };
+        st.apply(partial("PASS  Tests\\Unit\\ExampleTest"));
+        let result = |st: &ChatState| match st.items.last() {
+            Some(ChatItem::Tool(tc)) => tc.result.clone(),
+            _ => None,
+        };
+        assert_eq!(
+            result(&st).as_deref(),
+            Some("PASS  Tests\\Unit\\ExampleTest")
+        );
+        let long = "x".repeat(RESULT_PREVIEW_LIMIT + 10) + "LAST";
+        st.apply(partial(&long));
+        assert!(result(&st).unwrap().ends_with("LAST"));
+        // Once it has ended, an update that arrives late changes nothing.
+        st.apply(AgentEvent::ToolEnd {
+            id: "t1".into(),
+            name: "bash".into(),
+            result: serde_json::json!("done"),
+            is_error: false,
+        });
+        st.apply(partial("late"));
+        assert_eq!(result(&st).as_deref(), Some("done"));
     }
 
     #[test]

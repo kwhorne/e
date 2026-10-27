@@ -35,14 +35,20 @@ settings) and **✕**.
 before any API key is stored it says where to add one.
 
 **The transcript**: streaming replies rendered as **markdown**, **tool-call
-cards** (tool, one-line summary, running / done / error, a result preview),
-dimmed reasoning, and **Copy** on every code block and reply.
+cards** (tool, one-line summary, running / done / error, a result preview —
+while a tool runs, its latest output as it arrives, so a test run or a build
+shows where it is), dimmed reasoning, and **Copy** on every code block and
+reply.
 
 **The composer card** at the bottom:
 
 - The input is multi-line and word-wrapped and **grows** as you type (then
-  scrolls). **Enter** sends, **Shift+Enter** inserts a newline. Typing while
-  Elyra runs **steers** it.
+  scrolls). **Enter** sends, **Shift+Enter** inserts a newline.
+- While Elyra works, **Enter** sends a message that **steers** it — it is
+  read once the current tool calls finish — and **⌥Enter** queues one to run
+  **next**, when it is done. What waits is listed above the input (*Steer* or
+  *Next*), and joins the transcript where Elyra takes it up rather than where
+  you typed it.
 - **＋** attaches context: the **active file** (`@path`, which Elyra reads), the
   **selection** (file and line range), or **all open files**.
 - **‹/› Code / ◇ Ask**: Code lets Elyra read, edit and run; Ask asks it to

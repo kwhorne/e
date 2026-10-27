@@ -20,7 +20,7 @@ use floem::views::editor::core::editor::EditType;
 use floem::views::editor::core::selection::Selection;
 use floem::views::editor::text::Document;
 
-use crate::agent_native::{composer_input, transcript};
+use crate::agent_native::{composer_input, queue_rows, transcript};
 use crate::config;
 use crate::secrets::{self, Provider};
 use crate::state::AppState;
@@ -714,7 +714,7 @@ fn composer_card(state: AppState) -> impl IntoView {
     let toolbar = stack((attach, mode, model, spacer, badge, send))
         .style(|s| s.items_center().width_full().gap(2.0).padding_top(6.0));
 
-    stack((input, toolbar)).style(|s| {
+    stack((queue_rows(state), input, toolbar)).style(|s| {
         s.flex_col()
             .width_full()
             .padding(8.0)

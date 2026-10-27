@@ -135,6 +135,12 @@ impl AgentClient {
         self.send(&json!({ "type": "get_state" }))
     }
 
+    /// Ask for the session's numbers: how full the context window is, and
+    /// what the session has cost.
+    pub fn get_session_stats(&self) -> Result<()> {
+        self.send(&json!({ "type": "get_session_stats" }))
+    }
+
     /// Ask for the conversation so far — how a resumed session is redrawn.
     pub fn get_messages(&self) -> Result<()> {
         self.send(&json!({ "type": "get_messages" }))

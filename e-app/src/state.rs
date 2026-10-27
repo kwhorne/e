@@ -3581,6 +3581,7 @@ impl AppState {
                 // the conversation so far.
                 let _ = client.get_state();
                 let _ = client.get_available_models();
+                let _ = client.get_session_stats();
                 if session.is_some() {
                     let _ = client.get_messages();
                 }

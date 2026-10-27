@@ -74,6 +74,11 @@ never touched. It needs the project to be a git repository.
   grouped by provider, and the **thinking level** for models that have one.
   The choice is remembered and Elyra starts on it next time.
 - **↑** sends, **■** stops the current turn.
+- **Context and cost** — `42% context · $0.14` beside the model, once there
+  is something to say: how full the model's context window is, and what the
+  session has cost so far. It turns amber past 70% and red past 90%, when
+  replies start to suffer; click it to **compact** the context now, before
+  starting the next task. Elyra reports both after each turn.
 
 Under the card: `⌂ Local  ▭ <project>` — where the agent runs and on what.
 

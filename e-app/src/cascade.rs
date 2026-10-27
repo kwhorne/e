@@ -670,6 +670,42 @@ fn composer_card(state: AppState) -> impl IntoView {
         .style(chip_style)
         .popout_menu(move || model_menu(state));
 
+    // How full the context is and what the session has cost; a click
+    // compacts the context now, before the next task.
+    let usage = label(move || {
+        state
+            .agent
+            .chat
+            .with(|c| c.usage_label())
+            .unwrap_or_default()
+    })
+    .style(move |s| {
+        let (label, percent) = state.agent.chat.with(|c| {
+            (
+                c.usage_label(),
+                c.context.as_ref().and_then(|u| u.percent).unwrap_or(0.0),
+            )
+        });
+        let s = chip_style(s);
+        let s = if percent >= 90.0 {
+            s.color(theme::error())
+        } else if percent >= 70.0 {
+            s.color(theme::warning())
+        } else {
+            s
+        };
+        if label.is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+    .on_click_stop(move |_| {
+        if !state.agent.chat.with_untracked(|c| c.running) {
+            state.cascade_compact();
+        }
+    });
+
     let spacer = empty().style(|s| s.flex_grow(1.0_f32));
 
     let badge = label(|| "⬡ Elyra".to_string())
@@ -711,7 +747,7 @@ fn composer_card(state: AppState) -> impl IntoView {
         }
     });
 
-    let toolbar = stack((attach, mode, model, spacer, badge, send))
+    let toolbar = stack((attach, mode, model, usage, spacer, badge, send))
         .style(|s| s.items_center().width_full().gap(2.0).padding_top(6.0));
 
     stack((queue_rows(state), input, toolbar)).style(|s| {

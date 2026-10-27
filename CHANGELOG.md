@@ -12,8 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The caret in an empty input sits before the placeholder**, where typing
   starts — in Cascade's composer and the SQL console — not after its text.
 - **Tool cards in Cascade fit the panel**; they ran past its right edge.
+- **A tool's result no longer shows twice in Cascade**, once in its card and
+  again as if Elyra had said it.
 
 ### Added
+
+- **How full the context is, and what the session cost.** Beside the model
+  in Cascade's composer: `42% context · $0.14`, amber past 70% and red past
+  90%. A click compacts the context before the next task.
 
 - **What each turn changed, with Undo.** When Elyra finishes a turn in
   Cascade, a card under the reply lists the files it changed with their line

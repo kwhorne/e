@@ -508,6 +508,12 @@ fn app_view() -> impl IntoView {
                 let ended = drained
                     .iter()
                     .any(|ev| matches!(ev, e_agent::AgentEvent::AgentEnd));
+                // The context's size and the cost change with each turn and
+                // each compaction: ask for them again.
+                let recount = ended
+                    || drained
+                        .iter()
+                        .any(|ev| matches!(ev, e_agent::AgentEvent::CompactionEnd { .. }));
                 chat.update(|c| {
                     for ev in drained {
                         c.apply(ev);
@@ -516,6 +522,11 @@ fn app_view() -> impl IntoView {
                 // What the turn changed, under it.
                 if ended {
                     state.turn_end();
+                }
+                if recount {
+                    if let Some(client) = state.agent.native_client.get_untracked() {
+                        let _ = client.get_session_stats();
+                    }
                 }
             }
         });

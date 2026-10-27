@@ -115,6 +115,17 @@ impl ModelInfo {
     }
 }
 
+/// How full the model's context window is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContextUsage {
+    /// Tokens in the context; unknown right after a compaction, until the
+    /// next reply.
+    pub tokens: Option<u64>,
+    pub window: u64,
+    /// Percent of the window in use, when `tokens` is known.
+    pub percent: Option<f64>,
+}
+
 /// A message sent while the agent was busy, or one waiting for elyra's echo.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Sent {
@@ -149,6 +160,10 @@ pub struct ChatState {
     pub follow_up: Vec<String>,
     /// Sent messages not yet echoed back by the agent.
     sent: Vec<Sent>,
+    /// How full the context window is, as of the last `get_session_stats`.
+    pub context: Option<ContextUsage>,
+    /// What the session has cost so far, in dollars.
+    pub cost: f64,
     /// Index of the assistant item currently receiving text deltas.
     cur_assistant: Option<usize>,
     /// Index of the reasoning item currently receiving deltas.
@@ -200,6 +215,36 @@ impl ChatState {
     pub fn mark_undone(&mut self, index: usize, said: String) {
         if let Some(ChatItem::Receipt(r)) = self.items.get_mut(index) {
             r.undone = Some(said);
+        }
+    }
+
+    /// `42% context · $0.14`: how full the context is and what the session
+    /// has cost, for beside the composer. `None` before anything is known or
+    /// spent.
+    pub fn usage_label(&self) -> Option<String> {
+        // An empty context says nothing worth showing.
+        let context = self
+            .context
+            .as_ref()
+            .and_then(|c| c.percent)
+            .filter(|p| *p > 0.0)
+            .map(|p| {
+                if p < 1.0 {
+                    "<1% context".to_string()
+                } else {
+                    format!("{p:.0}% context")
+                }
+            });
+        let cost = (self.cost > 0.0).then(|| {
+            if self.cost < 0.01 {
+                "<$0.01".to_string()
+            } else {
+                format!("${:.2}", self.cost)
+            }
+        });
+        match (context, cost) {
+            (Some(c), Some(d)) => Some(format!("{c} · {d}")),
+            (one, other) => one.or(other),
         }
     }
 
@@ -273,6 +318,12 @@ impl ChatState {
                             self.cur_reasoning = None;
                         }
                     }
+                    return;
+                }
+                // A tool's result arrives as a message of its own (`toolResult`);
+                // its card shows it already. Only the assistant's are replies.
+                if !self.cur_role.is_empty() && self.cur_role != "assistant" {
+                    self.cur_role.clear();
                     return;
                 }
                 // Reconcile with the authoritative final text and stop streaming.
@@ -435,6 +486,14 @@ impl ChatState {
                     .get("sessionFile")
                     .and_then(Value::as_str)
                     .map(str::to_string);
+            }
+            "get_session_stats" => {
+                self.cost = data.get("cost").and_then(Value::as_f64).unwrap_or(0.0);
+                self.context = data.get("contextUsage").map(|u| ContextUsage {
+                    tokens: u.get("tokens").and_then(Value::as_u64),
+                    window: u.get("contextWindow").and_then(Value::as_u64).unwrap_or(0),
+                    percent: u.get("percent").and_then(Value::as_f64),
+                });
             }
             "set_model" => {
                 if let Some(m) = ModelInfo::from_value(data) {
@@ -683,6 +742,83 @@ mod tests {
                 text: Some(text.into()),
             },
         ]
+    }
+
+    #[test]
+    fn session_stats_say_how_full_the_context_is_and_what_it_cost() {
+        let stats = |v: serde_json::Value| AgentEvent::Response {
+            id: None,
+            command: "get_session_stats".into(),
+            success: true,
+            data: v,
+        };
+        let mut st = ChatState::new();
+        // A new session: nothing to say yet.
+        st.apply(stats(serde_json::json!({
+            "contextUsage": {"tokens": 0, "contextWindow": 1000000, "percent": 0},
+            "cost": 0
+        })));
+        assert_eq!(st.usage_label(), None);
+        // As elyra 0.9.55 reported it after one short reply on Opus 5.5.
+        st.apply(stats(serde_json::json!({
+            "contextUsage": {"tokens": 22973, "contextWindow": 1000000, "percent": 2.2973},
+            "cost": 0.114921
+        })));
+        assert_eq!(st.usage_label().as_deref(), Some("2% context · $0.11"));
+        assert_eq!(st.context.as_ref().unwrap().tokens, Some(22973));
+        st.apply(stats(serde_json::json!({
+            "contextUsage": {"tokens": 4000, "contextWindow": 1000000, "percent": 0.4},
+            "cost": 0.004
+        })));
+        assert_eq!(st.usage_label().as_deref(), Some("<1% context · <$0.01"));
+        // Right after a compaction the size is unknown; the cost still counts.
+        st.apply(stats(serde_json::json!({
+            "contextUsage": {"tokens": null, "contextWindow": 200000, "percent": null},
+            "cost": 1.5
+        })));
+        assert_eq!(st.usage_label().as_deref(), Some("$1.50"));
+    }
+
+    #[test]
+    fn a_tool_result_message_is_not_a_reply() {
+        let st = feed(&[
+            AgentEvent::ToolStart {
+                id: "t1".into(),
+                name: "read".into(),
+                args: serde_json::json!({"path": "app/Order.php"}),
+            },
+            AgentEvent::ToolEnd {
+                id: "t1".into(),
+                name: "read".into(),
+                result: serde_json::json!("<?php class Order {}"),
+                is_error: false,
+            },
+            // As elyra sends it: the result again, as a message of its own.
+            AgentEvent::MessageStart {
+                role: "toolResult".into(),
+            },
+            AgentEvent::MessageEnd {
+                text: Some("<?php class Order {}".into()),
+            },
+            AgentEvent::MessageStart {
+                role: "assistant".into(),
+            },
+            AgentEvent::TextDelta {
+                delta: "It is an empty class.".into(),
+            },
+            AgentEvent::MessageEnd {
+                text: Some("It is an empty class.".into()),
+            },
+        ]);
+        let replies: Vec<&str> = st
+            .items
+            .iter()
+            .filter_map(|it| match it {
+                ChatItem::Assistant { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(replies, ["It is an empty class."]);
     }
 
     #[test]

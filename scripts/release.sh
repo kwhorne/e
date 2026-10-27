@@ -106,8 +106,18 @@ else
     echo "       Once CI is green: git tag -a v$NEW -m 'e $NEW' && git push origin v$NEW" >&2
     exit 1
   fi
-  if ! gh run watch "$RUN" --exit-status --interval 20; then
-    echo "error: CI failed on the release commit; v$NEW was not tagged." >&2
+  # `gh run watch` also gives up when the network drops, which says nothing
+  # about CI: ask for the run's own conclusion until it has one.
+  gh run watch "$RUN" --exit-status --interval 20 || true
+  CONCLUSION=""
+  for _ in $(seq 1 120); do
+    CONCLUSION="$(gh run view "$RUN" --json status,conclusion \
+      -q 'select(.status == "completed") | .conclusion' 2>/dev/null || true)"
+    [[ -n "$CONCLUSION" ]] && break
+    sleep 20
+  done
+  if [[ "$CONCLUSION" != "success" ]]; then
+    echo "error: CI ${CONCLUSION:-did not finish} on the release commit; v$NEW was not tagged." >&2
     echo "       Fix it on main, then tag the fixed commit:" >&2
     echo "       git tag -a v$NEW -m 'e $NEW' && git push origin v$NEW" >&2
     exit 1

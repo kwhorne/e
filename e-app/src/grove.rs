@@ -152,6 +152,118 @@ pub fn set_sql_capture(on: bool) -> Option<bool> {
     sql_capture()
 }
 
+// ---- Tries: a branch beside the checkout ------------------------------------------
+//
+// `grove try` runs another branch of a project beside the checkout: its own git
+// worktree (under `~/.grove/try/`), its own `.env`, its own copy of the
+// database, migrated, and its own site at `<site>--<branch>.test`. Cascade runs
+// an agent in one so its work — and its migrations — stay off the user's
+// checkout and database.
+
+/// One try, as Grove records it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Try {
+    pub site: String,
+    pub branch: String,
+    /// The main checkout it was made from.
+    pub project: PathBuf,
+    /// The worktree.
+    pub path: PathBuf,
+    pub url: String,
+}
+
+/// `grove try --list --json`: a map of records.
+pub fn parse_tries(data: &Value) -> Vec<Try> {
+    let Some(map) = data.as_object() else {
+        return Vec::new();
+    };
+    map.values()
+        .filter_map(|t| {
+            Some(Try {
+                site: t.get("site")?.as_str()?.to_string(),
+                branch: t.get("branch")?.as_str()?.to_string(),
+                project: PathBuf::from(t.get("project")?.as_str()?),
+                path: PathBuf::from(t.get("path")?.as_str()?),
+                url: t.get("url")?.as_str()?.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Every try there is.
+pub fn tries() -> Vec<Try> {
+    let Some(bin) = binary() else {
+        return Vec::new();
+    };
+    let Ok(out) = Command::new(bin).args(["try", "--list", "--json"]).output() else {
+        return Vec::new();
+    };
+    serde_json::from_slice::<Value>(&out.stdout)
+        .map(|v| parse_tries(&v))
+        .unwrap_or_default()
+}
+
+/// The tries made from the project at `root`.
+pub fn tries_of(root: &Path) -> Vec<Try> {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut out: Vec<Try> = tries()
+        .into_iter()
+        .filter(|t| {
+            t.project
+                .canonicalize()
+                .unwrap_or_else(|_| t.project.clone())
+                == root
+        })
+        .collect();
+    out.sort_by(|a, b| a.branch.cmp(&b.branch));
+    out
+}
+
+/// `grove try` in `root`, with `args`: `Ok` or the reason it failed (the last
+/// thing it said on stderr).
+fn run_try(root: &Path, args: &[&str]) -> Result<(), String> {
+    let bin = binary().ok_or("Grove isn't installed")?;
+    let out = Command::new(bin)
+        .current_dir(root)
+        .arg("try")
+        .args(args)
+        .arg("--json")
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    Err(err
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("grove try failed")
+        .trim_start_matches("Error: ")
+        .to_string())
+}
+
+/// Make `branch` from the checkout's current commit and run it as a try.
+/// Slow: Grove copies the database, catches up `composer install` and
+/// migrates.
+pub fn try_new(root: &Path, branch: &str) -> Result<Try, String> {
+    run_try(root, &["--new", branch])?;
+    tries_of(root)
+        .into_iter()
+        .find(|t| t.branch == branch)
+        .ok_or_else(|| format!("Grove made {branch}, but doesn't list it"))
+}
+
+/// Take a try down: its site, its database and its worktree. Grove refuses,
+/// unless `force`, when the worktree holds uncommitted work.
+pub fn try_done(root: &Path, branch: &str, force: bool) -> Result<(), String> {
+    if force {
+        run_try(root, &["--done", branch, "--force"])
+    } else {
+        run_try(root, &["--done", branch])
+    }
+}
+
 // ---- Parsers (pure) ---------------------------------------------------------------
 
 fn str_of(v: &Value, key: &str) -> String {
@@ -748,5 +860,29 @@ mod tests {
         let c = clip(s, 2);
         assert!(c.starts_with("H…"));
         assert_eq!(clip("kort", 100), "kort");
+    }
+
+    #[test]
+    fn tries_are_read_from_groves_list() {
+        let v = serde_json::json!({
+            "shop--e-agent-1027-1130": {
+                "site": "shop",
+                "branch": "e/agent-1027-1130",
+                "project": "/Users/kh/Code/shop",
+                "path": "/Users/kh/.grove/try/shop--e-agent-1027-1130",
+                "url": "http://shop--e-agent-1027-1130.test",
+                "engine": "mysql",
+                "database": "shop_e_agent_1027_1130"
+            }
+        });
+        let t = parse_tries(&v);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].branch, "e/agent-1027-1130");
+        assert_eq!(
+            t[0].path,
+            PathBuf::from("/Users/kh/.grove/try/shop--e-agent-1027-1130")
+        );
+        assert_eq!(t[0].url, "http://shop--e-agent-1027-1130.test");
+        assert!(parse_tries(&serde_json::json!({})).is_empty());
     }
 }

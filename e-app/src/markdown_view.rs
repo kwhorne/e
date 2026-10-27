@@ -488,7 +488,8 @@ pub fn markdown_preview(state: AppState) -> impl IntoView {
 
             scroll(list)
                 .style(|s| s.size_full().background(theme::bg()))
-                .scroll_to_percent(move || editor_scroll_fraction(state) as f32)
+                // A percentage (0–100), not a fraction.
+                .scroll_to_percent(move || editor_scroll_fraction(state) as f32 * 100.0)
                 .into_any()
         },
     )

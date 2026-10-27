@@ -12,6 +12,7 @@ mod agent_turn;
 mod agent_ui;
 mod agent_verify;
 mod agent_view;
+mod agent_worktree;
 mod app;
 use e_laravel::artisan;
 mod artisan_palette;

@@ -522,6 +522,7 @@ fn app_view() -> impl IntoView {
                 // What the turn changed, under it.
                 if ended {
                     state.turn_end();
+                    state.worktree_check();
                 }
                 if recount {
                     if let Some(client) = state.agent.native_client.get_untracked() {

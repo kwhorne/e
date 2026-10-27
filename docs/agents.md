@@ -50,6 +50,26 @@ reply.
   *Next*), and joins the transcript where Elyra takes it up rather than where
   you typed it.
 
+**A session in a worktree.** **⋯ → New session in a worktree** gives Elyra a
+branch of its own (`e/agent-<date>-<time>`) beside your checkout: its own git
+worktree, its own `.env`, its own copy of the database, migrated, and its own
+site at `<site>--e-agent-….test`. Its migrations, test runs and half-done edits
+stay off the files you are working in and the database you are using. It needs
+the project served by [Grove](laravel.md#runtime-insight), which does the work
+(`grove try`); `vendor/` and `node_modules/` are cloned from your checkout, so
+it takes seconds.
+
+While Elyra works in one, a line under the tab names the branch, with **Open
+site**, **Open in e** (the worktree's code in a new window) and **Back to the
+project**. Turn receipts and the session review measure the worktree, not your
+checkout.
+
+The ⋯ menu also lists this project's earlier worktrees — *(merged)* once their
+branch is merged into yours — to **Continue in** one or **Take down** one: its
+site, database and worktree go; the branch stays. Grove won't take down a
+worktree with uncommitted work in it. If a worktree is taken down while Elyra
+is working in it, Cascade says so and stops showing it.
+
 **What each turn changed.** When Elyra finishes, a card under its reply says
 what that turn changed — *This turn changed 3 files · +42 −7*, with ⚠ and
 the number of [review flags](source-control.md#session-review-v) when there

@@ -79,7 +79,7 @@ impl AppState {
     /// Remember where the current agent session started, so the review shows
     /// exactly what the session changed. Called when an agent is started.
     pub fn mark_review_session(&self) {
-        let Some(root) = self.repo_root_path() else {
+        let Some(root) = self.agent_repo_root() else {
             return;
         };
         if let Ok(cp) = e_core::git::checkpoint(&root) {
@@ -107,7 +107,7 @@ impl AppState {
         if self.review_busy.get_untracked() {
             return;
         }
-        let Some(root) = self.repo_root_path() else {
+        let Some(root) = self.agent_repo_root() else {
             Self::notify("Session review needs a git repository");
             return;
         };
@@ -195,7 +195,7 @@ impl AppState {
 
     /// Open the selected/〈path〉 file in the editor at the first changed line.
     pub fn review_open_file(&self, path: &str) {
-        let Some(root) = self.repo_root_path() else {
+        let Some(root) = self.agent_repo_root() else {
             return;
         };
         let line = self.review_changeset.with_untracked(|cs| {
@@ -212,7 +212,7 @@ impl AppState {
     /// Undo one file from the session: delete it if the session created it,
     /// otherwise restore it from `HEAD`.
     pub fn review_revert_file(&self, path: &str) {
-        let Some(root) = self.repo_root_path() else {
+        let Some(root) = self.agent_repo_root() else {
             return;
         };
         let kind = self
@@ -431,7 +431,7 @@ impl AppState {
         if self.review_shipping.get_untracked() {
             return;
         }
-        let Some(root) = self.repo_root_path() else {
+        let Some(root) = self.agent_repo_root() else {
             return;
         };
         let cs = self.review_changeset.get_untracked();

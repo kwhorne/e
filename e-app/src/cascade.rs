@@ -430,8 +430,46 @@ fn header(state: AppState) -> impl IntoView {
     });
 
     let more = icon_button("⋯").popout_menu(move || {
-        Menu::new("")
+        let mut menu = Menu::new("")
             .entry(MenuItem::new("New session").action(move || state.native_agent_new_session()))
+            .entry(
+                MenuItem::new("New session in a worktree — own branch, database and site")
+                    .action(move || state.cascade_new_worktree()),
+            );
+        // The shelf: this project's earlier worktree sessions, to go back to
+        // or take down — once merged, they have done their job.
+        let here = state.agent.worktree.get_untracked();
+        if here.is_some() {
+            menu = menu.entry(
+                MenuItem::new("Back to the project")
+                    .action(move || state.cascade_enter_worktree(None)),
+            );
+        }
+        if crate::grove::available() {
+            let root = state.root.get_untracked();
+            let tries = crate::grove::tries_of(&root);
+            if !tries.is_empty() {
+                menu = menu.separator();
+            }
+            for t in tries {
+                let merged = crate::agent_worktree::merged(&root, &t.branch);
+                let note = if merged { "  (merged)" } else { "" };
+                let current = here.as_ref().is_some_and(|w| w.path == t.path);
+                if !current {
+                    let go = t.clone();
+                    menu = menu.entry(
+                        MenuItem::new(format!("Continue in {}{note}", t.branch))
+                            .action(move || state.cascade_enter_worktree(Some(go.clone()))),
+                    );
+                }
+                let down = t.clone();
+                menu = menu.entry(
+                    MenuItem::new(format!("Take down {}{note}", t.branch))
+                        .action(move || state.cascade_take_down(down.clone())),
+                );
+            }
+        }
+        menu.separator()
             .entry(MenuItem::new("Compact context").action(move || state.cascade_compact()))
             .entry(MenuItem::new("Restart Elyra").action(move || state.restart_agent()))
             .separator()
@@ -761,6 +799,58 @@ fn composer_card(state: AppState) -> impl IntoView {
     })
 }
 
+/// Under the tab, while the agent works in a worktree: which branch, and the
+/// way to its site, its code, and back.
+fn worktree_bar(state: AppState) -> impl IntoView {
+    let what = label(move || {
+        state
+            .agent
+            .worktree
+            .with(|t| t.as_ref().map(|t| format!("⎇ {}", t.branch)))
+            .unwrap_or_default()
+    })
+    .style(|s| {
+        s.flex_grow(1.0_f32)
+            .min_width(0.0)
+            .font_size(12.0)
+            .color(theme::fg())
+            .text_ellipsis()
+    });
+    let link = |text: &'static str| {
+        label(move || text.to_string()).style(|s| {
+            s.font_size(12.0)
+                .padding_horiz(6.0)
+                .color(theme::accent())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+    };
+    let site = link("Open site").on_click_stop(move |_| {
+        if let Some(t) = state.agent.worktree.get_untracked() {
+            crate::platform::open_url(&t.url);
+        }
+    });
+    let code = link("Open in e").on_click_stop(move |_| state.cascade_open_worktree());
+    let back =
+        link("Back to the project").on_click_stop(move |_| state.cascade_enter_worktree(None));
+    stack((what, site, code, back)).style(move |s| {
+        let s = s
+            .items_center()
+            .width_full()
+            .gap(4.0)
+            .padding_horiz(12.0)
+            .padding_vert(5.0)
+            .border_bottom(1.0)
+            .border_color(theme::border())
+            .background(theme::bg_panel());
+        if state.agent.worktree.with(Option::is_some) {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
 /// `⌂ Local   ▭ <project>` under the composer.
 fn footer(state: AppState) -> impl IntoView {
     label(move || {
@@ -789,7 +879,8 @@ pub fn cascade_panel(state: AppState) -> impl IntoView {
             .padding_top(8.0)
             .background(theme::bg())
     });
-    stack((header(state), body(state), bottom)).style(|s| s.flex_col().size_full())
+    stack((header(state), worktree_bar(state), body(state), bottom))
+        .style(|s| s.flex_col().size_full())
 }
 
 #[cfg(test)]

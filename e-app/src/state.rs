@@ -451,6 +451,8 @@ pub struct AgentPanel {
     /// The working tree before the turn now running, as a tree object; its
     /// receipt is made from it when the turn ends.
     pub turn_before: RwSignal<Option<String>>,
+    /// The worktree (a Grove try) the agent works in, when not the project.
+    pub worktree: RwSignal<Option<crate::grove::Try>>,
 }
 
 impl AgentPanel {
@@ -479,6 +481,7 @@ impl AgentPanel {
             edit: RwSignal::new(None),
             mode: RwSignal::new(config::load_settings().cascade_mode),
             turn_before: RwSignal::new(None),
+            worktree: RwSignal::new(None),
         }
     }
 }
@@ -3539,7 +3542,11 @@ impl AppState {
             return;
         };
         self.mark_review_session();
-        let cwd = if agent.cwd.trim().is_empty() {
+        // In a worktree session, the agent works there; otherwise where the
+        // agent is configured to, or the project.
+        let cwd = if self.agent.worktree.with_untracked(Option::is_some) {
+            self.agent_root()
+        } else if agent.cwd.trim().is_empty() {
             self.root.get_untracked()
         } else {
             PathBuf::from(&agent.cwd)

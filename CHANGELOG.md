@@ -14,8 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tool cards in Cascade fit the panel**; they ran past its right edge.
 - **A tool's result no longer shows twice in Cascade**, once in its card and
   again as if Elyra had said it.
+- **Cascade follows the reply while Elyra works.** The transcript jumped back
+  near the top whenever a reply or a tool's output grew: Floem's scroll takes a
+  percentage and was given a fraction. Markdown preview's synced scroll had the
+  same mistake.
 
 ### Added
+
+- **Elyra in a worktree of its own.** **⋯ → New session in a worktree** in
+  Cascade runs Elyra on a new branch beside your checkout, with its own `.env`,
+  its own copy of the database and its own Grove site (`grove try`), so its
+  migrations and edits stay off your files and your database. A line under the
+  tab names the branch, with the way to its site, its code and back; turn
+  receipts and the session review measure the worktree. Earlier ones are
+  listed in the ⋯ menu, marked once merged, to continue or take down.
 
 - **How full the context is, and what the session cost.** Beside the model
   in Cascade's composer: `42% context · $0.14`, amber past 70% and red past

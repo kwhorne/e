@@ -441,10 +441,12 @@ pub(crate) fn transcript(state: AppState) -> impl IntoView {
                 .min_height(0.0)
                 .background(theme::bg())
         })
-        // Follow the tail as content streams in.
+        // Follow the tail as content streams in. Floem takes a percentage
+        // (0–100): `1.0` was 1%, which put the view back near the top each
+        // time a reply or a tool's output grew.
         .scroll_to_percent(move || {
             let _ = transcript_size(state);
-            1.0
+            100.0
         })
 }
 

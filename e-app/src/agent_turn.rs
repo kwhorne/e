@@ -76,7 +76,7 @@ impl AppState {
     /// `send`. Without a git repository there is nothing to capture, and it
     /// is sent at once.
     pub(crate) fn turn_begin(&self, send: impl FnOnce() + 'static) {
-        let Some(root) = self.repo_root_path() else {
+        let Some(root) = self.agent_repo_root() else {
             send();
             return;
         };
@@ -97,7 +97,7 @@ impl AppState {
             return;
         };
         self.agent.turn_before.set(None);
-        let Some(root) = self.repo_root_path() else {
+        let Some(root) = self.agent_repo_root() else {
             return;
         };
         let chat = self.agent.chat;
@@ -144,7 +144,7 @@ impl AppState {
         if r.undone.is_some() {
             return;
         }
-        let Some(root) = self.repo_root_path() else {
+        let Some(root) = self.agent_repo_root() else {
             return;
         };
         // A file open with unsaved edits is the user's now, whatever is on

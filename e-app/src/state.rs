@@ -4078,6 +4078,7 @@ impl AppState {
 
     /// Show a desktop notification (see [`crate::platform::notify`]).
     pub(crate) fn notify(message: &str) {
+        crate::agent_drive::remember_notice(message);
         crate::platform::notify(message);
     }
 

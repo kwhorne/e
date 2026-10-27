@@ -210,6 +210,32 @@ So an agent fixing a bug a request showed can first write the test that
 reproduces it, see it fail, and then make it pass. `notes` says what the test
 could not set up by itself.
 
+## Driving the editor
+
+An agent can use the editor's UI the way a person does — run a command, pick a
+code action, confirm a dialog, work Cascade — and read back what is on screen.
+That is how `e` is tested end to end without sending keystrokes:
+
+```sh
+q() { printf '%s\n' "$1" | nc -U "$E_EDITOR_SOCK"; }
+q '{"method":"open","path":"/app/resources/views/orders/create.blade.php","line":22,"col":31}'
+q '{"method":"code_actions"}'                       # the ⌘. menu at the caret
+q '{"method":"apply_code_action","title":"Carry"}'  # by index or part of the title
+q '{"method":"ui_state"}'                           # the preview it opened
+q '{"method":"dialog","action":"confirm"}'
+```
+
+| Request | Does |
+| ------- | ---- |
+| `{"method":"commands"}` | Every named command, `{id, title}` — the palette's list |
+| `{"method":"command","id":"session-review"}` | Runs one, as its key binding would |
+| `{"method":"code_actions"}` | Opens the `⌘.` menu at the caret; answers with its items once the language servers have answered (`shown: false` and the notification when there are none) |
+| `{"method":"apply_code_action","index":0}` | Applies one (`"title":"…"` matches part of a title) |
+| `{"method":"dialog","action":"confirm"}` | Confirms (or `cancel`s) the dialog showing — a rename or carry-through preview, or a yes/no question |
+| `{"method":"cascade","action":"send","text":"…"}` | Cascade's controls: `send`, `steer`, `next` (queue for after the turn), `stop`, `new_session`, `compact`, `new_worktree`, `back_to_project`, `continue_in`/`take_down` (`"branch"`), `review_turn`/`undo_turn` (`"index"` of the receipt) |
+| `{"method":"wait_idle","timeout_ms":120000}` | Answers once Elyra has finished its turn, with the end of the transcript |
+| `{"method":"ui_state"}` | What is on screen: open panels, the dialog and what it lists, the code-action menu, the active editor and caret, the session review, Cascade's state and transcript (tool cards, receipts, notices), and the last 20 notifications |
+
 ## Running commands
 
 ```sh

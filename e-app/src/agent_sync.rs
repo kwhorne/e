@@ -21,6 +21,13 @@
 //!   → a feature test made from the newest captured request to that path or
 //!   route (or the Runtime panel's `id`): the test file's path and content
 //!   with the test added, and notes. Writes nothing.
+//! - Driving the UI as a person would, for testing it (see `agent_drive`):
+//!   `{"method":"commands"}`, `{"method":"command","id":"session-review"}`,
+//!   `{"method":"code_actions"}` then `{"method":"apply_code_action","index":0}`,
+//!   `{"method":"dialog","action":"confirm|cancel"}`,
+//!   `{"method":"cascade","action":"send","text":"…"}` (and steer, next, stop,
+//!   new_session, new_worktree, take_down, review_turn, undo_turn…),
+//!   `{"method":"wait_idle","timeout_ms":120000}` and `{"method":"ui_state"}`.
 //! - `{"method":"focus","target":"terminal|editor|agent"}`.
 //! - `{"method":"notify","message":"…"}`.
 //!
@@ -314,6 +321,14 @@ const METHODS: &[&str] = &[
     "laravel_map",
     "verify_route",
     "request_test",
+    "commands",
+    "command",
+    "code_actions",
+    "apply_code_action",
+    "dialog",
+    "cascade",
+    "wait_idle",
+    "ui_state",
     "db_schema",
     "db_query",
     "tinker",
@@ -531,6 +546,79 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
 
+        // ---- Driving the UI, for testing it (see agent_drive) --------------
+        "commands" => json!({
+            "ok": true,
+            "commands": crate::cmd_palette::COMMANDS
+                .iter()
+                .map(|(id, title)| json!({"id": id, "title": title}))
+                .collect::<Vec<_>>(),
+        }),
+        "command" => {
+            let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if crate::commands::dispatch(state, id) {
+                json!({"ok": true})
+            } else {
+                json!({"ok": false, "error": format!("unknown command {id:?}: `commands` lists them")})
+            }
+        }
+        "code_actions" => {
+            state.agent_code_actions(reply);
+            return;
+        }
+        "apply_code_action" => {
+            let list = state.code_actions.get_untracked();
+            let by_title = req
+                .get("title")
+                .and_then(|v| v.as_str())
+                .and_then(|t| list.iter().position(|a| a.title.contains(t)));
+            let index = req
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .map(|i| i as usize)
+                .or(by_title);
+            match index.filter(|i| *i < list.len()) {
+                Some(i) => {
+                    let title = list[i].title.clone();
+                    state.apply_code_action(i);
+                    json!({"ok": true, "applied": title})
+                }
+                None => {
+                    json!({"ok": false, "error": "no such code action: call code_actions first"})
+                }
+            }
+        }
+        "dialog" => {
+            let confirm = req.get("action").and_then(|v| v.as_str()) == Some("confirm");
+            if state.rename_plan.with_untracked(Option::is_some) {
+                if confirm {
+                    state.confirm_rename();
+                } else {
+                    state.cancel_rename();
+                }
+                json!({"ok": true})
+            } else if state.confirm.with_untracked(Option::is_some) {
+                if confirm {
+                    state.confirm_accept();
+                } else {
+                    state.confirm_cancel();
+                }
+                json!({"ok": true})
+            } else {
+                json!({"ok": false, "error": "no dialog is showing"})
+            }
+        }
+        "cascade" => state.agent_cascade(req),
+        "wait_idle" => {
+            let timeout = req
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(120_000);
+            state.agent_wait_idle(timeout, reply);
+            return;
+        }
+        "ui_state" => state.ui_state(),
+
         // ---- A feature test from a captured request (async) --------------
         "request_test" => {
             state.agent_request_test(req, reply);
@@ -654,6 +742,14 @@ fn log_summary(req: &Value) -> String {
         "db_query" => s("sql").chars().take(60).collect(),
         "lsp_symbols" => s("query").to_string(),
         "laravel_map" => s("filter").to_string(),
+        "command" => s("id").to_string(),
+        "cascade" => format!(
+            "{} {}",
+            s("action"),
+            s("text").chars().take(50).collect::<String>()
+        )
+        .trim()
+        .to_string(),
         "request_test" => match s("id") {
             "" => format!("{} {}", s("http_method"), s("uri"))
                 .trim()

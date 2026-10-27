@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Drive the editor from the agent socket.** `commands` and `command` run any
+  named command; `code_actions` and `apply_code_action` work the `⌘.` menu;
+  `dialog` confirms or cancels what is showing; `cascade` does what Cascade's
+  controls do; `wait_idle` waits for Elyra's turn; and `ui_state` reads back
+  what is on screen, notifications included. An agent — or a test — can now
+  use the UI end to end, and see the result, without sending keystrokes.
+
 ## [0.12.0] - 2026-10-27
 
 ### Fixed

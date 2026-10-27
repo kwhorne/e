@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The palettes follow the selection.** Arrowing past the last visible row in
+  Go to File, the command palette, symbols and search, tasks, Artisan and
+  Recent now scrolls that row into view, whole; the list stayed put before.
+
 ## [0.13.1] - 2026-10-27
 
 ### Fixed

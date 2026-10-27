@@ -183,11 +183,9 @@ pub fn recent_palette(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
+    let list = floem::View::id(&results);
     let results_scroll = scroll(results)
-        .scroll_to_percent(move || {
-            let n = state.recent_paths().len().max(1) as f32;
-            recent.selected.get() as f32 / n
-        })
+        .ensure_visible(move || crate::palette::row_rect(list, recent.selected.get()))
         .style(|s| s.max_height(320.0).width_full());
 
     let box_ = stack((input, results_scroll))

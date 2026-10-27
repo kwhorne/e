@@ -342,11 +342,9 @@ pub fn artisan_palette(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
+    let list = floem::View::id(&rows);
     let rows_scroll = scroll(rows)
-        .scroll_to_percent(move || {
-            let n = state.filtered_artisan().len().max(1) as f32;
-            a.selected.get() as f32 / n
-        })
+        .ensure_visible(move || crate::palette::row_rect(list, a.selected.get()))
         .style(|s| s.max_height(400.0).width_full());
 
     let empty = label(move || {

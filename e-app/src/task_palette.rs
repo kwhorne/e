@@ -158,11 +158,9 @@ pub fn task_palette(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
+    let list = floem::View::id(&rows);
     let rows_scroll = scroll(rows)
-        .scroll_to_percent(move || {
-            let n = state.filtered_tasks().len().max(1) as f32;
-            task.selected.get() as f32 / n
-        })
+        .ensure_visible(move || crate::palette::row_rect(list, task.selected.get()))
         .style(|s| s.max_height(360.0).width_full());
 
     let empty = label(|| "No tasks found in this project.".to_string()).style(move |s| {

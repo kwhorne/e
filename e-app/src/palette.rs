@@ -3,12 +3,29 @@
 use std::path::{Path, PathBuf};
 
 use floem::keyboard::{Key, NamedKey};
+use floem::kurbo::Rect;
 use floem::reactive::{create_effect, RwSignal, SignalGet, SignalUpdate, SignalWith};
 use floem::views::{container, dyn_stack, label, scroll, stack, text_input, Decorators};
-use floem::IntoView;
+use floem::{IntoView, ViewId};
 
 use crate::state::AppState;
 use crate::theme;
+
+/// Row `i` of a palette's list, in the list's own coordinates, for the
+/// list's scroll to keep the selected row in view (`ensure_visible`): it moves
+/// only as far as the row needs, so arrowing past the edge brings the next row
+/// in whole. The rows are the list's children, in order.
+pub(crate) fn row_rect(list: ViewId, i: usize) -> Rect {
+    list.children()
+        .get(i)
+        .and_then(|row| row.get_layout())
+        .map_or(Rect::ZERO, |l| {
+            Rect::from_origin_size(
+                (l.location.x as f64, l.location.y as f64),
+                (l.size.width as f64, l.size.height as f64),
+            )
+        })
+}
 
 const MAX_FILES: usize = 40_000;
 const MAX_RESULTS: usize = 200;
@@ -384,11 +401,9 @@ pub fn palette(state: AppState) -> impl IntoView {
         }
     });
 
+    let list = floem::View::id(&results);
     let results_scroll = scroll(results)
-        .scroll_to_percent(move || {
-            let n = ranked.with(Vec::len).max(1) as f32;
-            selected.get() as f32 / n
-        })
+        .ensure_visible(move || crate::palette::row_rect(list, selected.get()))
         .style(|s| s.max_height(320.0).width_full());
 
     let box_ = stack((tabs, input, hint, results_scroll))

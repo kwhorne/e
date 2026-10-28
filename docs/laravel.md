@@ -209,6 +209,13 @@ description or a PHPUnit `test_…` / `#[Test]` method — as `php artisan test
 <file> --filter="…"`, in the TDD panel, so a failure still has a line to jump to.
 The next `⌘⇧T` runs the whole suite again.
 
+Each test's latest result is marked in the gutter beside its declaration: a
+tick when it passed, a red cross when it failed, a dash when it was skipped. A
+test run once per data set shows its worst result. Running one test updates its
+mark and leaves the others' as they were. Click a mark to run that test again.
+The marks come from the runner's JUnit report, so they appear for PHPUnit and
+Pest.
+
 ## The Laravel menu
 
 `⌘⇧,` opens the command palette filtered to `Laravel: ` — every Laravel command

@@ -22,6 +22,111 @@ impl Task {
     }
 }
 
+/// A test declared on one line of a test file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeclaredTest {
+    /// Pest: `it('…')` (`it` is true) or `test('…')`.
+    Pest { it: bool, description: String },
+    /// PHPUnit: a `test_x()` method, or one marked `#[Test]` or `@test`.
+    Method(String),
+}
+
+impl DeclaredTest {
+    /// The name `--filter` takes.
+    pub fn name(&self) -> &str {
+        match self {
+            DeclaredTest::Pest { description, .. } => description,
+            DeclaredTest::Method(name) => name,
+        }
+    }
+
+    /// Whether a runner's report names this test `reported`. Pest reports
+    /// `it('passes')` as "It passes" (or `__pest_evaluable_it_passes`), and a
+    /// test run once per data set adds "with data set …" to the name.
+    pub fn reported_as(&self, reported: &str) -> bool {
+        let mut r = reported.to_lowercase();
+        if let Some(rest) = r.strip_prefix("__pest_evaluable_") {
+            r = rest.replace("__", "_").replace('_', " ");
+        }
+        let candidates = match self {
+            DeclaredTest::Pest {
+                it: true,
+                description,
+            } => {
+                vec![format!("it {}", description.to_lowercase())]
+            }
+            DeclaredTest::Pest {
+                it: false,
+                description,
+            } => {
+                let d = description.to_lowercase();
+                vec![format!("test {d}"), d]
+            }
+            DeclaredTest::Method(name) => vec![name.to_lowercase()],
+        };
+        candidates.iter().any(|c| {
+            r == *c
+                || r.strip_prefix(c.as_str())
+                    .is_some_and(|rest| rest.starts_with(" with "))
+        })
+    }
+}
+
+/// The test declared on `line`, if any. `after_test_attribute` says the line
+/// before carried `#[Test]` or `@test`.
+fn declared_test(line: &str, after_test_attribute: bool) -> Option<DeclaredTest> {
+    let t = line.trim_start();
+    let mut found = None;
+    // Pest: it('does x', …) / test('does x', …)
+    for (open, it) in [
+        ("it(", true),
+        ("test(", false),
+        ("it (", true),
+        ("test (", false),
+    ] {
+        if let Some(rest) = t.strip_prefix(open) {
+            let rest = rest.trim_start();
+            if let Some(q) = rest.chars().next().filter(|c| *c == '\'' || *c == '"') {
+                if let Some(end) = rest[1..].find(q) {
+                    found = Some(DeclaredTest::Pest {
+                        it,
+                        description: rest[1..1 + end].to_string(),
+                    });
+                }
+            }
+        }
+    }
+    // PHPUnit: public function test_x() / #[Test] public function x()
+    if let Some(pos) = t.find("function ") {
+        let name: String = t[pos + "function ".len()..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        if !name.is_empty() && (after_test_attribute || name.starts_with("test")) {
+            found = Some(DeclaredTest::Method(name));
+        }
+    }
+    found
+}
+
+fn is_test_attribute(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("#[Test") || t.contains("@test")
+}
+
+/// Every test declared in `text`, with its 0-based line.
+pub fn tests_in(text: &str) -> Vec<(usize, DeclaredTest)> {
+    let mut out = Vec::new();
+    let mut attr_test = false;
+    for (i, line) in text.lines().enumerate() {
+        if let Some(test) = declared_test(line, attr_test) {
+            out.push((i, test));
+        }
+        attr_test = is_test_attribute(line);
+    }
+    out
+}
+
 /// The test the caret is in, as a `--filter` pattern: a Pest `it('…')` /
 /// `test('…')` description, or a PHPUnit `test_x()` / `#[Test]` method. The
 /// nearest declaration at or above the caret's line wins.
@@ -31,34 +136,9 @@ pub fn test_at_cursor(text: &str, offset: usize) -> Option<String> {
         .find('\n')
         .map(|i| upto + i)
         .unwrap_or(text.len());
-    let mut found: Option<String> = None;
-    let mut attr_test = false;
-    for line in text[..line_end].lines() {
-        let t = line.trim_start();
-        // Pest: it('does x', …) / test('does x', …)
-        for open in ["it(", "test(", "it (", "test ("] {
-            if let Some(rest) = t.strip_prefix(open) {
-                let rest = rest.trim_start();
-                if let Some(q) = rest.chars().next().filter(|c| *c == '\'' || *c == '"') {
-                    if let Some(end) = rest[1..].find(q) {
-                        found = Some(rest[1..1 + end].to_string());
-                    }
-                }
-            }
-        }
-        // PHPUnit: public function test_x() / #[Test] public function x()
-        if let Some(pos) = t.find("function ") {
-            let name: String = t[pos + "function ".len()..]
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect();
-            if !name.is_empty() && (attr_test || name.starts_with("test")) {
-                found = Some(name);
-            }
-        }
-        attr_test = t.starts_with("#[Test") || t.contains("@test");
-    }
-    found
+    tests_in(&text[..line_end])
+        .pop()
+        .map(|(_, t)| t.name().to_string())
 }
 
 /// Quote a test name for `--filter`, which both Pest and PHPUnit read as a

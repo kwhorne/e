@@ -15,7 +15,8 @@ The adapter is chosen automatically from the active file's language.
 
 ## Quick start
 
-1. Open a file and set a breakpoint — press `F9` on a line, or `⌥`-click it.
+1. Open a file and set a breakpoint — press `F9` on a line, `⌥`-click it, or
+   click left of its line number.
    A red dot appears in the editor margin.
 2. Press `F5` to start. The Debug panel opens and shows the session status.
 3. When execution hits a breakpoint, the line is highlighted, the editor jumps
@@ -29,6 +30,7 @@ The adapter is chosen automatically from the active file's language.
 | `F5`     | Start / continue |
 | `F9`     | Toggle breakpoint on the caret line |
 | `⌥`-click | Toggle breakpoint on the clicked line |
+| Click left of the line number | Toggle breakpoint on that line |
 | `F10`    | Step over |
 | `F11`    | Step into |
 | `⇧F11`   | Step out |

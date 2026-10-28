@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The gutter shows changes, breakpoints and test results.** Git's marks
+  moved out of the text into the gutter, beside it: a bar for added and
+  changed lines, and now a wedge where lines were removed. Breakpoints sit left
+  of the line numbers; click there to set or clear one. Each test shows how it
+  last ended — a tick, a cross, a dash for skipped — beside its declaration,
+  kept across runs and following edits; click it to run that test again.
+- **Click from the agent socket.** `{"method":"click","x":…,"y":…}` clicks in
+  the editor's window, so a test can press buttons and gutter marks.
 - **Press keys from the agent socket.** `{"method":"key","keys":["cmd+p","down",
   "enter"]}` presses keys in the editor's window, and `"text"` types; each is a
   real key event, through the keyboard layout and `e`'s key bindings. An agent

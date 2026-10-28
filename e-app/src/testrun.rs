@@ -10,7 +10,10 @@
 //! crate to read four attributes would be a poor trade, and the shapes the
 //! runners actually emit are pinned by tests below.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use crate::tasks::tests_in;
 
 /// How one test ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +99,77 @@ impl TestRun {
         }
         parts.join(" · ")
     }
+}
+
+/// The class PHPUnit and Pest report for the test file at `rel`, relative to
+/// the project: `tests/Feature/OrderTest.php` is `Tests\Feature\OrderTest`.
+pub fn suite_of(rel: &Path) -> String {
+    let parts: Vec<String> = rel
+        .with_extension("")
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    parts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let mut chars = p.chars();
+            match (i, chars.next()) {
+                (0, Some(first)) => first.to_uppercase().chain(chars).collect(),
+                _ => p.clone(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\\")
+}
+
+/// How each test declared in `text` last ended, by 0-based line, from the
+/// results in `cases`. `text` is the file at `path`, `rel` within the
+/// project. A test run once per data set shows its worst result.
+pub fn outcomes_in(
+    text: &str,
+    path: &Path,
+    rel: &Path,
+    cases: &[TestCase],
+) -> HashMap<usize, Outcome> {
+    let suite = suite_of(rel);
+    let here: Vec<&TestCase> = cases
+        .iter()
+        .filter(|c| {
+            c.file.as_deref() == Some(path)
+                || c.suite.replace('.', "\\").eq_ignore_ascii_case(&suite)
+        })
+        .collect();
+    let mut out = HashMap::new();
+    if here.is_empty() {
+        return out;
+    }
+    for (line, test) in tests_in(text) {
+        let worst = here
+            .iter()
+            .filter(|c| test.reported_as(&c.name))
+            .map(|c| c.outcome)
+            .max_by_key(|o| match o {
+                Outcome::Failed | Outcome::Errored => 3,
+                Outcome::Passed => 2,
+                Outcome::Skipped => 1,
+            });
+        if let Some(outcome) = worst {
+            out.insert(line, outcome);
+        }
+    }
+    out
+}
+
+/// Fold `run` into the results kept so far: a test's new result replaces its
+/// old one, and the tests it didn't run keep theirs.
+pub fn remember(kept: &mut Vec<TestCase>, run: &TestRun) {
+    kept.retain(|k| {
+        !run.cases
+            .iter()
+            .any(|c| c.suite == k.suite && c.name == k.name)
+    });
+    kept.extend(run.cases.iter().cloned());
 }
 
 /// Read one XML attribute off a tag.
@@ -486,6 +560,87 @@ at tests/Feature/DemoTest.php:7</failure>
         // that used to work.
         assert_eq!(junit_command("cargo test", report), None);
         assert_eq!(junit_command("go test ./...", report), None);
+    }
+
+    fn case(suite: &str, name: &str, outcome: Outcome) -> TestCase {
+        TestCase {
+            suite: suite.into(),
+            name: name.into(),
+            outcome,
+            duration_s: 0.0,
+            file: None,
+            line: None,
+            message: None,
+        }
+    }
+
+    #[test]
+    fn a_test_file_is_named_after_its_class() {
+        assert_eq!(
+            suite_of(Path::new("tests/Feature/OrderTest.php")),
+            "Tests\\Feature\\OrderTest"
+        );
+    }
+
+    #[test]
+    fn each_test_in_a_file_gets_its_latest_result() {
+        let phpunit = "<?php\nclass OrderTest extends TestCase\n{\n    public function test_lists_orders(): void {}\n\n    #[Test]\n    public function rejects_an_empty_cart(): void {}\n\n    public function test_not_run(): void {}\n}\n";
+        let cases = [
+            case(
+                "Tests\\Feature\\OrderTest",
+                "test_lists_orders",
+                Outcome::Passed,
+            ),
+            case(
+                "Tests\\Feature\\OrderTest",
+                "rejects_an_empty_cart",
+                Outcome::Failed,
+            ),
+            case("Tests\\Feature\\OtherTest", "test_not_run", Outcome::Failed),
+        ];
+        let path = Path::new("/app/tests/Feature/OrderTest.php");
+        let rel = Path::new("tests/Feature/OrderTest.php");
+        let got = outcomes_in(phpunit, path, rel, &cases);
+        assert_eq!(got.get(&3), Some(&Outcome::Passed));
+        assert_eq!(got.get(&6), Some(&Outcome::Failed));
+        assert_eq!(got.get(&8), None, "another class's test of the same name");
+
+        // Pest, as `php artisan test` reports it: "It passes", and a data set
+        // that failed once.
+        let pest = "<?php\n\nit('passes', function () {});\n\ntest('sums', function ($a) {})->with([1, 2]);\n";
+        let cases = [
+            case("Tests.Feature.DemoTest", "It passes", Outcome::Passed),
+            case(
+                "Tests.Feature.DemoTest",
+                "Sums with data set #0",
+                Outcome::Passed,
+            ),
+            case(
+                "Tests.Feature.DemoTest",
+                "Sums with data set #1",
+                Outcome::Failed,
+            ),
+        ];
+        let rel = Path::new("tests/Feature/DemoTest.php");
+        let got = outcomes_in(pest, &root().join(rel), rel, &cases);
+        assert_eq!(got.get(&2), Some(&Outcome::Passed));
+        assert_eq!(got.get(&4), Some(&Outcome::Failed));
+    }
+
+    #[test]
+    fn a_new_run_replaces_only_the_tests_it_ran() {
+        let mut kept = vec![
+            case("T", "a", Outcome::Failed),
+            case("T", "b", Outcome::Passed),
+        ];
+        let run = TestRun {
+            cases: vec![case("T", "a", Outcome::Passed)],
+        };
+        remember(&mut kept, &run);
+        let a: Vec<_> = kept.iter().filter(|c| c.name == "a").collect();
+        assert_eq!(a.len(), 1);
+        assert_eq!(a[0].outcome, Outcome::Passed);
+        assert!(kept.iter().any(|c| c.name == "b"));
     }
 }
 

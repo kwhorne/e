@@ -354,6 +354,19 @@ pub trait Styling {
     ) {
     }
 
+    /// What the gutter shows beside `line`, besides its number: a changed
+    /// line, a breakpoint, a test's result. Drawn by the gutter, outside the
+    /// text.
+    fn gutter_marks(&self, _edid: EditorId, _line: usize) -> Vec<super::gutter::GutterMark> {
+        Vec::new()
+    }
+
+    /// A click in the gutter beside `line`, in `lane`. `true` when it was
+    /// handled, which stops the click there.
+    fn gutter_click(&self, _edid: EditorId, _line: usize, _lane: super::gutter::GutterLane) -> bool {
+        false
+    }
+
     /// Whether it should draw the cursor caret on the given line.
     /// Note that these are extra conditions on top of the typical hide cursor &
     /// the editor being active conditions

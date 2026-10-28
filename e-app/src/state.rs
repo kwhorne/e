@@ -44,7 +44,7 @@ use crate::runtime::RuntimeReq;
 use crate::session::{self, SessionData};
 use crate::styling::{
     build_diag_lines, BpMarks, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
-    StopLine,
+    StopLine, TestMarks,
 };
 
 /// One open file/tab.
@@ -305,6 +305,8 @@ pub struct Buffer {
     pub bp_marks: BpMarks,
     /// The line the debugger is currently stopped on (0-based), if any.
     pub stop_line: StopLine,
+    /// How the tests declared in this file last ended, by line (0-based).
+    pub test_marks: TestMarks,
     /// Per-line find-match spans.
     pub find_marks: FindMarks,
     /// Matching-bracket highlight spans.
@@ -959,6 +961,9 @@ pub struct AppState {
     /// Parsed per-test results from the last run, when the runner could produce
     /// them. Empty for runners that can't write JUnit XML.
     pub tdd_results: RwSignal<crate::testrun::TestRun>,
+    /// Every test's latest result across runs, so running one test doesn't
+    /// forget how the others ended. Read for the gutter's test marks.
+    pub test_outcomes: RwSignal<Vec<crate::testrun::TestCase>>,
     pub tdd_iteration: RwSignal<usize>,
     /// When true, a failing run asks the agent to fix and re-runs on apply.
     pub tdd_loop: RwSignal<bool>,
@@ -1815,6 +1820,7 @@ impl AppState {
             tdd_status: RwSignal::new(TddStatus::Idle),
             tdd_output: RwSignal::new(String::new()),
             tdd_results: RwSignal::new(Default::default()),
+            test_outcomes: RwSignal::new(Vec::new()),
             tdd_iteration: RwSignal::new(0),
             tdd_loop: RwSignal::new(false),
             update_info: RwSignal::new(None),
@@ -3943,6 +3949,7 @@ impl AppState {
             git_marks: Rc::new(RefCell::new(Vec::new())),
             bp_marks: Rc::new(RefCell::new(Default::default())),
             stop_line: Rc::new(RefCell::new(None)),
+            test_marks: Rc::new(RefCell::new(Default::default())),
             find_marks: Rc::new(RefCell::new(Vec::new())),
             bracket_marks: Rc::new(RefCell::new(Vec::new())),
             uri: None,
@@ -6350,6 +6357,11 @@ impl AppState {
         // it lands (and every edit after recomputes them against it).
         let head_text: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
         let git_marks: GitMarks = Rc::new(RefCell::new(Vec::new()));
+        // A test file shows how its tests last ended, from the runs so far.
+        let test_marks: TestMarks = Rc::new(RefCell::new(match &file.path {
+            Some(path) => self.test_marks_for(path, &content),
+            None => Default::default(),
+        }));
         if let Some(path) = file.path.clone() {
             let (head, marks, doc) = (head_text.clone(), git_marks.clone(), doc.clone());
             self.spawn_bg(
@@ -6405,6 +6417,8 @@ impl AppState {
             let doc = doc.clone();
             let highlights = highlights.clone();
             let git_marks = git_marks.clone();
+            let test_marks = test_marks.clone();
+            let test_path = file.path.clone();
             let head_text = head_text.clone();
             let app = *self;
             let uri = uri.clone();
@@ -6424,6 +6438,12 @@ impl AppState {
                 }
                 app.last_edit.set(now_ms());
                 let text = doc.text().to_string();
+                // A test's mark moves with its declaration.
+                if let Some(path) = &test_path {
+                    if app.test_outcomes.with_untracked(|o| !o.is_empty()) {
+                        *test_marks.borrow_mut() = app.test_marks_for(path, &text);
+                    }
+                }
                 if !undo_nav.get() {
                     let now = now_ms() as u64;
                     // Do the recording (and any save) inside a scope so the
@@ -6537,6 +6557,7 @@ impl AppState {
             git_marks,
             bp_marks: Rc::new(RefCell::new(Default::default())),
             stop_line: Rc::new(RefCell::new(None)),
+            test_marks: test_marks.clone(),
             find_marks: Rc::new(RefCell::new(Vec::new())),
             bracket_marks: Rc::new(RefCell::new(Vec::new())),
             uri,

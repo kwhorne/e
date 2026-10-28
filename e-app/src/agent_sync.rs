@@ -31,6 +31,8 @@
 //! - `{"method":"key","keys":["cmd+p","down","enter"]}` or
 //!   `{"method":"key","text":"orders"}` → presses keys in the editor's window
 //!   as the keyboard would (macOS; see `synthetic_keys`).
+//! - `{"method":"click","x":40,"y":120,"modifiers":"alt"}` → clicks at a point
+//!   in the window, in points from the top left of its content (macOS).
 //! - `{"method":"focus","target":"terminal|editor|agent"}`.
 //! - `{"method":"notify","message":"…"}`.
 //!
@@ -333,6 +335,7 @@ const METHODS: &[&str] = &[
     "wait_idle",
     "ui_state",
     "key",
+    "click",
     "db_schema",
     "db_query",
     "tinker",
@@ -622,6 +625,24 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
         "ui_state" => state.ui_state(),
+        "click" => {
+            let (Some(x), Some(y)) = (
+                req.get("x").and_then(Value::as_f64),
+                req.get("y").and_then(Value::as_f64),
+            ) else {
+                let _ = reply.send(json!({"ok": false, "error": "give `x` and `y`"}));
+                return;
+            };
+            let modifiers = req.get("modifiers").and_then(Value::as_str).unwrap_or("");
+            if let Err(e) = crate::synthetic_keys::click(x, y, modifiers) {
+                let _ = reply.send(json!({"ok": false, "error": e}));
+                return;
+            }
+            floem::action::exec_after(std::time::Duration::from_millis(80), move |_| {
+                let _ = reply.send(json!({"ok": true}));
+            });
+            return;
+        }
         "key" => {
             let mut strokes = Vec::new();
             let chords: Vec<&str> = match req.get("keys") {

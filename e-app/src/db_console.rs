@@ -51,6 +51,8 @@ pub fn sql_console(state: AppState) -> impl IntoView {
         Default::default(),
         Default::default(),
         Default::default(),
+        Default::default(),
+        std::rc::Rc::new(|_, _| false),
         state.font_size,
         tab_width,
     );

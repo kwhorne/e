@@ -10,6 +10,8 @@ use similar::{ChangeTag, DiffOp, TextDiff};
 pub enum LineMark {
     Added,
     Modified,
+    /// Lines were removed just above this one.
+    Deleted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -496,10 +498,10 @@ pub fn marks(head: &str, current: &str, line_count: usize) -> Vec<Option<LineMar
                 }
             }
             DiffOp::Delete { new_index, .. } => {
-                // Show deletions as a modification marker on the following line.
+                // Marked on the line that follows, unless it changed itself.
                 if let Some(slot) = marks.get_mut(new_index) {
                     if slot.is_none() {
-                        *slot = Some(LineMark::Modified);
+                        *slot = Some(LineMark::Deleted);
                     }
                 }
             }
@@ -833,6 +835,19 @@ mod tests {
         assert_eq!(m[0], None);
         assert_eq!(m[1], Some(LineMark::Modified));
         assert_eq!(m[3], Some(LineMark::Added));
+    }
+
+    #[test]
+    fn a_deletion_marks_the_line_after_it() {
+        let m = marks(
+            "a
+b
+c
+", "a
+c
+", 2,
+        );
+        assert_eq!(m, [None, Some(LineMark::Deleted)]);
     }
 
     #[test]

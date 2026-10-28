@@ -32,8 +32,10 @@ The panel refreshes automatically after saves, file operations, and git actions.
 
 ## Change gutter
 
-Lines changed relative to `HEAD` are marked in the editor gutter (added vs
-modified), so you can see edits at a glance.
+Lines changed relative to `HEAD` are marked in the editor gutter, on its edge
+beside the text: a green bar for added lines, a blue one for changed lines, and
+a red wedge between two lines where lines were removed. The marks follow your
+edits as you type.
 
 ## Diff vs HEAD
 

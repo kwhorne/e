@@ -1,9 +1,10 @@
-//! Keystrokes for the agent socket's `key` method, so an agent — or a test —
-//! can press keys in the editor as a person would: `cmd+shift+p`, `down`,
-//! `enter`, or text to type.
+//! Keystrokes and clicks for the agent socket's `key` and `click` methods, so
+//! an agent — or a test — can use the editor as a person would: press
+//! `cmd+shift+p`, `down` or `enter`, type text, click a button or the gutter.
 //!
-//! On macOS each stroke is a real `NSEvent` (key down, then key up) sent to
-//! the editor's window, so it takes the same path as a key on the keyboard:
+//! On macOS each is a real `NSEvent` (key down then up; mouse moved, down,
+//! up) sent to the editor's window, so it takes the same path as a key on the
+//! keyboard or a click of the mouse:
 //! winit's view, the keyboard layout, IME, Floem's dispatch and `e`'s keymap.
 //! Unlike System Events it needs no Accessibility permission, and it reaches
 //! the window whether or not it is in front. Keys are named by their place on
@@ -80,16 +81,7 @@ pub fn parse_chord(chord: &str) -> Result<Stroke, String> {
             _ => ("", chord),
         },
     };
-    let mut flags = 0;
-    for m in mods.split('+').filter(|m| !m.is_empty()) {
-        flags |= match m.to_ascii_lowercase().as_str() {
-            "cmd" | "command" | "meta" | "⌘" => COMMAND,
-            "shift" | "⇧" => SHIFT,
-            "alt" | "opt" | "option" | "⌥" => OPTION,
-            "ctrl" | "control" | "⌃" => CONTROL,
-            other => return Err(format!("unknown modifier {other:?} in {chord:?}")),
-        };
-    }
+    let flags = modifier_flags(mods).map_err(|e| format!("{e} in {chord:?}"))?;
     let lower = key.to_ascii_lowercase();
     if let Some((_, code, c)) = NAMED.iter().find(|(n, ..)| *n == lower) {
         return Ok(Stroke {
@@ -147,43 +139,77 @@ pub fn text_strokes(text: &str) -> Vec<Stroke> {
         .collect()
 }
 
+/// The window to send events to: the one in front, else the first showing;
+/// and its number.
+#[cfg(target_os = "macos")]
+unsafe fn target_window(
+    mtm: objc2::MainThreadMarker,
+) -> Result<(*mut objc2::runtime::AnyObject, isize), String> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::NSApplication;
+
+    let app = NSApplication::sharedApplication(mtm);
+    let mut window: *mut AnyObject = msg_send![&*app, keyWindow];
+    if window.is_null() {
+        window = msg_send![&*app, mainWindow];
+    }
+    if window.is_null() {
+        let windows: *mut AnyObject = msg_send![&*app, windows];
+        let count: usize = msg_send![windows, count];
+        for i in 0..count {
+            let w: *mut AnyObject = msg_send![windows, objectAtIndex: i];
+            let visible: bool = msg_send![w, isVisible];
+            if visible {
+                window = w;
+                break;
+            }
+        }
+    }
+    if window.is_null() {
+        return Err("no window to send events to".into());
+    }
+    let number: isize = msg_send![window, windowNumber];
+    Ok((window, number))
+}
+
+/// Seconds since boot, the clock AppKit stamps events with.
+#[cfg(target_os = "macos")]
+unsafe fn uptime() -> f64 {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+    let Some(process) = AnyClass::get(c"NSProcessInfo") else {
+        return 0.0;
+    };
+    let info: *mut AnyObject = msg_send![process, processInfo];
+    msg_send![info, systemUptime]
+}
+
+/// Queue `event` for `window`. Queued on the run loop rather than sent now:
+/// this runs inside winit's own event handling, which must return first.
+#[cfg(target_os = "macos")]
+unsafe fn queue(window: *mut objc2::runtime::AnyObject, event: *mut objc2::runtime::AnyObject) {
+    use objc2::{msg_send, sel};
+    let _: () = msg_send![window,
+        performSelector: sel!(sendEvent:),
+        withObject: event,
+        afterDelay: 0.0f64];
+}
+
 /// Press `strokes` in the editor's window, in order. They arrive once the
 /// current event has been handled.
 #[cfg(target_os = "macos")]
 pub fn press(strokes: &[Stroke]) -> Result<(), String> {
+    use objc2::msg_send;
     use objc2::runtime::{AnyClass, AnyObject};
-    use objc2::{msg_send, sel, MainThreadMarker};
-    use objc2_app_kit::NSApplication;
+    use objc2::MainThreadMarker;
     use objc2_foundation::{NSPoint, NSString};
 
     let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
-    let app = NSApplication::sharedApplication(mtm);
     let class = AnyClass::get(c"NSEvent").ok_or("no NSEvent")?;
     unsafe {
-        // The window in front, else the first one showing.
-        let mut window: *mut AnyObject = msg_send![&*app, keyWindow];
-        if window.is_null() {
-            window = msg_send![&*app, mainWindow];
-        }
-        if window.is_null() {
-            let windows: *mut AnyObject = msg_send![&*app, windows];
-            let count: usize = msg_send![windows, count];
-            for i in 0..count {
-                let w: *mut AnyObject = msg_send![windows, objectAtIndex: i];
-                let visible: bool = msg_send![w, isVisible];
-                if visible {
-                    window = w;
-                    break;
-                }
-            }
-        }
-        if window.is_null() {
-            return Err("no window to press keys in".into());
-        }
-        let number: isize = msg_send![window, windowNumber];
-        let process = AnyClass::get(c"NSProcessInfo").ok_or("no NSProcessInfo")?;
-        let info: *mut AnyObject = msg_send![process, processInfo];
-        let now: f64 = msg_send![info, systemUptime];
+        let (window, number) = target_window(mtm)?;
+        let now = uptime();
         let context: *mut AnyObject = std::ptr::null_mut();
         for s in strokes {
             let chars = NSString::from_str(&s.chars);
@@ -204,21 +230,83 @@ pub fn press(strokes: &[Stroke]) -> Result<(), String> {
                 if event.is_null() {
                     return Err(format!("AppKit made no event for key {}", s.code));
                 }
-                // Queued on the run loop rather than sent now: this runs inside
-                // winit's own event handling, which must return first.
-                let _: () = msg_send![window,
-                    performSelector: sel!(sendEvent:),
-                    withObject: event,
-                    afterDelay: 0.0f64];
+                queue(window, event);
             }
         }
     }
     Ok(())
 }
 
+/// Click the left mouse button at `(x, y)` in the editor's window, in points
+/// from the top left of its content — where a screenshot of the window,
+/// halved on a Retina display, puts it. `modifiers` are held, as in a chord
+/// (`"alt"`, `"cmd+shift"`).
+#[cfg(target_os = "macos")]
+pub fn click(x: f64, y: f64, modifiers: &str) -> Result<(), String> {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+    use objc2::MainThreadMarker;
+    use objc2_foundation::{NSPoint, NSRect};
+
+    let flags = modifier_flags(modifiers)?;
+    let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
+    let class = AnyClass::get(c"NSEvent").ok_or("no NSEvent")?;
+    unsafe {
+        let (window, number) = target_window(mtm)?;
+        let view: *mut AnyObject = msg_send![window, contentView];
+        let frame: NSRect = msg_send![view, frame];
+        // AppKit counts up from the bottom.
+        let at = NSPoint::new(x, frame.size.height - y);
+        let now = uptime();
+        let context: *mut AnyObject = std::ptr::null_mut();
+        // Move there, press, release.
+        for kind in [5usize, 1, 2] {
+            let event: *mut AnyObject = msg_send![class,
+                mouseEventWithType: kind,
+                location: at,
+                modifierFlags: flags,
+                timestamp: now,
+                windowNumber: number,
+                context: context,
+                eventNumber: 0isize,
+                clickCount: if kind == 5 { 0isize } else { 1isize },
+                pressure: if kind == 1 { 1.0f32 } else { 0.0f32 }];
+            if event.is_null() {
+                return Err("AppKit made no mouse event".into());
+            }
+            queue(window, event);
+        }
+    }
+    Ok(())
+}
+
+/// The flags for modifiers named as in a chord: `"alt"`, `"cmd+shift"`.
+fn modifier_flags(modifiers: &str) -> Result<usize, String> {
+    let mut flags = 0;
+    for m in modifiers
+        .split('+')
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+    {
+        flags |= match m.to_ascii_lowercase().as_str() {
+            "cmd" | "command" | "meta" | "⌘" => COMMAND,
+            "shift" | "⇧" => SHIFT,
+            "alt" | "opt" | "option" | "⌥" => OPTION,
+            "ctrl" | "control" | "⌃" => CONTROL,
+            other => return Err(format!("unknown modifier {other:?}")),
+        };
+    }
+    Ok(flags)
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn press(_strokes: &[Stroke]) -> Result<(), String> {
     Err("pressing keys is only supported on macOS".into())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn click(_x: f64, _y: f64, _modifiers: &str) -> Result<(), String> {
+    Err("clicking is only supported on macOS".into())
 }
 
 #[cfg(test)]

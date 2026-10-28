@@ -107,3 +107,13 @@ local changes forward. Record any local patches in this file as they land:
   placeholder phantom text had no cursor affinity, so in an empty editor the
   caret was drawn after the placeholder instead of where typing starts. It is
   `CursorAffinity::Backward` now.
+- **`src/views/editor/gutter.rs`, `text.rs`: marks and clicks in the gutter.**
+  Upstream's gutter draws line numbers and nothing else, so `e` drew its git
+  bars and breakpoint dots inside the text, over the first column. `Styling`
+  now has `gutter_marks(edid, line)` — a `GutterMark` is a bar or a wedge on the
+  gutter's edge by the text, a dot in the left lane, or a tick, cross or dash
+  in the lane beside the numbers — which the gutter paints for each visible
+  line, and `gutter_click(edid, line, lane)`, which a primary click in the
+  gutter reaches with the line and the lane (`GutterLane::Left`, `Numbers`,
+  `Right`) it landed in. Both default to nothing, so other stylings are
+  unchanged.

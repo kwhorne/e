@@ -408,6 +408,12 @@ impl AppState {
             return;
         };
         let (line0, _) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
+        self.debug_toggle_breakpoint_at(&path, line0);
+    }
+
+    /// Set or clear the breakpoint on `line0` (0-based) of the file at
+    /// `path` — a click in the gutter's left lane.
+    pub(crate) fn debug_toggle_breakpoint_at(&self, path: &std::path::Path, line0: usize) {
         let line = (line0 + 1) as u32;
         let key = path.to_string_lossy().into_owned();
 

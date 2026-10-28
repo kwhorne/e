@@ -7,13 +7,15 @@
 //!
 //! It works for whatever serves the app — Grove, Herd, `artisan serve`, Sail
 //! — as it reads the log, not a proxy. Only what is logged after `e` opens the
-//! project counts; saving the file clears its exceptions, as that is usually
-//! the fix, and the next failing request brings them back.
+//! project counts. An exception stays with its line as the file is edited;
+//! saving the file clears its exceptions, as that is usually the fix, and the
+//! next failing request brings them back.
 
 use std::path::{Path, PathBuf};
 
 use e_laravel::laravel_log::{self, LoggedException};
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::views::editor::core::xi_rope::Rope;
 use floem::views::editor::text::Document;
 use floem::views::{label, Decorators};
 use floem::IntoView;
@@ -181,6 +183,51 @@ impl AppState {
     pub fn dismiss_caught(&self, path: &Path, line: usize) {
         self.caught
             .update(|c| c.retain(|c| !(c.path == path && c.line == line)));
+        self.sync_caught_marks();
+    }
+
+    /// Move the exceptions in `path` along with an edit from `old` to `new`:
+    /// lines added above push one down, and removing its line removes it.
+    pub(crate) fn follow_caught(&self, path: &Path, old: &Rope, new: &str) {
+        let lines: Vec<usize> = self.caught.with_untracked(|c| {
+            c.iter()
+                .filter(|c| c.path == path)
+                .map(|c| c.line)
+                .collect()
+        });
+        if lines.is_empty() {
+            return;
+        }
+        let old = old.to_string();
+        // Each line on its own, so a removed one can be told from one that
+        // moved onto another's place.
+        let moved: Vec<(usize, Option<usize>)> = lines
+            .iter()
+            .map(|&l| {
+                (
+                    l,
+                    e_core::diff::follow_lines(&old, new, &[l]).first().copied(),
+                )
+            })
+            .collect();
+        if moved.iter().all(|(from, to)| Some(*from) == *to) {
+            return;
+        }
+        self.caught.update(|c| {
+            c.retain_mut(|c| {
+                if c.path != path {
+                    return true;
+                }
+                match moved.iter().find(|(from, _)| *from == c.line) {
+                    Some((_, Some(to))) => {
+                        c.line = *to;
+                        true
+                    }
+                    Some((_, None)) => false,
+                    None => true,
+                }
+            });
+        });
         self.sync_caught_marks();
     }
 

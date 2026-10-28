@@ -422,9 +422,10 @@ error lands in the template, on the undefined variable when that's what it
 was. Paths from a container (Sail, Docker) are mapped onto the project.
 
 `⌘.` on the line offers **Exception: ask the agent to fix …**, which hands the
-agent the log entry with its stacktrace, and **Exception: dismiss**. Saving the
-file clears its exceptions — the fix is usually why you saved — and the next
-failing request brings them back.
+agent the log entry with its stacktrace, and **Exception: dismiss**. An
+exception stays with its line as you edit — lines added above push it down,
+and deleting its line removes it. Saving the file clears its exceptions — the
+fix is usually why you saved — and the next failing request brings them back.
 
 `e` reads `storage/logs/laravel.log` (or the newest daily
 `laravel-YYYY-MM-DD.log`) every two seconds, from where it was when the

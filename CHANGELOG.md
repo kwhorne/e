@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Exceptions on the line that caused them.** An exception the running app
   logs to `storage/logs/laravel.log` shows on the first line of your own code
   it passed through — in red at the end of the line, in Problems and in the
-  status bar, which takes you there. `⌘.` hands it to the agent with its
-  stacktrace, or dismisses it; saving the file clears it. Works with Grove,
+  status bar, which takes you there. It stays with its line as you edit.
+  `⌘.` hands it to the agent with its stacktrace, or dismisses it; saving the
+  file clears it. Works with Grove,
   Herd, `artisan serve` and Sail.
 
 ## [0.15.0] - 2026-10-28

@@ -6510,9 +6510,10 @@ impl AppState {
                     if app.test_outcomes.with_untracked(|o| !o.is_empty()) {
                         *test_marks.borrow_mut() = app.test_marks_for(path, &text);
                     }
-                    // And a breakpoint with its line.
+                    // And a breakpoint, or a logged exception, with its line.
                     if let Some(old) = update.old_text() {
                         app.follow_breakpoints(path, old, &text);
+                        app.follow_caught(path, old, &text);
                     }
                 }
                 if !undo_nav.get() {

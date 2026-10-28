@@ -172,6 +172,91 @@ pub fn remember(kept: &mut Vec<TestCase>, run: &TestRun) {
     kept.extend(run.cases.iter().cloned());
 }
 
+/// Where a project's kept results live between launches
+/// (`~/.config/e/tests/<hash of the root>.json`).
+fn kept_path(root: &Path) -> Option<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let home = std::env::var_os("HOME")?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    root.to_string_lossy().hash(&mut h);
+    Some(
+        PathBuf::from(home)
+            .join(".config/e/tests")
+            .join(format!("{:016x}.json", h.finish())),
+    )
+}
+
+/// The results kept for the project at `root` when it was last open.
+pub fn load_kept(root: &Path) -> Vec<TestCase> {
+    kept_path(root)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|text| kept_from_json(&text))
+        .unwrap_or_default()
+}
+
+/// Keep `cases` for the next launch, off the calling thread.
+pub fn save_kept(root: &Path, cases: Vec<TestCase>) {
+    let Some(path) = kept_path(root) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, kept_to_json(&cases));
+    });
+}
+
+fn kept_to_json(cases: &[TestCase]) -> String {
+    let cases: Vec<serde_json::Value> = cases
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "suite": c.suite,
+                "name": c.name,
+                "outcome": match c.outcome {
+                    Outcome::Passed => "passed",
+                    Outcome::Failed => "failed",
+                    Outcome::Errored => "errored",
+                    Outcome::Skipped => "skipped",
+                },
+                "duration_s": c.duration_s,
+                "file": c.file,
+                "line": c.line,
+                "message": c.message,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(cases).to_string()
+}
+
+fn kept_from_json(text: &str) -> Vec<TestCase> {
+    let Ok(serde_json::Value::Array(cases)) = serde_json::from_str(text) else {
+        return Vec::new();
+    };
+    cases
+        .iter()
+        .filter_map(|c| {
+            let string = |key: &str| c.get(key).and_then(|v| v.as_str()).map(String::from);
+            Some(TestCase {
+                suite: string("suite")?,
+                name: string("name")?,
+                outcome: match c.get("outcome")?.as_str()? {
+                    "passed" => Outcome::Passed,
+                    "failed" => Outcome::Failed,
+                    "errored" => Outcome::Errored,
+                    "skipped" => Outcome::Skipped,
+                    _ => return None,
+                },
+                duration_s: c.get("duration_s").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                file: string("file").map(PathBuf::from),
+                line: c.get("line").and_then(|v| v.as_u64()).map(|l| l as u32),
+                message: string("message"),
+            })
+        })
+        .collect()
+}
+
 /// Read one XML attribute off a tag.
 fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     let key = format!("{name}=\"");
@@ -641,6 +726,34 @@ at tests/Feature/DemoTest.php:7</failure>
         assert_eq!(a.len(), 1);
         assert_eq!(a[0].outcome, Outcome::Passed);
         assert!(kept.iter().any(|c| c.name == "b"));
+    }
+
+    #[test]
+    fn kept_results_read_back_as_they_were_written() {
+        let mut failed = case("Tests\\Feature\\OrderTest", "test_rejects", Outcome::Failed);
+        failed.file = Some(root().join("tests/Feature/OrderTest.php"));
+        failed.line = Some(12);
+        failed.message = Some("Failed asserting that 500 is 422.".into());
+        failed.duration_s = 0.25;
+        let cases = vec![
+            failed,
+            case("T", "a", Outcome::Passed),
+            case("T", "b", Outcome::Errored),
+            case("T", "c", Outcome::Skipped),
+        ];
+        assert_eq!(kept_from_json(&kept_to_json(&cases)), cases);
+    }
+
+    #[test]
+    fn a_damaged_kept_file_reads_as_no_results() {
+        assert!(kept_from_json("").is_empty());
+        assert!(kept_from_json("{\"suite\": 1}").is_empty());
+        // One bad entry doesn't take the others with it.
+        let text = r#"[{"suite":"T","name":"a","outcome":"exploded"},
+                       {"suite":"T","name":"b","outcome":"passed"}]"#;
+        let cases = kept_from_json(text);
+        assert_eq!(cases.len(), 1);
+        assert_eq!(cases[0].name, "b");
     }
 }
 

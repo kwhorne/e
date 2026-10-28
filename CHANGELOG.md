@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Test results survive a restart.** The gutter's tick, cross and dash beside
+  each test were gone the next time you opened the project. They are now kept
+  per project and come back with it, until the next run replaces them.
+
 ### Fixed
 
 - **Breakpoints follow their lines.** A breakpoint stayed on its line number

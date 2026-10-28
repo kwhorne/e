@@ -57,6 +57,10 @@ impl AppState {
                 state
                     .test_outcomes
                     .update(|kept| crate::testrun::remember(kept, &run));
+                crate::testrun::save_kept(
+                    &state.root.get_untracked(),
+                    state.test_outcomes.get_untracked(),
+                );
                 state.sync_test_marks();
                 state.tdd_results.set(run);
                 state.tdd_iteration.update(|i| *i += 1);

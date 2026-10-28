@@ -214,7 +214,8 @@ tick when it passed, a red cross when it failed, a dash when it was skipped. A
 test run once per data set shows its worst result. Running one test updates its
 mark and leaves the others' as they were. Click a mark to run that test again.
 The marks come from the runner's JUnit report, so they appear for PHPUnit and
-Pest.
+Pest. They are kept per project (`~/.config/e/tests/`) and come back the next
+time you open it.
 
 ## The Laravel menu
 

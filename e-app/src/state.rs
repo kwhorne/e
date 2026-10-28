@@ -962,7 +962,8 @@ pub struct AppState {
     /// them. Empty for runners that can't write JUnit XML.
     pub tdd_results: RwSignal<crate::testrun::TestRun>,
     /// Every test's latest result across runs, so running one test doesn't
-    /// forget how the others ended. Read for the gutter's test marks.
+    /// forget how the others ended. Read for the gutter's test marks; kept on
+    /// disk so the marks are back on the next launch.
     pub test_outcomes: RwSignal<Vec<crate::testrun::TestCase>>,
     pub tdd_iteration: RwSignal<usize>,
     /// When true, a failing run asks the agent to fix and re-runs on apply.
@@ -1662,6 +1663,8 @@ pub(crate) fn now_ms() -> u128 {
 
 impl AppState {
     pub fn new(cx: Scope, root: PathBuf) -> Self {
+        // Each test's mark shows how it last ended, also in an earlier launch.
+        let kept_tests = crate::testrun::load_kept(&root);
         let (tx, rx) = channel();
         let (term_tx, term_rx) = channel();
         let (agent_wake_tx, agent_wake_rx) = channel::<()>();
@@ -1820,7 +1823,7 @@ impl AppState {
             tdd_status: RwSignal::new(TddStatus::Idle),
             tdd_output: RwSignal::new(String::new()),
             tdd_results: RwSignal::new(Default::default()),
-            test_outcomes: RwSignal::new(Vec::new()),
+            test_outcomes: RwSignal::new(kept_tests),
             tdd_iteration: RwSignal::new(0),
             tdd_loop: RwSignal::new(false),
             update_info: RwSignal::new(None),

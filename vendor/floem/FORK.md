@@ -117,3 +117,6 @@ local changes forward. Record any local patches in this file as they land:
   gutter reaches with the line and the lane (`GutterLane::Left`, `Numbers`,
   `Right`) it landed in. Both default to nothing, so other stylings are
   unchanged.
+- **`src/views/editor/text_document.rs`: `OnUpdate::old_text()`.** An update
+  listener got the deltas but not the text they apply to, which it needs to
+  carry line-anchored state (breakpoints) across an edit.

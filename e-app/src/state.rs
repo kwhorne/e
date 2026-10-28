@@ -6430,7 +6430,7 @@ impl AppState {
             // instead of painting stale colours.
             let hl_gen: Rc<std::cell::Cell<u64>> = Rc::new(std::cell::Cell::new(0));
             let syntax = syntax.clone();
-            doc.clone().add_on_update(move |_| {
+            doc.clone().add_on_update(move |update| {
                 // Only on the change: every subscriber (title, tab, status)
                 // re-renders on a set, even to the same value.
                 if !dirty.get_untracked() {
@@ -6438,10 +6438,14 @@ impl AppState {
                 }
                 app.last_edit.set(now_ms());
                 let text = doc.text().to_string();
-                // A test's mark moves with its declaration.
                 if let Some(path) = &test_path {
+                    // A test's mark moves with its declaration.
                     if app.test_outcomes.with_untracked(|o| !o.is_empty()) {
                         *test_marks.borrow_mut() = app.test_marks_for(path, &text);
+                    }
+                    // And a breakpoint with its line.
+                    if let Some(old) = update.old_text() {
+                        app.follow_breakpoints(path, old, &text);
                     }
                 }
                 if !undo_nav.get() {

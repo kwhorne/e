@@ -17,7 +17,8 @@ The adapter is chosen automatically from the active file's language.
 
 1. Open a file and set a breakpoint — press `F9` on a line, `⌥`-click it, or
    click left of its line number.
-   A red dot appears in the editor margin.
+   A red dot appears in the editor margin. It stays with its line as you
+   edit: lines added above push it down, and deleting the line removes it.
 2. Press `F5` to start. The Debug panel opens and shows the session status.
 3. When execution hits a breakpoint, the line is highlighted, the editor jumps
    to it, and the call stack + variables fill in.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Breakpoints follow their lines.** A breakpoint stayed on its line number
+  while you edited, so adding a line above it left it on the wrong statement.
+  It now moves with its line — through typing, pasting, undo and formatting —
+  and goes away when its line is deleted. A running debug session gets the new
+  lines too.
+
 ## [0.14.0] - 2026-10-28
 
 ### Added

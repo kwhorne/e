@@ -14,6 +14,7 @@ use std::sync::mpsc::channel;
 
 use floem::ext_event::{create_ext_action, create_signal_from_channel};
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
+use floem::views::editor::core::xi_rope::Rope;
 use floem::views::editor::text::Document;
 use serde_json::json;
 
@@ -72,6 +73,39 @@ impl AppState {
                 }
             }
         });
+    }
+
+    /// Move the breakpoints in `path` along with an edit from `old` to `new`,
+    /// so text added above one pushes it down and removing its line removes it.
+    pub(crate) fn follow_breakpoints(&self, path: &Path, old: &Rope, new: &str) {
+        let key = path.to_string_lossy();
+        let Some(lines) = self
+            .debug_breakpoints
+            .with_untracked(|m| m.get(key.as_ref()).cloned())
+        else {
+            return;
+        };
+        let old_lines: Vec<usize> = lines
+            .iter()
+            .map(|l| (*l as usize).saturating_sub(1))
+            .collect();
+        let moved: Vec<u32> = e_core::diff::follow_lines(&old.to_string(), new, &old_lines)
+            .into_iter()
+            .map(|l| l as u32 + 1)
+            .collect();
+        if moved == lines {
+            return;
+        }
+        let key = key.into_owned();
+        self.debug_breakpoints.update(|m| {
+            if moved.is_empty() {
+                m.remove(&key);
+            } else {
+                m.insert(key.clone(), moved.clone());
+            }
+        });
+        self.sync_bp_marks(&key);
+        self.push_breakpoints(key);
     }
 
     /// Mark `line0` in the buffer for `path` as the stopped line; clear others.
@@ -433,13 +467,17 @@ impl AppState {
         // Paint the dot in the open buffer immediately.
         self.sync_bp_marks(&key);
 
-        // Push the updated set for this file to a live session.
+        self.push_breakpoints(key);
+    }
+
+    /// Send the breakpoints set in `path` to a live debug session.
+    fn push_breakpoints(&self, path: String) {
         if let Some(client) = self.debug_client.get_untracked() {
             let lines = self
                 .debug_breakpoints
-                .with_untracked(|m| m.get(&key).cloned().unwrap_or_default());
+                .with_untracked(|m| m.get(&path).cloned().unwrap_or_default());
             std::thread::spawn(move || {
-                let _ = client.set_breakpoints(&key, &lines);
+                let _ = client.set_breakpoints(&path, &lines);
             });
         }
     }

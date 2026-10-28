@@ -52,6 +52,11 @@ impl<'a> OnUpdate<'a> {
     pub fn deltas(&self) -> impl Iterator<Item = &'a RopeDelta> {
         self.deltas.iter().map(|(_, delta, _)| delta)
     }
+
+    /// The text as it was before these edits.
+    pub fn old_text(&self) -> Option<&'a Rope> {
+        self.deltas.first().map(|(text, _, _)| text)
+    }
 }
 
 /// A simple text document that holds content in a rope.  

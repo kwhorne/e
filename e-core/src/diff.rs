@@ -74,6 +74,41 @@ pub fn edit_segments(old: &str, new: &str) -> Vec<DiffSeg> {
     segs
 }
 
+/// Where `lines` (0-based lines of `old`) are in `new`. A line keeps its place
+/// among the unchanged lines around it, so text added above pushes it down; an
+/// edited line stays put, and lines joined into one all land on it. A line that
+/// was removed is dropped. The result is sorted, without duplicates.
+pub fn follow_lines(old: &str, new: &str, lines: &[usize]) -> Vec<usize> {
+    if lines.is_empty() || old == new {
+        return lines.to_vec();
+    }
+    let diff = TextDiff::from_lines(old, new);
+    let ops = diff.ops();
+    let end = |op: Option<&similar::DiffOp>| {
+        op.map_or((0, 0), |o| (o.old_range().end, o.new_range().end))
+    };
+    let (old_end, new_end) = end(ops.last());
+    let mut out: Vec<usize> = lines
+        .iter()
+        .filter_map(|&line| {
+            let Some(op) = ops.iter().find(|op| op.old_range().contains(&line)) else {
+                // Past the last line the diff saw, such as the empty line after
+                // a final newline: it moves with the end of the text.
+                return (line >= old_end).then(|| line - old_end + new_end);
+            };
+            let (from, to) = (op.old_range(), op.new_range());
+            match op.tag() {
+                similar::DiffTag::Equal => Some(to.start + line - from.start),
+                similar::DiffTag::Replace => Some(to.start + (line - from.start).min(to.len() - 1)),
+                similar::DiffTag::Delete | similar::DiffTag::Insert => None,
+            }
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +135,36 @@ mod tests {
         assert_eq!(orig, old);
         // There is at least one change segment.
         assert!(segs.iter().any(|s| !s.equal));
+    }
+
+    #[test]
+    fn lines_added_above_push_a_line_down() {
+        let old = "a\nb\nc\n";
+        assert_eq!(follow_lines(old, "x\ny\na\nb\nc\n", &[1, 2]), vec![3, 4]);
+        // Below it, nothing moves.
+        assert_eq!(follow_lines(old, "a\nb\nc\nd\n", &[1]), vec![1]);
+    }
+
+    #[test]
+    fn an_edited_line_stays_and_a_removed_one_goes() {
+        let old = "a\nb\nc\nd\n";
+        assert_eq!(follow_lines(old, "a\nbee\nc\nd\n", &[1, 3]), vec![1, 3]);
+        assert_eq!(follow_lines(old, "a\nc\nd\n", &[1, 3]), vec![2]);
+    }
+
+    #[test]
+    fn joined_lines_land_on_the_one_line_left() {
+        let old = "a\nb\nc\nd\n";
+        assert_eq!(follow_lines(old, "a\nbc\nd\n", &[1, 2, 3]), vec![1, 2]);
+    }
+
+    #[test]
+    fn a_whole_text_swap_keeps_the_lines_that_survive() {
+        // Undo and formatting replace the whole text in one edit.
+        let old = "<?php\n\nfoo();\nbar();\n";
+        let new = "<?php\n\n// note\nfoo();\nbar();\n";
+        assert_eq!(follow_lines(old, new, &[2, 3]), vec![3, 4]);
+        // The empty line after the final newline moves with the end.
+        assert_eq!(follow_lines(old, new, &[4]), vec![5]);
     }
 }

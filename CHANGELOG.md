@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stage or revert one hunk from the gutter.** Click a change bar or wedge to
+  peek at that hunk: the lines as they were in the last commit, with
+  **Stage** (that hunk alone into the index) and **Revert** (the lines back,
+  as one undoable edit).
+
 ### Changed
 
 - **Worktree sessions without Grove.** **⋯ → New session in a worktree** used
@@ -20,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Change marks after a commit.** The gutter compared against the `HEAD` the
+  file had when it was opened, so after a commit its lines stayed marked as
+  changed. The marks now catch up when `HEAD` moves, wherever the commit was
+  made.
 - **Turn snapshots skip big untracked files.** A database dump or build
   artifact left in the tree was hashed into `.git/objects` before and after
   every agent turn. Untracked files over 10 MB now stay out of the snapshot.

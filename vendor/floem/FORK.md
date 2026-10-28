@@ -115,7 +115,8 @@ local changes forward. Record any local patches in this file as they land:
   in the lane beside the numbers — which the gutter paints for each visible
   line, and `gutter_click(edid, line, lane)`, which a primary click in the
   gutter reaches with the line and the lane (`GutterLane::Left`, `Numbers`,
-  `Right`) it landed in. Both default to nothing, so other stylings are
+  `Right`, or `Changes` — the strip by the text where the bars are) it landed
+  in. Both default to nothing, so other stylings are
   unchanged.
 - **`src/views/editor/text_document.rs`: `OnUpdate::old_text()`.** An update
   listener got the deltas but not the text they apply to, which it needs to

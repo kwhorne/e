@@ -35,7 +35,19 @@ The panel refreshes automatically after saves, file operations, and git actions.
 Lines changed relative to `HEAD` are marked in the editor gutter, on its edge
 beside the text: a green bar for added lines, a blue one for changed lines, and
 a red wedge between two lines where lines were removed. The marks follow your
-edits as you type.
+edits as you type, and catch up within a couple of seconds when `HEAD` moves —
+a commit or checkout here, in a terminal or by an agent.
+
+Click a bar or a wedge to peek at that hunk under the line: what the lines were
+in the last commit, and
+
+- **Stage** — puts this hunk alone in the index; the rest of the file's
+  changes stay unstaged, and the file on disk isn't touched. What's staged is
+  the editor's text, saved or not.
+- **Revert** — puts the lines back as they were in the commit, as one edit:
+  `⌘Z` takes it back.
+
+`Esc`, **×** or typing closes the peek.
 
 ## Diff vs HEAD
 

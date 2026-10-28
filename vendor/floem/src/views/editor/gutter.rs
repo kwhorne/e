@@ -42,6 +42,10 @@ impl GutterStyle {
     }
 }
 
+/// How far from the text the change strip reaches, for clicks: wider than the
+/// bar it draws, so it isn't a three-pixel target.
+const CHANGES_LANE: f64 = 9.0;
+
 pub struct EditorGutterView {
     id: ViewId,
     editor: RwSignal<Editor>,
@@ -80,6 +84,8 @@ pub enum GutterLane {
     Numbers,
     /// Between the numbers and the text, where test results go.
     Right,
+    /// The strip along the edge by the text, where changes are marked.
+    Changes,
 }
 
 pub fn editor_gutter_view(editor: RwSignal<Editor>) -> EditorGutterView {
@@ -283,6 +289,8 @@ impl View for EditorGutterView {
         };
         let lane = if pe.pos.x < self.gutter_style.left_padding() {
             GutterLane::Left
+        } else if pe.pos.x >= self.full_width - CHANGES_LANE {
+            GutterLane::Changes
         } else if pe.pos.x > self.full_width - self.gutter_style.right_padding() {
             GutterLane::Right
         } else {

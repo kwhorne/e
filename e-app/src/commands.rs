@@ -267,6 +267,7 @@ fn close_overlays(state: AppState) {
     state.close_completion();
     state.clear_ghost();
     state.close_hover();
+    state.close_hunk_peek();
     state.close_signature();
     state.picker.open.set(false);
     state.palette_open.set(false);

@@ -528,7 +528,8 @@ pub fn editor_area(state: AppState) -> impl IntoView {
 }
 
 /// What a click in an editor's gutter does: the left lane sets or clears a
-/// breakpoint, and a test's mark beside the numbers runs that test again.
+/// breakpoint, a test's mark beside the numbers runs that test again, and a
+/// change bar by the text opens a peek at that hunk.
 fn gutter_click(state: AppState, path: Option<std::path::PathBuf>) -> crate::styling::GutterClick {
     std::rc::Rc::new(move |line, lane| {
         let Some(path) = &path else {
@@ -540,6 +541,7 @@ fn gutter_click(state: AppState, path: Option<std::path::PathBuf>) -> crate::sty
                 true
             }
             floem::views::editor::gutter::GutterLane::Right => state.run_test_at_line(path, line),
+            floem::views::editor::gutter::GutterLane::Changes => state.peek_hunk(path, line),
             floem::views::editor::gutter::GutterLane::Numbers => false,
         }
     })

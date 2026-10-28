@@ -305,6 +305,9 @@ pub struct Buffer {
     pub diag_lines: DiagLines,
     /// Per-line git change markers.
     pub git_marks: GitMarks,
+    /// The file as it is in HEAD, which the change marks compare against;
+    /// `None` until read, and for a file git doesn't have.
+    pub head_text: Rc<RefCell<Option<String>>>,
     /// Lines carrying a debug breakpoint (0-based).
     pub bp_marks: BpMarks,
     /// The line the debugger is currently stopped on (0-based), if any.
@@ -723,6 +726,11 @@ pub struct AppState {
     pub completion: Completion,
     /// Hover popup state.
     pub hover: HoverState,
+    /// The peek at a hunk, opened from the gutter's change bar.
+    pub hunk_peek: RwSignal<Option<crate::hunk_peek::HunkPeek>>,
+    /// When `.git/logs/HEAD` last changed, as last seen: it moves on every
+    /// commit and checkout, also ones made outside `e`.
+    pub head_moved: RwSignal<Option<std::time::SystemTime>>,
     /// Signature-help popup state.
     pub signature: SignatureState,
     /// Laravel project data (routes/views/config/env), if applicable.
@@ -1714,6 +1722,8 @@ impl AppState {
             laravel_project: RwSignal::new(None),
             completion: Completion::new(),
             hover: HoverState::new(),
+            hunk_peek: RwSignal::new(None),
+            head_moved: RwSignal::new(None),
             signature: SignatureState::new(),
             laravel: RwSignal::new(None),
             laravel_fp: RwSignal::new(None),
@@ -3974,6 +3984,7 @@ impl AppState {
             highlights,
             diag_lines: Rc::new(RefCell::new(Vec::new())),
             git_marks: Rc::new(RefCell::new(Vec::new())),
+            head_text: Rc::new(RefCell::new(None)),
             bp_marks: Rc::new(RefCell::new(Default::default())),
             stop_line: Rc::new(RefCell::new(None)),
             test_marks: Rc::new(RefCell::new(Default::default())),
@@ -6460,6 +6471,8 @@ impl AppState {
             let syntax = syntax.clone();
             doc.clone().add_on_update(move |update| {
                 app.last_edit.set(now_ms());
+                // A peek shows the hunk as it was; an edit may have moved it.
+                app.close_hunk_peek();
                 let text = doc.text().to_string();
                 // Undoing back to what's on disk leaves nothing to save. Set
                 // only on a change: every subscriber (title, tab, status)
@@ -6590,6 +6603,7 @@ impl AppState {
             highlights,
             diag_lines: Rc::new(RefCell::new(Vec::new())),
             git_marks,
+            head_text,
             bp_marks: Rc::new(RefCell::new(Default::default())),
             stop_line: Rc::new(RefCell::new(None)),
             test_marks: test_marks.clone(),

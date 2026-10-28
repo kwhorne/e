@@ -626,9 +626,11 @@ fn app_view() -> impl IntoView {
                 }
                 let tick = lens_tick.get().wrapping_add(1);
                 lens_tick.set(tick);
-                // Every 2 s: the timeline, for the lenses of the files open.
+                // Every 2 s: the timeline, for the lenses of the files open,
+                // and whether HEAD moved under the change marks.
                 if tick.is_multiple_of(4) {
                     state.poll_runtime_for_lenses();
+                    state.check_head_moved();
                 }
                 // Every 15 s: the lenses' "2m ago".
                 if tick.is_multiple_of(30) {
@@ -917,7 +919,11 @@ fn app_view() -> impl IntoView {
         about_dialog(state),
         signature_popup(state),
         completion_popup(state),
-        hover_popup(state),
+        // The hover and the hunk peek share one slot (floem's tuple arity).
+        // No size of its own: a full-size wrapper would take every click
+        // meant for the editor under it.
+        stack((hover_popup(state), crate::hunk_peek::hunk_peek_view(state)))
+            .style(|s| s.absolute().inset_left(0.0).inset_top(0.0)),
         picker_overlay(state),
         palette(state),
         command_palette(state),

@@ -552,6 +552,150 @@ pub fn marks(head: &str, current: &str, line_count: usize) -> Vec<Option<LineMar
     marks
 }
 
+/// One run of changed lines between two versions of a file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hunk {
+    /// 0-based lines of the old text it replaces; empty for lines only added.
+    pub old: std::ops::Range<usize>,
+    /// 0-based lines of the new text; empty for lines only removed.
+    pub new: std::ops::Range<usize>,
+}
+
+/// The hunk of `old` → `new` at `line` (0-based, in `new`): the changed lines
+/// that include it, or lines removed just above it — where the gutter draws
+/// its wedge.
+pub fn hunk_at(old: &str, new: &str, line: usize) -> Option<Hunk> {
+    let diff = TextDiff::from_lines(old, new);
+    let hunks: Vec<Hunk> = diff
+        .grouped_ops(0)
+        .iter()
+        .filter_map(|group| {
+            let (first, last) = (group.first()?, group.last()?);
+            Some(Hunk {
+                old: first.old_range().start..last.old_range().end,
+                new: first.new_range().start..last.new_range().end,
+            })
+        })
+        .collect();
+    hunks
+        .iter()
+        .find(|h| h.new.contains(&line))
+        .or_else(|| {
+            hunks
+                .iter()
+                .find(|h| h.new.is_empty() && h.new.start == line)
+        })
+        .cloned()
+}
+
+/// The byte range of `lines` (0-based) in `text`, newlines included.
+pub fn line_bytes(text: &str, lines: std::ops::Range<usize>) -> std::ops::Range<usize> {
+    let mut start = text.len();
+    let mut end = text.len();
+    let mut at = 0;
+    for (i, line) in text.split_inclusive('\n').enumerate() {
+        if i == lines.start {
+            start = at;
+        }
+        if i == lines.end {
+            end = at;
+            break;
+        }
+        at += line.len();
+    }
+    start..end.max(start)
+}
+
+/// `target` with its lines `h.old` replaced by `source`'s lines `h.new`:
+/// the hunk applied. Swap the texts and use [`Hunk::reversed`] to undo it.
+pub fn apply_hunk(target: &str, source: &str, h: &Hunk) -> String {
+    let at = line_bytes(target, h.old.clone());
+    let with = &source[line_bytes(source, h.new.clone())];
+    let mut out = String::with_capacity(target.len() + with.len());
+    out.push_str(&target[..at.start]);
+    out.push_str(with);
+    out.push_str(&target[at.end..]);
+    out
+}
+
+impl Hunk {
+    /// The same hunk seen from the new text's side.
+    pub fn reversed(&self) -> Hunk {
+        Hunk {
+            old: self.new.clone(),
+            new: self.old.clone(),
+        }
+    }
+}
+
+/// The file's content in the index (`git show :path`), or `None` when it
+/// isn't in the index.
+pub fn index_text(path: &Path) -> Option<String> {
+    let (dir, name) = (path.parent()?, path.file_name()?.to_str()?);
+    git_bytes(dir, &["show", &format!(":./{name}")])
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+}
+
+/// Put `text` in the index as the content of the file at `path`, leaving the
+/// file itself alone: how one hunk is staged.
+pub fn stage_text(path: &Path, text: &str) -> Result<(), String> {
+    // Git runs in the file's directory, so its paths are just the name.
+    let dir = path.parent().ok_or("no directory")?;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("no file name")?;
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["hash-object", "-w", "--stdin", "--path", name])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    {
+        use std::io::Write;
+        let mut stdin = child.stdin.take().ok_or("no stdin")?;
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| e.to_string())?;
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    // Keep the mode the index has; a new file takes the one on disk.
+    let mode = git_out(dir, &["ls-files", "-s", "--", name])
+        .ok()
+        .and_then(|l| l.split_whitespace().next().map(String::from))
+        .unwrap_or_else(|| file_mode(path).to_string());
+    run_git(
+        dir,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("{mode},{id},{name}"),
+        ],
+    )
+}
+
+/// `100755` for an executable file, else `100644`.
+fn file_mode(path: &Path) -> &'static str {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o111 != 0) {
+            return "100755";
+        }
+    }
+    let _ = path;
+    "100644"
+}
+
 // ---- Reversible working-tree checkpoints (verify-fix loop) ------------------
 
 /// A capture of the working tree at a point in time, used to run a reversible
@@ -899,7 +1043,74 @@ pub fn undo_tree_change(
 
 #[cfg(test)]
 mod tests {
-    use super::{diff, marks, parse_worktrees, DiffKind, LineMark};
+    use super::{
+        apply_hunk, diff, hunk_at, line_bytes, marks, parse_worktrees, DiffKind, Hunk, LineMark,
+    };
+
+    #[test]
+    fn the_hunk_at_a_line_covers_its_run_of_changes() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nB\nC\nd\nx\ne\n";
+        assert_eq!(
+            hunk_at(old, new, 2),
+            Some(Hunk {
+                old: 1..3,
+                new: 1..3
+            })
+        );
+        assert_eq!(
+            hunk_at(old, new, 4),
+            Some(Hunk {
+                old: 4..4,
+                new: 4..5
+            })
+        );
+        assert_eq!(hunk_at(old, new, 0), None);
+        assert_eq!(hunk_at(old, new, 3), None);
+    }
+
+    #[test]
+    fn a_removal_is_found_on_the_line_below_it() {
+        let old = "a\nb\nc\n";
+        let new = "a\nc\n";
+        assert_eq!(
+            hunk_at(old, new, 1),
+            Some(Hunk {
+                old: 1..2,
+                new: 1..1
+            })
+        );
+    }
+
+    #[test]
+    fn a_hunk_applies_one_way_and_reverts_the_other() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nB\nc\nd\nx\ne\n";
+        // Staging the second hunk only: the first stays as it was.
+        let h = hunk_at(old, new, 4).unwrap();
+        assert_eq!(apply_hunk(old, new, &h), "a\nb\nc\nd\nx\ne\n");
+        // Reverting the first only.
+        let h = hunk_at(old, new, 1).unwrap();
+        assert_eq!(apply_hunk(new, old, &h.reversed()), "a\nb\nc\nd\nx\ne\n");
+        // A removal comes back.
+        let h = hunk_at("a\nb\nc\n", "a\nc\n", 1).unwrap();
+        assert_eq!(
+            apply_hunk("a\nc\n", "a\nb\nc\n", &h.reversed()),
+            "a\nb\nc\n"
+        );
+    }
+
+    #[test]
+    fn the_last_line_needs_no_newline() {
+        let old = "a\nb";
+        let new = "a\nB";
+        let h = hunk_at(old, new, 1).unwrap();
+        assert_eq!(line_bytes(new, h.new.clone()), 2..3);
+        assert_eq!(apply_hunk(new, old, &h.reversed()), "a\nb");
+        // Lines added at the end of a file.
+        let h = hunk_at("a\n", "a\nb\n", 1).unwrap();
+        assert_eq!(apply_hunk("a\n", "a\nb\n", &h), "a\nb\n");
+    }
 
     #[test]
     fn worktrees_are_read_with_their_branches() {
@@ -954,6 +1165,7 @@ c
         checkpoint, git_out, restore_checkpoint, snapshot_tree, tree_changes, tree_diff,
         undo_tree_change, SNAPSHOT_MAX_UNTRACKED,
     };
+    use super::{index_text, stage_text};
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
@@ -1144,6 +1356,35 @@ c
         // And it was never hashed into the object store.
         let dump_id = git_out(&dir, &["hash-object", "dump [*].sql"]).unwrap();
         assert!(git_out(&dir, &["cat-file", "-e", &dump_id]).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn one_hunk_is_staged_and_the_file_is_left_alone() {
+        let dir = init_repo("stage");
+        std::fs::write(dir.join("a.txt"), "a\nb\nc\nd\ne\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "init"]);
+        let now = "a\nB\nc\nd\nx\ne\n";
+        std::fs::write(dir.join("a.txt"), now).unwrap();
+        let file = dir.join("a.txt");
+
+        let index = index_text(&file).unwrap();
+        let h = hunk_at(&index, now, 4).unwrap();
+        stage_text(&file, &apply_hunk(&index, now, &h)).unwrap();
+
+        assert_eq!(index_text(&file).unwrap(), "a\nb\nc\nd\nx\ne\n");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), now);
+        // What's left unstaged is the other hunk.
+        let index = index_text(&file).unwrap();
+        assert!(hunk_at(&index, now, 4).is_none());
+        assert!(hunk_at(&index, now, 1).is_some());
+
+        // A new file has no index entry until a hunk of it is staged.
+        std::fs::write(dir.join("new.sh"), "echo\n").unwrap();
+        assert_eq!(index_text(&dir.join("new.sh")), None);
+        stage_text(&dir.join("new.sh"), "echo\n").unwrap();
+        assert_eq!(index_text(&dir.join("new.sh")).unwrap(), "echo\n");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

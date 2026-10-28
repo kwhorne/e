@@ -53,6 +53,13 @@ impl AppState {
                 }
                 match snapshot {
                     Some((branch, status, log, stashes, repo)) => {
+                        // A commit or checkout moved HEAD: the change marks
+                        // compare against something else now.
+                        let head =
+                            |l: &[(String, String, String, String)]| l.first().map(|c| c.0.clone());
+                        if state.git_log.with_untracked(|old| head(old)) != head(&log) {
+                            state.refresh_head_texts();
+                        }
                         state.git_root.set(Some(repo));
                         state.git_branch.set(branch);
                         state.git_status.set(status);

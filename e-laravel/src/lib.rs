@@ -32,4 +32,5 @@ pub mod querycomplete;
 pub mod relatedfiles;
 pub mod relations;
 pub mod request_test;
+pub mod test_impact;
 pub mod validation;

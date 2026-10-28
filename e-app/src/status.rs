@@ -136,8 +136,10 @@ pub fn status_bar(state: AppState) -> impl IntoView {
     })
     .on_click_stop(move |_| state.jump_to_agent_mark());
 
-    let left =
-        stack((left, blame, agent_mark)).style(|s| s.items_center().gap(14.0).min_width(0.0));
+    let tests = crate::test_on_save::save_run_status(state);
+
+    let left = stack((left, tests, blame, agent_mark))
+        .style(|s| s.items_center().gap(14.0).min_width(0.0));
 
     stack((left, right)).style(|s| {
         s.height(24.0)

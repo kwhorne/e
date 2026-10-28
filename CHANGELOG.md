@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Run the affected tests on save.** With **Settings → Laravel → Run
+  affected tests on save** on, saving a PHP file runs, in the background, the
+  test files that use its class, are named after it or call its controller's
+  routes — a test file runs itself. The gutter's marks update, and the status
+  bar says how it went; click it for the output.
 - **Stage or revert one hunk from the gutter.** Click a change bar or wedge to
   peek at that hunk: the lines as they were in the last commit, with
   **Stage** (that hunk alone into the index) and **Revert** (the lines back,

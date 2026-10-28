@@ -124,6 +124,7 @@ mod tdd;
 mod tdd_state;
 mod terminal_state;
 mod terminal_view;
+mod test_on_save;
 mod testrun;
 mod theme;
 mod tinker;

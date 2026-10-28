@@ -726,6 +726,10 @@ pub struct AppState {
     pub completion: Completion,
     /// Hover popup state.
     pub hover: HoverState,
+    /// Files saved since the last run of their tests, waiting to settle.
+    pub save_run_queue: RwSignal<Vec<PathBuf>>,
+    /// How the last run of the tests a save touched went.
+    pub save_run: RwSignal<Option<crate::test_on_save::SaveRun>>,
     /// The peek at a hunk, opened from the gutter's change bar.
     pub hunk_peek: RwSignal<Option<crate::hunk_peek::HunkPeek>>,
     /// When `.git/logs/HEAD` last changed, as last seen: it moves on every
@@ -1723,6 +1727,8 @@ impl AppState {
             completion: Completion::new(),
             hover: HoverState::new(),
             hunk_peek: RwSignal::new(None),
+            save_run_queue: RwSignal::new(Vec::new()),
+            save_run: RwSignal::new(None),
             head_moved: RwSignal::new(None),
             signature: SignatureState::new(),
             laravel: RwSignal::new(None),
@@ -3005,6 +3011,7 @@ impl AppState {
                     }
                     self.request_inlay_hints(b.id);
                     self.check_migration(b.id);
+                    self.tests_after_save(path, b.file.language);
                 }
                 // Reported once per pause in typing; the edits stay unsaved
                 // (and backed up in the session) until a write succeeds.
@@ -7097,6 +7104,7 @@ impl AppState {
                 self.request_inlay_hints(buf.id);
                 eprintln!("e: saved {}", path.display());
                 self.laravel_touch(&path);
+                self.tests_after_save(&path, buf.file.language);
                 if let Some(uri) = buf.uri.as_ref() {
                     for client in self.lsp_clients_for(buf.file.language) {
                         client.did_save(uri, &text);

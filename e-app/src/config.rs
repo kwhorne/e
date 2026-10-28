@@ -25,6 +25,8 @@ pub struct Settings {
     /// Runtime lenses: the running app's latest request at the end of the
     /// controller method that served it.
     pub runtime_lenses: bool,
+    /// Run the tests a saved PHP file touches, in the background.
+    pub test_on_save: bool,
     pub sticky_scroll: bool,
     /// Inline AI completion ("ghost text") via a local Ollama code model.
     pub ai_completion: bool,
@@ -81,6 +83,7 @@ impl Default for Settings {
             auto_close: true,
             inlay_hints: true,
             runtime_lenses: true,
+            test_on_save: false,
             sticky_scroll: true,
             ai_completion: false,
             cascade: false,
@@ -154,6 +157,7 @@ pub fn load_settings() -> Settings {
         auto_close: bool_of("auto_close", d.auto_close),
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
         runtime_lenses: bool_of("runtime_lenses", d.runtime_lenses),
+        test_on_save: bool_of("test_on_save", d.test_on_save),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         ai_completion: bool_of("ai_completion", d.ai_completion),
         cascade: v

@@ -42,48 +42,58 @@ impl AppState {
         }
         self.tdd_open.set(true);
         self.tdd_status.set(TddStatus::Running);
+        let state = *self;
+        self.spawn_test_run(cmd, move |code, text, run| {
+            state.keep_test_results(&run);
+            state.tdd_results.set(run);
+            state.tdd_iteration.update(|i| *i += 1);
+            let passed = code == 0;
+            state.tdd_status.set(if passed {
+                TddStatus::Passed
+            } else {
+                TddStatus::Failed
+            });
+            state.tdd_output.set(text.clone());
+            if passed {
+                state.tdd_loop.set(false);
+            } else if state.tdd_loop.get_untracked() {
+                let tail: String = {
+                    let n = text.len().saturating_sub(4000);
+                    text[n..].to_string()
+                };
+                state.send_to_agent(&format!(
+                    "The test suite is failing. Fix the code so the tests pass. \
+                 Use propose_edit over $E_EDITOR_SOCK for your changes so I can review them. \
+                 Failing output:\n{tail}"
+                ));
+            }
+        });
+    }
+
+    /// Run `cmd` (a test command) in the project off the UI thread, and hand
+    /// `on_done` its exit code, its output and the results it reported.
+    pub(crate) fn spawn_test_run(
+        &self,
+        cmd: String,
+        on_done: impl FnOnce(i32, String, crate::testrun::TestRun) + 'static,
+    ) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static RUN: AtomicU64 = AtomicU64::new(0);
+        let root = self.root.get_untracked();
         // Ask the runner for machine-readable results where it can produce
         // them, so a failure has somewhere to jump to instead of being a wall of
-        // text. Runners that can't are run exactly as before.
-        let report = std::env::temp_dir().join(format!("e-junit-{}.xml", std::process::id()));
+        // text. Runners that can't are run exactly as before. One report per
+        // run, as a run after a save may overlap one from the panel.
+        let report = std::env::temp_dir().join(format!(
+            "e-junit-{}-{}.xml",
+            std::process::id(),
+            RUN.fetch_add(1, Ordering::Relaxed)
+        ));
         let cmd = crate::testrun::junit_command(&cmd, &report).unwrap_or(cmd);
-        let report_for_thread = report.clone();
-        let root_for_parse = root.clone();
-
-        let state = *self;
         let send = create_ext_action(
             self.cx,
             move |(code, text, run): (i32, String, crate::testrun::TestRun)| {
-                state
-                    .test_outcomes
-                    .update(|kept| crate::testrun::remember(kept, &run));
-                crate::testrun::save_kept(
-                    &state.root.get_untracked(),
-                    state.test_outcomes.get_untracked(),
-                );
-                state.sync_test_marks();
-                state.tdd_results.set(run);
-                state.tdd_iteration.update(|i| *i += 1);
-                let passed = code == 0;
-                state.tdd_status.set(if passed {
-                    TddStatus::Passed
-                } else {
-                    TddStatus::Failed
-                });
-                state.tdd_output.set(text.clone());
-                if passed {
-                    state.tdd_loop.set(false);
-                } else if state.tdd_loop.get_untracked() {
-                    let tail: String = {
-                        let n = text.len().saturating_sub(4000);
-                        text[n..].to_string()
-                    };
-                    state.send_to_agent(&format!(
-                        "The test suite is failing. Fix the code so the tests pass. \
-                     Use propose_edit over $E_EDITOR_SOCK for your changes so I can review them. \
-                     Failing output:\n{tail}"
-                    ));
-                }
+                on_done(code, text, run)
             },
         );
         std::thread::spawn(move || {
@@ -108,12 +118,24 @@ impl AppState {
             // The report only exists if the runner wrote one. A missing file
             // means no structured results, not a failed run — every runner this
             // doesn't know how to ask still works exactly as before.
-            let run = std::fs::read_to_string(&report_for_thread)
-                .map(|xml| crate::testrun::parse_junit(&xml, &root_for_parse))
+            let run = std::fs::read_to_string(&report)
+                .map(|xml| crate::testrun::parse_junit(&xml, &root))
                 .unwrap_or_default();
-            let _ = std::fs::remove_file(&report_for_thread);
+            let _ = std::fs::remove_file(&report);
             send((code, text, run));
         });
+    }
+
+    /// Fold a run's results into the ones kept, on disk too, and redraw the
+    /// gutter's test marks.
+    pub(crate) fn keep_test_results(&self, run: &crate::testrun::TestRun) {
+        self.test_outcomes
+            .update(|kept| crate::testrun::remember(kept, run));
+        crate::testrun::save_kept(
+            &self.root.get_untracked(),
+            self.test_outcomes.get_untracked(),
+        );
+        self.sync_test_marks();
     }
 
     /// Start the autonomous "fix to green" loop.

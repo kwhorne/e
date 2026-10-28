@@ -217,6 +217,24 @@ The marks come from the runner's JUnit report, so they appear for PHPUnit and
 Pest. They are kept per project (`~/.config/e/tests/`) and come back the next
 time you open it.
 
+### Tests on save
+
+With **Settings → Laravel → Run affected tests on save** on, saving a PHP file
+runs the tests that exercise it, in the background, without the Tests panel:
+
+- a test file runs itself;
+- a model, service or any other class runs the tests that `use` it or name it
+  in full, and the one named after it (`OrderTest.php` for `Order`);
+- a controller also runs the tests that call one of its routes, by name
+  (`route('orders.store')`) or by path (`$this->post('/orders')`).
+
+The gutter's marks update when the run is done, and the status bar says how it
+went — *✓ 12 passed* or *✗ 1 failed, 11 passed*. Click it for the output in the
+Tests panel. Saves close together run once; a save during a run waits for it.
+A save that touches more than twelve test files is left to a full run, and the
+status bar says so. Tests reached only through other classes aren't found —
+run the suite (`⌘⇧T`) for those.
+
 ## The Laravel menu
 
 `⌘⇧,` opens the command palette filtered to `Laravel: ` — every Laravel command

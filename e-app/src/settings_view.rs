@@ -900,6 +900,21 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
     );
     push(
         4,
+        "Run affected tests on save",
+        "Saving a PHP file runs the tests that use it, in the background; the gutter and status bar show how they went",
+        toggle_row(
+            "Run affected tests on save",
+            "Saving a PHP file runs the tests that use it, in the background; the gutter and status bar show how they went",
+            move || s.settings.get().test_on_save,
+            move |v| {
+                s.settings.update(|st| st.test_on_save = v);
+                config::set_bool("test_on_save", v);
+            },
+        )
+        .into_any(),
+    );
+    push(
+        4,
         "Enable Xdebug",
         "Load Xdebug into Grove's PHP for step-debugging (grove debug on)",
         toggle_row(

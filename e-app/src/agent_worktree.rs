@@ -4,11 +4,15 @@
 //! the files you are working in and the database you are using.
 //!
 //! Grove does the heavy lifting (`grove try`, see [`crate::grove::try_new`]).
-//! Here: starting a session in one, the line in Cascade that says where the
-//! agent is working, and the shelf of earlier ones in the ⋯ menu — each to go
-//! back to, or take down once its branch is merged.
+//! A project Grove doesn't serve — a Rust or Go one, `e` itself, a Laravel
+//! app not linked yet — gets a plain git worktree under
+//! `~/.config/e/worktrees/` instead: its own branch and files, with `.env` and
+//! an SQLite database copied over, but no site. Here: starting a session in
+//! one, the line in Cascade that says where the agent is working, and the
+//! shelf of earlier ones in the ⋯ menu — each to go back to, or take down once
+//! its branch is merged.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use floem::reactive::{SignalGet, SignalUpdate};
 
@@ -21,6 +25,105 @@ fn branch_name() -> String {
     let ts = crate::codegen::migration_timestamp();
     let digits: String = ts.chars().filter(char::is_ascii_digit).collect();
     format!("e/agent-{}-{}", &digits[4..8], &digits[8..])
+}
+
+/// Where the plain worktrees of the project at `root` go:
+/// `~/.config/e/worktrees/<project>-<hash of its path>`.
+fn plain_dir(root: &Path) -> Option<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let home = std::env::var_os("HOME")?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    root.to_string_lossy().hash(&mut h);
+    let name = root.file_name()?.to_string_lossy();
+    Some(
+        PathBuf::from(home)
+            .join(".config/e/worktrees")
+            .join(format!("{name}-{:08x}", h.finish() as u32)),
+    )
+}
+
+/// A plain git worktree for `branch`, made from the checkout's HEAD, for a
+/// project Grove doesn't serve. `.env` and a `database/database.sqlite` come
+/// along, as they aren't in git; any other database is the checkout's own.
+fn plain_new(root: &Path, branch: &str) -> Result<Try, String> {
+    plain_new_in(&plain_dir(root).ok_or("no home directory")?, root, branch)
+}
+
+/// [`plain_new`], in `dir`.
+fn plain_new_in(dir: &Path, root: &Path, branch: &str) -> Result<Try, String> {
+    let path = dir.join(branch.replace('/', "-"));
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    e_core::git::worktree_add(root, branch, &path)?;
+    for file in [".env", "database/database.sqlite"] {
+        if root.join(file).is_file() && !path.join(file).exists() {
+            if let Some(parent) = path.join(file).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::copy(root.join(file), path.join(file));
+        }
+    }
+    Ok(Try {
+        site: String::new(),
+        branch: branch.to_string(),
+        project: root.to_path_buf(),
+        path,
+        url: String::new(),
+    })
+}
+
+/// The worktree sessions made from the project at `root`: Grove's tries and
+/// the plain worktrees `e` made, by branch.
+pub fn worktrees_of(root: &Path) -> Vec<Try> {
+    let mut out = if grove::available() {
+        grove::tries_of(root)
+    } else {
+        Vec::new()
+    };
+    if let Some(dir) = plain_dir(root) {
+        for t in plain_in(&dir, root) {
+            if !out.iter().any(|o| o.path == t.path) {
+                out.push(t);
+            }
+        }
+    }
+    out.sort_by(|a, b| a.branch.cmp(&b.branch));
+    out
+}
+
+/// The repository's worktrees that live in `dir`.
+fn plain_in(dir: &Path, root: &Path) -> Vec<Try> {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let dir = canon(dir);
+    e_core::git::worktrees(root)
+        .into_iter()
+        .filter(|(path, _)| canon(path).starts_with(&dir))
+        .map(|(path, branch)| Try {
+            site: String::new(),
+            branch,
+            project: root.to_path_buf(),
+            path,
+            url: String::new(),
+        })
+        .collect()
+}
+
+/// Whether `t` has a site of its own: Grove's tries do, plain worktrees don't.
+pub fn has_site(t: &Try) -> bool {
+    !t.url.is_empty()
+}
+
+/// Whether the project at `root` keeps its data somewhere a plain worktree
+/// shares: a Laravel app whose database isn't SQLite.
+fn shares_database(root: &Path) -> bool {
+    if !root.join("artisan").is_file() {
+        return false;
+    }
+    let env = std::fs::read_to_string(root.join(".env")).unwrap_or_default();
+    !env.lines().any(|l| {
+        l.trim()
+            .strip_prefix("DB_CONNECTION=")
+            .is_some_and(|v| v.trim().trim_matches('"') == "sqlite")
+    })
 }
 
 /// Whether `branch` is merged into the checkout's HEAD.
@@ -69,30 +172,37 @@ impl AppState {
     pub fn cascade_new_worktree(&self) {
         let root = self.root.get_untracked();
         let branch = branch_name();
-        self.cascade_note(
-            format!(
-                "Making {branch} beside your checkout: its own worktree, database copy and site…"
-            ),
-            false,
-        );
+        self.cascade_note(format!("Making {branch} beside your checkout…"), false);
         let app = *self;
         self.spawn_bg(
             move || {
                 // Asked here rather than from the Runtime panel's lookup,
-                // which may not have run yet.
-                if grove::site_for(&root).is_none() {
-                    return Err(
-                        "it needs the project served by Grove (grove link), which gives the worktree its own site and database"
-                            .to_string(),
-                    );
+                // which may not have run yet. With Grove serving the project
+                // the worktree gets its own site and database; without, it's
+                // a plain git worktree.
+                if grove::site_for(&root).is_some() {
+                    return grove::try_new(&root, &branch).map(|t| (t, false));
                 }
-                grove::try_new(&root, &branch)
+                plain_new(&root, &branch).map(|t| (t, shares_database(&root)))
             },
-            move |res: Result<Try, String>| match res {
-                Ok(t) => {
-                    let ready = format!("Working in {} — its site is {}", t.branch, t.url);
+            move |res: Result<(Try, bool), String>| match res {
+                Ok((t, shared)) => {
+                    let ready = if has_site(&t) {
+                        format!(
+                            "Working in {} — its own database, and its site is {}",
+                            t.branch, t.url
+                        )
+                    } else if shared {
+                        format!(
+                            "Working in {}, a worktree of its own. It shares your database: Grove isn't serving this project (grove link gives a worktree a copy of its own)",
+                            t.branch
+                        )
+                    } else {
+                        format!("Working in {}, a worktree of its own", t.branch)
+                    };
                     app.cascade_enter_worktree(Some(t));
-                    app.cascade_note(ready, false);
+                    // Shown as a warning: migrations there reach your data.
+                    app.cascade_note(ready, shared);
                 }
                 Err(e) => app.cascade_note(format!("Couldn't make the worktree: {e}"), true),
             },
@@ -114,7 +224,7 @@ impl AppState {
     }
 
     /// Take a worktree down — site, database, worktree; the branch stays.
-    /// Grove refuses while it holds uncommitted work.
+    /// Grove, and git for a plain one, refuse while it holds uncommitted work.
     pub fn cascade_take_down(&self, t: Try) {
         if self
             .agent
@@ -125,16 +235,26 @@ impl AppState {
             self.cascade_enter_worktree(None);
         }
         let root = self.root.get_untracked();
-        let branch = t.branch.clone();
         let app = *self;
+        let down = t.clone();
         self.spawn_bg(
-            move || grove::try_done(&root, &branch, false),
+            move || {
+                if has_site(&down) {
+                    grove::try_done(&root, &down.branch, false)
+                } else {
+                    e_core::git::worktree_remove(&root, &down.path)
+                }
+            },
             move |res: Result<(), String>| match res {
                 Ok(()) => app.cascade_note(
-                    format!(
-                        "{} is taken down: its site, database and worktree. The branch is kept",
-                        t.branch
-                    ),
+                    if has_site(&t) {
+                        format!(
+                            "{} is taken down: its site, database and worktree. The branch is kept",
+                            t.branch
+                        )
+                    } else {
+                        format!("{}'s worktree is removed. The branch is kept", t.branch)
+                    },
                     false,
                 ),
                 Err(e) => app.cascade_note(format!("{} is still up: {e}", t.branch), true),
@@ -190,5 +310,82 @@ mod tests {
         assert_eq!(date.len(), 4);
         assert_eq!(time.len(), 6);
         assert!(date.chars().chain(time.chars()).all(|c| c.is_ascii_digit()));
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        assert!(ok, "git {args:?} failed");
+    }
+
+    #[test]
+    fn a_project_without_grove_gets_a_plain_worktree() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("e-wt-{}-{nanos}", std::process::id()));
+        let root = base.join("app");
+        let dir = base.join("worktrees");
+        std::fs::create_dir_all(root.join("database")).unwrap();
+        git(&root, &["init", "-q", "-b", "main"]);
+        git(&root, &["config", "user.email", "t@example.com"]);
+        git(&root, &["config", "user.name", "Test"]);
+        git(&root, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(root.join(".gitignore"), ".env\n*.sqlite\n").unwrap();
+        std::fs::write(root.join("artisan"), "").unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-qm", "init"]);
+        std::fs::write(root.join(".env"), "DB_CONNECTION=sqlite\n").unwrap();
+        std::fs::write(root.join("database/database.sqlite"), "rows").unwrap();
+
+        let t = plain_new_in(&dir, &root, "e/agent-1028-120000").unwrap();
+        assert!(!has_site(&t));
+        assert_eq!(t.path, dir.join("e-agent-1028-120000"));
+        assert!(t.path.join("artisan").is_file());
+        // What git doesn't carry comes along.
+        assert_eq!(
+            std::fs::read_to_string(t.path.join(".env")).unwrap(),
+            "DB_CONNECTION=sqlite\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(t.path.join("database/database.sqlite")).unwrap(),
+            "rows"
+        );
+        assert!(!shares_database(&root));
+
+        // It is on the shelf, and the checkout itself isn't.
+        let shelf = plain_in(&dir, &root);
+        assert_eq!(shelf.len(), 1);
+        assert_eq!(shelf[0].branch, "e/agent-1028-120000");
+
+        // Taking it down removes the worktree and keeps the branch.
+        e_core::git::worktree_remove(&root, &t.path).unwrap();
+        assert!(!t.path.exists());
+        assert!(plain_in(&dir, &root).is_empty());
+        assert!(e_core::git::branches(&root).contains(&"e/agent-1028-120000".to_string()));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn only_a_laravel_app_off_sqlite_shares_its_database() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("e-wt-db-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        // Not Laravel: nothing to share.
+        assert!(!shares_database(&root));
+        std::fs::write(root.join("artisan"), "").unwrap();
+        std::fs::write(root.join(".env"), "DB_CONNECTION=mysql\n").unwrap();
+        assert!(shares_database(&root));
+        std::fs::write(root.join(".env"), "DB_CONNECTION=\"sqlite\"\n").unwrap();
+        assert!(!shares_database(&root));
+        std::fs::remove_dir_all(&root).ok();
     }
 }

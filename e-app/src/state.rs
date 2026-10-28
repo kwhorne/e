@@ -2648,7 +2648,7 @@ impl AppState {
     // ---- Move class ------------------------------------------------------
 
     /// The project's PSR-4 maps, from `composer.json`.
-    fn psr4(&self) -> Vec<crate::move_class::Psr4Root> {
+    pub(crate) fn psr4(&self) -> Vec<crate::move_class::Psr4Root> {
         let root = self.root.get_untracked();
         std::fs::read_to_string(root.join("composer.json"))
             .map(|t| crate::move_class::psr4_roots(&t))

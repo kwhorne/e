@@ -287,7 +287,7 @@ impl AppState {
             "continue_in" | "take_down" => {
                 let branch = s("branch");
                 let root = self.root.get_untracked();
-                let Some(t) = crate::grove::tries_of(&root)
+                let Some(t) = crate::agent_worktree::worktrees_of(&root)
                     .into_iter()
                     .find(|t| t.branch == branch)
                 else {

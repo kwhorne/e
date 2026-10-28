@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Worktree sessions without Grove.** **⋯ → New session in a worktree** used
+  to refuse a project Grove doesn't serve. Any git project now gets a plain
+  git worktree under `~/.config/e/worktrees/`, with `.env` and an SQLite
+  database copied over; Grove still gives a worktree its own site and
+  database. The shelf lists and takes down both kinds.
+- **Runtime lenses beyond `app/`.** A route's controller is found through the
+  project's PSR-4 map, so modular and domain-driven apps (`Domain\`,
+  `Modules\`) get their lenses too.
+
+### Fixed
+
+- **Turn snapshots skip big untracked files.** A database dump or build
+  artifact left in the tree was hashed into `.git/objects` before and after
+  every agent turn. Untracked files over 10 MB now stay out of the snapshot.
+
 ## [0.14.1] - 2026-10-28
 
 ### Changed

@@ -54,20 +54,27 @@ reply.
 branch of its own (`e/agent-<date>-<time>`) beside your checkout: its own git
 worktree, its own `.env`, its own copy of the database, migrated, and its own
 site at `<site>--e-agent-….test`. Its migrations, test runs and half-done edits
-stay off the files you are working in and the database you are using. It needs
-the project served by [Grove](laravel.md#runtime-insight), which does the work
+stay off the files you are working in and the database you are using. With the
+project served by [Grove](laravel.md#runtime-insight), Grove does the work
 (`grove try`); `vendor/` and `node_modules/` are cloned from your checkout, so
 it takes seconds.
 
+Any other git project — a Rust or Go one, or a Laravel app not linked in Grove
+— gets a plain git worktree under `~/.config/e/worktrees/`: its own branch and
+files, with `.env` and `database/database.sqlite` copied over, but no site.
+A Laravel app on MySQL or Postgres then shares your database, and Cascade
+says so in red when the session starts; `grove link` the project to give its
+worktrees a copy of their own.
+
 While Elyra works in one, a line under the tab names the branch, with **Open
-site**, **Open in e** (the worktree's code in a new window) and **Back to the
+site** (for a Grove worktree), **Open in e** (the worktree's code in a new window) and **Back to the
 project**. Turn receipts and the session review measure the worktree, not your
 checkout.
 
 The ⋯ menu also lists this project's earlier worktrees — *(merged)* once their
 branch is merged into yours — to **Continue in** one or **Take down** one: its
-site, database and worktree go; the branch stays. Grove won't take down a
-worktree with uncommitted work in it. If a worktree is taken down while Elyra
+site, database and worktree go; the branch stays. Neither Grove nor git will
+take down a worktree with uncommitted work in it. If a worktree is taken down while Elyra
 is working in it, Cascade says so and stops showing it.
 
 **What each turn changed.** When Elyra finishes, a card under its reply says
@@ -83,7 +90,9 @@ are any — and lists the files:
 
 Before a prompt goes to an idle Elyra, `e` takes a snapshot of the working
 tree (tracked files and untracked ones that aren't ignored) as a git tree
-object, and another when Elyra finishes; the card is the difference. The
+object, and another when Elyra finishes; the card is the difference. An
+untracked file over 10 MB — a database dump, a build artifact — is left out,
+so it isn't copied into `.git/objects` on every turn. The
 snapshot uses a copy of the index, so your staging area, HEAD and stash are
 never touched. It needs the project to be a git repository.
 - **＋** attaches context: the **active file** (`@path`, which Elyra reads), the

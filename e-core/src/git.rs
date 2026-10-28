@@ -1,7 +1,7 @@
 //! Minimal git integration: compare a buffer against its `HEAD` version to
 //! produce per-line change markers (for the editor gutter).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use similar::{ChangeTag, DiffOp, TextDiff};
@@ -168,6 +168,47 @@ fn run_git(root: &Path, args: &[&str]) -> Result<(), String> {
     } else {
         Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
+}
+
+// ---- Worktrees -----------------------------------------------------------------
+
+/// Make `branch` from HEAD and check it out in a new worktree at `path`.
+pub fn worktree_add(root: &Path, branch: &str, path: &Path) -> Result<(), String> {
+    let path = path.to_string_lossy();
+    run_git(root, &["worktree", "add", "-q", "-b", branch, &path])
+}
+
+/// Remove the worktree at `path`; its branch stays. Git refuses while the
+/// worktree holds changes that aren't committed.
+pub fn worktree_remove(root: &Path, path: &Path) -> Result<(), String> {
+    run_git(root, &["worktree", "remove", &path.to_string_lossy()])
+}
+
+/// The repository's worktrees with the branch each has checked out — the
+/// main checkout among them. A detached one has no branch and is left out.
+pub fn worktrees(root: &Path) -> Vec<(PathBuf, String)> {
+    git_out(root, &["worktree", "list", "--porcelain"])
+        .map(|out| parse_worktrees(&out))
+        .unwrap_or_default()
+}
+
+/// `git worktree list --porcelain`: blocks of `worktree <path>`, `HEAD <id>`
+/// and `branch refs/heads/<name>` (or `detached`), apart by a blank line.
+fn parse_worktrees(out: &str) -> Vec<(PathBuf, String)> {
+    out.split("\n\n")
+        .filter_map(|block| {
+            let mut path = None;
+            let mut branch = None;
+            for line in block.lines() {
+                if let Some(p) = line.strip_prefix("worktree ") {
+                    path = Some(PathBuf::from(p));
+                } else if let Some(b) = line.strip_prefix("branch ") {
+                    branch = Some(b.strip_prefix("refs/heads/").unwrap_or(b).to_string());
+                }
+            }
+            Some((path?, branch?))
+        })
+        .collect()
 }
 
 /// Local branch names, current branch first.
@@ -697,9 +738,15 @@ fn git_bytes(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Untracked files bigger than this stay out of a snapshot: a database dump or
+/// build artifact left in the tree would otherwise be hashed into the object
+/// store on every turn.
+const SNAPSHOT_MAX_UNTRACKED: u64 = 10 * 1024 * 1024;
+
 /// The working tree as it is now, as a tree object: tracked files with their
-/// current contents and untracked ones that aren't ignored. Built in a copy
-/// of the index, so the real one is never touched.
+/// current contents and untracked ones that aren't ignored, except untracked
+/// files over [`SNAPSHOT_MAX_UNTRACKED`]. Built in a copy of the index, so the
+/// real one is never touched.
 pub fn snapshot_tree(root: &Path) -> Result<String, String> {
     let index = git_out(root, &["rev-parse", "--git-path", "index"])?;
     let index = root.join(index);
@@ -713,10 +760,37 @@ pub fn snapshot_tree(root: &Path) -> Result<String, String> {
     if index.is_file() {
         std::fs::copy(&index, &tmp).map_err(|e| e.to_string())?;
     }
-    let tree = git_with_index(root, &tmp, &["add", "-A", "--", "."])
+    // The pathspecs go through a file: there can be any number of big files.
+    let specs = tmp.with_extension("pathspec");
+    let tree = std::fs::write(&specs, snapshot_pathspecs(root))
+        .map_err(|e| e.to_string())
+        .and_then(|_| {
+            let from = format!("--pathspec-from-file={}", specs.display());
+            git_with_index(root, &tmp, &["add", "-A", &from, "--pathspec-file-nul"])
+        })
         .and_then(|_| git_with_index(root, &tmp, &["write-tree"]));
     let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(&specs);
     tree
+}
+
+/// NUL-separated pathspecs for a snapshot: the whole tree, less the untracked
+/// files that are too big to take along.
+fn snapshot_pathspecs(root: &Path) -> Vec<u8> {
+    let mut specs = b".\0".to_vec();
+    let untracked =
+        git_bytes(root, &["ls-files", "-z", "--others", "--exclude-standard"]).unwrap_or_default();
+    for path in untracked.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+        let rel = String::from_utf8_lossy(path);
+        let big = std::fs::metadata(root.join(rel.as_ref()))
+            .is_ok_and(|m| m.len() > SNAPSHOT_MAX_UNTRACKED);
+        if big {
+            specs.extend_from_slice(b":(exclude,literal)");
+            specs.extend_from_slice(path);
+            specs.push(0);
+        }
+    }
+    specs
 }
 
 /// One file a turn changed, with its line counts (both 0 for a binary file).
@@ -825,7 +899,24 @@ pub fn undo_tree_change(
 
 #[cfg(test)]
 mod tests {
-    use super::{diff, marks, DiffKind, LineMark};
+    use super::{diff, marks, parse_worktrees, DiffKind, LineMark};
+
+    #[test]
+    fn worktrees_are_read_with_their_branches() {
+        let out = "worktree /code/app\nHEAD 1111\nbranch refs/heads/main\n\n\
+                   worktree /wt/app/e-agent-1028-120000\nHEAD 2222\nbranch refs/heads/e/agent-1028-120000\n\n\
+                   worktree /wt/app/bisect\nHEAD 3333\ndetached\n";
+        assert_eq!(
+            parse_worktrees(out),
+            [
+                (PathBuf::from("/code/app"), "main".to_string()),
+                (
+                    PathBuf::from("/wt/app/e-agent-1028-120000"),
+                    "e/agent-1028-120000".to_string()
+                ),
+            ]
+        );
+    }
 
     #[test]
     fn diff_marks_changes() {
@@ -860,7 +951,8 @@ c
     }
 
     use super::{
-        checkpoint, restore_checkpoint, snapshot_tree, tree_changes, tree_diff, undo_tree_change,
+        checkpoint, git_out, restore_checkpoint, snapshot_tree, tree_changes, tree_diff,
+        undo_tree_change, SNAPSHOT_MAX_UNTRACKED,
     };
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -1031,6 +1123,27 @@ c
         assert_eq!(report.restored, ["b.txt"]);
         assert!(!dir.join("b.txt").exists());
         assert_eq!(std::fs::read(dir.join(".git/index")).unwrap(), index_before);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_big_untracked_file_stays_out_of_a_snapshot() {
+        let dir = init_repo("big");
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "init"]);
+        // A dump left in the tree, named so a pathspec would read it as a glob.
+        let dump = vec![b'x'; SNAPSHOT_MAX_UNTRACKED as usize + 1];
+        std::fs::write(dir.join("dump [*].sql"), &dump).unwrap();
+        std::fs::write(dir.join("small.txt"), "kept\n").unwrap();
+
+        let tree = snapshot_tree(&dir).unwrap();
+        let files = git_out(&dir, &["ls-tree", "-r", "--name-only", &tree]).unwrap();
+        let files: Vec<&str> = files.lines().collect();
+        assert_eq!(files, ["a.txt", "small.txt"]);
+        // And it was never hashed into the object store.
+        let dump_id = git_out(&dir, &["hash-object", "dump [*].sql"]).unwrap();
+        assert!(git_out(&dir, &["cat-file", "-e", &dump_id]).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

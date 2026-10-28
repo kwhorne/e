@@ -400,8 +400,10 @@ public function index(Request $request)   ⚡ 42 ms · 14 queries · N+1 orders 
 
 Each captured request is matched to the route the router would pick, and the
 route to its action; the newest request per action is the one shown, with the
-number of requests when there were several. A Livewire page or an invokable
-controller gets its lens on the `class` line. The lens turns yellow for an N+1
+number of requests when there were several. The action's class is found
+through `composer.json`'s PSR-4 map, so a controller under `Domain\` or
+`Modules\` gets its lens as well as one in `app/`. A Livewire page or an
+invokable controller gets its lens on the `class` line. The lens turns yellow for an N+1
 or a request over a second, and red for a server error. Queries are shown only
 when they could be seen — Clockwork in the app, or Grove with SQL capture on —
 never as a guessed zero.
@@ -412,8 +414,8 @@ the request with its queries and stacktrace, and is told to measure the route
 with [`verify_route`](agent-sync.md#measuring-a-route) before and after its
 change and to report that verdict.
 
-With Grove, the timeline is read every two seconds while a file under `app/` is
-open, so the lenses follow your browser without the Runtime panel open; with
+With Grove, the timeline is read every two seconds while one of the project's
+classes is open (under `app/` or another autoloaded directory), so the lenses follow your browser without the Runtime panel open; with
 Clockwork, they follow while the panel is open. Turn them off under
 **Settings → Laravel → Runtime lenses**.
 

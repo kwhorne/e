@@ -20,6 +20,7 @@ use e_verify::metrics_of;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::text::Document;
 
+use crate::move_class::Psr4Root;
 use crate::runtime::RuntimeReq;
 use crate::state::AppState;
 
@@ -86,17 +87,30 @@ pub struct Lens {
     pub req_id: String,
 }
 
-/// The file and anchor of a route action, if it is a class of the app's:
+/// The file and anchor of a route action, if it is a class of the project's:
 /// `App\Http\Controllers\OrderController@index` →
-/// `app/Http/Controllers/OrderController.php`, method `index`.
-pub fn action_target(root: &Path, action: &str) -> Option<(PathBuf, LensAnchor)> {
+/// `app/Http/Controllers/OrderController.php`, method `index`. The class is
+/// found through `psr4`, the project's autoload map, so `Domain\` or
+/// `Modules\` work too; without one, `App\` is taken to live in `app/`.
+pub fn action_target(
+    root: &Path,
+    psr4: &[Psr4Root],
+    action: &str,
+) -> Option<(PathBuf, LensAnchor)> {
     let (class, method) = match action.split_once('@') {
         Some((c, m)) => (c, Some(m)),
         None => (action, None),
     };
-    let rel = class.trim_start_matches('\\').strip_prefix("App\\")?;
+    let class = class.trim_start_matches('\\');
+    // Longest prefix first, as `psr4_roots` sorts them. An empty prefix would
+    // claim the framework's classes too.
+    let (dir, rel) = psr4
+        .iter()
+        .filter(|r| !r.prefix.is_empty())
+        .find_map(|r| Some((r.dir.as_str(), class.strip_prefix(r.prefix.as_str())?)))
+        .or_else(|| Some(("app", class.strip_prefix("App\\")?)))?;
     let file = root
-        .join("app")
+        .join(dir)
         .join(format!("{}.php", rel.replace('\\', "/")));
     let anchor = match method {
         Some(m) => LensAnchor::Method(m.to_string()),
@@ -178,6 +192,7 @@ pub fn label(
 /// newest request. `visible` says whether a request's queries can be seen.
 pub fn lenses(
     root: &Path,
+    psr4: &[Psr4Root],
     routes: &[RouteInfo],
     reqs: &[RuntimeReq],
     visible: impl Fn(&RuntimeReq) -> bool,
@@ -200,7 +215,7 @@ pub fn lenses(
         .into_iter()
         .filter_map(|action| {
             let (req, hits) = by_action[action];
-            let (file, anchor) = action_target(root, action)?;
+            let (file, anchor) = action_target(root, psr4, action)?;
             let (label, level) = label(req, visible(req), hits, now_ms);
             Some(Lens {
                 file,
@@ -226,9 +241,11 @@ impl AppState {
                 .unwrap_or_default();
             let sql_capture = self.grove_sql_capture.get_untracked();
             let root = self.root.get_untracked();
+            let psr4 = self.psr4();
             self.runtime_reqs.with_untracked(|reqs| {
                 lenses(
                     &root,
+                    &psr4,
                     &routes,
                     reqs,
                     |r| r.chain_loaded && (r.grove_id.is_none() || sql_capture == Some(true)),
@@ -269,8 +286,9 @@ impl AppState {
     }
 
     /// Keep the lenses' data coming while the Runtime panel is closed: with
-    /// Grove serving the project and a file under `app/` open, poll its
-    /// timeline. Called on the idle tick.
+    /// Grove serving the project and one of its classes open (under `app/`, or
+    /// another autoloaded directory), poll its timeline. Called on the idle
+    /// tick.
     pub fn poll_runtime_for_lenses(&self) {
         if !self.settings.get_untracked().runtime_lenses
             || self.runtime_open.get_untracked()
@@ -278,10 +296,23 @@ impl AppState {
         {
             return;
         }
-        let app = self.root.get_untracked().join("app");
+        let root = self.root.get_untracked();
+        let dirs: Vec<PathBuf> = std::iter::once(root.join("app"))
+            .chain(
+                self.psr4()
+                    .iter()
+                    // A map to the project root would match every file.
+                    .filter(|r| !r.dir.trim_matches(['.', '/']).is_empty())
+                    .map(|r| root.join(&r.dir)),
+            )
+            .collect();
         let wanted = self.buffers.with_untracked(|bs| {
-            bs.iter()
-                .any(|b| b.file.path.as_ref().is_some_and(|p| p.starts_with(&app)))
+            bs.iter().any(|b| {
+                b.file
+                    .path
+                    .as_ref()
+                    .is_some_and(|p| dirs.iter().any(|d| p.starts_with(d)))
+            })
         });
         if wanted {
             self.poll_runtime();
@@ -376,22 +407,52 @@ mod tests {
     fn actions_point_at_app_classes() {
         let root = Path::new("/p");
         assert_eq!(
-            action_target(root, "App\\Http\\Controllers\\OrderController@index"),
+            action_target(root, &[], "App\\Http\\Controllers\\OrderController@index"),
             Some((
                 PathBuf::from("/p/app/Http/Controllers/OrderController.php"),
                 LensAnchor::Method("index".into())
             ))
         );
         assert_eq!(
-            action_target(root, "App\\Livewire\\Pages\\Show"),
+            action_target(root, &[], "App\\Livewire\\Pages\\Show"),
             Some((
                 PathBuf::from("/p/app/Livewire/Pages/Show.php"),
                 LensAnchor::Class("Show".into())
             ))
         );
-        assert_eq!(action_target(root, "Closure"), None);
+        assert_eq!(action_target(root, &[], "Closure"), None);
         assert_eq!(
-            action_target(root, "Illuminate\\Routing\\ViewController"),
+            action_target(root, &[], "Illuminate\\Routing\\ViewController"),
+            None
+        );
+    }
+
+    #[test]
+    fn actions_are_found_through_the_autoload_map() {
+        let root = Path::new("/p");
+        let psr4 = crate::move_class::psr4_roots(
+            r#"{"autoload": {"psr-4": {
+                "App\\": "app/",
+                "Domain\\": "src/Domain/",
+                "Domain\\Billing\\": "modules/billing/src/"
+            }}}"#,
+        );
+        assert_eq!(
+            action_target(root, &psr4, "Domain\\Orders\\OrderController@store"),
+            Some((
+                PathBuf::from("/p/src/Domain/Orders/OrderController.php"),
+                LensAnchor::Method("store".into())
+            ))
+        );
+        // The longer prefix wins.
+        assert_eq!(
+            action_target(root, &psr4, "Domain\\Billing\\InvoiceController@show").map(|(f, _)| f),
+            Some(PathBuf::from(
+                "/p/modules/billing/src/InvoiceController.php"
+            ))
+        );
+        assert_eq!(
+            action_target(root, &psr4, "Illuminate\\Routing\\ViewController"),
             None
         );
     }
@@ -444,7 +505,7 @@ mod tests {
             req("g0", "GET", "/", 5.0, &[], 500),
             req("gx", "GET", "/nowhere", 5.0, &[], 400),
         ];
-        let ls = lenses(Path::new("/p"), &routes, &reqs, |_| false, 3_000);
+        let ls = lenses(Path::new("/p"), &[], &routes, &reqs, |_| false, 3_000);
         assert_eq!(ls.len(), 2);
         assert_eq!(ls[0].anchor, LensAnchor::Method("index".into()));
         assert_eq!(ls[0].req_id, "g3");

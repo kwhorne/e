@@ -430,12 +430,16 @@ fn header(state: AppState) -> impl IntoView {
     });
 
     let more = icon_button("⋯").popout_menu(move || {
+        // With Grove serving the project, a worktree gets a site and database
+        // of its own; without, it is a plain git worktree.
+        let worktree = if state.grove_site().is_some() {
+            "New session in a worktree — own branch, database and site"
+        } else {
+            "New session in a worktree — own branch and files"
+        };
         let mut menu = Menu::new("")
             .entry(MenuItem::new("New session").action(move || state.native_agent_new_session()))
-            .entry(
-                MenuItem::new("New session in a worktree — own branch, database and site")
-                    .action(move || state.cascade_new_worktree()),
-            );
+            .entry(MenuItem::new(worktree).action(move || state.cascade_new_worktree()));
         // The shelf: this project's earlier worktree sessions, to go back to
         // or take down — once merged, they have done their job.
         let here = state.agent.worktree.get_untracked();
@@ -445,9 +449,9 @@ fn header(state: AppState) -> impl IntoView {
                     .action(move || state.cascade_enter_worktree(None)),
             );
         }
-        if crate::grove::available() {
+        {
             let root = state.root.get_untracked();
-            let tries = crate::grove::tries_of(&root);
+            let tries = crate::agent_worktree::worktrees_of(&root);
             if !tries.is_empty() {
                 menu = menu.separator();
             }
@@ -854,11 +858,20 @@ fn worktree_bar(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         })
     };
-    let site = link("Open site").on_click_stop(move |_| {
-        if let Some(t) = state.agent.worktree.get_untracked() {
-            crate::platform::open_url(&t.url);
-        }
-    });
+    let site = link("Open site")
+        .on_click_stop(move |_| {
+            if let Some(t) = state.agent.worktree.get_untracked() {
+                crate::platform::open_url(&t.url);
+            }
+        })
+        // A plain worktree has no site to open.
+        .style(move |s| {
+            let none = state
+                .agent
+                .worktree
+                .with(|t| !t.as_ref().is_some_and(crate::agent_worktree::has_site));
+            s.apply_if(none, |s| s.hide())
+        });
     let code = link("Open in e").on_click_stop(move |_| state.cascade_open_worktree());
     let back =
         link("Back to the project").on_click_stop(move |_| state.cascade_enter_worktree(None));

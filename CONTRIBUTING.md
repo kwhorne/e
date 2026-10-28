@@ -36,6 +36,11 @@ skip themselves when it isn't installed.
 - **Format** your code: `cargo fmt --all`
 - **Lint**: `cargo clippy --workspace`
 - **Test**: `cargo test --workspace`
+- **UI flows** (macOS): `cargo test -p e-app --test ui_flows -- --ignored --test-threads=1`
+  starts the real app on a small fixture project per test, drives it over its
+  agent socket — keys, commands, the `⌘.` menu — and checks what `ui_state`
+  says is on screen. Run it when a change touches the editor, the gutter or a
+  flow end to end; add a flow in `e-app/tests/ui_flows.rs` for a new one.
 - Keep commits focused and write clear, descriptive messages.
 - If your change is user-facing, add an entry to [`CHANGELOG.md`](CHANGELOG.md)
   under the `Unreleased` section.

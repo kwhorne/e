@@ -47,7 +47,9 @@ in the last commit, and
 - **Revert** — puts the lines back as they were in the commit, as one edit:
   `⌘Z` takes it back.
 
-`Esc`, **×** or typing closes the peek.
+`Esc`, **×** or typing closes the peek. From the keyboard, **Git: Peek Change
+at Caret**, **Git: Stage Change at Caret** and **Git: Revert Change at Caret**
+in the command palette do the same for the line the caret is on.
 
 ## Diff vs HEAD
 

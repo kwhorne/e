@@ -640,16 +640,19 @@ pub fn index_text(path: &Path) -> Option<String> {
 /// Put `text` in the index as the content of the file at `path`, leaving the
 /// file itself alone: how one hunk is staged.
 pub fn stage_text(path: &Path, text: &str) -> Result<(), String> {
-    // Git runs in the file's directory, so its paths are just the name.
     let dir = path.parent().ok_or("no directory")?;
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or("no file name")?;
+    // The index's paths are from the repository's top, whatever directory
+    // git runs in: `app/Models/Order.php`, not `Order.php`.
+    let top = PathBuf::from(git_out(dir, &["rev-parse", "--show-toplevel"])?);
+    let rel = format!("{}{name}", git_out(dir, &["rev-parse", "--show-prefix"])?);
     let mut child = Command::new("git")
         .arg("-C")
-        .arg(dir)
-        .args(["hash-object", "-w", "--stdin", "--path", name])
+        .arg(&top)
+        .args(["hash-object", "-w", "--stdin", "--path", &rel])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -668,17 +671,17 @@ pub fn stage_text(path: &Path, text: &str) -> Result<(), String> {
     }
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     // Keep the mode the index has; a new file takes the one on disk.
-    let mode = git_out(dir, &["ls-files", "-s", "--", name])
+    let mode = git_out(&top, &["ls-files", "-s", "--", &rel])
         .ok()
         .and_then(|l| l.split_whitespace().next().map(String::from))
         .unwrap_or_else(|| file_mode(path).to_string());
     run_git(
-        dir,
+        &top,
         &[
             "update-index",
             "--add",
             "--cacheinfo",
-            &format!("{mode},{id},{name}"),
+            &format!("{mode},{id},{rel}"),
         ],
     )
 }
@@ -1380,11 +1383,16 @@ c
         assert!(hunk_at(&index, now, 4).is_none());
         assert!(hunk_at(&index, now, 1).is_some());
 
-        // A new file has no index entry until a hunk of it is staged.
-        std::fs::write(dir.join("new.sh"), "echo\n").unwrap();
-        assert_eq!(index_text(&dir.join("new.sh")), None);
-        stage_text(&dir.join("new.sh"), "echo\n").unwrap();
-        assert_eq!(index_text(&dir.join("new.sh")).unwrap(), "echo\n");
+        // A new file has no index entry until a hunk of it is staged — and
+        // one in a subdirectory goes in under its path from the top.
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        let script = dir.join("bin/new.sh");
+        std::fs::write(&script, "echo\n").unwrap();
+        assert_eq!(index_text(&script), None);
+        stage_text(&script, "echo\n").unwrap();
+        assert_eq!(index_text(&script).unwrap(), "echo\n");
+        let staged = git_out(&dir, &["diff", "--cached", "--name-only"]).unwrap();
+        assert!(staged.lines().any(|l| l == "bin/new.sh"), "{staged}");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

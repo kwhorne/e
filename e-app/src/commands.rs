@@ -112,6 +112,19 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "debug" => state.debug_start(),
         "debug-panel" => state.toggle_debug_panel(),
         "debug-toggle-breakpoint" => state.debug_toggle_breakpoint(),
+        "git-peek-change" => {
+            state.peek_hunk_at_caret();
+        }
+        "git-stage-change" => {
+            if state.peek_hunk_at_caret() {
+                state.stage_hunk();
+            }
+        }
+        "git-revert-change" => {
+            if state.peek_hunk_at_caret() {
+                state.revert_hunk();
+            }
+        }
         "debug-step-over" => state.debug_step_over(),
         "debug-step-into" => state.debug_step_into(),
         "debug-step-out" => state.debug_step_out(),

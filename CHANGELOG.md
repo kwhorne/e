@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stage or revert a change from the keyboard.** **Git: Peek / Stage /
+  Revert Change at Caret** in the command palette do what a click on the
+  gutter's change bar does.
+- **UI flow tests.** `cargo test -p e-app --test ui_flows -- --ignored` runs
+  the real app through its everyday flows over the agent socket, and
+  `ui_state` now reports the gutter's marks, line-end exceptions, the hunk
+  peek and the last run of tests on save.
+
+### Fixed
+
+- **Staging a hunk in a file under a directory.** It went into the index at
+  the repository's top (`Order.php` instead of `app/Models/Order.php`).
+
 ## [0.15.1] - 2026-10-28
 
 ### Added

@@ -193,12 +193,54 @@ impl AppState {
                     (l + 1, c + 1)
                 })
                 .unwrap_or((0, 0));
+            // What the gutter and the line ends show, by 1-based line.
+            let mut breakpoints: Vec<usize> = b.bp_marks.borrow().iter().map(|l| l + 1).collect();
+            breakpoints.sort_unstable();
+            let mut tests: Vec<(usize, String)> = b
+                .test_marks
+                .borrow()
+                .iter()
+                .map(|(l, o)| (l + 1, format!("{o:?}").to_lowercase()))
+                .collect();
+            tests.sort();
+            let changes: Vec<(usize, String)> = b
+                .git_marks
+                .borrow()
+                .iter()
+                .enumerate()
+                .filter_map(|(l, m)| Some((l + 1, format!("{:?}", (*m)?).to_lowercase())))
+                .collect();
+            let exceptions: Vec<(usize, String)> = b
+                .alerts
+                .get_untracked()
+                .into_iter()
+                .map(|(l, t)| (l + 1, t))
+                .collect();
             json!({
                 "path": b.file.path,
                 "line": line,
                 "col": col,
                 "dirty": b.dirty.get_untracked(),
                 "length": b.doc.text().len(),
+                "breakpoints": breakpoints,
+                "tests": tests,
+                "changes": changes,
+                "exceptions": exceptions,
+            })
+        });
+
+        let tests_on_save = self.save_run.get_untracked().map(|r| match r {
+            crate::test_on_save::SaveRun::Running { files } => json!({"running": files}),
+            crate::test_on_save::SaveRun::Done { passed, failed } => {
+                json!({"passed": passed, "failed": failed})
+            }
+            crate::test_on_save::SaveRun::TooWide { files } => json!({"too_wide": files}),
+        });
+        let hunk_peek = self.hunk_peek.get_untracked().map(|p| {
+            json!({
+                "line": p.line + 1,
+                "old_lines": p.old_lines,
+                "staged": p.staged,
             })
         });
 
@@ -230,6 +272,8 @@ impl AppState {
             "dialog": dialog,
             "code_actions": code_actions,
             "editor": editor,
+            "tests_on_save": tests_on_save,
+            "hunk_peek": hunk_peek,
             "review": review,
             "cascade": cascade,
             "transcript": transcript(*self),

@@ -85,6 +85,23 @@ impl AppState {
         true
     }
 
+    /// Open the peek for the change at the caret, as a click on its bar
+    /// would. `false` when the caret's line didn't change.
+    pub fn peek_hunk_at_caret(&self) -> bool {
+        let Some(buf) = self.active_buffer() else {
+            return false;
+        };
+        let (Some(path), Some(editor)) = (buf.file.path.clone(), buf.editor.get_untracked()) else {
+            return false;
+        };
+        let (line, _) = editor.offset_to_line_col(editor.cursor.get_untracked().offset());
+        let found = self.peek_hunk(&path, line);
+        if !found {
+            Self::notify("No change at the caret");
+        }
+        found
+    }
+
     pub fn close_hunk_peek(&self) {
         if self.hunk_peek.with_untracked(Option::is_some) {
             self.hunk_peek.set(None);

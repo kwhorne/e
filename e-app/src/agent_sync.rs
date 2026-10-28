@@ -28,6 +28,9 @@
 //!   `{"method":"cascade","action":"send","text":"…"}` (and steer, next, stop,
 //!   new_session, new_worktree, take_down, review_turn, undo_turn…),
 //!   `{"method":"wait_idle","timeout_ms":120000}` and `{"method":"ui_state"}`.
+//! - `{"method":"key","keys":["cmd+p","down","enter"]}` or
+//!   `{"method":"key","text":"orders"}` → presses keys in the editor's window
+//!   as the keyboard would (macOS; see `synthetic_keys`).
 //! - `{"method":"focus","target":"terminal|editor|agent"}`.
 //! - `{"method":"notify","message":"…"}`.
 //!
@@ -329,6 +332,7 @@ const METHODS: &[&str] = &[
     "cascade",
     "wait_idle",
     "ui_state",
+    "key",
     "db_schema",
     "db_query",
     "tinker",
@@ -618,6 +622,46 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
         "ui_state" => state.ui_state(),
+        "key" => {
+            let mut strokes = Vec::new();
+            let chords: Vec<&str> = match req.get("keys") {
+                Some(Value::String(k)) => vec![k.as_str()],
+                Some(Value::Array(ks)) => ks.iter().filter_map(Value::as_str).collect(),
+                _ => Vec::new(),
+            };
+            for chord in chords {
+                match crate::synthetic_keys::parse_chord(chord) {
+                    Ok(s) => strokes.push(s),
+                    Err(e) => {
+                        let _ = reply.send(json!({"ok": false, "error": e}));
+                        return;
+                    }
+                }
+            }
+            if let Some(text) = req.get("text").and_then(Value::as_str) {
+                strokes.extend(crate::synthetic_keys::text_strokes(text));
+            }
+            if strokes.is_empty() {
+                let _ = reply.send(
+                    json!({"ok": false, "error": "give `keys` (\"cmd+p\" or a list) or `text`"}),
+                );
+                return;
+            }
+            if let Err(e) = crate::synthetic_keys::press(&strokes) {
+                let _ = reply.send(json!({"ok": false, "error": e}));
+                return;
+            }
+            // Answer once the keys have been handled, so a `ui_state` sent
+            // next sees what they did.
+            let n = strokes.len();
+            floem::action::exec_after(
+                std::time::Duration::from_millis(50 + 10 * n as u64),
+                move |_| {
+                    let _ = reply.send(json!({"ok": true, "pressed": n}));
+                },
+            );
+            return;
+        }
 
         // ---- A feature test from a captured request (async) --------------
         "request_test" => {

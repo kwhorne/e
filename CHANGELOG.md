@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Press keys from the agent socket.** `{"method":"key","keys":["cmd+p","down",
+  "enter"]}` presses keys in the editor's window, and `"text"` types; each is a
+  real key event, through the keyboard layout and `e`'s key bindings. An agent
+  or a test can now work palettes, inputs and shortcuts without Accessibility
+  permission or System Events.
+
 ## [0.13.2] - 2026-10-27
 
 ### Fixed

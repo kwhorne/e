@@ -115,6 +115,7 @@ mod snippets;
 mod state;
 mod status;
 mod styling;
+mod synthetic_keys;
 mod tabs;
 mod task_palette;
 mod tasks;

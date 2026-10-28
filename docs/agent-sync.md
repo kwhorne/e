@@ -213,8 +213,8 @@ could not set up by itself.
 ## Driving the editor
 
 An agent can use the editor's UI the way a person does — run a command, pick a
-code action, confirm a dialog, work Cascade — and read back what is on screen.
-That is how `e` is tested end to end without sending keystrokes:
+code action, confirm a dialog, work Cascade, press keys — and read back what
+is on screen. That is how `e` is tested end to end:
 
 ```sh
 q() { printf '%s\n' "$1" | nc -U "$E_EDITOR_SOCK"; }
@@ -234,6 +234,7 @@ q '{"method":"dialog","action":"confirm"}'
 | `{"method":"dialog","action":"confirm"}` | Confirms (or `cancel`s) the dialog showing — a rename or carry-through preview, or a yes/no question |
 | `{"method":"cascade","action":"send","text":"…"}` | Cascade's controls: `send`, `steer`, `next` (queue for after the turn), `stop`, `new_session`, `compact`, `new_worktree`, `back_to_project`, `continue_in`/`take_down` (`"branch"`), `review_turn`/`undo_turn` (`"index"` of the receipt), `answer` (a permission card: `"index"`, `"choice"` by id or name), `agent` (`"id"`: `elyra`, `claude`, `codex`, …, `custom`) |
 | `{"method":"wait_idle","timeout_ms":120000}` | Answers once Elyra has finished its turn, with the end of the transcript |
+| `{"method":"key","keys":["cmd+p","down","enter"]}` | Presses keys in the editor's window, as the keyboard would: a chord or a list of them (`cmd`, `shift`, `alt`, `ctrl`; named keys such as `enter`, `escape`, `tab`, `up`, `pagedown`, `f12`; other keys by their place on a US keyboard). `"text":"…"` types text. Answers once the keys have been handled. macOS only; needs no Accessibility permission |
 | `{"method":"ui_state"}` | What is on screen: open panels, the dialog and what it lists, the code-action menu, the active editor and caret, the session review, Cascade's state and transcript (tool cards, receipts, notices), and the last 20 notifications |
 
 ## Running commands

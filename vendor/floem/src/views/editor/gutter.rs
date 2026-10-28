@@ -337,10 +337,8 @@ impl EditorGutterView {
             GutterMark::Cross(color) => {
                 let s = size * 0.8;
                 for (a, b) in [((-s, -s), (s, s)), ((-s, s), (s, -s))] {
-                    let line = Line::new(
-                        (right_x + a.0, mid_y + a.1),
-                        (right_x + b.0, mid_y + b.1),
-                    );
+                    let line =
+                        Line::new((right_x + a.0, mid_y + a.1), (right_x + b.0, mid_y + b.1));
                     cx.stroke(&line, color, &pen);
                 }
             }

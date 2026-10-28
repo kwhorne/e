@@ -363,7 +363,12 @@ pub trait Styling {
 
     /// A click in the gutter beside `line`, in `lane`. `true` when it was
     /// handled, which stops the click there.
-    fn gutter_click(&self, _edid: EditorId, _line: usize, _lane: super::gutter::GutterLane) -> bool {
+    fn gutter_click(
+        &self,
+        _edid: EditorId,
+        _line: usize,
+        _lane: super::gutter::GutterLane,
+    ) -> bool {
         false
     }
 

@@ -17,6 +17,7 @@ use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith};
 use floem::views::editor::core::cursor::{Cursor, CursorMode};
 use floem::views::editor::core::editor::EditType;
 use floem::views::editor::core::selection::{SelRegion, Selection};
+use floem::views::editor::core::xi_rope::Rope;
 use floem::views::editor::text::Document;
 use floem::views::editor::text_document::TextDocument;
 use floem::views::editor::Editor;
@@ -296,6 +297,9 @@ pub struct Buffer {
     pub file: FileInfo,
     pub doc: Rc<TextDocument>,
     pub dirty: RwSignal<bool>,
+    /// The text as it last matched the file on disk, so undoing back to it
+    /// clears `dirty` again. Shares its storage with the document's rope.
+    pub saved: Rc<RefCell<Rope>>,
     pub highlights: Highlights,
     /// Per-line diagnostic spans (for inline squiggles).
     pub diag_lines: DiagLines,
@@ -1649,6 +1653,25 @@ fn now_hms() -> String {
     )
 }
 
+impl Buffer {
+    /// The text now is what's on disk.
+    fn mark_saved(&self) {
+        *self.saved.borrow_mut() = self.doc.text();
+        self.dirty.set(false);
+    }
+}
+
+/// Whether `rope` holds exactly `text`.
+fn same_text(rope: &Rope, text: &str) -> bool {
+    let mut at = 0;
+    rope.len() == text.len()
+        && rope.iter_chunks(..).all(|chunk| {
+            let same = text.as_bytes()[at..at + chunk.len()] == *chunk.as_bytes();
+            at += chunk.len();
+            same
+        })
+}
+
 /// Epoch milliseconds as `u64` (for the undo tree and its panel).
 pub fn now_ms_epoch() -> u64 {
     now_ms() as u64
@@ -2963,7 +2986,7 @@ impl AppState {
             let text = b.doc.text().to_string();
             match buffer::write_with_encoding(path, &text, &b.encoding.get_untracked()) {
                 Ok(()) => {
-                    b.dirty.set(false);
+                    b.mark_saved();
                     Self::refresh_disk_mtime(b);
                     if let Some(uri) = b.uri.as_ref() {
                         for client in self.lsp_clients_for(b.file.language) {
@@ -3193,7 +3216,7 @@ impl AppState {
         let old_len = buf.doc.text().len();
         let mut it = std::iter::once((Selection::region(0, old_len), content.as_str()));
         buf.doc.edit(&mut it, EditType::InsertChars);
-        buf.dirty.set(false);
+        buf.mark_saved();
         buf.disk_changed.set(false);
         Self::refresh_disk_mtime(buf);
     }
@@ -3947,6 +3970,7 @@ impl AppState {
             file: FileInfo::scratch(),
             doc,
             dirty,
+            saved: Rc::new(RefCell::new(Rope::from(""))),
             highlights,
             diag_lines: Rc::new(RefCell::new(Vec::new())),
             git_marks: Rc::new(RefCell::new(Vec::new())),
@@ -4874,7 +4898,6 @@ impl AppState {
         let mut it = std::iter::once((Selection::region(0, len), text));
         buf.doc.edit(&mut it, EditType::InsertChars);
         buf.undo_nav.set(false);
-        buf.dirty.set(true);
         buf.doc.cache_rev().update(|r| *r += 1);
         self.undo_rev.update(|r| *r += 1);
         if let Some(p) = &buf.file.path {
@@ -6381,6 +6404,7 @@ impl AppState {
             );
         }
         let dirty = RwSignal::new(false);
+        let saved = Rc::new(RefCell::new(doc.text()));
         let version = RwSignal::new(1i64);
 
         // Branching undo tree, restored from disk when it still matches.
@@ -6418,6 +6442,7 @@ impl AppState {
         // and notify the language server.
         {
             let doc = doc.clone();
+            let saved = saved.clone();
             let highlights = highlights.clone();
             let git_marks = git_marks.clone();
             let test_marks = test_marks.clone();
@@ -6434,13 +6459,15 @@ impl AppState {
             let hl_gen: Rc<std::cell::Cell<u64>> = Rc::new(std::cell::Cell::new(0));
             let syntax = syntax.clone();
             doc.clone().add_on_update(move |update| {
-                // Only on the change: every subscriber (title, tab, status)
-                // re-renders on a set, even to the same value.
-                if !dirty.get_untracked() {
-                    dirty.set(true);
-                }
                 app.last_edit.set(now_ms());
                 let text = doc.text().to_string();
+                // Undoing back to what's on disk leaves nothing to save. Set
+                // only on a change: every subscriber (title, tab, status)
+                // re-renders on a set, even to the same value.
+                let changed = !same_text(&saved.borrow(), &text);
+                if dirty.get_untracked() != changed {
+                    dirty.set(changed);
+                }
                 if let Some(path) = &test_path {
                     // A test's mark moves with its declaration.
                     if app.test_outcomes.with_untracked(|o| !o.is_empty()) {
@@ -6559,6 +6586,7 @@ impl AppState {
             file,
             doc,
             dirty,
+            saved,
             highlights,
             diag_lines: Rc::new(RefCell::new(Vec::new())),
             git_marks,
@@ -7044,7 +7072,7 @@ impl AppState {
         let text = buf.doc.text().to_string();
         match buffer::write_with_encoding(&path, &text, &buf.encoding.get_untracked()) {
             Ok(()) => {
-                buf.dirty.set(false);
+                buf.mark_saved();
                 buf.disk_changed.set(false);
                 Self::refresh_disk_mtime(&buf);
                 self.fs_rev.update(|r| *r += 1);
@@ -7969,5 +7997,31 @@ mod open_project_tests {
         assert!(is_open_project(&roots, &root.join("sub").join("..")));
         assert!(!is_open_project(&roots, &root.join("sub")));
         assert!(!is_open_project(&roots, &PathBuf::from("/")));
+    }
+}
+
+#[cfg(test)]
+mod saved_text_tests {
+    use super::{same_text, Rope};
+
+    #[test]
+    fn text_matches_the_saved_rope_only_when_identical() {
+        let saved = Rope::from("<?php\n\necho 1;\n");
+        assert!(same_text(&saved, "<?php\n\necho 1;\n"));
+        assert!(!same_text(&saved, "<?php\n\necho 2;\n"));
+        assert!(!same_text(&saved, "<?php\n\necho 1;"));
+        assert!(same_text(&Rope::from(""), ""));
+    }
+
+    #[test]
+    fn a_rope_in_many_chunks_compares_across_them() {
+        // Big enough that the rope splits into several leaves.
+        let text = "fn line() {}\n".repeat(5000);
+        let saved = Rope::from(text.as_str());
+        assert!(saved.iter_chunks(..).count() > 1);
+        assert!(same_text(&saved, &text));
+        let mut edited = text.clone();
+        edited.replace_range(40_000..40_001, "X");
+        assert!(!same_text(&saved, &edited));
     }
 }

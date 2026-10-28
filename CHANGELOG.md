@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It now moves with its line — through typing, pasting, undo and formatting —
   and goes away when its line is deleted. A running debug session gets the new
   lines too.
+- **Undoing back to the saved text clears the unsaved mark.** A tab stayed
+  marked as changed after you undid every edit, and closing it asked to save
+  a file identical to the one on disk. The mark now goes as soon as the text
+  matches what was last saved, and comes back on the next change.
 
 ## [0.14.0] - 2026-10-28
 

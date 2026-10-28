@@ -53,6 +53,8 @@ pub struct HintsDoc {
     path: Option<PathBuf>,
     /// `(line, text)` shown dimmed at the end of the line.
     annotations: RwSignal<Vec<(usize, String)>>,
+    /// `(line, text)` shown in red at the end of the line: exceptions.
+    alerts: RwSignal<Vec<(usize, String)>>,
 }
 
 impl HintsDoc {
@@ -63,6 +65,7 @@ impl HintsDoc {
         lenses: RwSignal<Arc<Vec<crate::runtime_lens::Lens>>>,
         path: Option<PathBuf>,
         annotations: RwSignal<Vec<(usize, String)>>,
+        alerts: RwSignal<Vec<(usize, String)>>,
     ) -> Self {
         Self {
             inner,
@@ -71,7 +74,27 @@ impl HintsDoc {
             lenses,
             path,
             annotations,
+            alerts,
         }
+    }
+
+    /// The exception on `line`, in red at the end of it.
+    fn alert_on(&self, line: usize) -> Option<PhantomText> {
+        let text = self
+            .alerts
+            .with_untracked(|a| a.iter().find(|(l, _)| *l == line).map(|(_, t)| t.clone()))?;
+        let rope = self.inner.rope_text();
+        let content = rope.line_content(line);
+        Some(PhantomText {
+            kind: PhantomTextKind::InlayHint,
+            col: content.trim_end_matches(['\n', '\r']).len(),
+            affinity: None,
+            text: format!("   {text}"),
+            font_size: None,
+            fg: Some(theme::error()),
+            bg: None,
+            under_line: None,
+        })
     }
 
     /// The annotation for `line`, at the end of it.
@@ -158,6 +181,9 @@ impl DocumentPhantom for HintsDoc {
         }
         if let Some(note) = self.annotation_on(line) {
             pl.text.push(note);
+        }
+        if let Some(alert) = self.alert_on(line) {
+            pl.text.push(alert);
         }
 
         // Inline AI suggestion ("ghost text") at the cursor, rendered grey.

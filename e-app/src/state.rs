@@ -355,6 +355,11 @@ pub struct Buffer {
     /// `(line, text)` shown dimmed at the end of a line: the SQL a pending
     /// migration's line will run.
     pub annotations: RwSignal<Vec<(usize, String)>>,
+    /// Exceptions the running app logged on lines of this file, `(line, text)`,
+    /// shown in red at the end of the line.
+    pub alerts: RwSignal<Vec<(usize, String)>>,
+    /// The same exceptions as diagnostics, merged with the language servers'.
+    pub caught: Rc<RefCell<Vec<Diagnostic>>>,
     /// Branching undo history (see [`e_core::undotree`]).
     pub undo: Rc<RefCell<e_core::undotree::UndoTree>>,
     /// When set, a text change is caused by undo-tree navigation, so it must
@@ -726,6 +731,11 @@ pub struct AppState {
     pub completion: Completion,
     /// Hover popup state.
     pub hover: HoverState,
+    /// The Laravel log followed for exceptions, and how far it has been read.
+    pub log_read: RwSignal<Option<(PathBuf, u64)>>,
+    /// Exceptions the running app logged, placed in the project's code;
+    /// newest last.
+    pub caught: RwSignal<Vec<crate::caught::Caught>>,
     /// Files saved since the last run of their tests, waiting to settle.
     pub save_run_queue: RwSignal<Vec<PathBuf>>,
     /// How the last run of the tests a save touched went.
@@ -1727,6 +1737,8 @@ impl AppState {
             completion: Completion::new(),
             hover: HoverState::new(),
             hunk_peek: RwSignal::new(None),
+            log_read: RwSignal::new(None),
+            caught: RwSignal::new(Vec::new()),
             save_run_queue: RwSignal::new(Vec::new()),
             save_run: RwSignal::new(None),
             head_moved: RwSignal::new(None),
@@ -3012,6 +3024,7 @@ impl AppState {
                     self.request_inlay_hints(b.id);
                     self.check_migration(b.id);
                     self.tests_after_save(path, b.file.language);
+                    self.clear_caught_in(path);
                 }
                 // Reported once per pause in typing; the edits stay unsaved
                 // (and backed up in the session) until a write succeeds.
@@ -4014,6 +4027,8 @@ impl AppState {
             analysis: Rc::new(RefCell::new(Vec::new())),
             migration_risks: Rc::new(RefCell::new(Vec::new())),
             annotations: RwSignal::new(Vec::new()),
+            alerts: RwSignal::new(Vec::new()),
+            caught: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
             tab_width: self.settings.get_untracked().tab_width,
@@ -5535,8 +5550,9 @@ impl AppState {
     }
 
     /// What `e` itself found in an open file, beside the language servers:
-    /// its lints (unknown columns, missing views and keys), PHPStan, and a
-    /// pending migration's risks against the data.
+    /// its lints (unknown columns, missing views and keys), PHPStan, a
+    /// pending migration's risks against the data, and exceptions the running
+    /// app logged.
     pub(crate) fn own_diagnostics(&self, uri: &str) -> Vec<Diagnostic> {
         self.buffers.with_untracked(|bs| {
             bs.iter()
@@ -5545,6 +5561,7 @@ impl AppState {
                     let mut all = b.lint.borrow().clone();
                     all.extend(b.analysis.borrow().iter().cloned());
                     all.extend(b.migration_risks.borrow().iter().cloned());
+                    all.extend(b.caught.borrow().iter().cloned());
                     all
                 })
                 .unwrap_or_default()
@@ -6633,6 +6650,8 @@ impl AppState {
             analysis: Rc::new(RefCell::new(Vec::new())),
             migration_risks: Rc::new(RefCell::new(Vec::new())),
             annotations: RwSignal::new(Vec::new()),
+            alerts: RwSignal::new(Vec::new()),
+            caught: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
             tab_width: ec_tab,
@@ -6641,6 +6660,7 @@ impl AppState {
         self.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
         self.sync_bp_marks(&canon.to_string_lossy());
+        self.sync_caught_marks();
         self.load_blame(id);
         self.refresh_lint(id);
         self.request_inlay_hints(id);
@@ -6849,6 +6869,25 @@ impl AppState {
                 server: "e".to_string(),
             });
         }
+        // On a line the running app threw from: the exception.
+        if let Some(c) = buf
+            .file
+            .path
+            .as_ref()
+            .and_then(|p| self.caught_at(p, sl as usize))
+        {
+            let item = |title: String, action: &str| e_lsp::CodeActionItem {
+                title,
+                edits: Vec::new(),
+                command: Some(serde_json::json!({ "e": action, "line": c.line })),
+                server: "e".to_string(),
+            };
+            local.push(item(
+                format!("Exception: ask the agent to fix {}", c.summary()),
+                "caught.fix",
+            ));
+            local.push(item("Exception: dismiss".to_string(), "caught.dismiss"));
+        }
         // On a line with a runtime lens: the request behind it.
         let lens = buf.file.path.as_ref().and_then(|p| {
             let line = text.lines().nth(sl as usize)?;
@@ -6975,6 +7014,16 @@ impl AppState {
                 Some("runtime.open") => self.runtime_lens_open(id),
                 Some("runtime.fix") => self.runtime_fix(id),
                 Some("runtime.test") => self.runtime_test(id),
+                Some(action @ ("caught.fix" | "caught.dismiss")) => {
+                    let line = command.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if let Some(path) = self.active_buffer().and_then(|b| b.file.path.clone()) {
+                        if action == "caught.fix" {
+                            self.caught_to_agent(&path, line as usize);
+                        } else {
+                            self.dismiss_caught(&path, line as usize);
+                        }
+                    }
+                }
                 Some("migration.dry_run") => self.migration_dry_run(),
                 Some("heal") => self.heal_field(),
                 _ => {}
@@ -7105,6 +7154,7 @@ impl AppState {
                 eprintln!("e: saved {}", path.display());
                 self.laravel_touch(&path);
                 self.tests_after_save(&path, buf.file.language);
+                self.clear_caught_in(&path);
                 if let Some(uri) = buf.uri.as_ref() {
                     for client in self.lsp_clients_for(buf.file.language) {
                         client.did_save(uri, &text);
@@ -7164,6 +7214,7 @@ impl AppState {
         all.extend(buf.lint.borrow().iter().cloned());
         all.extend(buf.analysis.borrow().iter().cloned());
         all.extend(buf.migration_risks.borrow().iter().cloned());
+        all.extend(buf.caught.borrow().iter().cloned());
         *buf.diag_lines.borrow_mut() = build_diag_lines(&all, &text);
         buf.doc.cache_rev().update(|r| *r += 1);
     }

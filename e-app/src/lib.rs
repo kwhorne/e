@@ -21,6 +21,7 @@ mod artisan_palette;
 mod breadcrumbs;
 mod builtin_completion;
 mod cascade;
+mod caught;
 mod cmd_palette;
 mod code_action;
 use e_laravel::codegen;

@@ -631,6 +631,7 @@ fn app_view() -> impl IntoView {
                 if tick.is_multiple_of(4) {
                     state.poll_runtime_for_lenses();
                     state.check_head_moved();
+                    state.poll_laravel_log();
                 }
                 // Every 15 s: the lenses' "2m ago".
                 if tick.is_multiple_of(30) {

@@ -407,6 +407,31 @@ the app has no Clockwork — turn on SQL capture first. Grove 1.12.4 or later is
 needed for it to see a Laravel app's queries; older versions missed PDO's
 prepared statements.
 
+### Exceptions on their line
+
+When the running app logs an exception, it shows on the line that caused it:
+in red at the end of the line — *✖ ErrorException: Undefined variable $orders
+· 20:15:03* — with a squiggle and an entry in Problems, and in the status bar
+(*✖ OrderController.php:48 ErrorException*), which takes you there with a
+click, also when the file isn't open.
+
+The line is the first one in your own code the exception passed through: one
+thrown inside the framework — a model not found, a failed query — lands on the
+call in your controller or service that led to it, not in `vendor/`. A Blade
+error lands in the template, on the undefined variable when that's what it
+was. Paths from a container (Sail, Docker) are mapped onto the project.
+
+`⌘.` on the line offers **Exception: ask the agent to fix …**, which hands the
+agent the log entry with its stacktrace, and **Exception: dismiss**. Saving the
+file clears its exceptions — the fix is usually why you saved — and the next
+failing request brings them back.
+
+`e` reads `storage/logs/laravel.log` (or the newest daily
+`laravel-YYYY-MM-DD.log`) every two seconds, from where it was when the
+project opened, so it works with whatever serves the app: Grove, Herd,
+`artisan serve` or Sail. Only exceptions logged at error level or worse with
+a location count.
+
 ### Runtime lenses
 
 What the running app just did shows at the end of the line of the controller

@@ -88,6 +88,29 @@ fn contains_any_ci(hay: &str, needles: &[&str]) -> bool {
     needles.iter().any(|n| low.contains(*n))
 }
 
+/// The variables `line` reads with the `env()` helper — not Blade's `@env`,
+/// a method named `env`, or `getenv`.
+fn env_keys(line: &str) -> Vec<&str> {
+    let bytes = line.as_bytes();
+    line.match_indices("env(")
+        .filter(|(at, _)| {
+            at.checked_sub(1)
+                .and_then(|i| bytes.get(i))
+                .is_none_or(|p| {
+                    !(p.is_ascii_alphanumeric()
+                        || matches!(p, b'_' | b'@' | b'$' | b'>' | b':' | b'\\'))
+                })
+        })
+        .filter_map(|(at, _)| {
+            let arg = line[at + 4..].trim_start();
+            let q = arg.chars().next().filter(|c| *c == '\'' || *c == '"')?;
+            let key = &arg[1..1 + arg[1..].find(q)?];
+            (!key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                .then_some(key)
+        })
+        .collect()
+}
+
 /// A short, safe excerpt of a line for the message (no secrets echoed in full).
 fn excerpt(line: &str) -> String {
     let t = line.trim();
@@ -144,6 +167,12 @@ pub fn scan_file(f: &FileChange) -> Vec<Flag> {
     let is_migration = f.risk_reason == "migration";
     let is_env = f.risk_reason == "environment";
     let is_test = f.risk_reason == "test";
+    let is_config = f.risk_reason == "config";
+    let reads_env_at_runtime = f.path.ends_with(".php")
+        && !is_config
+        && !is_test
+        && !f.path.starts_with("tests/")
+        && !f.path.contains("/tests/");
 
     for h in &f.hunks {
         for (n, line) in added_lines(h) {
@@ -176,6 +205,24 @@ pub fn scan_file(f: &FileChange) -> Vec<Flag> {
                     "secret",
                     "Possible hardcoded credential — move it to the environment".to_string(),
                 );
+            }
+            // `env()` outside the config: null once the config is cached.
+            // In Blade, only where the line has PHP: the rest is markup, a
+            // documentation page's example.
+            let php_line = !f.path.ends_with(".blade.php")
+                || contains_any(line, &["{{", "{!!", "@", "<?php", "$"]);
+            if reads_env_at_runtime && php_line && !line.trim_start().starts_with("//") {
+                for key in env_keys(line) {
+                    push(
+                        n,
+                        Severity::Warn,
+                        "env-outside-config",
+                        format!(
+                            "env('{key}') outside config/ is null once the config is cached — \
+                             read it with config()"
+                        ),
+                    );
+                }
             }
             // Raw SQL built with interpolation.
             if calls_any(line, &["DB::raw", "whereRaw", "selectRaw", "DB::statement"])
@@ -339,6 +386,43 @@ pub fn scan_changeset(cs: &Changeset) -> Vec<Flag> {
     flags
 }
 
+/// Variables the changeset's config files start reading that `.env.example`
+/// — its text `example`, as it is now — doesn't have: the next clone won't
+/// know to set them. Nothing without a `.env.example`.
+pub fn env_example_flags(cs: &Changeset, example: Option<&str>) -> Vec<Flag> {
+    let Some(example) = example else {
+        return Vec::new();
+    };
+    let declared = |key: &str| {
+        example.lines().any(|l| {
+            l.trim()
+                .split_once('=')
+                .is_some_and(|(k, _)| k.trim() == key)
+        })
+    };
+    let mut out: Vec<Flag> = Vec::new();
+    for f in cs.files.iter().filter(|f| f.risk_reason == "config") {
+        for h in &f.hunks {
+            for (n, line) in added_lines(h) {
+                for key in env_keys(line) {
+                    if declared(key) || out.iter().any(|f| f.message.contains(&format!("`{key}`")))
+                    {
+                        continue;
+                    }
+                    out.push(Flag {
+                        path: f.path.clone(),
+                        line: n,
+                        severity: Severity::Warn,
+                        code: "env-example-missing",
+                        message: format!("`{key}` is read here but missing from .env.example"),
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
 /// `(danger, warn, info)` counts.
 pub fn counts(flags: &[Flag]) -> (usize, usize, usize) {
     let mut c = (0, 0, 0);
@@ -395,6 +479,54 @@ mod tests {
 
         let ok = cs_of("app/Services/Api.php", &["$apiKey = env('API_KEY');"]);
         assert!(!codes(&ok).contains(&"secret"), "{:?}", codes(&ok));
+    }
+
+    #[test]
+    fn flags_env_outside_config() {
+        let cs = cs_of(
+            "app/Services/Api.php",
+            &["$key = env('API_KEY', 'x') ?? getenv('OTHER');"],
+        );
+        let flags = scan_changeset(&cs);
+        let env: Vec<&Flag> = flags
+            .iter()
+            .filter(|f| f.code == "env-outside-config")
+            .collect();
+        assert_eq!(env.len(), 1, "{flags:?}");
+        assert!(env[0].message.starts_with("env('API_KEY')"));
+        for fine in ["config/services.php", "tests/Feature/ApiTest.php"] {
+            let cs = cs_of(fine, &["'key' => env('API_KEY'),"]);
+            assert!(!codes(&cs).contains(&"env-outside-config"), "{fine}");
+        }
+        let blade = cs_of(
+            "resources/views/a.blade.php",
+            &["@env('local') x @endenv", "<pre>'key' => env('DOC'),</pre>"],
+        );
+        assert!(!codes(&blade).contains(&"env-outside-config"));
+        let blade = cs_of(
+            "resources/views/a.blade.php",
+            &["<h1>{{ env('APP_NAME') }}</h1>"],
+        );
+        assert!(codes(&blade).contains(&"env-outside-config"));
+    }
+
+    #[test]
+    fn flags_new_config_variables_missing_from_env_example() {
+        let cs = cs_of(
+            "config/services.php",
+            &[
+                "    'stripe' => [",
+                "        'key' => env('STRIPE_KEY'),",
+                "        'secret' => env('STRIPE_SECRET'),",
+                "    ],",
+            ],
+        );
+        let flags = env_example_flags(&cs, Some("APP_NAME=Laravel\nSTRIPE_KEY=\n"));
+        assert_eq!(flags.len(), 1, "{flags:?}");
+        assert_eq!(flags[0].code, "env-example-missing");
+        assert_eq!(flags[0].line, 12);
+        assert!(flags[0].message.contains("`STRIPE_SECRET`"));
+        assert!(env_example_flags(&cs, None).is_empty());
     }
 
     #[test]

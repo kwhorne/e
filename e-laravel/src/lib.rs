@@ -14,6 +14,7 @@ pub mod contract;
 mod corpus;
 pub mod eloquent;
 pub mod eloquent_helper;
+pub mod env_guard;
 pub mod events;
 pub mod heal;
 pub mod ide_json;

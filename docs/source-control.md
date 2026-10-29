@@ -117,6 +117,8 @@ above the diff, each with an **Ask** button that sends the finding to the agent:
 | `sql-injection` | danger | `DB::raw("… $id")`, `whereRaw` with interpolation |
 | `destructive-migration` | danger | `dropColumn`, `dropIfExists`, `truncate(` in a migration |
 | `env-changed` | danger | a value changed in `.env` |
+| `env-outside-config` | warn | `env('…')` in code outside `config/` — `null` once the config is cached |
+| `env-example-missing` | warn | a config file starts reading a variable `.env.example` doesn't have |
 | `auth-removed` | danger | an `authorize(`/`Gate::`/`can:` line **deleted** |
 | `unchecked-lookup` | warn | a changed controller method that hands a signed-in user a model by its id without checking it is theirs — see [Unchecked lookups](laravel.md#unchecked-lookups-idor) |
 | `unsafe` | danger | `shell_exec(`, `eval(`, `unsafe {` |

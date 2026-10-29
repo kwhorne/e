@@ -37,8 +37,10 @@ fn receipt(root: &Path, before: String) -> Option<TurnReceipt> {
     let flags = e_core::git::tree_diff(root, &before, &after)
         .map(|diff| {
             let cs = e_review::changeset_from_diff(&diff);
+            let example = std::fs::read_to_string(root.join(".env.example")).ok();
             flags::scan_changeset(&cs)
                 .iter()
+                .chain(&flags::env_example_flags(&cs, example.as_deref()))
                 .filter(|f| f.severity >= Severity::Warn)
                 .count()
         })

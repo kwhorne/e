@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -5721,32 +5721,96 @@ impl AppState {
     /// Code actions that fix `e`'s own Laravel diagnostics under the caret:
     /// create the missing view, add the missing translation key.
     fn lint_fix_actions(&self, uri: &str, line: u32, col: u32) -> Vec<e_lsp::CodeActionItem> {
-        let at: Vec<Diagnostic> = self.diagnostics.with_untracked(|m| {
-            m.get(uri)
-                .map(|ds| {
-                    ds.iter()
-                        .filter(|d| d.source.as_deref() == Some("laravel"))
-                        .filter(|d| {
-                            let s = &d.range.start;
-                            let e = &d.range.end;
-                            (s.line < line || (s.line == line && s.character <= col))
-                                && (e.line > line || (e.line == line && e.character >= col))
-                        })
-                        .cloned()
-                        .collect()
-                })
-                .unwrap_or_default()
-        });
+        // The servers' and `e`'s own: those are kept on the buffer.
+        let mut all: Vec<Diagnostic> = self
+            .diagnostics
+            .with_untracked(|m| m.get(uri).cloned().unwrap_or_default());
+        all.extend(self.own_diagnostics(uri));
+        let at: Vec<Diagnostic> = all
+            .into_iter()
+            .filter(|d| d.source.as_deref() == Some("laravel"))
+            .filter(|d| {
+                let s = &d.range.start;
+                let e = &d.range.end;
+                (s.line < line || (s.line == line && s.character <= col))
+                    && (e.line > line || (e.line == line && e.character >= col))
+            })
+            .collect();
         if at.is_empty() {
             return Vec::new();
         }
         let root = self.root.get_untracked();
         let locale = self.app_locale();
-        crate::laravel_lint::fixes(&at, &root, &locale, &|p| std::fs::read_to_string(p).ok())
+        let read = |p: &Path| std::fs::read_to_string(p).ok();
+        let mut out: Vec<e_lsp::CodeActionItem> =
+            crate::laravel_lint::fixes(&at, &root, &locale, &read)
+                .into_iter()
+                .map(|f| e_lsp::CodeActionItem {
+                    title: f.title,
+                    edits: vec![(path_to_uri(&f.path), f.edits)],
+                    command: None,
+                    server: "e".to_string(),
+                })
+                .collect();
+        out.extend(self.env_fix_actions(uri, &at, &root, &read));
+        out
+    }
+
+    /// `env()` outside `config/` under the caret: read it through `config()`.
+    fn env_fix_actions(
+        &self,
+        uri: &str,
+        at: &[Diagnostic],
+        root: &Path,
+        read: &dyn Fn(&Path) -> Option<String>,
+    ) -> Vec<e_lsp::CodeActionItem> {
+        use e_laravel::env_guard;
+        let flagged = at.iter().any(|d| {
+            matches!(&d.code, Some(lsp_types::NumberOrString::String(c)) if c.starts_with(env_guard::CODE))
+        });
+        if !flagged {
+            return Vec::new();
+        }
+        let Some(buf) = self
+            .buffers
+            .with_untracked(|bs| bs.iter().find(|b| b.uri.as_deref() == Some(uri)).cloned())
+        else {
+            return Vec::new();
+        };
+        let Some(path) = buf.file.path.clone() else {
+            return Vec::new();
+        };
+        let text = buf.doc.text().to_string();
+        let configs: Vec<(String, String)> = std::fs::read_dir(root.join("config"))
             .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let p = e.path();
+                let name = p.file_name()?.to_str()?.strip_suffix(".php")?.to_string();
+                Some((name, std::fs::read_to_string(&p).ok()?))
+            })
+            .collect();
+        let starts: Vec<(u32, u32)> = at
+            .iter()
+            .map(|d| (d.range.start.line, d.range.start.character))
+            .collect();
+        env_guard::env_calls(&text)
+            .iter()
+            .filter(|call| {
+                let before = &text[..call.start];
+                let line = before.matches('\n').count() as u32;
+                let col = (call.start - before.rfind('\n').map_or(0, |i| i + 1)) as u32;
+                starts.contains(&(line, col))
+            })
+            .filter_map(|call| env_guard::fix(root, &path, &text, call, &configs, read))
             .map(|f| e_lsp::CodeActionItem {
                 title: f.title,
-                edits: vec![(path_to_uri(&f.path), f.edits)],
+                edits: f
+                    .edits
+                    .into_iter()
+                    .map(|(p, edits)| (path_to_uri(&p), edits))
+                    .collect(),
                 command: None,
                 server: "e".to_string(),
             })
@@ -7283,7 +7347,8 @@ impl AppState {
     /// Recompute `e`'s own lints for a buffer and re-render its diagnostics:
     /// unknown query-builder columns (live schema), missing views / routes /
     /// translation keys (project data — off when laravel-lsp runs, which does
-    /// the same), and `.env` keys `.env.example` declares. Debounced and off the
+    /// the same), `env()` outside `config/`, and `.env` keys `.env.example`
+    /// declares. Debounced and off the
     /// UI thread: resolving a model's table reads its class file, and a
     /// keystroke shouldn't wait for disk.
     pub fn refresh_lint(&self, buffer_id: u64) {
@@ -7316,7 +7381,20 @@ impl AppState {
             .as_ref()
             .filter(|p| p.starts_with(root_now.join("app/Http/Controllers")))
             .and_then(|_| self.laravel.get_untracked());
-        if php_like && schema.is_empty() && laravel.is_none() && controller_routes.is_none() {
+        // `env()` outside `config/`: in a Laravel project, whatever else runs.
+        let env_rel = buf
+            .file
+            .path
+            .as_ref()
+            .filter(|_| php_like && root_now.join("artisan").is_file())
+            .and_then(|p| p.strip_prefix(&root_now).ok())
+            .map(Path::to_path_buf);
+        if php_like
+            && schema.is_empty()
+            && laravel.is_none()
+            && controller_routes.is_none()
+            && env_rel.is_none()
+        {
             return;
         }
         let gen = buf.lint_gen.get() + 1;
@@ -7345,6 +7423,9 @@ impl AppState {
                         }
                         if let Some(data) = &controller_routes {
                             diags.extend(unchecked_lookup_lint(&text, &root, &data.all_routes));
+                        }
+                        if let Some(rel) = &env_rel {
+                            diags.extend(e_laravel::env_guard::lint(rel, &text));
                         }
                     }
                     if is_env {

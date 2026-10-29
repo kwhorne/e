@@ -163,7 +163,9 @@ impl AppState {
             };
             send(diff.map(|diff| {
                 let cs = changeset_from_diff(&diff);
-                let unchecked = unchecked_lookup_flags(&root, &project, &cs, &routes);
+                let mut unchecked = unchecked_lookup_flags(&root, &project, &cs, &routes);
+                let example = std::fs::read_to_string(project.join(".env.example")).ok();
+                unchecked.extend(flags::env_example_flags(&cs, example.as_deref()));
                 (diff, unchecked)
             }))
         });

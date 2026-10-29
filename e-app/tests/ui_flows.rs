@@ -189,6 +189,15 @@ fn fixture(root: &Path) {
             "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass OrderController extends Controller\n{\n    public function index()\n    {\n        return view('orders.index', ['orders' => $orders]);\n    }\n}\n",
         ),
         (
+            "app/Services/Pay.php",
+            "<?php\n\nnamespace App\\Services;\n\nclass Pay\n{\n    public function secret(): string\n    {\n        return env('STRIPE_WEBHOOK_SECRET');\n    }\n}\n",
+        ),
+        (
+            "config/services.php",
+            "<?php\n\nreturn [\n\n    'postmark' => [\n        'token' => env('POSTMARK_TOKEN'),\n    ],\n\n];\n",
+        ),
+        (".env.example", "APP_NAME=Laravel\nPOSTMARK_TOKEN=\n"),
+        (
             "resources/views/orders/index.blade.php",
             "<ul>\n@foreach ($orders as $order)\n    <li>{{ $order->id }}</li>\n@endforeach\n</ul>\n",
         ),
@@ -445,4 +454,76 @@ fn saving_a_view_runs_the_tests_of_its_controller() {
         calls.contains("tests/Feature/OrderControllerTest.php"),
         "the test of the controller that renders it: {calls}"
     );
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn env_outside_config_is_moved_into_it() {
+    let app = App::launch(json!({"format_on_save": false}));
+    app.open("Pay.php");
+    let flagged = |app: &App| {
+        app.call(json!({"method": "diagnostics"}))
+            .to_string()
+            .contains("env('STRIPE_WEBHOOK_SECRET') is null once the config is cached")
+    };
+    let start = Instant::now();
+    while !flagged(&app) {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no env() warning: {}",
+            app.call(json!({"method": "diagnostics"}))
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    // On the call: before the `;` that ends the line.
+    app.caret_to(9);
+    app.keys(&["cmd+right", "left"]);
+    let actions = app.call(json!({"method": "code_actions"}));
+    assert!(
+        actions.to_string().contains(
+            "Move env('STRIPE_WEBHOOK_SECRET') to config/services.php and read config('services.stripe.webhook_secret')"
+        ),
+        "{actions}"
+    );
+    let applied = app
+        .call(json!({"method": "apply_code_action", "title": "Move env('STRIPE_WEBHOOK_SECRET')"}));
+    assert_eq!(applied["ok"], true, "{applied}");
+    app.keys(&["cmd+s"]);
+    app.wait_for("the save", |s| s["editor"]["dirty"] == false);
+
+    let read = |rel: &str| std::fs::read_to_string(app.file(rel)).unwrap();
+    let start = Instant::now();
+    while !read("config/services.php").contains("'stripe'") {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{}",
+            read("config/services.php")
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        read("app/Services/Pay.php").contains("return config('services.stripe.webhook_secret');"),
+        "{}",
+        read("app/Services/Pay.php")
+    );
+    assert!(
+        read("config/services.php").contains(
+            "    'stripe' => [\n        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),\n    ],"
+        ),
+        "{}",
+        read("config/services.php")
+    );
+    assert!(
+        read(".env.example").ends_with("POSTMARK_TOKEN=\nSTRIPE_WEBHOOK_SECRET=\n"),
+        "{:?}",
+        read(".env.example")
+    );
+    let start = Instant::now();
+    while flagged(&app) {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the warning stays"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`env()` outside `config/`.** A call to `env('…')` in a controller,
+  service, route file or template is underlined — it returns `null` once the
+  config is cached — and `⌘.` reads it through `config()` instead: the key a
+  config file already has for it, or a new entry in `config/services.php`,
+  with the variable added to `.env.example` when it's missing there. The agent
+  review flags the same call, and a config file reading a variable
+  `.env.example` doesn't have.
 - **Unstage a hunk.** A peek at a change that is already staged says so, with
   **Unstage** to take that hunk alone out of the index again — also as **Git:
   Unstage Change at Caret**.
@@ -22,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Exceptions with a message over several lines.** A Postgres
   `QueryException` (`… at or near "x"` with `LINE 1:` under it) lost where it
   was thrown and most of its message; it is now read whole.
+- **A workspace edit at the very end of a file** — after its last newline —
+  was dropped instead of appended.
 
 ## [0.15.2] - 2026-10-28
 

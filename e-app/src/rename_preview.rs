@@ -109,6 +109,10 @@ fn line_starts(text: &str) -> Vec<usize> {
 /// Byte offset of an LSP position. Characters are counted as UTF-8 bytes, which
 /// is what the rest of the editor uses.
 fn offset_of(text: &str, starts: &[usize], line: u32, character: u32) -> Option<usize> {
+    // The empty line after a final newline: the end, where text is appended.
+    if line as usize == starts.len() && text.ends_with('\n') {
+        return Some(text.len());
+    }
     let start = *starts.get(line as usize)?;
     let rest = &text[start..];
     let line_text = rest.split('\n').next().unwrap_or("");
@@ -330,6 +334,16 @@ mod tests {
         assert_eq!(p.summary(), "1 site in 1 file");
         assert_eq!(p.files[0].sites[0].before, "public $total;");
         assert_eq!(p.files[0].sites[0].after, "public $amount;");
+    }
+
+    #[test]
+    fn an_edit_after_the_final_newline_appends() {
+        assert_eq!(
+            apply_edits("A=1\nB=2\n", &[edit(2, 0, 0, "C=\n")]),
+            "A=1\nB=2\nC=\n"
+        );
+        // Past that, nothing.
+        assert_eq!(apply_edits("A=1\n", &[edit(5, 0, 0, "C=\n")]), "A=1\n");
     }
 
     #[test]

@@ -97,16 +97,43 @@ type (300 ms after the last keystroke, off the UI thread):
 | `route('…')`, `to_route('…')` | the route is defined (error); its required `{parameters}` are passed (warning) |
 | `__('file.key')`, `trans()`, `trans_choice()`, `@lang` | the key exists in `lang/` (warning; sentence keys are JSON translations that fall back to themselves) |
 | `.env` | every key `.env.example` declares is set (warning at the top of the file) |
+| `env('…')` outside `config/` | warning: it returns `null` once the config is cached |
 
 Arguments that are expressions (`'a.'.$b`, `$name`) and namespaced names
 (`pkg::view`) are left alone. When the official `laravel/lsp` is running it
-reports missing views and routes itself, so these lints stay off then.
+reports missing views and routes itself, so these lints stay off then; the
+`env()` check stays on, as it doesn't make that one.
 
 Two of them come with a fix in the code-action picker: **Create
 resources/views/…blade.php** for a missing view (the file opens once created),
 and **Add `key` to lang/<locale>/file.php** for a missing translation key, where
 the locale is `APP_LOCALE` from `.env` (else `app.locale`, else `en`) and the
 file is created around the key when it doesn't exist yet.
+
+### `env()` outside `config/`
+
+`php artisan config:cache` — which every deploy should run — stops Laravel
+from loading `.env`, and from then on every `env('…')` outside the config
+files returns `null`. A controller that reads `env('STRIPE_WEBHOOK_SECRET')`
+works on every laptop and fails in production. `e` underlines such a call in
+PHP and in a Blade template's PHP (`{{ env('APP_NAME') }}`, a directive's
+arguments) — not in `config/`, `tests/`, a package's own `config/`, or a
+template's markup, where it is text.
+
+`⌘.` on the call reads the value through `config()` instead:
+
+- **Use config('app.url') instead of env('APP_URL')** — when a config file
+  already reads the variable, the call becomes that key.
+- **Move env('STRIPE_WEBHOOK_SECRET') to config/services.php and read
+  config('services.stripe.webhook_secret')** — otherwise the variable gets an
+  entry in `config/services.php`, named for its prefix: in the service's array
+  when there is one, a new array when not, and the file when there isn't one.
+  A default (`env('X', 'fallback')`) moves along with it.
+
+Either way the variable is added to `.env.example` when it's missing there.
+The agent review flags the same call in a diff, and a config file that starts
+reading a variable `.env.example` doesn't have
+([Automated flags](source-control.md#automated-flags)).
 
 ## Package completions (`ide.json`)
 

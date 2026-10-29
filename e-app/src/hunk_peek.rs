@@ -255,14 +255,17 @@ impl AppState {
         let Some(repo) = self.git_root.get_untracked() else {
             return;
         };
-        let modified = std::fs::metadata(repo.join(".git/logs/HEAD"))
-            .and_then(|m| m.modified())
-            .ok();
+        let reflog = repo.join(".git/logs/HEAD");
+        let modified = std::fs::metadata(&reflog).and_then(|m| m.modified()).ok();
         let seen = self.head_moved.get_untracked();
         if seen != modified {
             self.head_moved.set(modified);
             if seen.is_some() {
                 self.refresh_git_status();
+                // A checkout, pull or merge brings other migrations along.
+                if git::last_head_move(&reflog).is_some_and(|m| !git::is_own_commit(&m)) {
+                    self.check_migration_drift();
+                }
             }
         }
     }

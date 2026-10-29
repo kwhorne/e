@@ -7,6 +7,11 @@
 //! what would go wrong against the data already there shows as diagnostics
 //! (see [`e_laravel::migration_check`]). ⌘. offers a dry run of `up()` and
 //! `down()` in a transaction that is rolled back, on Postgres and SQLite.
+//!
+//! And whether the database is where the checkout expects it: when the
+//! project opens, and after a checkout, pull or merge, a bar above the editor
+//! says which migrations haven't run here — with **Run migrate** — and which
+//! ran from another branch (see [`e_laravel::migration_drift`]).
 
 use std::path::{Path, PathBuf};
 
@@ -361,7 +366,53 @@ impl AppState {
         let app = *self;
         floem::action::exec_after(std::time::Duration::from_secs(6), move |_| {
             app.refresh_migrations();
+            app.check_migration_drift();
         });
+    }
+
+    /// Compare the checkout's migrations with the database's `migrations`
+    /// table, off the UI thread, and raise or lower the bar. Quiet when the
+    /// database can't be asked (none, unreachable, production) or has no
+    /// `migrations` table yet.
+    pub fn check_migration_drift(&self) {
+        let root = self.root.get_untracked();
+        if !root.join("artisan").is_file() {
+            return;
+        }
+        let state = *self;
+        self.spawn_bg(
+            move || {
+                use e_laravel::migration_drift as md;
+                let (conn, _) = local_database(&root)?;
+                let ran = e_db::query(&conn, "select migration from migrations", 100_000).ok()?;
+                let ran: Vec<String> = ran
+                    .rows
+                    .into_iter()
+                    .filter_map(|r| r.into_iter().next().flatten())
+                    .collect();
+                Some(md::drift(
+                    &md::migration_names(&root),
+                    &md::own_migration_names(&root),
+                    &ran,
+                ))
+            },
+            move |drift: Option<e_laravel::migration_drift::Drift>| {
+                let shown = drift.filter(|d| {
+                    !d.is_empty()
+                        && state.migration_drift_dismissed.get_untracked().as_ref() != Some(d)
+                });
+                if state.migration_drift.get_untracked() != shown {
+                    state.migration_drift.set(shown);
+                }
+            },
+        );
+    }
+
+    /// Wave the bar away until the drift changes.
+    pub fn dismiss_migration_drift(&self) {
+        self.migration_drift_dismissed
+            .set(self.migration_drift.get_untracked());
+        self.migration_drift.set(None);
     }
 
     /// `php artisan migrate`, behind a `grove db snapshot` when Grove can take
@@ -391,6 +442,62 @@ impl AppState {
             self.open_path(p);
         }
     }
+}
+
+/// The bar above the editor when the database and the checkout disagree on
+/// migrations.
+pub fn migration_drift_bar(state: AppState) -> impl IntoView {
+    let drift = state.migration_drift;
+    let button = |text: &'static str| {
+        label(move || text.to_string()).style(|s| {
+            s.padding_horiz(10.0)
+                .padding_vert(3.0)
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+    };
+    let pending = move || drift.with(|d| d.as_ref().is_some_and(|d| !d.pending.is_empty()));
+    stack((
+        label(move || drift.with(|d| d.as_ref().map(|d| d.summary()).unwrap_or_default())).style(
+            |s| {
+                s.color(theme::fg())
+                    .font_size(12.0)
+                    .flex_grow(1.0_f32)
+                    .min_width(0.0)
+                    .text_ellipsis()
+            },
+        ),
+        button("Run migrate")
+            .on_click_stop(move |_| state.migrations_run())
+            .style(move |s| s.apply_if(!pending(), |s| s.hide())),
+        button("Show migrations").on_click_stop(move |_| {
+            if !state.migrations_open.get_untracked() {
+                state.toggle_migrations();
+            }
+        }),
+        button("×").on_click_stop(move |_| state.dismiss_migration_drift()),
+    ))
+    .style(move |s| {
+        let s = s
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .padding_horiz(12.0)
+            .padding_vert(6.0)
+            .background(amber().multiply_alpha(0.16))
+            .border_bottom(1.0)
+            .border_color(theme::border());
+        if drift.with(Option::is_some) {
+            s
+        } else {
+            s.hide()
+        }
+    })
 }
 
 fn pill(text: &'static str, color: Color, on_click: impl Fn() + 'static) -> impl IntoView {

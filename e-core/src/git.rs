@@ -628,6 +628,29 @@ impl Hunk {
     }
 }
 
+/// What last moved HEAD, from the reflog at `reflog` (`.git/logs/HEAD`):
+/// `checkout: moving from main to feature`, `commit: Fix totals`, … Reads
+/// only the file's tail.
+pub fn last_head_move(reflog: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(reflog).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(4096))).ok()?;
+    let mut tail = String::new();
+    file.read_to_string(&mut tail).ok()?;
+    let line = tail.lines().rev().find(|l| !l.trim().is_empty())?;
+    Some(line.split_once('\t')?.1.trim().to_string())
+}
+
+/// Whether a reflog message is a commit made here — HEAD moved on, the
+/// checkout's files are the ones being worked on — rather than a checkout,
+/// pull, merge, rebase or reset that brought other files in.
+pub fn is_own_commit(message: &str) -> bool {
+    ["commit:", "commit (amend):", "commit (initial):"]
+        .iter()
+        .any(|p| message.starts_with(p))
+}
+
 /// Whether the change at `line` (0-based) of `text` is in `index` as it is
 /// in the editor: staged.
 pub fn hunk_staged(index: &str, text: &str, line: usize) -> bool {
@@ -1379,6 +1402,32 @@ c
         // And it was never hashed into the object store.
         let dump_id = git_out(&dir, &["hash-object", "dump [*].sql"]).unwrap();
         assert!(git_out(&dir, &["cat-file", "-e", &dump_id]).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_last_head_move_is_read_from_the_reflog() {
+        let dir = std::env::temp_dir().join(format!("e-reflog-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("HEAD");
+        let zero = "0".repeat(40);
+        let line = |msg: &str| format!("{zero} {zero} Me <me@x> 1761740000 +0100\t{msg}\n");
+        std::fs::write(
+            &log,
+            format!(
+                "{}{}",
+                line("commit: Fix totals"),
+                line("checkout: moving from main to feature")
+            ),
+        )
+        .unwrap();
+        let last = super::last_head_move(&log).unwrap();
+        assert_eq!(last, "checkout: moving from main to feature");
+        assert!(!super::is_own_commit(&last));
+        assert!(super::is_own_commit("commit (amend): Fix totals"));
+        assert!(!super::is_own_commit("commit (merge): Merge branch x"));
+        assert!(!super::is_own_commit("pull: Fast-forward"));
+        assert_eq!(super::last_head_move(&dir.join("none")), None);
         std::fs::remove_dir_all(&dir).ok();
     }
 

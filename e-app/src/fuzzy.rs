@@ -89,8 +89,10 @@ pub fn match_score(query: &str, text: &str) -> Option<Match> {
     }
 
     let (n, m) = (q.len(), t.len());
-    // best[i][j] — score of matching q[..=i] with q[i] landing on t[j].
+    // best[i][j] — score of matching q[..=i] with q[i] landing on t[j], and
+    // from[i][j] — where q[i - 1] landed on the way to it.
     let mut best = vec![i32::MIN; n * m];
+    let mut from = vec![usize::MAX; n * m];
 
     for i in 0..n {
         for j in 0..m {
@@ -98,6 +100,7 @@ pub fn match_score(query: &str, text: &str) -> Option<Match> {
                 continue;
             }
             let mut cell = i32::MIN;
+            let mut came = usize::MAX;
 
             if i == 0 {
                 // A leading gap costs, so an early match wins ties.
@@ -127,8 +130,10 @@ pub fn match_score(query: &str, text: &str) -> Option<Match> {
                         bonus_at(t, j)
                     };
                     let candidate = prev + MATCH + bonus + gap;
-                    if candidate > cell {
+                    // On a tie the later predecessor: the tighter run.
+                    if candidate >= cell {
                         cell = candidate;
+                        came = k;
                     }
                 }
             }
@@ -138,6 +143,7 @@ pub fn match_score(query: &str, text: &str) -> Option<Match> {
                     cell += 2;
                 }
                 best[i * m + j] = cell;
+                from[i * m + j] = came;
             }
         }
     }
@@ -155,33 +161,14 @@ pub fn match_score(query: &str, text: &str) -> Option<Match> {
         return None;
     }
 
-    // Walk back for the positions.
+    // Walk back the way the score came: every cell on it was reached.
     let mut positions = vec![0usize; n];
     let mut j = end;
     for i in (0..n).rev() {
         positions[i] = j;
-        if i == 0 {
-            break;
+        if i > 0 {
+            j = from[i * m + j];
         }
-        let target = best[i * m + j] - MATCH;
-        let mut chosen = usize::MAX;
-        for k in (0..j).rev() {
-            let prev = best[(i - 1) * m + k];
-            if prev == i32::MIN {
-                continue;
-            }
-            // Any predecessor that could have produced this cell will do; the
-            // rightmost keeps the run tight, which is what the score preferred.
-            if prev <= target + BONUS_BOUNDARY + 2 {
-                chosen = k;
-                break;
-            }
-        }
-        j = if chosen == usize::MAX {
-            j.saturating_sub(1)
-        } else {
-            chosen
-        };
     }
 
     Some(Match { score, positions })
@@ -276,6 +263,26 @@ mod tests {
     }
 
     // ── the thing the old matcher could not do ──────────────────────────
+
+    #[test]
+    fn positions_follow_the_score_back_without_overflow() {
+        // A path the old walk-back lost its way in, and underflowed on.
+        let path = "database/migrations/2024_01_01_000000_create_orders_table.php";
+        for q in ["i", "in", "ind", "inde", "index"] {
+            let Some(m) = match_path(q, path) else {
+                continue;
+            };
+            let lower = path.to_ascii_lowercase();
+            for (c, &at) in q.bytes().zip(&m.positions) {
+                assert_eq!(lower.as_bytes()[at], c, "{q:?} at {at}");
+            }
+            assert!(
+                m.positions.windows(2).all(|w| w[0] < w[1]),
+                "{q:?}: {:?}",
+                m.positions
+            );
+        }
+    }
 
     #[test]
     fn initials_find_the_camel_case_name() {

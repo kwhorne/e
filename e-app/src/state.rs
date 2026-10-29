@@ -914,6 +914,11 @@ pub struct AppState {
     pub migrations: RwSignal<Vec<crate::migrations::Migration>>,
     pub migrations_error: RwSignal<String>,
     pub migrations_loading: RwSignal<bool>,
+    /// Where the database and the checkout disagree on migrations, shown in
+    /// a bar above the editor; `None` when they agree.
+    pub migration_drift: RwSignal<Option<e_laravel::migration_drift::Drift>>,
+    /// The drift last waved away, which doesn't come back until it changes.
+    pub migration_drift_dismissed: RwSignal<Option<e_laravel::migration_drift::Drift>>,
     /// The Grove panel (mail-catcher + webhooks).
     pub grove_panel_open: RwSignal<bool>,
     pub grove_tab: RwSignal<crate::grove_state::GroveTab>,
@@ -1835,6 +1840,8 @@ impl AppState {
             migrations: RwSignal::new(Vec::new()),
             migrations_error: RwSignal::new(String::new()),
             migrations_loading: RwSignal::new(false),
+            migration_drift: RwSignal::new(None),
+            migration_drift_dismissed: RwSignal::new(None),
             grove_panel_open: RwSignal::new(false),
             grove_tab: RwSignal::new(crate::grove_state::GroveTab::Mail),
             grove_mail: RwSignal::new(Vec::new()),

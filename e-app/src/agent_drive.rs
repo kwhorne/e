@@ -273,6 +273,11 @@ impl AppState {
             "code_actions": code_actions,
             "editor": editor,
             "tests_on_save": tests_on_save,
+            "migration_drift": self.migration_drift.get_untracked().map(|d| json!({
+                "pending": d.pending,
+                "foreign": d.foreign,
+                "summary": d.summary(),
+            })),
             "hunk_peek": hunk_peek,
             "review": review,
             "cascade": cascade,

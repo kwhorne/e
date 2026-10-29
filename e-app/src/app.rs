@@ -633,6 +633,14 @@ fn app_view() -> impl IntoView {
                     state.check_head_moved();
                     state.poll_laravel_log();
                 }
+                // Two seconds in, whether the database has the checkout's
+                // migrations; while the bar says it hasn't, every 10 s, so a
+                // `migrate` run in a terminal takes it down.
+                if tick == 4
+                    || (tick % 20 == 12 && state.migration_drift.with_untracked(Option::is_some))
+                {
+                    state.check_migration_drift();
+                }
                 // Every 10 s, from a second in: the failed jobs; a database
                 // that couldn't be reached, every minute.
                 if tick % 20 == 2 {
@@ -658,6 +666,7 @@ fn app_view() -> impl IntoView {
         breadcrumbs(state),
         disk_conflict_bar(state),
         merge_conflict_bar(state),
+        crate::migrations::migration_drift_bar(state),
         // The Markdown preview sits beside the editor, live, when it's on.
         stack((
             editor_area(state).style(|s| s.flex_grow(1.0_f32).min_width(0.0).height_full()),

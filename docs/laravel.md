@@ -688,6 +688,30 @@ batch** runs `migrate:rollback --step=1`; both in a terminal tab, with the list
 re-read once they have had a moment to finish. Click a migration to open its
 file.
 
+### After a branch switch
+
+Check out a branch with migrations of its own and the app fails on a missing
+column until `migrate` runs; switch back and the database has a migration the
+branch knows nothing about. When the project opens, and whenever a checkout,
+pull, merge, rebase or reset moves `HEAD` — in `e`, in a terminal or by an
+agent — `e` compares the migration files with the database's `migrations`
+table, and a bar above the editor says where they part:
+
+*2 migrations on this branch haven't run, and the database has
+2026_09_01_000000_add_discount_to_orders, which this branch doesn't*
+
+**Run migrate** runs what's pending, as **▶ Migrate** does; **Show
+migrations** opens the list; **×** puts the bar away until the drift changes.
+A migration from another branch can't be rolled back from here — its file is
+on that branch — so the bar only tells you; check that branch out to roll it
+back. While the bar is up it is re-checked every ten seconds, so a `migrate`
+run in a terminal takes it down.
+
+A commit of your own doesn't raise it — the migration you just wrote not
+having run is the work at hand. Migrations packages load from `vendor/` count
+as files the branch has. The database is the local one `.env` names, never one
+that looks like production.
+
 ### Before a migration runs
 
 Open or save a migration that hasn't run, and `e` asks `php artisan migrate

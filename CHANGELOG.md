@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Migrations after a branch switch.** When the project opens and after a
+  checkout, pull, merge or reset, a bar above the editor says which
+  migrations on the branch haven't run — with **Run migrate** — and which the
+  database has from another branch.
+
 - **Failed jobs on their `handle()`.** A queued job, listener, notification
   or mail in the local database's `failed_jobs` table shows in red on the
   class that runs it, with the exception. `⌘.` retries it (`php artisan
@@ -37,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was thrown and most of its message; it is now read whole.
 - **A workspace edit at the very end of a file** — after its last newline —
   was dropped instead of appended.
+- **Go to File crashed on some queries.** Typing `ind` with a long migration
+  path in the project panicked in a debug build (an overflow walking back the
+  match) and could underline the wrong characters in a release one.
 
 ## [0.15.2] - 2026-10-28
 

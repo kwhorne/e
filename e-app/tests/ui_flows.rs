@@ -162,8 +162,25 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
+        let alive = matches!(self.child.try_wait(), Ok(None));
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // A failed flow: what the app said, before it goes with its HOME.
+        if std::thread::panicking() {
+            let log = std::fs::read_to_string(self.home.join("e.log")).unwrap_or_default();
+            // A panic's message, rather than the backtrace after it.
+            let said: String = match log.find("panicked at") {
+                Some(at) => log[at..].chars().take(1500).collect(),
+                None => {
+                    let n = log.chars().count();
+                    log.chars().skip(n.saturating_sub(1500)).collect()
+                }
+            };
+            eprintln!(
+                "e {} — its log:\n{said}",
+                if alive { "was running" } else { "had exited" }
+            );
+        }
         let _ = std::fs::remove_dir_all(&self.home);
     }
 }
@@ -182,6 +199,10 @@ fn fixture(root: &Path) {
             "<?php\nif (($argv[1] ?? '') === 'queue:retry') {\n    foreach (array_slice($argv, 2) as $id) {\n        if ($id[0] !== '-') {\n            exec('sqlite3 ' . __DIR__ . '/database/database.sqlite ' . escapeshellarg(\"delete from failed_jobs where uuid = '$id'\"));\n        }\n    }\n    exit(0);\n}\n$args = array_map('escapeshellarg', array_slice($argv, 2));\npassthru(__DIR__ . '/vendor/bin/phpunit ' . implode(' ', $args), $code);\nexit($code);\n",
         ),
         (".env", "APP_NAME=Laravel\nDB_CONNECTION=sqlite\n"),
+        (
+            "database/migrations/2024_01_01_000000_create_orders_table.php",
+            "<?php\n\nreturn new class extends Migration {};\n",
+        ),
         (
             "app/Jobs/SyncOrders.php",
             "<?php\n\nnamespace App\\Jobs;\n\nclass SyncOrders implements ShouldQueue\n{\n    public function __construct(public Order $order) {}\n\n    public function handle(): void\n    {\n    }\n}\n",
@@ -248,7 +269,7 @@ exit 1
     }
     let made = Command::new("sqlite3")
         .arg(root.join("database/database.sqlite"))
-        .arg("create table failed_jobs (id integer primary key autoincrement, uuid varchar unique, connection text, queue text, payload text, exception text, failed_at datetime default current_timestamp);")
+        .arg("create table failed_jobs (id integer primary key autoincrement, uuid varchar unique, connection text, queue text, payload text, exception text, failed_at datetime default current_timestamp); create table migrations (id integer primary key autoincrement, migration varchar, batch integer); insert into migrations (migration, batch) values ('2024_01_01_000000_create_orders_table', 1);")
         .status()
         .is_ok_and(|s| s.success());
     assert!(made, "sqlite3");
@@ -583,4 +604,78 @@ fn a_failed_job_shows_on_its_handle_and_is_retried() {
     app.wait_for("the job gone once retried", |s| {
         lines_of(s, "exceptions").is_empty()
     });
+}
+
+/// `git` in `dir`, as a test author, failing the test when it fails.
+fn git(dir: &Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    assert!(ok, "git {args:?}");
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn switching_branches_tells_which_migrations_the_database_lacks() {
+    let app = App::launch(json!({}));
+    let project = app.project.clone();
+    // In step to begin with: no bar.
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(app.state()["migration_drift"].is_null());
+
+    // A branch with a migration of its own, made by a commit: no bar for
+    // that — it's the work at hand.
+    git(&project, &["checkout", "-q", "-b", "feature"]);
+    std::fs::write(
+        project.join("database/migrations/2026_10_01_000000_add_sku_to_orders.php"),
+        "<?php\n\nreturn new class extends Migration {};\n",
+    )
+    .unwrap();
+    git(&project, &["add", "-A"]);
+    git(&project, &["commit", "-qm", "Add sku"]);
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(app.state()["migration_drift"].is_null());
+
+    // Back and forth: on `feature` its migration hasn't run.
+    git(&project, &["checkout", "-q", "main"]);
+    git(&project, &["checkout", "-q", "feature"]);
+    let s = app.wait_for("the bar for the pending migration", |s| {
+        s["migration_drift"]["pending"] == json!(["2026_10_01_000000_add_sku_to_orders"])
+    });
+    assert_eq!(
+        s["migration_drift"]["summary"],
+        "1 migration on this branch hasn't run"
+    );
+
+    // Migrated (from a terminal, say): the bar goes.
+    let ok = Command::new("sqlite3")
+        .arg(app.file("database/database.sqlite"))
+        .arg("insert into migrations (migration, batch) values ('2026_10_01_000000_add_sku_to_orders', 2);")
+        .status()
+        .is_ok_and(|s| s.success());
+    assert!(ok, "insert");
+    app.wait_for("the bar gone once migrated", |s| {
+        s["migration_drift"].is_null()
+    });
+
+    // On `main`, the database has a migration the branch doesn't.
+    git(&project, &["checkout", "-q", "main"]);
+    let s = app.wait_for("the bar for the foreign migration", |s| {
+        s["migration_drift"]["foreign"] == json!(["2026_10_01_000000_add_sku_to_orders"])
+    });
+    assert_eq!(
+        s["migration_drift"]["summary"],
+        "The database has 2026_10_01_000000_add_sku_to_orders, which this branch doesn't"
+    );
 }

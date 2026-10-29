@@ -469,6 +469,35 @@ project opened, so it works with whatever serves the app: Grove, Herd,
 `artisan serve` or Sail. Only exceptions logged at error level or worse with
 a location count.
 
+### Failed jobs on their handle()
+
+A queued job, listener, notification or mail that fails shows on the class
+that runs it — in red at the end of its `handle()` line (or `__invoke()`, or
+the class line): *✖ Failed job SyncOrders: RuntimeException: The warehouse
+said no · 14:02:11*, with a squiggle, an entry in Problems and the status bar,
+like an exception from the log. Several failures of one job share the line
+(*SyncOrders ×3*). A class the project doesn't have lands where it threw in
+your code instead.
+
+`⌘.` on the line offers:
+
+- **Failed job: retry SyncOrders (queue:retry)** — runs `php artisan
+  queue:retry` for every failure on that line, which pushes them back onto
+  their queue for a worker to pick up.
+- **Failed job: ask the agent to fix …** — hands the agent the job's class,
+  queue, the models it was dispatched with (`App\Models\Order #14`) and the
+  stacktrace.
+- **Failed job: dismiss**.
+
+The mark goes when the job leaves the table — retried, or forgotten from a
+terminal — and saving the file leaves it be: the job is still failed until it
+is retried.
+
+`e` reads the `failed_jobs` table every ten seconds — a count and the newest
+id, and the rows only when those change — from the database `.env` names
+(SQLite, MySQL/MariaDB or PostgreSQL), never one that looks like production.
+One it can't reach is asked again once a minute.
+
 ### Runtime lenses
 
 What the running app just did shows at the end of the line of the controller

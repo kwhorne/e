@@ -172,11 +172,19 @@ impl Drop for App {
 /// a stand-in for PHPUnit that logs how it was called and reports one
 /// failure, and an empty log. Committed, so the gutter has a base.
 fn fixture(root: &Path) {
+    std::fs::create_dir_all(root.join("database")).unwrap();
     let files: &[(&str, &str)] = &[
         // `php artisan test` is what `e` runs here: hand it to the stand-in.
+        // `queue:retry` takes the jobs out of `failed_jobs`, as the real
+        // one does once they're back on the queue.
         (
             "artisan",
-            "<?php\n$args = array_map('escapeshellarg', array_slice($argv, 2));\npassthru(__DIR__ . '/vendor/bin/phpunit ' . implode(' ', $args), $code);\nexit($code);\n",
+            "<?php\nif (($argv[1] ?? '') === 'queue:retry') {\n    foreach (array_slice($argv, 2) as $id) {\n        if ($id[0] !== '-') {\n            exec('sqlite3 ' . __DIR__ . '/database/database.sqlite ' . escapeshellarg(\"delete from failed_jobs where uuid = '$id'\"));\n        }\n    }\n    exit(0);\n}\n$args = array_map('escapeshellarg', array_slice($argv, 2));\npassthru(__DIR__ . '/vendor/bin/phpunit ' . implode(' ', $args), $code);\nexit($code);\n",
+        ),
+        (".env", "APP_NAME=Laravel\nDB_CONNECTION=sqlite\n"),
+        (
+            "app/Jobs/SyncOrders.php",
+            "<?php\n\nnamespace App\\Jobs;\n\nclass SyncOrders implements ShouldQueue\n{\n    public function __construct(public Order $order) {}\n\n    public function handle(): void\n    {\n    }\n}\n",
         ),
         ("composer.json", r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#),
         ("storage/logs/laravel.log", ""),
@@ -238,6 +246,12 @@ exit 1
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, text).unwrap();
     }
+    let made = Command::new("sqlite3")
+        .arg(root.join("database/database.sqlite"))
+        .arg("create table failed_jobs (id integer primary key autoincrement, uuid varchar unique, connection text, queue text, payload text, exception text, failed_at datetime default current_timestamp);")
+        .status()
+        .is_ok_and(|s| s.success());
+    assert!(made, "sqlite3");
     use std::os::unix::fs::PermissionsExt;
     let phpunit = root.join("vendor/bin/phpunit");
     std::fs::set_permissions(&phpunit, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -526,4 +540,47 @@ fn env_outside_config_is_moved_into_it() {
         );
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn a_failed_job_shows_on_its_handle_and_is_retried() {
+    let app = App::launch(json!({}));
+    app.open("SyncOrders.php");
+    let payload = r#"{"uuid":"u-1","displayName":"App\\Jobs\\SyncOrders","data":{"commandName":"App\\Jobs\\SyncOrders","command":"O:19:\"App\\Jobs\\SyncOrders\":1:{s:5:\"order\";O:45:\"Illuminate\\Contracts\\Database\\ModelIdentifier\":2:{s:5:\"class\";s:16:\"App\\Models\\Order\";s:2:\"id\";i:14;}}"}}"#;
+    let exception = "RuntimeException: The warehouse said no in /var/www/html/app/Jobs/SyncOrders.php:11\nStack trace:\n#0 {main}";
+    let sql = format!(
+        "insert into failed_jobs (uuid, connection, queue, payload, exception, failed_at) values ('u-1', 'database', 'default', '{}', '{}', '2026-10-29 14:02:11');",
+        payload.replace('\'', "''"),
+        exception.replace('\'', "''"),
+    );
+    let ok = Command::new("sqlite3")
+        .arg(app.file("database/database.sqlite"))
+        .arg(&sql)
+        .status()
+        .is_ok_and(|s| s.success());
+    assert!(ok, "insert");
+
+    let s = app.wait_for("the failed job on handle()", |s| {
+        lines_of(s, "exceptions") == [9]
+    });
+    assert_eq!(
+        s["editor"]["exceptions"][0][1],
+        "✖ Failed job SyncOrders: RuntimeException: The warehouse said no · 14:02:11"
+    );
+    app.caret_to(9);
+    let actions = app.call(json!({"method": "code_actions"})).to_string();
+    assert!(
+        actions.contains("Failed job: retry SyncOrders (queue:retry)"),
+        "{actions}"
+    );
+    assert!(
+        actions.contains("Failed job: ask the agent to fix"),
+        "{actions}"
+    );
+    let applied = app.call(json!({"method": "apply_code_action", "title": "Failed job: retry"}));
+    assert_eq!(applied["ok"], true, "{applied}");
+    app.wait_for("the job gone once retried", |s| {
+        lines_of(s, "exceptions").is_empty()
+    });
 }

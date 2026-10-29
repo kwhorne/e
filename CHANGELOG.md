@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Failed jobs on their `handle()`.** A queued job, listener, notification
+  or mail in the local database's `failed_jobs` table shows in red on the
+  class that runs it, with the exception. `⌘.` retries it (`php artisan
+  queue:retry`), hands it to the agent with its models and stacktrace, or
+  dismisses it; the mark goes when the job leaves the table.
+
 - **`env()` outside `config/`.** A call to `env('…')` in a controller,
   service, route file or template is underlined — it returns `null` once the
   config is cached — and `⌘.` reads it through `config()` instead: the key a

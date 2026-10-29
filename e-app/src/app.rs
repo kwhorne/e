@@ -633,6 +633,11 @@ fn app_view() -> impl IntoView {
                     state.check_head_moved();
                     state.poll_laravel_log();
                 }
+                // Every 10 s, from a second in: the failed jobs; a database
+                // that couldn't be reached, every minute.
+                if tick % 20 == 2 {
+                    state.poll_failed_jobs(tick % 120 == 2);
+                }
                 // Every 15 s: the lenses' "2m ago".
                 if tick.is_multiple_of(30) {
                     state.refresh_runtime_lenses();

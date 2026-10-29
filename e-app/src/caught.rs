@@ -10,6 +10,9 @@
 //! project counts. An exception stays with its line as the file is edited;
 //! saving the file clears its exceptions, as that is usually the fix, and the
 //! next failing request brings them back.
+//!
+//! A failed queued job lands here too ([`crate::failed_jobs`]), on its
+//! class's `handle()`; it stays until the job is retried or forgotten.
 
 use std::path::{Path, PathBuf};
 
@@ -39,6 +42,8 @@ pub struct Caught {
     pub time: String,
     /// The log entry, stacktrace and all.
     pub text: String,
+    /// Set when it is a failed queued job rather than a logged exception.
+    pub job: Option<crate::failed_jobs::JobRef>,
 }
 
 impl Caught {
@@ -46,13 +51,18 @@ impl Caught {
         self.class.rsplit('\\').next().unwrap_or(&self.class)
     }
 
-    /// `ErrorException: Undefined variable $orders`.
+    /// `ErrorException: Undefined variable $orders`; for a job, `Failed job
+    /// SyncOrders: RuntimeException: …`.
     pub fn summary(&self) -> String {
         let mut message: String = self.message.chars().take(140).collect();
         if message.len() < self.message.len() {
             message.push('…');
         }
-        format!("{}: {message}", self.short_class())
+        let exception = format!("{}: {message}", self.short_class());
+        match &self.job {
+            Some(job) => format!("{}: {exception}", job.title()),
+            None => exception,
+        }
     }
 }
 
@@ -103,6 +113,7 @@ fn place(e: &LoggedException, root: &Path) -> Option<Caught> {
             .unwrap_or(&e.datetime)
             .to_string(),
         text: e.text.clone(),
+        job: None,
     })
 }
 
@@ -169,12 +180,11 @@ impl AppState {
     }
 
     /// The file at `path` was saved: its exceptions were probably the reason.
+    /// A failed job stays until it is retried.
     pub(crate) fn clear_caught_in(&self, path: &Path) {
-        if self
-            .caught
-            .with_untracked(|c| c.iter().any(|c| c.path == path))
-        {
-            self.caught.update(|c| c.retain(|c| c.path != path));
+        let logged_here = |c: &Caught| c.path == path && c.job.is_none();
+        if self.caught.with_untracked(|c| c.iter().any(logged_here)) {
+            self.caught.update(|c| c.retain(|c| !logged_here(c)));
             self.sync_caught_marks();
         }
     }

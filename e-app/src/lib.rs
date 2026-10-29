@@ -24,6 +24,7 @@ mod cascade;
 mod caught;
 mod cmd_palette;
 mod code_action;
+mod failed_jobs;
 use e_laravel::codegen;
 mod commands;
 mod completion;

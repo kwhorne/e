@@ -733,9 +733,14 @@ pub struct AppState {
     pub hover: HoverState,
     /// The Laravel log followed for exceptions, and how far it has been read.
     pub log_read: RwSignal<Option<(PathBuf, u64)>>,
-    /// Exceptions the running app logged, placed in the project's code;
-    /// newest last.
+    /// Exceptions the running app logged, placed in the project's code, and
+    /// failed queued jobs; newest last.
     pub caught: RwSignal<Vec<crate::caught::Caught>>,
+    /// The `failed_jobs` table as last read (its count and newest id), or
+    /// that it couldn't be: unchanged, there is nothing to read again.
+    pub failed_jobs_seen: RwSignal<Option<String>>,
+    /// A look at `failed_jobs` is under way.
+    pub failed_jobs_busy: RwSignal<bool>,
     /// Files saved since the last run of their tests, waiting to settle.
     pub save_run_queue: RwSignal<Vec<PathBuf>>,
     /// How the last run of the tests a save touched went.
@@ -1738,6 +1743,8 @@ impl AppState {
             hover: HoverState::new(),
             hunk_peek: RwSignal::new(None),
             log_read: RwSignal::new(None),
+            failed_jobs_seen: RwSignal::new(None),
+            failed_jobs_busy: RwSignal::new(false),
             caught: RwSignal::new(Vec::new()),
             save_run_queue: RwSignal::new(Vec::new()),
             save_run: RwSignal::new(None),
@@ -6934,7 +6941,8 @@ impl AppState {
                 server: "e".to_string(),
             });
         }
-        // On a line the running app threw from: the exception.
+        // On a line the running app threw from: the exception, or the
+        // failed job.
         if let Some(c) = buf
             .file
             .path
@@ -6947,11 +6955,31 @@ impl AppState {
                 command: Some(serde_json::json!({ "e": action, "line": c.line })),
                 server: "e".to_string(),
             };
-            local.push(item(
-                format!("Exception: ask the agent to fix {}", c.summary()),
-                "caught.fix",
-            ));
-            local.push(item("Exception: dismiss".to_string(), "caught.dismiss"));
+            match &c.job {
+                Some(job) => {
+                    let short = job.class.rsplit('\\').next().unwrap_or(&job.class);
+                    let what = match job.retry_ids.len() {
+                        1 => short.to_string(),
+                        n => format!("{short} ({n} failures)"),
+                    };
+                    local.push(item(
+                        format!("Failed job: retry {what} (queue:retry)"),
+                        "job.retry",
+                    ));
+                    local.push(item(
+                        format!("Failed job: ask the agent to fix {}", c.summary()),
+                        "job.fix",
+                    ));
+                    local.push(item("Failed job: dismiss".to_string(), "caught.dismiss"));
+                }
+                None => {
+                    local.push(item(
+                        format!("Exception: ask the agent to fix {}", c.summary()),
+                        "caught.fix",
+                    ));
+                    local.push(item("Exception: dismiss".to_string(), "caught.dismiss"));
+                }
+            }
         }
         // On a line with a runtime lens: the request behind it.
         let lens = buf.file.path.as_ref().and_then(|p| {
@@ -7079,13 +7107,14 @@ impl AppState {
                 Some("runtime.open") => self.runtime_lens_open(id),
                 Some("runtime.fix") => self.runtime_fix(id),
                 Some("runtime.test") => self.runtime_test(id),
-                Some(action @ ("caught.fix" | "caught.dismiss")) => {
-                    let line = command.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+                Some(action @ ("caught.fix" | "caught.dismiss" | "job.retry" | "job.fix")) => {
+                    let line = command.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                     if let Some(path) = self.active_buffer().and_then(|b| b.file.path.clone()) {
-                        if action == "caught.fix" {
-                            self.caught_to_agent(&path, line as usize);
-                        } else {
-                            self.dismiss_caught(&path, line as usize);
+                        match action {
+                            "caught.fix" => self.caught_to_agent(&path, line),
+                            "job.retry" => self.retry_failed_job(&path, line),
+                            "job.fix" => self.failed_job_to_agent(&path, line),
+                            _ => self.dismiss_caught(&path, line),
                         }
                     }
                 }

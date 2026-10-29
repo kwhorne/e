@@ -141,7 +141,7 @@ fn diagnostic_on(
 }
 
 /// The project's database, if it can be asked without risk: local, reachable.
-fn local_database(root: &Path) -> Option<(e_db::Conn, e_db::DbConfig)> {
+pub(crate) fn local_database(root: &Path) -> Option<(e_db::Conn, e_db::DbConfig)> {
     let cfg = e_db::from_env(root)?;
     if cfg.looks_like_prod() {
         return None;

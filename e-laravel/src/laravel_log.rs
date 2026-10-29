@@ -175,13 +175,13 @@ fn parse_entry(lines: &[&str]) -> Option<LoggedException> {
 }
 
 /// `/path/file.php:48` → the file and line.
-fn location(s: &str) -> Option<(PathBuf, usize)> {
+pub(crate) fn location(s: &str) -> Option<(PathBuf, usize)> {
     let (path, line) = s.trim().rsplit_once(':')?;
     Some((PathBuf::from(path), line.trim().parse().ok()?))
 }
 
 /// `#3 /path/file.php(48): Some\\Class->method()` → the file and line.
-fn frame(line: &str) -> Option<(PathBuf, usize)> {
+pub(crate) fn frame(line: &str) -> Option<(PathBuf, usize)> {
     let rest = line.trim_start().strip_prefix('#')?;
     let (_, rest) = rest.split_once(' ')?;
     let open = rest.find("(")?;

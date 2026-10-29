@@ -16,6 +16,7 @@ pub mod eloquent;
 pub mod eloquent_helper;
 pub mod env_guard;
 pub mod events;
+pub mod failed_jobs;
 pub mod heal;
 pub mod ide_json;
 pub mod inertia;

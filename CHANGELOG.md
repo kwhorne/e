@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-29
+
 ### Added
 
 - **Migrations after a branch switch.** When the project opens and after a
@@ -2205,7 +2207,8 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.15.2...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/kwhorne/e/compare/v0.15.2...v0.16.0
 [0.15.2]: https://github.com/kwhorne/e/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/kwhorne/e/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/kwhorne/e/compare/v0.14.1...v0.15.0

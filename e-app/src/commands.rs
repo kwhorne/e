@@ -120,6 +120,11 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
                 state.stage_hunk();
             }
         }
+        "git-unstage-change" => {
+            if state.peek_hunk_at_caret() {
+                state.unstage_hunk();
+            }
+        }
         "git-revert-change" => {
             if state.peek_hunk_at_caret() {
                 state.revert_hunk();

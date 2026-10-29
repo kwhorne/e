@@ -628,6 +628,26 @@ impl Hunk {
     }
 }
 
+/// Whether the change at `line` (0-based) of `text` is in `index` as it is
+/// in the editor: staged.
+pub fn hunk_staged(index: &str, text: &str, line: usize) -> bool {
+    hunk_at(index, text, line).is_none()
+}
+
+/// `index` with the change at `line` (0-based) of `text` taken back out —
+/// those lines as `head` has them, the rest of the index as it is. `None`
+/// when the index doesn't have that change.
+pub fn unstage_hunk(head: &str, index: &str, text: &str, line: usize) -> Option<String> {
+    if !hunk_staged(index, text, line) {
+        return None;
+    }
+    // The staged lines are the editor's, so the line is found in the index
+    // around them, whatever else is staged or not above it.
+    let at = *crate::diff::follow_lines(text, index, &[line]).first()?;
+    let h = hunk_at(head, index, at)?;
+    Some(apply_hunk(index, head, &h.reversed()))
+}
+
 /// The file's content in the index (`git show :path`), or `None` when it
 /// isn't in the index.
 pub fn index_text(path: &Path) -> Option<String> {
@@ -1168,7 +1188,7 @@ c
         checkpoint, git_out, restore_checkpoint, snapshot_tree, tree_changes, tree_diff,
         undo_tree_change, SNAPSHOT_MAX_UNTRACKED,
     };
-    use super::{index_text, stage_text};
+    use super::{hunk_staged, index_text, stage_text, unstage_hunk};
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
@@ -1363,6 +1383,27 @@ c
     }
 
     #[test]
+    fn a_staged_hunk_comes_out_alone_and_in_its_place() {
+        let head = "a\nb\nc\nd\ne\nf\n";
+        // Line 1 changed and staged; a line added at the top, not staged; a
+        // removal (of `e`) staged too.
+        let index = "a\nB\nc\nd\nf\n";
+        let text = "top\na\nB\nc\nd\nf\n";
+        assert!(hunk_staged(index, text, 2));
+        assert!(!hunk_staged(index, text, 0));
+        assert_eq!(
+            unstage_hunk(head, index, text, 2).as_deref(),
+            Some("a\nb\nc\nd\nf\n")
+        );
+        // The removal's wedge sits on the line after it.
+        assert_eq!(
+            unstage_hunk(head, index, text, 5).as_deref(),
+            Some("a\nB\nc\nd\ne\nf\n")
+        );
+        assert_eq!(unstage_hunk(head, index, text, 0), None);
+    }
+
+    #[test]
     fn one_hunk_is_staged_and_the_file_is_left_alone() {
         let dir = init_repo("stage");
         std::fs::write(dir.join("a.txt"), "a\nb\nc\nd\ne\n").unwrap();
@@ -1380,8 +1421,17 @@ c
         assert_eq!(std::fs::read_to_string(&file).unwrap(), now);
         // What's left unstaged is the other hunk.
         let index = index_text(&file).unwrap();
-        assert!(hunk_at(&index, now, 4).is_none());
-        assert!(hunk_at(&index, now, 1).is_some());
+        assert!(hunk_staged(&index, now, 4));
+        assert!(!hunk_staged(&index, now, 1));
+
+        // Unstaged again: the index is back at HEAD for those lines, and the
+        // file is still left alone.
+        let head = "a\nb\nc\nd\ne\n";
+        assert_eq!(unstage_hunk(head, &index, now, 1), None);
+        let back = unstage_hunk(head, &index, now, 4).unwrap();
+        stage_text(&file, &back).unwrap();
+        assert_eq!(index_text(&file).unwrap(), head);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), now);
 
         // A new file has no index entry until a hunk of it is staged — and
         // one in a subdirectory goes in under its path from the top.

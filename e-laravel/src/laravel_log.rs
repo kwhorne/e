@@ -130,14 +130,32 @@ fn parse_entry(lines: &[&str]) -> Option<LoggedException> {
     if !matches!(level, "ERROR" | "CRITICAL" | "ALERT" | "EMERGENCY") {
         return None;
     }
-    // `"exception":"[object] (Class(code: 0): message at /path:48)`
-    let first = lines.iter().find(|l| l.contains("[object] ("))?;
+    // `"exception":"[object] (Class(code: 0): message at /path:48)` — on
+    // more lines than one when the message has line breaks (a Postgres
+    // error's `LINE 1: …`), up to the stacktrace.
+    let at = lines.iter().position(|l| l.contains("[object] ("))?;
+    let first = lines[at];
     let start = first.find("[object] (")? + "[object] (".len();
-    let object = first[start..].trim_end().trim_end_matches(')');
+    let trace = lines[at..]
+        .iter()
+        .position(|l| l.contains("[stacktrace]"))
+        .map(|i| at + i);
+    let object = match trace {
+        Some(end) if end > at + 1 => std::iter::once(&first[start..])
+            .chain(lines[at + 1..end].iter().copied())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => first[start..].to_string(),
+    };
+    let object = object.trim_end().trim_end_matches(')');
     let (class, rest) = object.split_once("(code: ")?;
     let (_, rest) = rest.split_once("): ")?;
-    let (message, thrown_at) = match rest.rfind(" at ") {
-        Some(i) => (&rest[..i], location(&rest[i + 4..])),
+    // The last ` at ` is where it was thrown; the message may have its own.
+    let (message, thrown_at) = match rest
+        .rfind(" at ")
+        .and_then(|i| Some((&rest[..i], location(&rest[i + 4..])?)))
+    {
+        Some((message, at)) => (message, Some(at)),
         None => (rest, None),
     };
     let frames = lines
@@ -271,6 +289,39 @@ mod tests {
             Some((root.join("resources/views/orders/show.blade.php"), 1))
         );
         assert_eq!(undefined_variable(&e.message), Some("total"));
+    }
+
+    #[test]
+    fn a_message_over_several_lines_keeps_where_it_was_thrown() {
+        // Postgres puts the query and a caret under the error, and the
+        // message has an ` at ` of its own.
+        let text = format!(
+            "[2026-10-28 20:15:03] local.ERROR: SQLSTATE[42601]: Syntax error: 7 ERROR:  syntax error at or near \"fro\"\nLINE 1: select * fro orders\n                 ^ (Connection: pgsql, SQL: select * fro orders) {{\"exception\":\"[object] (Illuminate\\\\Database\\\\QueryException(code: 42601): SQLSTATE[42601]: Syntax error: 7 ERROR:  syntax error at or near \\\"fro\\\"\nLINE 1: select * fro orders\n                 ^ (Connection: pgsql, SQL: select * fro orders) at {ROOT}/vendor/laravel/framework/src/Illuminate/Database/Connection.php:825)\n[stacktrace]\n#0 {ROOT}/app/Http/Controllers/OrderController.php(20): Illuminate\\\\Database\\\\Connection->select()\n#1 {{main}}\n\"}} \n"
+        );
+        let e = &exceptions(&text)[0];
+        assert_eq!(e.short_class(), "QueryException");
+        assert!(
+            e.message.starts_with("SQLSTATE[42601]: Syntax error")
+                && e.message.contains("LINE 1: select * fro orders")
+                && e.message
+                    .ends_with("(Connection: pgsql, SQL: select * fro orders)"),
+            "{}",
+            e.message
+        );
+        assert_eq!(
+            e.thrown_at,
+            Some((
+                PathBuf::from(format!(
+                    "{ROOT}/vendor/laravel/framework/src/Illuminate/Database/Connection.php"
+                )),
+                825
+            ))
+        );
+        let root = Path::new(ROOT);
+        assert_eq!(
+            e.origin(root, |_| false),
+            Some((root.join("app/Http/Controllers/OrderController.php"), 20))
+        );
     }
 
     #[test]

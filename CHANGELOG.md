@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Unstage a hunk.** A peek at a change that is already staged says so, with
+  **Unstage** to take that hunk alone out of the index again — also as **Git:
+  Unstage Change at Caret**.
+- **Tests on save for views.** Saving a Blade template, a Livewire or Volt
+  component's view or an Inertia page runs the tests of the controllers and
+  components that render it, and the tests that name it (`assertViewIs`,
+  `->component(…)`, `Volt::test(…)`).
+
+### Fixed
+
+- **Exceptions with a message over several lines.** A Postgres
+  `QueryException` (`… at or near "x"` with `LINE 1:` under it) lost where it
+  was thrown and most of its message; it is now read whole.
+
 ## [0.15.2] - 2026-10-28
 
 ### Added

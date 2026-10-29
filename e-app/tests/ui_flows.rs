@@ -189,6 +189,14 @@ fn fixture(root: &Path) {
             "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass OrderController extends Controller\n{\n    public function index()\n    {\n        return view('orders.index', ['orders' => $orders]);\n    }\n}\n",
         ),
         (
+            "resources/views/orders/index.blade.php",
+            "<ul>\n@foreach ($orders as $order)\n    <li>{{ $order->id }}</li>\n@endforeach\n</ul>\n",
+        ),
+        (
+            "tests/Feature/OrderControllerTest.php",
+            "<?php\n\nnamespace Tests\\Feature;\n\nuse App\\Http\\Controllers\\OrderController;\n\nclass OrderControllerTest extends TestCase\n{\n}\n",
+        ),
+        (
             "tests/Unit/OrderTest.php",
             "<?php\n\nnamespace Tests\\Unit;\n\nclass OrderTest extends TestCase\n{\n    public function test_totals(): void\n    {\n    }\n}\n",
         ),
@@ -333,6 +341,26 @@ fn a_change_is_peeked_staged_and_left_on_disk() {
         String::from_utf8_lossy(&staged.stdout).trim(),
         "app/Models/Order.php"
     );
+
+    // Peeked again, it knows; and Unstage takes it back out.
+    app.keys(&["escape"]);
+    app.wait_for("the peek closed", |s| s["hunk_peek"].is_null());
+    app.command("git-peek-change");
+    app.wait_for("the peek seeing it staged", |s| {
+        s["hunk_peek"]["staged"] == true
+    });
+    app.command("git-unstage-change");
+    app.wait_for("the change unstaged", |s| s["hunk_peek"]["staged"] == false);
+    let staged = Command::new("git")
+        .arg("-C")
+        .arg(&app.project)
+        .args(["diff", "--cached", "--name-only"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&staged.stdout).trim(), "");
+    assert!(std::fs::read_to_string(app.file("app/Models/Order.php"))
+        .unwrap()
+        .contains("return 1; // staged"));
 }
 
 #[test]
@@ -399,4 +427,22 @@ fn saving_a_model_runs_the_tests_that_use_it() {
     app.wait_for("the failed test marked", |s| {
         s["editor"]["tests"] == json!([[9, "failed"]])
     });
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn saving_a_view_runs_the_tests_of_its_controller() {
+    let app = App::launch(json!({"test_on_save": true, "format_on_save": false}));
+    app.open("index.blade.php");
+    app.caret_to(1);
+    app.type_text("Orders");
+    app.keys(&["cmd+s"]);
+    app.wait_for("the tests run on save", |s| {
+        s["tests_on_save"]["failed"].is_u64()
+    });
+    let calls = std::fs::read_to_string(app.file("phpunit.log")).unwrap();
+    assert!(
+        calls.contains("tests/Feature/OrderControllerTest.php"),
+        "the test of the controller that renders it: {calls}"
+    );
 }

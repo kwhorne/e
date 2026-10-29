@@ -2,7 +2,8 @@
 //! at that hunk beside the line: what the lines were in the last commit, with
 //! **Stage** — the hunk alone into the index, the rest of the file as it is —
 //! and **Revert** — the lines in the editor back to the commit, as one edit
-//! that undo takes back.
+//! that undo takes back. A hunk already in the index says so, with
+//! **Unstage** to take it out again.
 
 use std::path::PathBuf;
 
@@ -33,7 +34,8 @@ pub struct HunkPeek {
     pub old_lines: Vec<String>,
     /// Where it opens, in window coordinates: under the clicked line.
     pub anchor: Point,
-    /// Set once the hunk is in the index.
+    /// Whether the hunk is in the index — looked up as the peek opens, and
+    /// set by Stage and Unstage.
     pub staged: bool,
 }
 
@@ -59,6 +61,19 @@ impl AppState {
         let Some(hunk) = git::hunk_at(&head, &text, line) else {
             return false;
         };
+        // Already open on it — by a click, before a command that acts on it:
+        // keep what it knows.
+        let open = self
+            .hunk_peek
+            .with_untracked(|p| p.as_ref().is_some_and(|p| p.path == path && p.hunk == hunk));
+        if open {
+            self.hunk_peek.update(|p| {
+                if let Some(p) = p.as_mut() {
+                    p.line = line;
+                }
+            });
+            return true;
+        }
         let old_lines = head[git::line_bytes(&head, hunk.old.clone())]
             .lines()
             .map(String::from)
@@ -82,7 +97,32 @@ impl AppState {
             anchor,
             staged: false,
         }));
+        // Staged already? The index is read off the UI thread.
+        let path = path.to_path_buf();
+        let state = *self;
+        self.spawn_bg(
+            {
+                let path = path.clone();
+                move || git::index_text(&path).is_some_and(|i| git::hunk_staged(&i, &text, line))
+            },
+            move |staged: bool| state.mark_peek_staged(&path, line, staged),
+        );
         true
+    }
+
+    /// Note on the open peek at `line` of `path` whether its hunk is staged.
+    fn mark_peek_staged(&self, path: &std::path::Path, line: usize, staged: bool) {
+        let open = self.hunk_peek.with_untracked(|p| {
+            p.as_ref()
+                .is_some_and(|p| p.path == path && p.line == line && p.staged != staged)
+        });
+        if open {
+            self.hunk_peek.update(|p| {
+                if let Some(p) = p.as_mut() {
+                    p.staged = staged;
+                }
+            });
+        }
     }
 
     /// Open the peek for the change at the caret, as a click on its bar
@@ -166,12 +206,41 @@ impl AppState {
             },
             move |res: Result<(), String>| {
                 match res {
-                    Ok(()) => state.hunk_peek.update(|p| {
-                        if let Some(p) = p.as_mut().filter(|p| p.path == peek.path) {
-                            p.staged = true;
-                        }
-                    }),
+                    Ok(()) => state.mark_peek_staged(&peek.path, peek.line, true),
                     Err(e) => AppState::notify(&format!("Couldn't stage the change: {e}")),
+                }
+                state.refocus_peeked(&peek.path);
+                state.refresh_git_status();
+            },
+        );
+    }
+
+    /// Take the peeked hunk out of the index again: those lines go back to
+    /// the last commit's there, and the rest of what is staged stays.
+    pub fn unstage_hunk(&self) {
+        let Some(peek) = self.hunk_peek.get_untracked() else {
+            return;
+        };
+        let Some(buf) = self.buffer_for(&peek.path) else {
+            return;
+        };
+        let Some(head) = buf.head_text.borrow().clone() else {
+            return;
+        };
+        let text = buf.doc.text().to_string();
+        let path = peek.path.clone();
+        let state = *self;
+        self.spawn_bg(
+            move || {
+                let index = git::index_text(&path).ok_or("The file isn't in the index")?;
+                let back = git::unstage_hunk(&head, &index, &text, peek.line)
+                    .ok_or("This change isn't staged")?;
+                git::stage_text(&path, &back)
+            },
+            move |res: Result<(), String>| {
+                match res {
+                    Ok(()) => state.mark_peek_staged(&peek.path, peek.line, false),
+                    Err(e) => AppState::notify(&format!("Couldn't unstage the change: {e}")),
                 }
                 state.refocus_peeked(&peek.path);
                 state.refresh_git_status();
@@ -262,13 +331,13 @@ pub fn hunk_peek_view(state: AppState) -> impl IntoView {
         })
     })
     .style(|s| s.flex_grow(1.0_f32).font_size(12.0).color(theme::fg_dim()));
+    let staged = move || peek.with(|p| p.as_ref().is_some_and(|p| p.staged));
     let stage = button("Stage")
         .on_click_stop(move |_| state.stage_hunk())
-        .style(move |s| {
-            s.apply_if(peek.with(|p| p.as_ref().is_some_and(|p| p.staged)), |s| {
-                s.hide()
-            })
-        });
+        .style(move |s| s.apply_if(staged(), |s| s.hide()));
+    let unstage = button("Unstage")
+        .on_click_stop(move |_| state.unstage_hunk())
+        .style(move |s| s.apply_if(!staged(), |s| s.hide()));
     let revert = button("Revert").on_click_stop(move |_| state.revert_hunk());
     let close = button("×").on_click_stop(move |_| {
         if let Some(p) = state.hunk_peek.get_untracked() {
@@ -276,7 +345,7 @@ pub fn hunk_peek_view(state: AppState) -> impl IntoView {
             state.refocus_peeked(&p.path);
         }
     });
-    let header = stack((title, stage, revert, close)).style(|s| {
+    let header = stack((title, stage, unstage, revert, close)).style(|s| {
         s.items_center()
             .gap(2.0)
             .padding_horiz(8.0)

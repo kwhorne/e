@@ -220,13 +220,20 @@ time you open it.
 ### Tests on save
 
 With **Settings → Laravel → Run affected tests on save** on, saving a PHP file
-runs the tests that exercise it, in the background, without the Tests panel:
+or a view runs the tests that exercise it, in the background, without the Tests
+panel:
 
 - a test file runs itself;
 - a model, service or any other class runs the tests that `use` it or name it
   in full, and the one named after it (`OrderTest.php` for `Order`);
 - a controller also runs the tests that call one of its routes, by name
-  (`route('orders.store')`) or by path (`$this->post('/orders')`).
+  (`route('orders.store')`) or by path (`$this->post('/orders')`);
+- a Blade template, a Livewire or Volt component's view, or an Inertia page
+  runs the tests of the classes that render it (`view('orders.index')`,
+  `Inertia::render('Orders/Index')`) — so a controller's routes and a Livewire
+  component's `Livewire::test(…)` — and the tests that name it:
+  `assertViewIs('orders.index')`, `->component('Orders/Index')`,
+  `Volt::test('orders.table')`.
 
 The gutter's marks update when the run is done, and the status bar says how it
 went — *✓ 12 passed* or *✗ 1 failed, 11 passed*. Click it for the output in the
@@ -419,7 +426,9 @@ The line is the first one in your own code the exception passed through: one
 thrown inside the framework — a model not found, a failed query — lands on the
 call in your controller or service that led to it, not in `vendor/`. A Blade
 error lands in the template, on the undefined variable when that's what it
-was. Paths from a container (Sail, Docker) are mapped onto the project.
+was. Paths from a container (Sail, Docker) are mapped onto the project, and a
+message over several lines — a Postgres error with its `LINE 1:` and caret —
+is read whole.
 
 `⌘.` on the line offers **Exception: ask the agent to fix …**, which hands the
 agent the log entry with its stacktrace, and **Exception: dismiss**. An

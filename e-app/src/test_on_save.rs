@@ -1,6 +1,7 @@
 //! Running the tests a save touches. With **Run affected tests on save** on,
 //! saving a PHP file runs the test files that exercise it
-//! ([`e_laravel::test_impact`]) — the file itself when it is a test — in the
+//! ([`e_laravel::test_impact`]) — the file itself when it is a test, and for a
+//! view or an Inertia page the tests of what renders it — in the
 //! background, without the Tests panel. The gutter's marks update when it
 //! finishes, and the status bar says how it went; a click there opens the
 //! panel with the output.
@@ -58,7 +59,16 @@ pub fn run_args(files: &[PathBuf]) -> String {
 impl AppState {
     /// After `path` is written: note it for a run of the tests it touches.
     pub(crate) fn tests_after_save(&self, path: &Path, language: Language) {
-        if !self.settings.get_untracked().test_on_save || language != Language::Php {
+        let view_or_php = matches!(
+            language,
+            Language::Php
+                | Language::Blade
+                | Language::Vue
+                | Language::Svelte
+                | Language::JavaScript
+                | Language::TypeScript
+        );
+        if !self.settings.get_untracked().test_on_save || !view_or_php {
             return;
         }
         let first = self.save_run_queue.with_untracked(Vec::is_empty);
@@ -99,9 +109,19 @@ impl AppState {
         self.spawn_bg(
             move || {
                 let tests = test_impact::test_files(&root);
+                // Read once, and only when a view was saved.
+                let mut renderers: Option<Vec<(PathBuf, String)>> = None;
                 let mut files: Vec<PathBuf> = Vec::new();
                 for path in &saved {
                     let rel = path.strip_prefix(&root).unwrap_or(path);
+                    if let Some(view) = test_impact::view_name(rel) {
+                        let classes =
+                            renderers.get_or_insert_with(|| test_impact::view_renderers(&root));
+                        files.extend(test_impact::affected_by_view(
+                            &view, classes, &tests, &routes,
+                        ));
+                        continue;
+                    }
                     let src = std::fs::read_to_string(path).unwrap_or_default();
                     files.extend(test_impact::affected_tests(rel, &src, &tests, &routes));
                 }

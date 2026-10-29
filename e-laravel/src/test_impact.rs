@@ -8,7 +8,11 @@
 //! - a test that `use`s the class, or names it in full;
 //! - a test named after the class (`OrderTest.php` for `Order`);
 //! - for a controller, a test that calls one of its routes by name
-//!   (`route('orders.store')`) or by path (`->post('/orders')`).
+//!   (`route('orders.store')`) or by path (`->post('/orders')`);
+//! - for a view — a Blade template, a Livewire or Volt component's, an
+//!   Inertia page — the tests of the classes that render it
+//!   (`view('orders.index')`, `Inertia::render('Orders/Index')`), and a test
+//!   that names it (`assertViewIs`, `->component(…)`, `Volt::test(…)`).
 //!
 //! It finds tests that exercise a class directly. One reached only through
 //! other classes is missed — that is what the full suite is for.
@@ -100,6 +104,126 @@ pub fn affected_tests(
         .collect();
     out.sort();
     out.dedup();
+    out
+}
+
+/// How the code names a view file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ViewName {
+    /// `orders.index` for `resources/views/orders/index.blade.php`, and the
+    /// component name when it is a Livewire or Volt one (`orders.index` for
+    /// `resources/views/livewire/orders/index.blade.php`).
+    Blade {
+        name: String,
+        component: Option<String>,
+    },
+    /// `Orders/Index` for `resources/js/Pages/Orders/Index.vue`.
+    Page(String),
+}
+
+/// Where Inertia keeps its pages; the same list as [`crate::inertia`].
+const PAGE_ROOTS: &[&str] = &[
+    "resources/js/Pages",
+    "resources/js/pages",
+    "resources/ts/Pages",
+    "resources/js/Components/Pages",
+];
+
+/// The view the file at `rel` (relative to the project) is, if it is one.
+pub fn view_name(rel: &Path) -> Option<ViewName> {
+    let s = rel.to_string_lossy().replace('\\', "/");
+    if let Some(stem) = s
+        .strip_prefix("resources/views/")
+        .and_then(|r| r.strip_suffix(".blade.php"))
+    {
+        let component = ["livewire/", "pages/"]
+            .iter()
+            .find_map(|dir| stem.strip_prefix(dir))
+            .map(|c| c.replace('/', "."));
+        return Some(ViewName::Blade {
+            name: stem.replace('/', "."),
+            component,
+        });
+    }
+    PAGE_ROOTS.iter().find_map(|root| {
+        let page = s.strip_prefix(root)?.strip_prefix('/')?;
+        let (name, ext) = page.rsplit_once('.')?;
+        ["vue", "tsx", "jsx", "ts", "js", "svelte"]
+            .contains(&ext)
+            .then(|| ViewName::Page(name.to_string()))
+    })
+}
+
+/// The test files that reach the view `view`: the tests of each class among
+/// `classes` — `(path relative to the project, text)` — that renders it, and
+/// those that name it themselves. Sorted, no repeats.
+pub fn affected_by_view(
+    view: &ViewName,
+    classes: &[(PathBuf, String)],
+    tests: &[(PathBuf, String)],
+    routes: &[RouteInfo],
+) -> Vec<PathBuf> {
+    let quoted = |calls: &[&str], name: &str| -> Vec<String> {
+        calls
+            .iter()
+            .flat_map(|call| ['\'', '"'].map(|q| format!("{call}{q}{name}{q}")))
+            .collect()
+    };
+    let (renders, named) = match view {
+        ViewName::Blade { name, component } => {
+            let mut named = quoted(&["assertViewIs(", "assertSeeLivewire("], name);
+            if let Some(c) = component {
+                named.extend(quoted(&["Volt::test(", "Livewire::test("], c));
+            }
+            (quoted(&["view(", "make(", "view: "], name), named)
+        }
+        ViewName::Page(name) => (
+            quoted(&["render(", "inertia("], name),
+            quoted(&["component("], name),
+        ),
+    };
+    let mut out: Vec<PathBuf> = classes
+        .iter()
+        .filter(|(_, src)| renders.iter().any(|r| src.contains(r.as_str())))
+        .flat_map(|(rel, src)| affected_tests(rel, src, tests, routes))
+        .chain(
+            tests
+                .iter()
+                .filter(|(_, text)| named.iter().any(|n| text.contains(n.as_str())))
+                .map(|(path, _)| path.clone()),
+        )
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The PHP files under `root/app` that render a view, with their text, paths
+/// relative to `root`: the classes [`affected_by_view`] looks through.
+pub fn view_renderers(root: &Path) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.join("app")];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|x| x == "php") {
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let renders = ["view(", "View::make(", "view: ", "render(", "inertia("]
+                    .iter()
+                    .any(|n| text.contains(n));
+                if let (true, Ok(rel)) = (renders, path.strip_prefix(root)) {
+                    out.push((rel.to_path_buf(), text));
+                }
+            }
+        }
+    }
     out
 }
 
@@ -288,5 +412,97 @@ mod tests {
             Some("App\\Concerns\\HasTeam")
         );
         assert_eq!(declared_type("<?php\nreturn [];\n"), None);
+    }
+
+    #[test]
+    fn view_files_are_named_as_the_code_names_them() {
+        assert_eq!(
+            view_name(Path::new("resources/views/orders/index.blade.php")),
+            Some(ViewName::Blade {
+                name: "orders.index".into(),
+                component: None
+            })
+        );
+        assert_eq!(
+            view_name(Path::new("resources/views/livewire/orders/table.blade.php")),
+            Some(ViewName::Blade {
+                name: "livewire.orders.table".into(),
+                component: Some("orders.table".into())
+            })
+        );
+        assert_eq!(
+            view_name(Path::new("resources/js/Pages/Orders/Index.vue")),
+            Some(ViewName::Page("Orders/Index".into()))
+        );
+        assert_eq!(view_name(Path::new("resources/js/app.js")), None);
+        assert_eq!(view_name(Path::new("app/Models/Order.php")), None);
+    }
+
+    #[test]
+    fn a_view_reaches_the_tests_of_what_renders_it() {
+        let routes = [route(
+            "orders.index",
+            "orders",
+            "App\\Http\\Controllers\\OrderController@index",
+        )];
+        let classes = [
+            test(
+                "app/Http/Controllers/OrderController.php",
+                "<?php\nnamespace App\\Http\\Controllers;\nclass OrderController\n{\n    public function index() { return view('orders.index'); }\n}\n",
+            ),
+            test(
+                "app/Http/Controllers/InvoiceController.php",
+                "<?php\nnamespace App\\Http\\Controllers;\nclass InvoiceController\n{\n    public function index() { return view('orders.index-old'); }\n}\n",
+            ),
+        ];
+        let mut tests = suite();
+        tests.push(test(
+            "tests/Feature/ViewsTest.php",
+            "<?php\nit('shows', fn () => $this->get('/x')->assertViewIs('orders.index'));\n",
+        ));
+        let view = view_name(Path::new("resources/views/orders/index.blade.php")).unwrap();
+        assert_eq!(
+            affected_by_view(&view, &classes, &tests, &routes),
+            [
+                PathBuf::from("tests/Feature/OrderPagesTest.php"),
+                PathBuf::from("tests/Feature/ViewsTest.php"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_page_or_component_reaches_the_tests_that_name_it() {
+        let classes = [test(
+            "app/Livewire/Orders/Table.php",
+            "<?php\nnamespace App\\Livewire\\Orders;\nclass Table extends Component\n{\n    public function render() { return view('livewire.orders.table'); }\n}\n",
+        )];
+        let tests = [
+            test(
+                "tests/Feature/TableTest.php",
+                "<?php\nuse App\\Livewire\\Orders\\Table;\nLivewire::test(Table::class);\n",
+            ),
+            test(
+                "tests/Feature/VoltTest.php",
+                "<?php\nVolt::test('orders.table')->assertOk();\n",
+            ),
+            test(
+                "tests/Feature/PagesTest.php",
+                "<?php\n$this->get('/')->assertInertia(fn ($p) => $p->component('Orders/Index'));\n",
+            ),
+        ];
+        let table =
+            view_name(Path::new("resources/views/livewire/orders/table.blade.php")).unwrap();
+        assert_eq!(
+            affected_by_view(&table, &classes, &tests, &[]),
+            [
+                PathBuf::from("tests/Feature/TableTest.php"),
+                PathBuf::from("tests/Feature/VoltTest.php"),
+            ]
+        );
+        let page = ViewName::Page("Orders/Index".into());
+        assert_eq!(
+            affected_by_view(&page, &classes, &tests, &[]),
+            [PathBuf::from("tests/Feature/PagesTest.php")]
+        );
     }
 }

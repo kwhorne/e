@@ -80,6 +80,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("debug-toggle-breakpoint", "Debug: Toggle Breakpoint (F9)"),
     ("git-peek-change", "Git: Peek Change at Caret"),
     ("git-stage-change", "Git: Stage Change at Caret"),
+    ("git-unstage-change", "Git: Unstage Change at Caret"),
     ("git-revert-change", "Git: Revert Change at Caret"),
     ("debug-step-over", "Debug: Step Over (F10)"),
     ("debug-step-into", "Debug: Step Into (F11)"),

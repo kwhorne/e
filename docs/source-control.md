@@ -47,9 +47,14 @@ in the last commit, and
 - **Revert** — puts the lines back as they were in the commit, as one edit:
   `⌘Z` takes it back.
 
+A hunk that is already in the index says *· staged*, with **Unstage** in place
+of Stage: it takes this hunk alone out of the index again, and leaves the rest
+of what's staged and the file on disk as they are.
+
 `Esc`, **×** or typing closes the peek. From the keyboard, **Git: Peek Change
-at Caret**, **Git: Stage Change at Caret** and **Git: Revert Change at Caret**
-in the command palette do the same for the line the caret is on.
+at Caret**, **Git: Stage Change at Caret**, **Git: Unstage Change at Caret**
+and **Git: Revert Change at Caret** in the command palette do the same for the
+line the caret is on.
 
 ## Diff vs HEAD
 

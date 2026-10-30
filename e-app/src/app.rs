@@ -944,6 +944,7 @@ fn app_view() -> impl IntoView {
         palette(state),
         command_palette(state),
         update_notice(state),
+        crate::toast::toasts(state),
         stack((
             goto_bar(state),
             // Two dialogs share one slot so the tuple stays within floem's arity.
@@ -1016,6 +1017,12 @@ fn app_view() -> impl IntoView {
             }
         }
         EventPropagation::Continue
+    })
+    .on_event_cont(EventListener::WindowGotFocus, |_| {
+        crate::toast::set_window_focused(true)
+    })
+    .on_event_cont(EventListener::WindowLostFocus, |_| {
+        crate::toast::set_window_focused(false)
     })
     .on_event_stop(EventListener::DroppedFile, move |e| {
         if let Event::DroppedFile(ev) = e {

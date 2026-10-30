@@ -55,6 +55,12 @@ live, run `e --foreground .` (or set `E_FOREGROUND=1`).
 - **Terminal** (`⌘T`) — an integrated terminal with tabs and split panes.
 - **Agent panel** (`⌘L`) — run an AI coding agent beside your code.
 - **Status bar** — cursor position, language, git branch, blame, diagnostics.
+- **Messages** — what `e` has to tell you (a test run finished, a migration
+  was written, a command needs the caret elsewhere) shows at the bottom
+  right and goes by itself. The pointer on a message keeps it, a click
+  dismisses it, and the same message again is counted (`×2`) rather than
+  repeated. While `e` isn't the app in front, a message goes to the desktop's
+  notifications as well.
 
 ## Essential first steps
 

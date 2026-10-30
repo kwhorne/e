@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Messages show in the window.** What `e` has to tell you shows at the
+  bottom right and goes by itself, instead of in macOS Notification Center
+  (or `notify-send`) every time. The pointer on a message keeps it, a click
+  dismisses it, and a repeat is counted rather than shown twice. While `e`
+  isn't the app in front, a message still goes to the desktop as well.
+
 ## [0.18.0] - 2026-10-30
 
 ### Added
@@ -19,13 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names the composite index its `where` and `order by` ask for, and `⌘.`
   writes it as a migration.
 
-### Fixed
-
-- `⌘↵` with the caret after a line's `;` evaluates that line, rather than
-  finding nothing.
-
-### Added
-
 - **Evaluate an expression where it is written.** In a Laravel project, `⌘↵`
   outside a SQL string evaluates the PHP statement at the caret (or the
   selection) in the booted app. It runs in the file's namespace, with the
@@ -35,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nothing it does sticks: writes are rolled back, and mail, notifications
   and queued jobs are faked. It refuses to run against an app that boots as
   production, or one whose database isn't on this machine.
+
+### Fixed
+
+- `⌘↵` with the caret after a line's `;` evaluates that line, rather than
+  finding nothing.
 
 ## [0.17.0] - 2026-10-30
 

@@ -423,6 +423,19 @@ fn saving_writes_the_file() {
 
 #[test]
 #[ignore = "opens a window; run with --ignored"]
+fn a_message_shows_in_the_window_counts_repeats_and_goes() {
+    let app = App::launch(json!({}));
+    let toasts = |s: &Value| s["toasts"].as_array().cloned().unwrap_or_default();
+    for _ in 0..2 {
+        app.call(json!({"method": "notify", "message": "Tests passed"}));
+    }
+    let s = app.wait_for("the message", |s| !toasts(s).is_empty());
+    assert_eq!(s["toasts"], json!([{"text": "Tests passed", "count": 2}]));
+    app.wait_for("the message to go by itself", |s| toasts(s).is_empty());
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
 fn a_breakpoint_stays_with_its_line() {
     let app = App::launch(json!({}));
     app.open("Order.php");

@@ -46,7 +46,7 @@ against the data — each with its `source`.
 | ------- | ------ |
 | `{"method":"open","path":"…","line":45,"col":1}` | Open the file and jump to the position |
 | `{"method":"focus","target":"terminal\|editor\|agent"}` | Focus a panel |
-| `{"method":"notify","message":"…"}` | Post a system notification |
+| `{"method":"notify","message":"…"}` | Show a message in the window, and on the desktop while `e` isn't in front |
 | `{"method":"review_summary","text":"…"}` | Hand the editor a written summary of this session's changes. It becomes the pull-request description when you ship from [session review](source-control.md#session-review-v). |
 
 Example — let the agent jump you to a definition it found:
@@ -240,7 +240,7 @@ q '{"method":"dialog","action":"confirm"}'
 | `{"method":"wait_idle","timeout_ms":120000}` | Answers once Elyra has finished its turn, with the end of the transcript |
 | `{"method":"key","keys":["cmd+p","down","enter"]}` | Presses keys in the editor's window, as the keyboard would: a chord or a list of them (`cmd`, `shift`, `alt`, `ctrl`; named keys such as `enter`, `escape`, `tab`, `up`, `pagedown`, `f12`; other keys by their place on a US keyboard). `"text":"…"` types text. Answers once the keys have been handled. macOS only; needs no Accessibility permission |
 | `{"method":"click","x":252,"y":303}` | Clicks at a point in the window, in points from the top left of its content (below the title bar): a button, a gutter mark. `"modifiers":"alt"` holds keys down. macOS only |
-| `{"method":"ui_state"}` | What is on screen: open panels, the dialog and what it lists, the code-action menu, the active editor and caret — with its gutter (`breakpoints`, `tests`, `changes`) and the `exceptions` and failed jobs at its line ends, by 1-based line — the hunk peek, the last run of tests on save, the migration drift bar, the session review, Cascade's state and transcript (tool cards, receipts, notices), and the last 20 notifications |
+| `{"method":"ui_state"}` | What is on screen: open panels, the dialog and what it lists, the code-action menu, the active editor and caret — with its gutter (`breakpoints`, `tests`, `changes`) and the `exceptions` and failed jobs at its line ends, by 1-based line — the hunk peek, the last run of tests on save, the migration drift bar, the session review, Cascade's state and transcript (tool cards, receipts, notices), the last 20 notifications, the messages on screen now (`toasts`) and whether the window is in front (`window_focused`) |
 
 ## Running commands
 

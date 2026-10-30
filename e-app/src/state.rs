@@ -1016,6 +1016,8 @@ pub struct AppState {
     pub update_status: RwSignal<crate::updater::UpdateStatus>,
     /// Whether the changelog is expanded in the update notice.
     pub update_notes_open: RwSignal<bool>,
+    /// Messages on screen (see [`crate::toast`]).
+    pub toasts: RwSignal<Vec<crate::toast::Toast>>,
 
     /// Go-to-line prompt state.
     pub goto: crate::editing::GotoState,
@@ -1899,6 +1901,7 @@ impl AppState {
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
+            toasts: RwSignal::new(Vec::new()),
             goto: crate::editing::GotoState::new(),
             task: crate::task_palette::TaskState::new(),
             task_list: RwSignal::new(Vec::new()),
@@ -4181,10 +4184,14 @@ impl AppState {
         }
     }
 
-    /// Show a desktop notification (see [`crate::platform::notify`]).
+    /// Say `message` in the window, and on the desktop too while the window
+    /// isn't in front (see [`crate::toast`]).
     pub(crate) fn notify(message: &str) {
         crate::agent_drive::remember_notice(message);
-        crate::platform::notify(message);
+        crate::toast::post(message);
+        if !crate::toast::window_focused() {
+            crate::platform::notify(message);
+        }
     }
 
     /// Add another root folder to the workspace (multi-root).

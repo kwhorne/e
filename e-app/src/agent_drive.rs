@@ -298,6 +298,12 @@ impl AppState {
             "cascade": cascade,
             "transcript": transcript(*self),
             "notifications": notices(),
+            "window_focused": crate::toast::window_focused(),
+            "toasts": self.toasts.with_untracked(|v| {
+                v.iter()
+                    .map(|t| json!({"text": t.text, "count": t.count}))
+                    .collect::<Vec<_>>()
+            }),
         })
     }
 

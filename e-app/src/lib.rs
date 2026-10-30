@@ -132,6 +132,7 @@ mod test_on_save;
 mod testrun;
 mod theme;
 mod tinker;
+mod toast;
 mod undo_view;
 mod update_view;
 mod updater;

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Project rules.** Write the project's own rules in `.e/rules.toml`:
+  - what a rule says;
+  - the files it covers;
+  - a pattern it `forbid`s, or one it `require`s, in each file or each
+    public method.
+
+  `e` underlines a file that breaks a rule as you type. Session Review flags
+  a change that breaks one where it changed, and an `error` rule blocks the
+  ship gate. A new Cascade session's first message starts with the rules.
+  Agents can read them, and where the project breaks them, over the socket
+  (`rules`, and `laravel_map`). **Project Rules: Open** starts the file;
+  **Project Rules: Check Project** lists every place the project breaks a
+  rule now.
+
 ## [0.16.0] - 2026-10-29
 
 ### Added

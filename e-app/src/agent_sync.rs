@@ -15,6 +15,8 @@
 //!   problems once the language servers have re-read what you just wrote.
 //! - `{"method":"laravel_map","include":["routes","models"],"filter":"order"}`
 //!   → routes, models with live columns, Livewire components, Inertia pages.
+//! - `{"method":"rules","check":true}` → the project's own rules from
+//!   `.e/rules.toml`, and with `check` every place the project breaks them.
 //! - `{"method":"verify_route","uri":"/orders"}` → status, time, queries and
 //!   N+1, compared with the first measurement of that URL.
 //! - `{"method":"request_test","uri":"/orders/{order}","http_method":"PUT"}`
@@ -324,6 +326,7 @@ const METHODS: &[&str] = &[
     "lsp_hover",
     "lsp_symbols",
     "laravel_map",
+    "rules",
     "verify_route",
     "request_test",
     "commands",
@@ -537,12 +540,51 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             };
             let data = state.laravel.get_untracked();
             let schema = state.db.schema_cache.get_untracked();
+            let rules = state.project_rules.get_untracked();
             std::thread::spawn(move || {
                 let data = data.unwrap_or_else(|| Arc::new(e_laravel::laravel::load(&root)));
                 let mut map = e_laravel::project_map::build(&root, &data, &schema, &request);
+                // Whatever was asked for: an agent reading the map should
+                // know the rules it works under.
+                if !rules.is_empty() {
+                    map["rules"] = crate::project_rules::rules_json(&rules);
+                }
                 map["ok"] = json!(true);
                 map["root"] = json!(root.to_string_lossy());
                 let _ = reply.send(map);
+            });
+            return;
+        }
+
+        // ---- The project's own rules (async when checking) ----------------
+        "rules" => {
+            let root = state.root.get_untracked();
+            let rules = state.project_rules.get_untracked();
+            let check = req.get("check").and_then(|c| c.as_bool()).unwrap_or(false);
+            std::thread::spawn(move || {
+                let mut resp = json!({
+                    "ok": true,
+                    "file": e_review::rules::FILE,
+                    "rules": crate::project_rules::rules_json(&rules),
+                });
+                if let Err(e) = e_review::rules::load(&root) {
+                    resp["error"] = json!(format!("line {}: {}", e.line + 1, e.message));
+                }
+                if check {
+                    resp["breaches"] = crate::project_rules::check_project(&root, &rules)
+                        .into_iter()
+                        .map(|(path, line, col, rule)| {
+                            json!({
+                                "path": path,
+                                "line": line + 1,
+                                "col": col + 1,
+                                "rule": rules.rules[rule].id,
+                                "says": rules.rules[rule].says,
+                            })
+                        })
+                        .collect();
+                }
+                let _ = reply.send(resp);
             });
             return;
         }

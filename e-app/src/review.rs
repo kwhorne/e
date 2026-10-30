@@ -19,6 +19,34 @@ use crate::state::{AppState, TddStatus};
 /// Controller methods the changeset touches that hand a signed-in user a
 /// model by its id without checking it is theirs (see
 /// [`e_laravel::authz`]). Blocking: reads the changed controllers.
+/// The project's rules a changeset breaks where it changed: `repo` is the
+/// repository its paths are from, `project` the root the rules' are.
+pub(crate) fn rule_flags(
+    rules: &e_review::rules::Rules,
+    cs: &e_review::Changeset,
+    repo: &std::path::Path,
+    project: &std::path::Path,
+) -> Vec<Flag> {
+    if rules.is_empty() {
+        return Vec::new();
+    }
+    e_review::rules::review_flags(
+        rules,
+        cs,
+        |p| {
+            let rel = repo.join(p);
+            let rel = rel.strip_prefix(project).ok()?;
+            Some(
+                rel.components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            )
+        },
+        |p| std::fs::read_to_string(repo.join(p)).ok(),
+    )
+}
+
 fn unchecked_lookup_flags(
     repo: &std::path::Path,
     project: &std::path::Path,
@@ -129,6 +157,8 @@ impl AppState {
             .map(|d| d.all_routes.clone())
             .unwrap_or_default();
         let project = self.root.get_untracked();
+        let rules = self.project_rules.get_untracked();
+        let rules_root = self.agent_project_root();
         let send = create_ext_action(self.cx, move |res: Result<(String, Vec<Flag>), String>| {
             busy.set(false);
             match res {
@@ -166,6 +196,7 @@ impl AppState {
                 let mut unchecked = unchecked_lookup_flags(&root, &project, &cs, &routes);
                 let example = std::fs::read_to_string(project.join(".env.example")).ok();
                 unchecked.extend(flags::env_example_flags(&cs, example.as_deref()));
+                unchecked.extend(rule_flags(&rules, &cs, &root, &rules_root));
                 (diff, unchecked)
             }))
         });

@@ -250,6 +250,17 @@ impl AppState {
                     "turn": self.review_turn.get_untracked().is_some(),
                     "summary": cs.summary(),
                     "files": cs.files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+                    "flags": self.review_flags.with_untracked(|f| f
+                        .iter()
+                        .map(|f| json!({
+                            "path": f.path,
+                            "line": f.line,
+                            "severity": format!("{:?}", f.severity),
+                            "code": f.code,
+                            "message": f.message,
+                        }))
+                        .collect::<Vec<_>>()),
+                    "ship": format!("{:?}", floem::reactive::untrack(|| self.review_ship_verdict()).readiness),
                 })
             })
         });

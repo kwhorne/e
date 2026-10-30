@@ -91,6 +91,7 @@ mod picker;
 mod platform;
 use e_laravel::policies;
 mod problems;
+mod project_rules;
 use e_laravel::querycomplete;
 mod recent;
 mod related_view;

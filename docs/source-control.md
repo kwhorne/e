@@ -119,6 +119,7 @@ above the diff, each with an **Ask** button that sends the finding to the agent:
 | `env-changed` | danger | a value changed in `.env` |
 | `env-outside-config` | warn | `env('…')` in code outside `config/` — `null` once the config is cached |
 | `env-example-missing` | warn | a config file starts reading a variable `.env.example` doesn't have |
+| `project-rule` | warn / danger | a change breaks one of the project's own rules — see [Project Rules](project-rules.md); an `error` rule is danger |
 | `auth-removed` | danger | an `authorize(`/`Gate::`/`can:` line **deleted** |
 | `unchecked-lookup` | warn | a changed controller method that hands a signed-in user a model by its id without checking it is theirs — see [Unchecked lookups](laravel.md#unchecked-lookups-idor) |
 | `unsafe` | danger | `shell_exec(`, `eval(`, `unsafe {` |

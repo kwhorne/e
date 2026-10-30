@@ -160,6 +160,19 @@ impl AppState {
         }
     }
 
+    /// The project, as the agent works on it: the project root, or where it
+    /// sits in the session's worktree.
+    pub(crate) fn agent_project_root(&self) -> PathBuf {
+        let root = self.root.get_untracked();
+        match (self.agent.worktree.get_untracked(), self.repo_root_path()) {
+            (Some(t), Some(repo)) => match root.strip_prefix(&repo) {
+                Ok(rel) => t.path.join(rel),
+                Err(_) => t.path,
+            },
+            _ => root,
+        }
+    }
+
     /// A line in the Cascade transcript — where someone looking at Cascade
     /// sees it, which a system notification may not be.
     fn cascade_note(&self, text: String, error: bool) {

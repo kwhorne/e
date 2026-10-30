@@ -765,6 +765,8 @@ pub struct AppState {
     laravel_tick: RwSignal<u32>,
     /// Completion rules the project and its packages declare in `ide.json`.
     pub ide_rules: RwSignal<Arc<Vec<crate::ide_json::Rule>>>,
+    /// The project's own rules, from `.e/rules.toml`.
+    pub project_rules: RwSignal<Arc<e_review::rules::Rules>>,
     /// References / symbol-search picker.
     pub picker: Picker,
     /// A planned workspace replace awaiting confirmation (`Some` shows the dialog).
@@ -1762,6 +1764,7 @@ impl AppState {
             laravel_reload_pending: RwSignal::new(false),
             laravel_tick: RwSignal::new(0),
             ide_rules: RwSignal::new(Arc::new(Vec::new())),
+            project_rules: RwSignal::new(Arc::new(e_review::rules::Rules::default())),
             picker: Picker::new(),
             replace_confirm: RwSignal::new(None),
             terminals: RwSignal::new(Vec::new()),
@@ -3749,6 +3752,16 @@ impl AppState {
         } else {
             text.to_string()
         };
+        // A new session's first message carries the project's rules.
+        let first = self.agent.chat.with_untracked(|c| {
+            !c.items
+                .iter()
+                .any(|i| matches!(i, e_agent::ChatItem::User { .. }))
+        });
+        let text = match self.rules_preamble().filter(|_| first) {
+            Some(rules) => format!("{rules}\n{text}"),
+            None => text,
+        };
         // Idle, it shows at once; queued, where the agent takes it up.
         self.agent.chat.update(|c| c.send(&shown, &text, busy));
         let send = move || {
@@ -4737,7 +4750,7 @@ impl AppState {
     }
 
     /// Re-run the lints for every open buffer (after project data changed).
-    fn relint_all(&self) {
+    pub(crate) fn relint_all(&self) {
         let ids: Vec<u64> = self
             .buffers
             .with_untracked(|bs| bs.iter().map(|b| b.id).collect());
@@ -7254,6 +7267,7 @@ impl AppState {
                 self.request_inlay_hints(buf.id);
                 eprintln!("e: saved {}", path.display());
                 self.laravel_touch(&path);
+                self.rules_touch(&path);
                 self.tests_after_save(&path, buf.file.language);
                 self.clear_caught_in(&path);
                 if let Some(uri) = buf.uri.as_ref() {
@@ -7399,9 +7413,18 @@ impl AppState {
             .and_then(|p| p.file_name())
             .map(|n| n == ".env")
             .unwrap_or(false);
-        if buf.large || !(php_like || is_env) {
+        // The project's own rules, on whatever files they cover, and the
+        // rules file itself.
+        let rules_rel = buf.file.path.as_ref().and_then(|p| self.rules_rel(p));
+        let rules_file = buf
+            .file
+            .path
+            .as_ref()
+            .is_some_and(|p| *p == self.root.get_untracked().join(e_review::rules::FILE));
+        if buf.large || !(php_like || is_env || rules_rel.is_some() || rules_file) {
             return;
         }
+        let project_rules = self.project_rules.get_untracked();
         let schema = self.db.schema_cache.get_untracked();
         let laravel = if self.laravel_lsp_running() {
             None
@@ -7430,6 +7453,7 @@ impl AppState {
             && laravel.is_none()
             && controller_routes.is_none()
             && env_rel.is_none()
+            && rules_rel.is_none()
         {
             return;
         }
@@ -7463,6 +7487,12 @@ impl AppState {
                         if let Some(rel) = &env_rel {
                             diags.extend(e_laravel::env_guard::lint(rel, &text));
                         }
+                    }
+                    if let Some(rel) = &rules_rel {
+                        diags.extend(crate::project_rules::lint(&project_rules, rel, &text));
+                    }
+                    if rules_file {
+                        diags.extend(crate::project_rules::lint_rules_file(&text));
                     }
                     if is_env {
                         if let Ok(example) = std::fs::read_to_string(root.join(".env.example")) {

@@ -214,6 +214,10 @@ The agent isn't just a terminal — it gets a local Unix socket
 - **Know the Laravel project** — routes, models with their live columns,
   Livewire components and Inertia pages in one answer, instead of grepping
   for them.
+- **Follow the project's rules** — the rules in `.e/rules.toml` start a
+  new Cascade session's first message, and any agent can read them, and
+  where the project breaks them, over the socket. See
+  [Project Rules](project-rules.md).
 - **Measure its own work** — replay a route before and after a change and get
   the verdict: faster or slower, fewer queries, N+1 gone.
 - **Query the database** through the editor's connection (consent-gated — you

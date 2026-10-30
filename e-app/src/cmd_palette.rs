@@ -25,6 +25,8 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("new-class", "Laravel: New Class… (every make: generator)"),
     ("route-search", "Laravel: Route Search…"),
     ("unused-views", "Laravel: Find Unused Views"),
+    ("project-rules", "Project Rules: Open"),
+    ("check-project-rules", "Project Rules: Check Project"),
     ("laravel-refresh", "Laravel: Refresh Project Data"),
     ("artisan", "Laravel: Artisan Command…"),
     (

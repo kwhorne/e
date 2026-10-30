@@ -188,6 +188,8 @@ impl Drop for App {
 /// A small Laravel project: a model, a controller, two tests that use them,
 /// a stand-in for PHPUnit that logs how it was called and reports one
 /// failure, and an empty log. Committed, so the gutter has a base.
+const INVOICE_CONTROLLER: &str = "<?php\n\nnamespace App\\Http\\Controllers\\Billing;\n\nclass InvoiceController extends Controller\n{\n    public function show(Invoice $invoice)\n    {\n        $this->authorize('view', $invoice);\n        return view('invoices.show');\n    }\n\n    public function update(Invoice $invoice)\n    {\n        return back();\n    }\n}\n";
+
 fn fixture(root: &Path) {
     std::fs::create_dir_all(root.join("database")).unwrap();
     let files: &[(&str, &str)] = &[
@@ -226,6 +228,30 @@ fn fixture(root: &Path) {
             "<?php\n\nreturn [\n\n    'postmark' => [\n        'token' => env('POSTMARK_TOKEN'),\n    ],\n\n];\n",
         ),
         (".env.example", "APP_NAME=Laravel\nPOSTMARK_TOKEN=\n"),
+        (
+            ".e/rules.toml",
+            r#"[[rule]]
+id = "no-raw-sql-in-models"
+says = "Models build queries with the query builder, never DB::raw"
+files = ["app/Models"]
+forbid = 'DB::raw'
+
+[[rule]]
+id = "billing-authorizes"
+says = "Every Billing controller action checks authorization"
+files = ["app/Http/Controllers/Billing"]
+require = '\$this->authorize\('
+per = "method"
+level = "error"
+
+[[rule]]
+says = "Money is integer cents, never a float"
+"#,
+        ),
+        (
+            "app/Http/Controllers/Billing/InvoiceController.php",
+            INVOICE_CONTROLLER,
+        ),
         (
             "resources/views/orders/index.blade.php",
             "<ul>\n@foreach ($orders as $order)\n    <li>{{ $order->id }}</li>\n@endforeach\n</ul>\n",
@@ -678,4 +704,107 @@ fn switching_branches_tells_which_migrations_the_database_lacks() {
         s["migration_drift"]["summary"],
         "The database has 2026_10_01_000000_add_sku_to_orders, which this branch doesn't"
     );
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn the_projects_rules_are_checked_as_you_type_and_at_the_ship_gate() {
+    let app = App::launch(json!({"format_on_save": false}));
+    // An agent reads them, and where the project breaks them now.
+    let rules = app.call(json!({"method": "rules", "check": true}));
+    assert_eq!(rules["rules"].as_array().map(Vec::len), Some(3), "{rules}");
+    assert_eq!(rules["rules"][2]["checked"], false, "{rules}");
+    assert_eq!(
+        rules["breaches"],
+        json!([{
+            "path": "app/Http/Controllers/Billing/InvoiceController.php",
+            "line": 13,
+            "col": 21,
+            "rule": "billing-authorizes",
+            "says": "Every Billing controller action checks authorization",
+        }]),
+        "{rules}"
+    );
+    let map = app.call(json!({"method": "laravel_map", "include": ["routes"]}));
+    assert_eq!(map["rules"][0]["id"], "no-raw-sql-in-models", "{map}");
+
+    // As you type.
+    let says = |app: &App, what: &str| {
+        app.call(json!({"method": "diagnostics"}))
+            .to_string()
+            .contains(what)
+    };
+    app.open("Order.php");
+    app.caret_to(6);
+    app.keys(&["cmd+right", "enter"]);
+    app.type_text("const SQL = DB::raw;");
+    app.keys(&["cmd+s"]);
+    app.wait_for("the save", |s| s["editor"]["dirty"] == false);
+    let start = Instant::now();
+    while !says(&app, "never DB::raw") {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no rule warning: {} in {}",
+            app.call(json!({"method": "diagnostics"})),
+            std::fs::read_to_string(app.file("app/Models/Order.php")).unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    // An agent changes update() and leaves it unauthorized: the review
+    // flags both, and the error rule blocks the ship gate.
+    std::fs::write(
+        app.file("app/Http/Controllers/Billing/InvoiceController.php"),
+        INVOICE_CONTROLLER.replace(
+            "        return back();",
+            "        $invoice->touch();\n        return back();",
+        ),
+    )
+    .unwrap();
+    app.command("session-review");
+    let state = app.wait_for("the rule flags", |s| {
+        s["review"]["flags"]
+            .as_array()
+            .is_some_and(|f| f.iter().filter(|f| f["code"] == "project-rule").count() == 2)
+    });
+    let flags: Vec<String> = state["review"]["flags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["code"] == "project-rule")
+        .map(|f| {
+            format!(
+                "{} {}:{} {}",
+                f["severity"], f["path"], f["line"], f["message"]
+            )
+        })
+        .collect();
+    assert_eq!(
+        flags,
+        [
+            r#""Danger" "app/Http/Controllers/Billing/InvoiceController.php":13 "Every Billing controller action checks authorization (billing-authorizes)""#,
+            r#""Warn" "app/Models/Order.php":7 "Models build queries with the query builder, never DB::raw (no-raw-sql-in-models)""#,
+        ],
+    );
+    assert_eq!(state["review"]["ship"], "Blocked", "{state:#}");
+    app.command("session-review");
+
+    // The rules file says where it doesn't read.
+    app.command("project-rules");
+    app.wait_for("the rules file", |s| {
+        s["editor"]["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with(".e/rules.toml"))
+    });
+    app.keys(&["cmd+down"]);
+    app.type_text("scope = 1");
+    let start = Instant::now();
+    while !says(&app, "unknown field `scope`") {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no error in the rules file: {}",
+            app.call(json!({"method": "diagnostics"}))
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }

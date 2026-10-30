@@ -64,6 +64,8 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "new-class" => state.open_artisan_palette_with("make:"),
         "route-search" => state.open_route_search(),
         "unused-views" => state.find_unused_views(),
+        "project-rules" => state.open_project_rules(),
+        "check-project-rules" => state.check_project_rules(),
         "install-intelephense" => state.install_lsp_by_id("intelephense"),
         "install-laravel-lsp" => state.install_lsp_by_id("laravel-lsp"),
         "eloquent-helper" => state.generate_eloquent_helper(),

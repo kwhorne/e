@@ -141,6 +141,10 @@ Two options keep the answer small on a large project:
 | `"include": ["routes", "models"]` | Only these sections (`routes`, `models`, `livewire`, `inertia`, `views`, `components`) |
 | `"filter": "order"` | Only entries whose name, URI, action, class or table contains this (any case) |
 
+When the project has [rules](project-rules.md), the answer carries them in
+`rules`, whatever was asked for. `{"method":"rules","check":true}` gives
+them, and where the project breaks them, in any project, Laravel or not.
+
 ## Measuring a route
 
 ```sh

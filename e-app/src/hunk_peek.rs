@@ -262,9 +262,11 @@ impl AppState {
             self.head_moved.set(modified);
             if seen.is_some() {
                 self.refresh_git_status();
-                // A checkout, pull or merge brings other migrations along.
+                // A checkout, pull or merge brings other migrations along,
+                // and maybe other rules.
                 if git::last_head_move(&reflog).is_some_and(|m| !git::is_own_commit(&m)) {
                     self.check_migration_drift();
+                    self.load_project_rules();
                 }
             }
         }

@@ -20,6 +20,8 @@ native code editor written in Rust.
 - [Debugging](debugging.md) — breakpoints, stepping, call stack & variables (DAP)
 - [Laravel](laravel.md) — PHP/Laravel-aware features
 - [Inertia / VILT](inertia.md) — Inertia page resolution, props & form contracts
+- [Project Rules](project-rules.md) — your team's own rules, checked as you
+  type, in review and at the ship gate, and told to agents
 
 ### Panels & tools
 - [Source Control](source-control.md) — staging, commits, blame, conflicts

@@ -30,7 +30,7 @@ pub struct Flag {
 }
 
 /// Added lines in a hunk, paired with their line number in the new file.
-fn added_lines(h: &Hunk) -> Vec<(usize, &str)> {
+pub(crate) fn added_lines(h: &Hunk) -> Vec<(usize, &str)> {
     let mut n = h.new_start;
     let mut out = Vec::new();
     for l in &h.lines {

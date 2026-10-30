@@ -542,6 +542,7 @@ fn app_view() -> impl IntoView {
         )
     });
     state.load_laravel();
+    state.load_project_rules();
     state.load_databases();
     state.load_db_schema_cache();
     // Runtime lenses follow the captured requests and the routes they match.

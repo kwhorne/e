@@ -25,7 +25,12 @@ fn debug(what: &str) {
 
 /// What a turn changed, from its two snapshots: `None` when it changed
 /// nothing. Blocking.
-fn receipt(root: &Path, before: String) -> Option<TurnReceipt> {
+fn receipt(
+    root: &Path,
+    before: String,
+    rules: &e_review::rules::Rules,
+    project: &Path,
+) -> Option<TurnReceipt> {
     let after = e_core::git::snapshot_tree(root).ok()?;
     if after == before {
         return None;
@@ -41,6 +46,7 @@ fn receipt(root: &Path, before: String) -> Option<TurnReceipt> {
             flags::scan_changeset(&cs)
                 .iter()
                 .chain(&flags::env_example_flags(&cs, example.as_deref()))
+                .chain(&crate::review::rule_flags(rules, &cs, root, project))
                 .filter(|f| f.severity >= Severity::Warn)
                 .count()
         })
@@ -103,8 +109,10 @@ impl AppState {
             return;
         };
         let chat = self.agent.chat;
+        let rules = self.project_rules.get_untracked();
+        let project = self.agent_project_root();
         self.spawn_bg(
-            move || receipt(&root, before),
+            move || receipt(&root, before, &rules, &project),
             move |r: Option<TurnReceipt>| {
                 debug(&format!(
                     "receipt {:?}",

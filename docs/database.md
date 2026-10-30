@@ -100,7 +100,9 @@ connected:
   [evaluates the PHP expression](laravel.md#evaluate-an-expression-where-it-is-written)
   at the caret.
 - **⌥⌘↵** — **Explain SQL under cursor**: runs the engine's `EXPLAIN` and flags
-  full table scans / missing indexes.
+  full table scans / missing indexes. On an Eloquent chain outside a SQL
+  string, it [explains the queries the chain runs](laravel.md#explain-the-query)
+  and offers the missing index as a migration.
 - **Suggest Index for SQL under cursor** (command palette) — runs `EXPLAIN`,
   and if it finds a problem, asks the AI agent to propose a Laravel migration
   that adds the missing index.

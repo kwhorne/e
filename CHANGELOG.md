@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Explain an Eloquent query.** In a Laravel project, `⌥⌘↵` on an Eloquent
+  chain, outside a SQL string, runs it (rolled back) and asks the database
+  for the plan of each select it ran, on the app's own connection. A chain
+  that hasn't run yet is explained without running. The end of the line says
+  whether every query used an index. Where one scans a whole table, the line
+  names the composite index its `where` and `order by` ask for, and `⌘.`
+  writes it as a migration.
+
+### Fixed
+
+- `⌘↵` with the caret after a line's `;` evaluates that line, rather than
+  finding nothing.
+
+### Added
+
 - **Evaluate an expression where it is written.** In a Laravel project, `⌘↵`
   outside a SQL string evaluates the PHP statement at the caret (or the
   selection) in the booted app. It runs in the file's namespace, with the

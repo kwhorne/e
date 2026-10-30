@@ -644,6 +644,42 @@ Some things can't be rolled back or faked: DDL on MySQL (it commits as it
 runs), HTTP calls, files written, and other connections. Evaluate those
 expressions with that in mind.
 
+### Explain the query
+
+**`⌥⌘↵`** on an Eloquent chain, outside a SQL string, explains the query
+instead of showing its value:
+
+```php
+return Order::where('status', 'paid')->where('created_at', '>', $since)->orderBy('total')->get();
+```
+
+```
+EXPLAIN ✖ Full table scan on `orders` (type=ALL, no index) — an index on orders (status, created_at) would cover it
+```
+
+**What gets explained:** the chain runs as an evaluation does, rolled back.
+The database's own plan is then asked for each select it ran, on the
+connection the app uses: `EXPLAIN` on MySQL, MariaDB and PostgreSQL,
+`EXPLAIN QUERY PLAN` on SQLite. A chain that ends before it runs (no
+`get()`, `first()` and so on) is explained without running at all.
+
+**The index it suggests** is the one the query's `where` and `order by` ask
+for:
+1. the columns compared with `=`, `in` or `is null`;
+2. then the one compared by range;
+3. or, if there is no range, the columns it sorts by.
+
+No index is suggested when one already starts with those columns, or when
+an `or` at the top of the `where` means no single index would serve.
+
+**`⌘.` on the line:**
+- **Explain: add an index on orders (status, created_at)** writes the
+  migration (`$table->index([...])` in `up()`, `dropIndex` in `down()`) and
+  opens it, where the [migration check](#before-a-migration-runs) shows the
+  SQL it will run.
+- **Evaluate: show the full result and its queries** shows every plan in the
+  Tinker panel.
+
 ## Tinker scratchpad
 
 Press `⌘⌥T` for a Tinker scratchpad: write PHP and press `⌘↵` to run it against

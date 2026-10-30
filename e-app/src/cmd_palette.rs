@@ -47,6 +47,10 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
         "evaluate",
         "Laravel: Evaluate Expression at Caret (⌘⏎ outside SQL)",
     ),
+    (
+        "explain-eloquent",
+        "Laravel: Explain Eloquent Query at Caret (⌥⌘⏎ outside SQL)",
+    ),
     ("explain-sql", "Database: Explain SQL Under Cursor (⌥⌘⏎)"),
     (
         "suggest-index",

@@ -33,6 +33,7 @@ pub mod move_class;
 pub mod phptools;
 pub mod policies;
 pub mod project_map;
+pub mod query_advice;
 pub mod querycomplete;
 pub mod relatedfiles;
 pub mod relations;

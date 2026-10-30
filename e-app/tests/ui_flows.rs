@@ -190,6 +190,42 @@ impl Drop for App {
 /// failure, and an empty log. Committed, so the gutter has a base.
 const INVOICE_CONTROLLER: &str = "<?php\n\nnamespace App\\Http\\Controllers\\Billing;\n\nclass InvoiceController extends Controller\n{\n    public function show(Invoice $invoice)\n    {\n        $this->authorize('view', $invoice);\n        return view('invoices.show');\n    }\n\n    public function update(Invoice $invoice)\n    {\n        return back();\n    }\n}\n";
 
+/// Enough of Laravel for `⌘⏎` and `⌥⌘⏎` to boot, evaluate and explain in: a
+/// query builder over the fixture's sqlite database.
+const STUB_APP: &str = r#"<?php
+namespace App\Support {
+    class Money { public static function cents(int $kr): int { return $kr * 100; } }
+}
+namespace Illuminate\Database\Query {
+    class Builder {
+        public array $wheres = [];
+        public function __construct(public string $table) {}
+        public function where($column, $value) { $this->wheres[] = "\"$column\" = '$value'"; return $this; }
+        public function toRawSql() { return "select * from \"{$this->table}\"" . ($this->wheres ? ' where ' . implode(' and ', $this->wheres) : ''); }
+        public function getConnection() { return \Illuminate\Support\Facades\DB::connection(); }
+    }
+}
+namespace Illuminate\Support\Facades {
+    class DB {
+        public static function table($table) { return new \Illuminate\Database\Query\Builder($table); }
+        public static function connection($name = null) {
+            return new class {
+                public function getName() { return 'sqlite'; }
+                public function getDriverName() { return 'sqlite'; }
+                public function select($sql) {
+                    $pdo = new \PDO('sqlite:' . __DIR__ . '/../database/database.sqlite');
+                    return $pdo->query($sql)->fetchAll(\PDO::FETCH_OBJ);
+                }
+            };
+        }
+    }
+    class Schema { public static function connection($name) { return new \stdClass(); } }
+}
+namespace {
+    function config($key) { return $key === 'database.default' ? 'sqlite' : ['driver' => 'sqlite', 'database' => __DIR__ . '/../database/database.sqlite']; }
+}
+"#;
+
 fn fixture(root: &Path) {
     std::fs::create_dir_all(root.join("database")).unwrap();
     let files: &[(&str, &str)] = &[
@@ -229,13 +265,14 @@ fn fixture(root: &Path) {
         ),
         (".env.example", "APP_NAME=Laravel\nPOSTMARK_TOKEN=\n"),
         // Enough of an app for `⌘⏎` to boot and evaluate in.
-        (
-            "vendor/autoload.php",
-            "<?php\nnamespace App\\Support { class Money { public static function cents(int $kr): int { return $kr * 100; } } }\nnamespace { function config($key) { return $key === 'database.default' ? 'sqlite' : ['driver' => 'sqlite', 'database' => __DIR__ . '/../database/database.sqlite']; } }\n",
-        ),
+        ("vendor/autoload.php", STUB_APP),
         (
             "bootstrap/app.php",
             "<?php\nreturn new class { public function make($c) { return new class { public function bootstrap() {} }; } public function environment($env) { return false; } };\n",
+        ),
+        (
+            "app/Services/Retries.php",
+            "<?php\n\nnamespace App\\Services;\n\nuse Illuminate\\Support\\Facades\\DB;\n\nclass Retries\n{\n    public function waiting()\n    {\n        return DB::table('failed_jobs')->where('queue', 'default');\n    }\n}\n",
         ),
         (
             "app/Services/Prices.php",
@@ -880,4 +917,48 @@ fn an_expression_is_evaluated_where_it_is_written() {
     app.keys(&["cmd+enter"]);
     std::thread::sleep(Duration::from_millis(500));
     assert!(evals(&app.state()).as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn a_query_is_explained_and_its_index_added() {
+    let app = App::launch(json!({"format_on_save": false}));
+    app.open("Retries.php");
+    app.caret_to(11);
+    app.keys(&["cmd+right", "cmd+alt+enter"]);
+    let evals = |s: &Value| s["editor"]["evals"].clone();
+    let state = app.wait_for("the plan", |s| {
+        evals(s).as_array().is_some_and(|e| {
+            e.iter()
+                .any(|e| e[1].as_str().is_some_and(|l| l.starts_with("EXPLAIN")))
+        })
+    });
+    assert_eq!(
+        evals(&state)[0],
+        json!([11, "EXPLAIN ✖ Full scan: SCAN failed_jobs — an index on failed_jobs (queue) would cover it"]),
+        "{state:#}"
+    );
+    let actions = app.call(json!({"method": "code_actions"}));
+    assert!(
+        actions
+            .to_string()
+            .contains("Explain: add an index on failed_jobs (queue) (new migration)"),
+        "{actions}"
+    );
+    let applied = app.call(json!({
+        "method": "apply_code_action",
+        "title": "Explain: add an index on failed_jobs (queue)",
+    }));
+    assert_eq!(applied["ok"], true, "{applied}");
+    let state = app.wait_for("the migration open", |s| {
+        s["editor"]["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("_add_queue_index_to_failed_jobs_table.php"))
+    });
+    let path = state["editor"]["path"].as_str().unwrap();
+    let migration = std::fs::read_to_string(path).unwrap();
+    assert!(
+        migration.contains("Schema::table('failed_jobs', function (Blueprint $table) {\n            $table->index(['queue']);"),
+        "{migration}"
+    );
 }

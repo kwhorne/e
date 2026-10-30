@@ -66,7 +66,7 @@ The find bar has toggles for **case-sensitive** (`Aa`), **whole-word** (`W`) and
 | `⌘2`     | Toggle Source Control panel |
 | `⌘3`     | Toggle database panel |
 | `⌘↵`     | Run SQL under cursor (in a PHP query string); elsewhere in a Laravel project's PHP, evaluate the expression at the caret |
-| `⌥⌘↵`    | Explain SQL under cursor (flags full scans / missing indexes) |
+| `⌥⌘↵`    | Explain SQL under cursor (flags full scans / missing indexes); on an Eloquent chain, explain its queries and offer the missing index |
 | `⌘T`     | Toggle terminal |
 | `⌘⇧B`    | Run task |
 | `⌘L`     | Toggle agent panel |

@@ -26,6 +26,8 @@ pub struct Evaluated {
     pub ms: f64,
     /// What it printed, if anything.
     pub printed: String,
+    /// The database's plan for each query, when asked to explain.
+    pub explains: Vec<crate::query_advice::Explained>,
 }
 
 impl Evaluated {
@@ -94,7 +96,13 @@ pub fn statement_at(text: &str, offset: usize) -> Option<Range<usize>> {
         Brace,
     }
     let b = text.as_bytes();
-    let offset = offset.min(b.len());
+    let mut offset = offset.min(b.len());
+    // After a line's `;` (and the spaces after it) is still that line's
+    // statement, not the next one.
+    let before = text[..offset].trim_end_matches([' ', '\t']);
+    if before.ends_with(';') {
+        offset = before.len() - 1;
+    }
     // Each frame, and where the statement in it began.
     let mut stack: Vec<(Frame, usize)> = vec![(Frame::Brace, 0)];
     let mut i = 0;
@@ -313,8 +321,9 @@ pub fn context_of(file: &str) -> String {
 const MARK: &str = "__E_EVAL__";
 
 /// The PHP that boots the app at `root` and evaluates `code` in `context`
-/// (a file's namespace and imports), answering with one JSON line.
-pub fn runner(root: &Path, context: &str, code: &str) -> String {
+/// (a file's namespace and imports), answering with one JSON line — with,
+/// when `explain`, the database's plan for each query it ran.
+pub fn runner(root: &Path, context: &str, code: &str, explain: bool) -> String {
     let quoted = |p: &Path| {
         format!(
             "'{}'",
@@ -334,6 +343,7 @@ pub fn runner(root: &Path, context: &str, code: &str) -> String {
         .replace("{autoload}", &quoted(&root.join("vendor/autoload.php")))
         .replace("{bootstrap}", &quoted(&root.join("bootstrap/app.php")))
         .replace("{mark}", MARK)
+        .replace("{explain}", if explain { "true" } else { "false" })
         .replace("{source}", &format!("<<<'{tag}'\n{source}\n{tag}"))
 }
 
@@ -456,12 +466,86 @@ function __e_sql($builder): string {
     if (method_exists($base, 'toRawSql')) {
         return $base->toRawSql();
     }
-    $sql = $base->toSql();
-    foreach ($base->getBindings() as $binding) {
-        $value = is_numeric($binding) ? (string) $binding : "'" . str_replace("'", "''", (string) $binding) . "'";
-        $sql = preg_replace('/\\?/', $value, $sql, 1);
+    return __e_bind($base->toSql(), $base->getBindings());
+}
+
+// `$sql` with its `?` replaced by `$bindings`, for a Laravel before
+// `toRawSql()`.
+function __e_bind(string $sql, array $bindings): string {
+    foreach ($bindings as $binding) {
+        if ($binding instanceof \DateTimeInterface) {
+            $binding = $binding->format('Y-m-d H:i:s');
+        }
+        $value = is_int($binding) || is_float($binding) ? (string) $binding
+            : ($binding === null ? 'null' : (is_bool($binding) ? (string) (int) $binding
+            : "'" . str_replace("'", "''", (string) $binding) . "'"));
+        $sql = preg_replace('/\\?/', str_replace(['\\', '$'], ['\\\\', '\\$'], $value), $sql, 1);
     }
     return $sql;
+}
+
+// The plan of each select `$value` (a query builder) and `$queries` (what
+// ran) amount to, on the connection each is for, with the indexes the tables
+// they read already have.
+function __e_explain($value, array $queries): array {
+    $todo = [];
+    $base = $value;
+    if ($base instanceof \Illuminate\Database\Eloquent\Relations\Relation) {
+        $base = $base->getQuery();
+    }
+    if ($base instanceof \Illuminate\Database\Eloquent\Builder) {
+        $base = $base->toBase();
+    }
+    if ($base instanceof \Illuminate\Database\Query\Builder) {
+        $todo[] = [__e_sql($base), $base->getConnection()->getName()];
+    }
+    foreach ($queries as $q) {
+        if (preg_match('/^\s*select\b/i', $q[0])) {
+            $todo[] = [$q[0], $q[2] ?? null];
+        }
+    }
+    $out = [];
+    $seen = [];
+    foreach ($todo as [$sql, $name]) {
+        if (isset($seen[$sql]) || count($out) >= 5) {
+            continue;
+        }
+        $seen[$sql] = true;
+        $db = \Illuminate\Support\Facades\DB::connection($name);
+        $engine = match ($db->getDriverName()) {
+            'sqlite' => 'sqlite',
+            'pgsql' => 'postgres',
+            'mysql', 'mariadb' => 'mysql',
+            default => $db->getDriverName(),
+        };
+        $entry = ['sql' => $sql, 'engine' => $engine, 'columns' => [], 'rows' => [], 'indexes' => [], 'error' => null];
+        try {
+            foreach ($db->select(($engine === 'sqlite' ? 'EXPLAIN QUERY PLAN ' : 'EXPLAIN ') . $sql) as $row) {
+                $row = (array) $row;
+                if (!$entry['columns']) {
+                    $entry['columns'] = array_map('strval', array_keys($row));
+                }
+                $entry['rows'][] = array_map(fn ($v) => $v === null ? null : (string) $v, array_values($row));
+            }
+        } catch (\Throwable $e) {
+            $entry['error'] = $e->getMessage();
+        }
+        if (preg_match_all('/\b(?:from|join)\s+[`"\[]?([A-Za-z0-9_]+)/i', $sql, $m)) {
+            $schema = \Illuminate\Support\Facades\Schema::connection($name);
+            foreach (array_unique($m[1]) as $table) {
+                try {
+                    if (method_exists($schema, 'getIndexes')) {
+                        foreach ($schema->getIndexes($table) as $index) {
+                            $entry['indexes'][] = [$table, $index['columns']];
+                        }
+                    }
+                } catch (\Throwable $e) {
+                }
+            }
+        }
+        $out[] = $entry;
+    }
+    return $out;
 }
 
 function __e_full($v): string {
@@ -488,12 +572,10 @@ try {
     \Illuminate\Support\Facades\DB::listen(function ($q) use (&$__eQueries) {
         $sql = $q->sql;
         try {
-            if (method_exists($q, 'toRawSql')) {
-                $sql = $q->toRawSql();
-            }
+            $sql = method_exists($q, 'toRawSql') ? $q->toRawSql() : __e_bind($q->sql, $q->bindings);
         } catch (\Throwable $e) {
         }
-        $__eQueries[] = [$sql, (float) $q->time];
+        $__eQueries[] = [$sql, (float) $q->time, $q->connectionName];
     });
     $__eConnection = \Illuminate\Support\Facades\DB::connection();
     $__eConnection->beginTransaction();
@@ -521,6 +603,14 @@ try {
 $__eOut['printed'] = (string) ob_get_clean();
 $__eOut['ms'] = (hrtime(true) - $__eStart) / 1e6;
 $__eOut['queries'] = $__eQueries;
+if ({explain}) {
+    // Still in the transaction: the plans are of what it saw.
+    try {
+        $__eOut['explains'] = __e_explain($__eValue ?? null, $__eQueries);
+    } catch (\Throwable $e) {
+        $__eOut['explains'] = [];
+    }
+}
 try {
     while ($__eConnection && $__eConnection->transactionLevel() > 0) {
         $__eConnection->rollBack();
@@ -559,16 +649,76 @@ pub fn read_answer(stdout: &str, stderr: &str) -> Result<Evaluated, String> {
             .unwrap_or_default(),
         ms: v.get("ms").and_then(|m| m.as_f64()).unwrap_or(0.0),
         printed: s("printed"),
+        explains: v
+            .get("explains")
+            .and_then(|e| e.as_array())
+            .map(|es| es.iter().map(explained).collect())
+            .unwrap_or_default(),
     })
+}
+
+/// One plan from the runner's answer.
+fn explained(v: &serde_json::Value) -> crate::query_advice::Explained {
+    let strings = |v: Option<&serde_json::Value>| -> Vec<String> {
+        v.and_then(|c| c.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    crate::query_advice::Explained {
+        sql: v["sql"].as_str().unwrap_or("").to_string(),
+        engine: v["engine"].as_str().unwrap_or("").to_string(),
+        columns: strings(v.get("columns")),
+        rows: v["rows"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .map(|r| {
+                        r.as_array()
+                            .map(|cells| {
+                                cells
+                                    .iter()
+                                    .map(|c| c.as_str().map(str::to_string))
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        indexes: v["indexes"]
+            .as_array()
+            .map(|ix| {
+                ix.iter()
+                    .filter_map(|i| Some((i.get(0)?.as_str()?.to_string(), strings(i.get(1)))))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        error: v["error"].as_str().map(str::to_string),
+    }
 }
 
 /// Evaluate `code` in the app at `root`, as `file` (the text of the file it
 /// comes from) would see it. Blocking: off the UI thread.
 pub fn run(root: &Path, file: &str, code: &str) -> Result<Evaluated, String> {
+    run_as(root, file, code, false)
+}
+
+/// [`run`], and the database's plan for each select it ran — or, for a
+/// query builder that hasn't run, the one it would.
+pub fn explain(root: &Path, file: &str, code: &str) -> Result<Evaluated, String> {
+    run_as(root, file, code, true)
+}
+
+fn run_as(root: &Path, file: &str, code: &str, explain: bool) -> Result<Evaluated, String> {
     static RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let script = std::env::temp_dir().join(format!("e-eval-{}-{n}.php", std::process::id()));
-    std::fs::write(&script, runner(root, &context_of(file), code)).map_err(|e| e.to_string())?;
+    std::fs::write(&script, runner(root, &context_of(file), code, explain))
+        .map_err(|e| e.to_string())?;
     let out = crate::phptools::php(
         root,
         &[&script.to_string_lossy()],
@@ -628,6 +778,12 @@ class OrderController extends Controller
         assert_eq!(at(CONTROLLER, "touch"), "$o->touch()");
         // No `;` before the block ends.
         assert_eq!(at(CONTROLLER, "$x = 1"), "$x = 1");
+        // The caret after a line's `;`: that line's statement.
+        let end = CONTROLLER.find("});").unwrap() + 3;
+        assert_eq!(
+            &CONTROLLER[statement_at(CONTROLLER, end).unwrap()],
+            at(CONTROLLER, "whereBelongsTo")
+        );
     }
 
     #[test]

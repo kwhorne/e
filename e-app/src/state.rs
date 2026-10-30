@@ -7014,6 +7014,15 @@ impl AppState {
                 command: Some(serde_json::json!({ "e": action, "line": sl })),
                 server: "e".to_string(),
             };
+            if let Some(advice) = self.eval_at(sl as usize).and_then(|e| e.advice) {
+                local.push(item(
+                    &format!(
+                        "Explain: add an index on {} (new migration)",
+                        advice.describe()
+                    ),
+                    "eval.index",
+                ));
+            }
             local.push(item(
                 "Evaluate: show the full result and its queries",
                 "eval.show",
@@ -7144,12 +7153,12 @@ impl AppState {
             let id = command.get("id").and_then(|v| v.as_str()).unwrap_or("");
             match command.get("e").and_then(|v| v.as_str()) {
                 Some("runtime.open") => self.runtime_lens_open(id),
-                Some(action @ ("eval.show" | "eval.clear")) => {
+                Some(action @ ("eval.show" | "eval.clear" | "eval.index")) => {
                     let line = command.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    if action == "eval.show" {
-                        self.show_eval(line);
-                    } else {
-                        self.clear_eval(line);
+                    match action {
+                        "eval.show" => self.show_eval(line),
+                        "eval.index" => self.add_advised_index(line),
+                        _ => self.clear_eval(line),
                     }
                 }
                 Some("runtime.fix") => self.runtime_fix(id),

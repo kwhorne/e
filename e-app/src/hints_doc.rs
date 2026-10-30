@@ -85,10 +85,10 @@ impl HintsDoc {
 
     /// The value of the expression evaluated on `line`, at the end of it.
     fn eval_on(&self, line: usize) -> Option<PhantomText> {
-        let (text, error) = self.evals.with_untracked(|m| {
+        let (text, error, warn) = self.evals.with_untracked(|m| {
             m.iter()
                 .find(|e| e.line == line)
-                .map(|e| (e.label.clone(), e.error))
+                .map(|e| (e.label.clone(), e.error, e.warn))
         })?;
         let rope = self.inner.rope_text();
         let content = rope.line_content(line);
@@ -98,7 +98,13 @@ impl HintsDoc {
             affinity: None,
             text: format!("   {text}"),
             font_size: None,
-            fg: Some(if error { theme::error() } else { theme::info() }),
+            fg: Some(if error {
+                theme::error()
+            } else if warn {
+                theme::warning()
+            } else {
+                theme::info()
+            }),
             bg: None,
             under_line: None,
         })

@@ -226,6 +226,10 @@ impl AppState {
                 "tests": tests,
                 "changes": changes,
                 "exceptions": exceptions,
+                "evals": b.evals.with_untracked(|m| m
+                    .iter()
+                    .map(|e| (e.line + 1, e.label.clone()))
+                    .collect::<Vec<_>>()),
             })
         });
 

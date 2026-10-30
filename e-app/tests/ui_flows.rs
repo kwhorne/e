@@ -228,6 +228,19 @@ fn fixture(root: &Path) {
             "<?php\n\nreturn [\n\n    'postmark' => [\n        'token' => env('POSTMARK_TOKEN'),\n    ],\n\n];\n",
         ),
         (".env.example", "APP_NAME=Laravel\nPOSTMARK_TOKEN=\n"),
+        // Enough of an app for `⌘⏎` to boot and evaluate in.
+        (
+            "vendor/autoload.php",
+            "<?php\nnamespace App\\Support { class Money { public static function cents(int $kr): int { return $kr * 100; } } }\nnamespace { function config($key) { return $key === 'database.default' ? 'sqlite' : ['driver' => 'sqlite', 'database' => __DIR__ . '/../database/database.sqlite']; } }\n",
+        ),
+        (
+            "bootstrap/app.php",
+            "<?php\nreturn new class { public function make($c) { return new class { public function bootstrap() {} }; } public function environment($env) { return false; } };\n",
+        ),
+        (
+            "app/Services/Prices.php",
+            "<?php\n\nnamespace App\\Services;\n\nuse App\\Support\\Money;\n\nclass Prices\n{\n    public function total(): int\n    {\n        return Money::cents(12)\n            + 1;\n    }\n}\n",
+        ),
         (
             ".e/rules.toml",
             r#"[[rule]]
@@ -807,4 +820,64 @@ fn the_projects_rules_are_checked_as_you_type_and_at_the_ship_gate() {
         );
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn an_expression_is_evaluated_where_it_is_written() {
+    let app = App::launch(json!({"format_on_save": false}));
+    app.open("Prices.php");
+    // On the statement's first line; it ends on the next.
+    app.caret_to(11);
+    app.keys(&["cmd+right", "cmd+enter"]);
+    let evals = |s: &Value| s["editor"]["evals"].clone();
+    let state = app.wait_for("the value", |s| {
+        evals(s).as_array().is_some_and(|e| {
+            e.iter()
+                .any(|e| e[1].as_str().is_some_and(|l| l.starts_with("⇒")))
+        })
+    });
+    let label = evals(&state)[0][1].as_str().unwrap().to_string();
+    assert_eq!(evals(&state)[0][0], 12, "{state:#}");
+    assert!(label.starts_with("⇒ 1201 · "), "{label}");
+
+    // All of it in the Tinker panel.
+    app.caret_to(12);
+    let actions = app.call(json!({"method": "code_actions"}));
+    assert!(
+        actions
+            .to_string()
+            .contains("Evaluate: show the full result and its queries"),
+        "{actions}"
+    );
+    let applied =
+        app.call(json!({"method": "apply_code_action", "title": "Evaluate: show the full result"}));
+    assert_eq!(applied["ok"], true, "{applied}");
+    app.wait_for("the Tinker panel", |s| {
+        s["open"]
+            .as_array()
+            .is_some_and(|o| o.iter().any(|p| p == "tinker"))
+    });
+    app.command("tinker");
+
+    // It moves with its line, and goes when the line changes.
+    app.caret_to(9);
+    app.keys(&["cmd+right", "enter"]);
+    app.type_text("// a note");
+    app.keys(&["escape"]);
+    app.wait_for("the value one line down", |s| evals(s)[0][0] == 13);
+    app.keys(&["down", "down", "down", "cmd+right"]);
+    app.wait_for("the caret on the value's line", |s| {
+        s["editor"]["line"] == 13
+    });
+    app.type_text(" + 2");
+    app.wait_for("the value gone", |s| {
+        evals(s).as_array().is_some_and(Vec::is_empty)
+    });
+
+    // A declaration isn't a value.
+    app.caret_to(9);
+    app.keys(&["cmd+enter"]);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(evals(&app.state()).as_array().is_some_and(Vec::is_empty));
 }

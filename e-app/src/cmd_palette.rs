@@ -43,6 +43,10 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ),
     ("toggle-database", "Toggle Database Panel"),
     ("run-sql", "Database: Run SQL Under Cursor (⌘⏎)"),
+    (
+        "evaluate",
+        "Laravel: Evaluate Expression at Caret (⌘⏎ outside SQL)",
+    ),
     ("explain-sql", "Database: Explain SQL Under Cursor (⌥⌘⏎)"),
     (
         "suggest-index",

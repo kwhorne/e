@@ -55,9 +55,12 @@ pub struct HintsDoc {
     annotations: RwSignal<Vec<(usize, String)>>,
     /// `(line, text)` shown in red at the end of the line: exceptions.
     alerts: RwSignal<Vec<(usize, String)>>,
+    /// Values of evaluated expressions, at the end of their lines.
+    evals: RwSignal<Vec<crate::inline_eval::EvalMark>>,
 }
 
 impl HintsDoc {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         inner: Rc<TextDocument>,
         hints: RwSignal<Vec<(u32, u32, String)>>,
@@ -66,6 +69,7 @@ impl HintsDoc {
         path: Option<PathBuf>,
         annotations: RwSignal<Vec<(usize, String)>>,
         alerts: RwSignal<Vec<(usize, String)>>,
+        evals: RwSignal<Vec<crate::inline_eval::EvalMark>>,
     ) -> Self {
         Self {
             inner,
@@ -75,7 +79,29 @@ impl HintsDoc {
             path,
             annotations,
             alerts,
+            evals,
         }
+    }
+
+    /// The value of the expression evaluated on `line`, at the end of it.
+    fn eval_on(&self, line: usize) -> Option<PhantomText> {
+        let (text, error) = self.evals.with_untracked(|m| {
+            m.iter()
+                .find(|e| e.line == line)
+                .map(|e| (e.label.clone(), e.error))
+        })?;
+        let rope = self.inner.rope_text();
+        let content = rope.line_content(line);
+        Some(PhantomText {
+            kind: PhantomTextKind::InlayHint,
+            col: content.trim_end_matches(['\n', '\r']).len(),
+            affinity: None,
+            text: format!("   {text}"),
+            font_size: None,
+            fg: Some(if error { theme::error() } else { theme::info() }),
+            bg: None,
+            under_line: None,
+        })
     }
 
     /// The exception on `line`, in red at the end of it.
@@ -184,6 +210,9 @@ impl DocumentPhantom for HintsDoc {
         }
         if let Some(alert) = self.alert_on(line) {
             pl.text.push(alert);
+        }
+        if let Some(value) = self.eval_on(line) {
+            pl.text.push(value);
         }
 
         // Inline AI suggestion ("ghost text") at the cursor, rendered grey.

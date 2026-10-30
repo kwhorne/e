@@ -96,6 +96,9 @@ syntax-highlighted. With the cursor inside such a string and a database
 connected:
 
 - **⌘↵** — **Run SQL under cursor**: runs the query and shows the result grid.
+  Outside a SQL string in a Laravel project, `⌘↵` instead
+  [evaluates the PHP expression](laravel.md#evaluate-an-expression-where-it-is-written)
+  at the caret.
 - **⌥⌘↵** — **Explain SQL under cursor**: runs the engine's `EXPLAIN` and flags
   full table scans / missing indexes.
 - **Suggest Index for SQL under cursor** (command palette) — runs `EXPLAIN`,

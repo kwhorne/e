@@ -63,6 +63,7 @@ mod grove_state;
 mod grove_view;
 mod hints_doc;
 mod hunk_peek;
+mod inline_eval;
 use e_laravel::ide_json;
 use e_laravel::inertia;
 use e_laravel::intentions;

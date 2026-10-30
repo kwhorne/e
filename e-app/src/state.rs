@@ -358,6 +358,8 @@ pub struct Buffer {
     /// Exceptions the running app logged on lines of this file, `(line, text)`,
     /// shown in red at the end of the line.
     pub alerts: RwSignal<Vec<(usize, String)>>,
+    /// Expressions evaluated with `⌘⏎`, their values at the end of the line.
+    pub evals: RwSignal<Vec<crate::inline_eval::EvalMark>>,
     /// The same exceptions as diagnostics, merged with the language servers'.
     pub caught: Rc<RefCell<Vec<Diagnostic>>>,
     /// Branching undo history (see [`e_core::undotree`]).
@@ -4055,6 +4057,7 @@ impl AppState {
             migration_risks: Rc::new(RefCell::new(Vec::new())),
             annotations: RwSignal::new(Vec::new()),
             alerts: RwSignal::new(Vec::new()),
+            evals: RwSignal::new(Vec::new()),
             caught: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
@@ -6695,6 +6698,7 @@ impl AppState {
                 app.request_ghost(id);
                 // Laravel query-builder lint (unknown columns).
                 app.refresh_lint(id);
+                app.follow_evals(id);
             });
         }
 
@@ -6743,6 +6747,7 @@ impl AppState {
             migration_risks: Rc::new(RefCell::new(Vec::new())),
             annotations: RwSignal::new(Vec::new()),
             alerts: RwSignal::new(Vec::new()),
+            evals: RwSignal::new(Vec::new()),
             caught: Rc::new(RefCell::new(Vec::new())),
             undo,
             undo_nav,
@@ -7001,6 +7006,20 @@ impl AppState {
                 }
             }
         }
+        // On a line with an evaluated expression: all of it, or away.
+        if self.eval_at(sl as usize).is_some() {
+            let item = |title: &str, action: &str| e_lsp::CodeActionItem {
+                title: title.to_string(),
+                edits: Vec::new(),
+                command: Some(serde_json::json!({ "e": action, "line": sl })),
+                server: "e".to_string(),
+            };
+            local.push(item(
+                "Evaluate: show the full result and its queries",
+                "eval.show",
+            ));
+            local.push(item("Evaluate: clear the result", "eval.clear"));
+        }
         // On a line with a runtime lens: the request behind it.
         let lens = buf.file.path.as_ref().and_then(|p| {
             let line = text.lines().nth(sl as usize)?;
@@ -7125,6 +7144,14 @@ impl AppState {
             let id = command.get("id").and_then(|v| v.as_str()).unwrap_or("");
             match command.get("e").and_then(|v| v.as_str()) {
                 Some("runtime.open") => self.runtime_lens_open(id),
+                Some(action @ ("eval.show" | "eval.clear")) => {
+                    let line = command.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    if action == "eval.show" {
+                        self.show_eval(line);
+                    } else {
+                        self.clear_eval(line);
+                    }
+                }
                 Some("runtime.fix") => self.runtime_fix(id),
                 Some("runtime.test") => self.runtime_test(id),
                 Some(action @ ("caught.fix" | "caught.dismiss" | "job.retry" | "job.fix")) => {

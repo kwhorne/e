@@ -20,6 +20,7 @@ pub mod failed_jobs;
 pub mod heal;
 pub mod ide_json;
 pub mod inertia;
+pub mod inline_eval;
 pub mod intentions;
 pub mod keys;
 pub mod laravel;

@@ -595,6 +595,55 @@ hit **Measure again**: `e` replays the request and shows a before/after
 
 For Inertia/VILT projects, see [Inertia & the VILT stack](inertia.md).
 
+## Evaluate an expression where it is written
+
+Put the caret on a PHP expression in a Laravel project, outside a SQL
+string, and press **`⌘↵`**:
+
+```php
+$orders = Order::whereBelongsTo($user)->withSum('items', 'price')->first();
+```
+
+The value shows at the end of the line, with the queries it ran and how long
+it took:
+
+```
+⇒ App\Models\Order #14 {id: 14, total: 990, …} · 2 queries · 3.1 ms
+```
+
+- **What runs.** The whole statement the caret is in runs, across lines. If
+  you select something, the selection runs instead. `return`, `echo` and a
+  trailing `;` are dropped, and an assignment gives what it assigns.
+- **How it runs.** The code runs in the booted app as the file would see it:
+  in the file's namespace, with its `use` imports.
+- **What the value looks like:**
+  - a model shows its key and first attributes;
+  - a collection shows its count and first items;
+  - a paginator shows how many of how many;
+  - a query builder that hasn't run shows the SQL it would run, with its
+    bindings in place.
+- **When it fails.** A variable that only exists inside the method
+  (`$user`, `$this`) comes back as an error. Select the part that stands on
+  its own.
+
+`⌘.` on the line has **Evaluate: show the full result and its queries**,
+which puts the whole value and every query in the Tinker panel, and
+**Evaluate: clear the result**. A result follows its line as the code above
+it changes, and goes when its own line changes.
+
+**Nothing you evaluate sticks:**
+- What it writes is rolled back. It runs in a transaction on the default
+  connection, so `$order->update(…)` changes nothing.
+- Mail, notifications and queued jobs are faked.
+- `e` won't run it when the app boots as production, or when its default
+  database isn't on this machine or has `prod` or `live` in its name. The
+  check reads the configuration the app actually loaded, so a cached
+  config counts as well as `.env`.
+
+Some things can't be rolled back or faked: DDL on MySQL (it commits as it
+runs), HTTP calls, files written, and other connections. Evaluate those
+expressions with that in mind.
+
 ## Tinker scratchpad
 
 Press `⌘⌥T` for a Tinker scratchpad: write PHP and press `⌘↵` to run it against

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Evaluate an expression where it is written.** In a Laravel project, `⌘↵`
+  outside a SQL string evaluates the PHP statement at the caret (or the
+  selection) in the booted app. It runs in the file's namespace, with the
+  file's imports. The value shows at the end of the line, with the queries it
+  ran and its time. `⌘.` there shows it all in the Tinker panel.
+
+  Nothing it does sticks: writes are rolled back, and mail, notifications
+  and queued jobs are faked. It refuses to run against an app that boots as
+  production, or one whose database isn't on this machine.
+
 ## [0.17.0] - 2026-10-30
 
 ### Added

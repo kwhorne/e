@@ -417,6 +417,9 @@ fn app_view() -> impl IntoView {
     // Remember this project so the next bare launch reopens it.
     crate::config::save_last_project(&root);
     let state = AppState::new(Scope::current(), root);
+    floem::file_action::on_dialog_unavailable(|| {
+        AppState::notify("The system file dialog didn't open: macOS couldn't start its panel")
+    });
     crate::snippets::set_user(crate::config::load_user_snippets());
     crate::keymap::load(crate::config::load_user_keybindings());
 

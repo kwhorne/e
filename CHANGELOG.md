@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`⌘O` quit the app on macOS 27.2.** `e` stored a setting
+  (`NSTreatUnknownArgumentsAsOpen`) in its defaults that macOS's open-panel
+  service reads, and since 27.2 the service crashes on it as it launches, so
+  every file dialog took `e` down. The setting now lives only in the running
+  app, and the stored one is removed at launch. A file dialog the system
+  can't open now says so instead of quitting.
+
 ## [0.19.0] - 2026-10-30
 
 ### Changed

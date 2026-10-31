@@ -71,11 +71,24 @@ pub fn install() {
     // handed back as "open this folder", which opens another instance, which
     // gets *its* argument back… Arguments are ours to read; documents come
     // from LaunchServices as Apple Events, which this doesn't affect.
+    //
+    // Registered, not stored: the open panel's service runs with our defaults,
+    // and on macOS 27.2 a stored `NSTreatUnknownArgumentsAsOpen` crashes it as
+    // it launches — `openPanel` returns nil and ⌘O took the app down. Up to
+    // 0.19.0 we stored it, so it is removed from the stored defaults too.
     unsafe {
-        if let Some(defaults_class) = AnyClass::get(c"NSUserDefaults") {
+        if let (Some(defaults_class), Some(number), Some(dictionary)) = (
+            AnyClass::get(c"NSUserDefaults"),
+            AnyClass::get(c"NSNumber"),
+            AnyClass::get(c"NSDictionary"),
+        ) {
             let defaults: *mut AnyObject = msg_send![defaults_class, standardUserDefaults];
             let key = NSString::from_str("NSTreatUnknownArgumentsAsOpen");
-            let _: () = msg_send![defaults, setBool: false, forKey: &*key];
+            let no: *mut AnyObject = msg_send![number, numberWithBool: false];
+            let registered: *mut AnyObject =
+                msg_send![dictionary, dictionaryWithObject: no, forKey: &*key];
+            let _: () = msg_send![defaults, registerDefaults: registered];
+            let _: () = msg_send![defaults, removeObjectForKey: &*key];
         }
     }
     let app = NSApplication::sharedApplication(mtm);

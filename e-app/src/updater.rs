@@ -10,9 +10,18 @@
 //!
 //! On startup (throttled) and on demand we look up the latest release. If it is
 //! newer than the running build we surface a notice with the changelog; the
-//! user can then install it in place with one click (the running binary is
-//! swapped for the freshly downloaded one).
+//! user can then install it in place with one click.
+//!
+//! Inside a macOS app bundle the whole bundle is replaced, never just its
+//! executable: swapping `Contents/MacOS/e` (or rewriting `Info.plist`) breaks
+//! the bundle's code signature, and with it Gatekeeper's trust, the Keychain
+//! items e may read and the privacy permissions granted to it. The release
+//! carries the notarized app as a zip, and it is only put in place once
+//! `codesign` confirms it is signed by e's Developer ID and is the version
+//! asked for. A bare binary (Linux, or run outside a bundle) is swapped for
+//! the archive the release workflow builds, as before.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -151,47 +160,12 @@ pub fn check() -> Result<Option<UpdateInfo>> {
     }
 }
 
-/// After an in-place update, rewrite the bundle's `Info.plist` version so the
-/// macOS "About" panel (which reads the plist, not the binary) shows the new
-/// version. Replacing the executable leaves the plist stale.
-pub fn patch_bundle_version(version: &str) {
-    let Ok(exe) = crate::platform::current_exe() else {
-        return;
-    };
-    let Some(bundle) = exe
-        .ancestors()
-        .find(|p| p.extension().map(|e| e == "app").unwrap_or(false))
-    else {
-        return;
-    };
-    let plist = bundle.join("Contents/Info.plist");
-    let Ok(content) = std::fs::read_to_string(&plist) else {
-        return;
-    };
-    let content = replace_plist_string(&content, "CFBundleShortVersionString", version);
-    let content = replace_plist_string(&content, "CFBundleVersion", version);
-    let _ = std::fs::write(&plist, content);
-    // Nudge LaunchServices to pick up the change on next launch.
-    let _ = std::process::Command::new("/usr/bin/touch")
-        .arg(bundle)
-        .status();
-}
-
-/// Replace the `<string>` value that follows `<key>{key}</key>` in a plist.
-fn replace_plist_string(content: &str, key: &str, value: &str) -> String {
-    let needle = format!("<key>{key}</key>");
-    let Some(kpos) = content.find(&needle) else {
-        return content.to_string();
-    };
-    let Some(srel) = content[kpos..].find("<string>") else {
-        return content.to_string();
-    };
-    let sstart = kpos + srel + "<string>".len();
-    let Some(erel) = content[sstart..].find("</string>") else {
-        return content.to_string();
-    };
-    let eabs = sstart + erel;
-    format!("{}{}{}", &content[..sstart], value, &content[eabs..])
+/// The `<string>` value that follows `<key>{key}</key>` in a plist.
+fn plist_string<'a>(content: &'a str, key: &str) -> Option<&'a str> {
+    let kpos = content.find(&format!("<key>{key}</key>"))?;
+    let sstart = kpos + content[kpos..].find("<string>")? + "<string>".len();
+    let send = sstart + content[sstart..].find("</string>")?;
+    Some(content[sstart..send].trim())
 }
 
 /// Hex SHA-256 of `bytes`, the way `shasum -a 256` prints it.
@@ -203,25 +177,16 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// Download `version`'s asset for this platform from its conventional URL,
-/// verify it against the published `.sha256`, and replace the running binary in
-/// place. Blocking — run on a background thread. After this succeeds the app
-/// must be restarted to load the new binary.
-pub fn install(version: &str) -> Result<()> {
-    let target = self_update::get_target();
-    let asset = format!("{REPO_NAME}-{target}.tar.gz");
-    let base = format!("{}/releases/download/v{version}", repo_url());
-    let dir = std::env::temp_dir().join(format!("e-update-{}-{version}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
-    let archive = dir.join(&asset);
+/// Download `{base}/{asset}` into `dir` and check it against the `.sha256`
+/// published beside it.
+fn download_verified(base: &str, asset: &str, dir: &Path) -> Result<PathBuf> {
+    let path = dir.join(asset);
     {
-        let mut file = std::fs::File::create(&archive)?;
+        let mut file = std::fs::File::create(&path)?;
         self_update::Download::from_url(&format!("{base}/{asset}"))
             .download_to(&mut file)
             .with_context(|| format!("downloading {asset}"))?;
     }
-
-    // The checksum published beside the asset must match what we got.
     let expected = ureq::get(&format!("{base}/{asset}.sha256"))
         .timeout(HTTP_TIMEOUT)
         .call()
@@ -232,27 +197,155 @@ pub fn install(version: &str) -> Result<()> {
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
-    let actual = sha256_hex(&std::fs::read(&archive)?);
+    let actual = sha256_hex(&std::fs::read(&path)?);
     if expected.len() != 64 || expected != actual {
-        let _ = std::fs::remove_dir_all(&dir);
         bail!("checksum mismatch for {asset}: published {expected}, downloaded {actual}");
     }
+    Ok(path)
+}
 
-    self_update::Extract::from_source(&archive)
-        .archive(self_update::ArchiveKind::Tar(Some(
-            self_update::Compression::Gz,
-        )))
-        .extract_file(&dir, REPO_NAME)
-        .with_context(|| format!("extracting {REPO_NAME} from {asset}"))?;
-    let new_exe = dir.join(REPO_NAME);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&new_exe, std::fs::Permissions::from_mode(0o755));
+/// The macOS app bundle the running executable lives in, if any.
+pub fn running_bundle() -> Option<PathBuf> {
+    let exe = crate::platform::current_exe().ok()?;
+    exe.ancestors()
+        .find(|p| p.extension().is_some_and(|e| e == "app"))
+        .map(Path::to_path_buf)
+}
+
+/// Install `version`. Blocking — run on a background thread. After this
+/// succeeds the app must be restarted to load the new version.
+pub fn install(version: &str) -> Result<()> {
+    let base = format!("{}/releases/download/v{version}", repo_url());
+    #[cfg(target_os = "macos")]
+    if let Some(bundle) = running_bundle() {
+        return install_bundle(&base, version, &bundle);
     }
-    self_update::self_replace::self_replace(&new_exe)
-        .context("replacing the running executable")?;
+    install_binary(&base, version)
+}
+
+/// Replace the running binary with the one in this platform's archive.
+fn install_binary(base: &str, version: &str) -> Result<()> {
+    let target = self_update::get_target();
+    let asset = format!("{REPO_NAME}-{target}.tar.gz");
+    let dir = std::env::temp_dir().join(format!("e-update-{}-{version}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let result = (|| {
+        let archive = download_verified(base, &asset, &dir)?;
+        self_update::Extract::from_source(&archive)
+            .archive(self_update::ArchiveKind::Tar(Some(
+                self_update::Compression::Gz,
+            )))
+            .extract_file(&dir, REPO_NAME)
+            .with_context(|| format!("extracting {REPO_NAME} from {asset}"))?;
+        let new_exe = dir.join(REPO_NAME);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&new_exe, std::fs::Permissions::from_mode(0o755));
+        }
+        self_update::self_replace::self_replace(&new_exe)
+            .context("replacing the running executable")
+    })();
     let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+/// The release asset holding the signed, notarized app bundle.
+pub fn bundle_asset(version: &str) -> String {
+    format!("{REPO_NAME}-{version}-universal.app.zip")
+}
+
+/// The designated requirement of a Developer ID application signed by e's
+/// team: Apple's anchor, the Developer ID intermediate and leaf, team
+/// 52AT44QFCM. Anyone can sign a bundle; only that team can satisfy this.
+#[cfg(target_os = "macos")]
+const SIGNED_BY_E: &str = "anchor apple generic \
+    and certificate 1[field.1.2.840.113635.100.6.2.6] exists \
+    and certificate leaf[field.1.2.840.113635.100.6.1.13] exists \
+    and certificate leaf[subject.OU] = \"52AT44QFCM\"";
+
+/// Replace the whole app bundle at `bundle` with the release's signed one.
+#[cfg(target_os = "macos")]
+fn install_bundle(base: &str, version: &str, bundle: &Path) -> Result<()> {
+    let parent = bundle
+        .parent()
+        .ok_or_else(|| anyhow!("{} has no parent folder", bundle.display()))?;
+    // Staged beside the bundle, so the final moves are renames on one volume.
+    let stage = parent.join(format!(".e-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&stage);
+    std::fs::create_dir(&stage).with_context(|| {
+        format!(
+            "e can't write to {}; download the new version from {}/releases/latest",
+            parent.display(),
+            repo_url()
+        )
+    })?;
+    let result = (|| {
+        let zip = download_verified(base, &bundle_asset(version), &stage)?;
+        // ditto keeps the signature, extended attributes and stapled ticket.
+        let out = std::process::Command::new("/usr/bin/ditto")
+            .args(["-x", "-k"])
+            .arg(&zip)
+            .arg(&stage)
+            .output()
+            .context("running ditto")?;
+        if !out.status.success() {
+            bail!(
+                "unpacking {}: {}",
+                bundle_asset(version),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        let new_app = stage.join(format!("{REPO_NAME}.app"));
+        verify_bundle(&new_app, version, SIGNED_BY_E)?;
+        swap_bundle(bundle, &new_app, &stage.join("previous.app"))
+    })();
+    let _ = std::fs::remove_dir_all(&stage);
+    result
+}
+
+/// Check that `app` satisfies the code-signing `requirement` — every file in
+/// it sealed, nothing added — and is `version`, so an older signed release
+/// can't be passed off as the new one.
+#[cfg(target_os = "macos")]
+fn verify_bundle(app: &Path, version: &str, requirement: &str) -> Result<()> {
+    let out = std::process::Command::new("/usr/bin/codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(format!("-R={requirement}"))
+        .arg(app)
+        .output()
+        .context("running codesign")?;
+    if !out.status.success() {
+        bail!(
+            "the downloaded app is not signed by e's developer: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let plist = std::fs::read_to_string(app.join("Contents/Info.plist"))
+        .context("reading the downloaded app's Info.plist")?;
+    match plist_string(&plist, "CFBundleShortVersionString") {
+        Some(v) if v == version => Ok(()),
+        other => bail!(
+            "the downloaded app is version {}, not {version}",
+            other.unwrap_or("?")
+        ),
+    }
+}
+
+/// Put `new` where `current` is, moving `current` to `aside` first and back
+/// if the second move fails. Both renames stay on one volume.
+#[cfg(target_os = "macos")]
+fn swap_bundle(current: &Path, new: &Path, aside: &Path) -> Result<()> {
+    std::fs::rename(current, aside)
+        .with_context(|| format!("moving {} aside", current.display()))?;
+    if let Err(e) = std::fs::rename(new, current) {
+        let _ = std::fs::rename(aside, current);
+        return Err(e).with_context(|| format!("putting the new app at {}", current.display()));
+    }
+    // Let LaunchServices see the new bundle's Info.plist.
+    let _ = std::process::Command::new("/usr/bin/touch")
+        .arg(current)
+        .status();
     Ok(())
 }
 
@@ -313,10 +406,117 @@ mod tests {
     }
 
     #[test]
-    fn plist_string_is_replaced_in_place() {
+    fn reads_a_string_out_of_a_plist() {
         let plist = "<key>CFBundleShortVersionString</key>\n<string>0.9.16</string>\n<key>Other</key><string>x</string>";
-        let out = replace_plist_string(plist, "CFBundleShortVersionString", "0.9.17");
-        assert!(out.contains("<string>0.9.17</string>"));
-        assert!(out.contains("<key>Other</key><string>x</string>"));
+        assert_eq!(
+            plist_string(plist, "CFBundleShortVersionString"),
+            Some("0.9.16")
+        );
+        assert_eq!(plist_string(plist, "Other"), Some("x"));
+        assert_eq!(plist_string(plist, "Missing"), None);
+    }
+
+    #[test]
+    fn the_bundle_asset_is_the_universal_app_zip() {
+        assert_eq!(bundle_asset("0.20.0"), "e-0.20.0-universal.app.zip");
+    }
+
+    /// A minimal app bundle around a copy of `/usr/bin/true`, ad-hoc signed.
+    #[cfg(target_os = "macos")]
+    fn adhoc_bundle(dir: &Path, version: &str) -> PathBuf {
+        let app = dir.join("e.app");
+        std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        std::fs::copy("/usr/bin/true", app.join("Contents/MacOS/e")).unwrap();
+        std::fs::write(
+            app.join("Contents/Info.plist"),
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
+                 <key>CFBundleIdentifier</key><string>dev.e.test</string>\
+                 <key>CFBundleExecutable</key><string>e</string>\
+                 <key>CFBundleShortVersionString</key><string>{version}</string>\
+                 </dict></plist>\n"
+            ),
+        )
+        .unwrap();
+        let ok = std::process::Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-"])
+            .arg(&app)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "ad-hoc signing the test bundle");
+        app
+    }
+
+    #[cfg(target_os = "macos")]
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("e-updater-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_bundle_not_signed_by_e_is_refused() {
+        let dir = scratch("unsigned");
+        let app = adhoc_bundle(&dir, "0.20.0");
+        let err = verify_bundle(&app, "0.20.0", SIGNED_BY_E).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("not signed by e's developer"),
+            "{err:#}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_tampered_or_older_bundle_is_refused() {
+        let dir = scratch("tampered");
+        let app = adhoc_bundle(&dir, "0.20.0");
+        // Signature intact, the requirement aside: the version must match.
+        assert!(verify_bundle(&app, "0.20.0", "always").is_ok());
+        let err = verify_bundle(&app, "0.21.0", "always").unwrap_err();
+        assert!(
+            format!("{err:#}").contains("version 0.20.0, not 0.21.0"),
+            "{err:#}"
+        );
+        // A file added after signing breaks the seal.
+        std::fs::write(app.join("Contents/MacOS/extra"), "x").unwrap();
+        assert!(verify_bundle(&app, "0.20.0", "always").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Against an installed release — run with `--ignored` on a Mac with e
+    /// in /Applications: our own signature must satisfy the requirement.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore]
+    fn an_installed_release_satisfies_the_requirement() {
+        let app = Path::new("/Applications/e.app");
+        let plist = std::fs::read_to_string(app.join("Contents/Info.plist")).unwrap();
+        let version = plist_string(&plist, "CFBundleShortVersionString").unwrap();
+        verify_bundle(app, version, SIGNED_BY_E).unwrap();
+        let other_team = SIGNED_BY_E.replace("52AT44QFCM", "AAAAAAAAAA");
+        assert!(verify_bundle(app, version, &other_team).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn swapping_puts_the_new_bundle_in_place() {
+        let dir = scratch("swap");
+        let current = dir.join("e.app");
+        let new = dir.join("stage/e.app");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("v"), "old").unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("v"), "new").unwrap();
+        swap_bundle(&current, &new, &dir.join("stage/previous.app")).unwrap();
+        assert_eq!(std::fs::read_to_string(current.join("v")).unwrap(), "new");
+        // A failed second move puts the old bundle back.
+        let missing = dir.join("stage/nothing.app");
+        assert!(swap_bundle(&current, &missing, &dir.join("stage/aside.app")).is_err());
+        assert_eq!(std::fs::read_to_string(current.join("v")).unwrap(), "new");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

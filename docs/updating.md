@@ -22,9 +22,19 @@ the latest version, you'll see a confirmation.
 
 ## Notes
 
-- The updater downloads the asset for your platform (`e-<target>.tar.gz`) from
-  the release's download URL, verifies it against the `.sha256` published beside
-  it, and swaps the binary atomically.
+- On macOS, an `e` installed as `e.app` is updated as a whole app: the updater
+  downloads the release's signed, notarized `e-<version>-universal.app.zip`,
+  checks it against the `.sha256` published beside it, and only puts it in
+  place once `codesign` confirms every file is sealed by e's Developer ID
+  (team `52AT44QFCM`) and it is the version offered. The old app is moved
+  aside and the new one renamed into its place. Replacing just the binary
+  inside the app would break its signature, and with it Gatekeeper's trust,
+  Keychain access and the permissions you granted `e`.
+- The updater needs to write to the folder the app is in (usually
+  `/Applications`). If it can't, it says so; download the DMG instead.
+- Elsewhere (Linux, or a bare `e` binary) it downloads the archive for your
+  platform (`e-<target>.tar.gz`), verifies it against its `.sha256`, and swaps
+  the binary atomically.
 - If a download fails, the notice offers **Retry**.
 - Updates are opt-in: nothing is installed until you click **Update now**.
 
@@ -38,5 +48,7 @@ Releases are produced with:
 
 This bumps the version, moves the `Unreleased` section of `CHANGELOG.md` under a
 new dated heading, commits, tags `vX.Y.Z`, and pushes. A GitHub Actions workflow
-then builds and attaches the per-platform binaries to the release, which the
-auto-updater consumes.
+then builds and attaches the per-platform binaries to the release. The script
+itself builds, signs and notarizes the universal DMG on the Mac and attaches it
+along with `e-X.Y.Z-universal.app.zip`, the app the macOS updater installs. A
+release without that zip can't be installed by the updater on macOS.

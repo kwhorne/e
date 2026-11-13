@@ -13,7 +13,8 @@
 #   5. Only when CI passes: tags `vX.Y.Z` and pushes the tag.
 #   6. Builds the universal DMG on this Mac, signed with Knut Horne's
 #      Developer ID and notarized with the "Knut Horne" keychain profile (as
-#      eterm's releases are), and attaches it to the release.
+#      eterm's releases are), and attaches it to the release, together with
+#      the signed app as a zip for the in-app updater.
 #
 # The GitHub release workflow (.github/workflows/release.yml) then builds and
 # attaches the platform archives automatically. Tagging only a commit CI has
@@ -139,13 +140,15 @@ else
   echo "==> building, signing and notarizing the universal DMG"
   E_REQUIRE_NOTARIZATION=1 ./scripts/bundle-dmg.sh --universal
   DMG="e-$NEW-universal.dmg"
-  (cd dist && shasum -a 256 "$DMG" > "$DMG.sha256")
+  APP_ZIP="e-$NEW-universal.app.zip"
+  (cd dist && shasum -a 256 "$DMG" > "$DMG.sha256" && shasum -a 256 "$APP_ZIP" > "$APP_ZIP.sha256")
   # The workflow makes the release when its first archive is attached.
   for _ in $(seq 1 90); do
     gh release view "v$NEW" >/dev/null 2>&1 && break
     sleep 10
   done
-  gh release upload "v$NEW" "dist/$DMG" "dist/$DMG.sha256" --clobber
+  gh release upload "v$NEW" "dist/$DMG" "dist/$DMG.sha256" \
+    "dist/$APP_ZIP" "dist/$APP_ZIP.sha256" --clobber
 fi
 
 echo

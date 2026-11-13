@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Updating on macOS kept e's signature intact.** The updater used to swap
+  the binary inside `e.app` for an unsigned build and rewrite its
+  `Info.plist`, which broke the app's code signature, and with it
+  Gatekeeper's trust, Keychain access and the permissions granted to `e`.
+  It now installs the whole signed, notarized app from the release, and only
+  after `codesign` confirms it is sealed by e's Developer ID and is the
+  version offered. Updating from 0.19.1 or earlier still goes the old way
+  once; the update after that, or installing from the DMG, puts a properly
+  signed app back.
+
 ## [0.19.1] - 2026-10-31
 
 ### Fixed

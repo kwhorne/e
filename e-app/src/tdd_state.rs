@@ -20,6 +20,9 @@ impl AppState {
     /// Run the project's test suite, parse pass/fail, and (when the loop is
     /// active) ask the agent to fix failures.
     pub fn run_tests(&self) {
+        if !self.may_run_project_code("tests") {
+            return;
+        }
         let root = self.root.get_untracked();
         let Some(cmd) = crate::tasks::test_command(&root) else {
             self.tdd_output

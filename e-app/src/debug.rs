@@ -199,6 +199,9 @@ impl AppState {
 
     /// F5: start a session, or continue if one is already paused.
     pub fn debug_start(&self) {
+        if !self.may_run_project_code("the debugger") {
+            return;
+        }
         if self.debug_client.get_untracked().is_some() {
             self.debug_continue();
             return;

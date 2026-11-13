@@ -423,6 +423,8 @@ fn app_view() -> impl IntoView {
     // Remember this project so the next bare launch reopens it.
     crate::config::save_last_project(&root);
     let state = AppState::new(Scope::current(), root);
+    // Before anything that could run the project's code.
+    state.apply_trust(crate::trust::is_trusted(&state.root.get_untracked()));
     floem::file_action::on_dialog_unavailable(|| {
         AppState::notify("The system file dialog didn't open: macOS couldn't start its panel")
     });
@@ -672,6 +674,7 @@ fn app_view() -> impl IntoView {
     }
 
     let editor_column = stack((
+        crate::trust::trust_bar(state),
         tab_bar(state),
         breadcrumbs(state),
         disk_conflict_bar(state),

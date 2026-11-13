@@ -33,6 +33,7 @@ native code editor written in Rust.
 
 ### Configuration & maintenance
 - [Configuration](configuration.md) · [Keybindings](keybindings.md) — `config.json`, themes, settings
+- [Workspace trust](workspace-trust.md) — what runs before you trust a project
 - [Updating](updating.md) — the built-in auto-updater
 - [Troubleshooting](troubleshooting.md) — common issues and fixes
 

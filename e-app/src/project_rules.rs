@@ -261,6 +261,10 @@ impl AppState {
     /// What an agent's first message starts with: the rules, when there are
     /// any.
     pub(crate) fn rules_preamble(&self) -> Option<String> {
+        // Instructions to an agent, written by whoever wrote the project.
+        if !self.trusted.get_untracked() {
+            return None;
+        }
         let rules = self.project_rules.get_untracked();
         (!rules.is_empty()).then(|| rules.for_agents())
     }

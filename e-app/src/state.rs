@@ -112,6 +112,9 @@ pub struct DbForm {
     pub ssh_password: String,
     pub ssh_key_path: String,
     pub ssh_passphrase: String,
+    /// `""` (auto), `disable`, `require` or `verify` (see `e_db::TlsMode`).
+    pub tls: String,
+    pub tls_ca: String,
 }
 
 impl Default for DbForm {
@@ -135,6 +138,8 @@ impl Default for DbForm {
             ssh_password: String::new(),
             ssh_key_path: String::new(),
             ssh_passphrase: String::new(),
+            tls: String::new(),
+            tls_ca: String::new(),
         }
     }
 }
@@ -163,6 +168,8 @@ impl DbForm {
             ssh_password: self.ssh_password.clone(),
             ssh_key_path: self.ssh_key_path.clone(),
             ssh_passphrase: self.ssh_passphrase.clone(),
+            tls: self.tls.clone(),
+            tls_ca: self.tls_ca.trim().to_string(),
         }
     }
 }

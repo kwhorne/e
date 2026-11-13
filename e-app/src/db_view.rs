@@ -398,6 +398,8 @@ fn add_form(state: AppState) -> impl IntoView {
     let ssh_password = create_rw_signal(f.ssh_password.clone());
     let ssh_key_path = create_rw_signal(f.ssh_key_path.clone());
     let ssh_passphrase = create_rw_signal(f.ssh_passphrase.clone());
+    let tls = create_rw_signal(f.tls.clone());
+    let tls_ca = create_rw_signal(f.tls_ca.clone());
 
     // Identity isn't edited in the dialog, but it has to survive the round trip
     // or the connection would be re-keyed in the credential store on every save.
@@ -424,6 +426,8 @@ fn add_form(state: AppState) -> impl IntoView {
             ssh_password: ssh_password.get_untracked(),
             ssh_key_path: ssh_key_path.get_untracked(),
             ssh_passphrase: ssh_passphrase.get_untracked(),
+            tls: tls.get_untracked(),
+            tls_ca: tls_ca.get_untracked(),
         });
     });
     let sync_test = sync.clone();
@@ -512,6 +516,79 @@ fn add_form(state: AppState) -> impl IntoView {
         },
     )
     .style(|s| s.flex_col().gap(6.0).width_full());
+
+    // TLS to the server (hidden for sqlite).
+    let tls_chip = move |id: &'static str, name: &'static str| {
+        label(move || name.to_string())
+            .style(move |s| {
+                let active = tls.get() == id;
+                let s = s
+                    .padding_horiz(8.0)
+                    .padding_vert(2.0)
+                    .border_radius(5.0)
+                    .font_size(11.0)
+                    .cursor(floem::style::CursorStyle::Pointer);
+                if active {
+                    s.background(theme::accent()).color(theme::on_accent())
+                } else {
+                    s.border(1.0)
+                        .border_color(theme::border())
+                        .color(theme::fg())
+                }
+            })
+            .on_click_stop(move |_| tls.set(id.to_string()))
+    };
+    let tls_hint = move || match e_db::TlsMode::parse(&tls.get()) {
+        e_db::TlsMode::Auto if engine.get() == "clickhouse" => {
+            "HTTPS on ports 8443 and 443, plain HTTP otherwise".to_string()
+        }
+        e_db::TlsMode::Auto => {
+            "Encrypted when the server offers it (not checked); local hosts and SSH go without"
+                .to_string()
+        }
+        e_db::TlsMode::Disable => "Never encrypted".to_string(),
+        e_db::TlsMode::Require => "Always encrypted; the certificate isn't checked".to_string(),
+        e_db::TlsMode::Verify => "Always encrypted; certificate and host name checked".to_string(),
+    };
+    let tls_fields = stack((
+        label(|| "TLS".to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        stack((
+            tls_chip("", "Auto"),
+            tls_chip("disable", "Off"),
+            tls_chip("require", "Require"),
+            tls_chip("verify", "Verify"),
+        ))
+        .style(|s| s.flex_row().gap(5.0)),
+        label(tls_hint).style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        dyn_stack(
+            move || {
+                if e_db::TlsMode::parse(&tls.get()) == e_db::TlsMode::Verify {
+                    vec!["ca"]
+                } else {
+                    vec![]
+                }
+            },
+            |k| k.to_string(),
+            move |_| {
+                form_field(
+                    "CA certificate (optional)",
+                    tls_ca,
+                    "/path/to/ca.pem",
+                    false,
+                )
+                .into_any()
+            },
+        )
+        .style(|s| s.flex_col().width_full()),
+    ))
+    .style(move |s| {
+        let s = s.flex_col().gap(4.0).width_full();
+        if engine.get() == "sqlite" {
+            s.hide()
+        } else {
+            s
+        }
+    });
 
     // SSH tunnel toggle + fields (hidden for sqlite).
     let ssh_toggle = label(move || {
@@ -672,6 +749,7 @@ fn add_form(state: AppState) -> impl IntoView {
             .style(|s| s.font_size(11.0).color(theme::fg_dim())),
         engines,
         net_fields,
+        tls_fields,
         ssh_toggle,
         ssh_fields,
         form_field("Group", group, "(optional)", false),

@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Projects in your recent list are trusted automatically the first time.
   See [Workspace trust](docs/workspace-trust.md).
 
+- **TLS for database connections.** PostgreSQL always connected without
+  TLS, ClickHouse always over plain `http://` and MySQL never used the TLS
+  it was built with, so passwords and data crossed the network in the clear.
+  Each connection now has a TLS setting:
+  - **Auto:** encrypts direct connections to other hosts when the server
+    offers it.
+  - **Off:** never encrypted.
+  - **Require:** always encrypted, the certificate not checked.
+  - **Verify:** always encrypted, with the certificate checked, optionally
+    against your own CA.
+
+  `DB_SSLMODE` and `MYSQL_ATTR_SSL_CA` are read from `.env`.
+
 ### Fixed
 
 - **Updating on macOS kept e's signature intact.** The updater used to swap

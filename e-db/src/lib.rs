@@ -13,8 +13,8 @@ pub use classify::is_read_only;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +72,63 @@ pub struct DbConfig {
     pub ssh_key_path: String,
     #[serde(default)]
     pub ssh_passphrase: String,
+    /// TLS to the database server: `""` (auto), `disable`, `require` or
+    /// `verify`. See [`TlsMode`].
+    #[serde(default)]
+    pub tls: String,
+    /// A CA certificate (PEM file) to trust besides the system's, for a
+    /// server whose certificate a private CA signed (RDS, Cloud SQL, …).
+    #[serde(default)]
+    pub tls_ca: String,
+}
+
+/// How a connection uses TLS.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TlsMode {
+    /// Encrypt a direct connection to a host that isn't local when the
+    /// server offers it, without checking its certificate (libpq's `prefer`;
+    /// on ClickHouse, HTTPS on its TLS ports 8443 and 443). Local hosts and
+    /// SSH tunnels, which are encrypted already, go without.
+    Auto,
+    /// Never.
+    Disable,
+    /// Always, but trust whatever certificate the server shows.
+    Require,
+    /// Always, with the certificate checked against the system's CAs (and
+    /// `tls_ca`) and the host name.
+    Verify,
+}
+
+impl TlsMode {
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "disable" | "off" | "false" => TlsMode::Disable,
+            "require" => TlsMode::Require,
+            "verify" | "verify-full" | "verify-ca" | "verify_identity" | "verify_ca" => {
+                TlsMode::Verify
+            }
+            _ => TlsMode::Auto,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TlsMode::Auto => "",
+            TlsMode::Disable => "disable",
+            TlsMode::Require => "require",
+            TlsMode::Verify => "verify",
+        }
+    }
+}
+
+/// Whether `host` is this machine (or a local development domain).
+pub fn is_local_host(host: &str) -> bool {
+    let host = host.trim().to_ascii_lowercase();
+    matches!(
+        host.as_str(),
+        "" | "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "host.docker.internal"
+    ) || host.ends_with(".test")
+        || host.ends_with(".localhost")
 }
 
 impl DbConfig {
@@ -101,17 +158,21 @@ impl DbConfig {
         if self.use_ssh && !self.ssh_host.is_empty() {
             return Environment::Staging; // remote via tunnel, no hint
         }
-        let host = self.host.trim().to_ascii_lowercase();
-        let local = matches!(
-            host.as_str(),
-            "" | "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "host.docker.internal"
-        ) || host.ends_with(".test")
-            || host.ends_with(".localhost");
-        if local {
+        if is_local_host(&self.host) {
             Environment::Local
         } else {
             Environment::Staging
         }
+    }
+
+    pub fn tls_mode(&self) -> TlsMode {
+        TlsMode::parse(&self.tls)
+    }
+
+    /// Whether the auto mode should try TLS: a direct connection to a host
+    /// that isn't this machine.
+    fn tls_worth_trying(&self) -> bool {
+        !self.use_ssh && !is_local_host(&self.host)
     }
 
     pub fn looks_like_prod(&self) -> bool {
@@ -182,6 +243,7 @@ enum Backend {
     Postgres(Mutex<postgres::Client>),
     /// ClickHouse over its HTTP interface.
     Clickhouse {
+        agent: ureq::Agent,
         base_url: String,
         user: String,
         password: String,
@@ -280,6 +342,17 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
             database: env.get("DB_DATABASE").cloned().unwrap_or_default(),
             username: env.get("DB_USERNAME").cloned().unwrap_or_default(),
             password: env.get("DB_PASSWORD").cloned().unwrap_or_default(),
+            // Laravel's `mysql` connection trusts this CA when it is set.
+            tls: env
+                .get("MYSQL_ATTR_SSL_CA")
+                .filter(|ca| !ca.trim().is_empty())
+                .map(|_| "verify".to_string())
+                .unwrap_or_default(),
+            tls_ca: env
+                .get("MYSQL_ATTR_SSL_CA")
+                .filter(|ca| !ca.trim().is_empty())
+                .map(|ca| project.join(ca.trim()).to_string_lossy().into_owned())
+                .unwrap_or_default(),
             label,
             ..Default::default()
         }),
@@ -293,6 +366,17 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
             database: env.get("DB_DATABASE").cloned().unwrap_or_default(),
             username: env.get("DB_USERNAME").cloned().unwrap_or_default(),
             password: env.get("DB_PASSWORD").cloned().unwrap_or_default(),
+            // libpq's sslmode, as Laravel's `pgsql` connection passes it.
+            tls: env
+                .get("DB_SSLMODE")
+                .map(|m| match m.trim() {
+                    "disable" => "disable",
+                    "require" => "require",
+                    "verify-ca" | "verify-full" => "verify",
+                    _ => "",
+                })
+                .unwrap_or_default()
+                .to_string(),
             label,
             ..Default::default()
         }),
@@ -340,7 +424,7 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
 
 pub fn connect(config: &DbConfig) -> Result<Conn, String> {
     let (eff, tunnel) = prepare(config)?;
-    let backend = build_backend(&eff)?;
+    let backend = build_backend(&eff, config)?;
     Ok(Conn {
         backend,
         read_only: AtomicBool::new(false),
@@ -433,9 +517,56 @@ fn sqlite_open(path: &str, read_only: bool) -> Result<rusqlite::Connection, Stri
     .map_err(|e| e.to_string())
 }
 
-fn build_backend(config: &DbConfig) -> Result<Backend, String> {
-    Ok(match config.engine.as_str() {
+/// A TLS connector for `mode`: checking certificates only for `Verify`, and
+/// trusting `ca` (a PEM file) besides the system's CAs when one is given.
+fn tls_connector(mode: TlsMode, ca: &str) -> Result<native_tls::TlsConnector, String> {
+    let mut b = native_tls::TlsConnector::builder();
+    if mode != TlsMode::Verify {
+        b.danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
+    }
+    if !ca.trim().is_empty() {
+        let pem = std::fs::read(ca.trim())
+            .map_err(|e| format!("reading the CA certificate {}: {e}", ca.trim()))?;
+        let cert = native_tls::Certificate::from_pem(&pem)
+            .map_err(|e| format!("the CA certificate {} isn't PEM: {e}", ca.trim()))?;
+        b.add_root_certificate(cert);
+    }
+    b.build().map_err(|e| e.to_string())
+}
+
+/// MySQL's TLS options for `config`, or `None` to go without.
+fn mysql_ssl(config: &DbConfig) -> Option<mysql::SslOpts> {
+    let mode = config.tls_mode();
+    let ssl = mysql::SslOpts::default();
+    let ssl = if config.tls_ca.trim().is_empty() {
+        ssl
+    } else {
+        ssl.with_root_cert_path(Some(std::path::PathBuf::from(config.tls_ca.trim())))
+    };
+    match mode {
+        TlsMode::Disable => None,
+        TlsMode::Auto if !config.tls_worth_trying() => None,
+        TlsMode::Auto | TlsMode::Require => Some(
+            ssl.with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true),
+        ),
+        // Through a tunnel the server is reached as 127.0.0.1, which its
+        // certificate doesn't name, and the driver can't be told the real
+        // name: the chain is still checked.
+        TlsMode::Verify => Some(ssl.with_danger_skip_domain_validation(config.use_ssh)),
+    }
+}
+
+/// `eff` is what to connect to (through an SSH tunnel, the local end of
+/// it); `config` is the connection as saved, whose host the server's
+/// certificate names.
+fn build_backend(eff: &DbConfig, config: &DbConfig) -> Result<Backend, String> {
+    let tunnelled = eff.host != config.host || eff.port != config.port;
+    let mode = config.tls_mode();
+    Ok(match eff.engine.as_str() {
         "mysql" => {
+            let config = eff;
             let opts = mysql::OptsBuilder::new()
                 .ip_or_hostname(Some(config.host.clone()))
                 .tcp_port(config.port)
@@ -446,8 +577,25 @@ fn build_backend(config: &DbConfig) -> Result<Backend, String> {
                 } else {
                     Some(config.database.clone())
                 });
-            let pool = mysql::Pool::new(opts).map_err(|e| e.to_string())?;
-            let _ = pool.get_conn().map_err(|e| e.to_string())?;
+            let ssl = mysql_ssl(config);
+            let auto = mode == TlsMode::Auto && ssl.is_some();
+            // On 127.0.0.1 the driver switches to the server's Unix socket,
+            // where TLS doesn't apply; TLS asked for must not go missing that
+            // way.
+            let opts = opts.prefer_socket(ssl.is_none());
+            let open = |opts: mysql::OptsBuilder| -> Result<mysql::Pool, mysql::Error> {
+                let pool = mysql::Pool::new(opts)?;
+                let _ = pool.get_conn()?;
+                Ok(pool)
+            };
+            let pool = match open(opts.clone().ssl_opts(ssl)) {
+                Ok(pool) => pool,
+                // Auto: a server without TLS is reached without it.
+                Err(mysql::Error::DriverError(mysql::DriverError::TlsNotSupported)) if auto => {
+                    open(opts).map_err(|e| e.to_string())?
+                }
+                Err(e) => return Err(e.to_string()),
+            };
             Backend::Mysql(pool)
         }
         "sqlite" => {
@@ -458,21 +606,49 @@ fn build_backend(config: &DbConfig) -> Result<Backend, String> {
             Backend::Sqlite(config.path.clone())
         }
         "postgres" | "postgresql" | "pgsql" => {
+            let host_of = |c: &DbConfig| {
+                if c.host.is_empty() {
+                    "127.0.0.1".to_string()
+                } else {
+                    c.host.clone()
+                }
+            };
+            let use_tls = match mode {
+                TlsMode::Disable => false,
+                TlsMode::Auto => config.tls_worth_trying(),
+                TlsMode::Require | TlsMode::Verify => true,
+            };
             let mut pg = postgres::Config::new();
-            pg.host(if config.host.is_empty() {
-                "127.0.0.1"
+            if use_tls && tunnelled {
+                // Reach the tunnel, but check the certificate against the
+                // name of the server behind it, not 127.0.0.1.
+                pg.host(&host_of(config))
+                    .hostaddr(std::net::IpAddr::from([127, 0, 0, 1]));
             } else {
-                &config.host
-            })
-            .port(if config.port == 0 { 5432 } else { config.port })
-            .user(&config.username);
-            if !config.password.is_empty() {
-                pg.password(&config.password);
+                pg.host(&host_of(eff));
             }
-            if !config.database.is_empty() {
-                pg.dbname(&config.database);
+            pg.port(if eff.port == 0 { 5432 } else { eff.port })
+                .user(&eff.username);
+            if !eff.password.is_empty() {
+                pg.password(&eff.password);
             }
-            let client = pg.connect(postgres::NoTls).map_err(|e| e.to_string())?;
+            if !eff.database.is_empty() {
+                pg.dbname(&eff.database);
+            }
+            let client = if use_tls {
+                pg.ssl_mode(if mode == TlsMode::Auto {
+                    postgres::config::SslMode::Prefer
+                } else {
+                    postgres::config::SslMode::Require
+                });
+                let tls =
+                    postgres_native_tls::MakeTlsConnector::new(tls_connector(mode, &eff.tls_ca)?);
+                pg.connect(tls)
+            } else {
+                pg.ssl_mode(postgres::config::SslMode::Disable);
+                pg.connect(postgres::NoTls)
+            }
+            .map_err(|e| e.to_string())?;
             Backend::Postgres(Mutex::new(client))
         }
         "clickhouse" | "ch" => {
@@ -482,8 +658,27 @@ fn build_backend(config: &DbConfig) -> Result<Backend, String> {
                 &config.host
             };
             let port = if config.port == 0 { 8123 } else { config.port };
+            // ClickHouse serves HTTP and HTTPS on different ports (8123 and
+            // 8443), so auto can't try one and fall back: it follows the port.
+            let https = match mode {
+                TlsMode::Disable => false,
+                TlsMode::Require | TlsMode::Verify => true,
+                TlsMode::Auto => matches!(port, 8443 | 443),
+            };
+            let mut agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(10));
+            if https {
+                agent = agent.tls_connector(Arc::new(tls_connector(mode, &config.tls_ca)?));
+            }
+            if tunnelled {
+                // The URL names the server (for its certificate and the Host
+                // header); the bytes go to the tunnel.
+                let local = std::net::SocketAddr::from(([127, 0, 0, 1], eff.port));
+                agent = agent.resolver(move |_: &str| Ok(vec![local]));
+            }
+            let scheme = if https { "https" } else { "http" };
             let conn = Backend::Clickhouse {
-                base_url: format!("http://{host}:{port}/"),
+                agent: agent.build(),
+                base_url: format!("{scheme}://{host}:{port}/"),
                 user: if config.username.is_empty() {
                     "default".to_string()
                 } else {
@@ -930,6 +1125,7 @@ fn ch_query_as(
     read_only: bool,
 ) -> Result<QueryResult, String> {
     let Backend::Clickhouse {
+        agent,
         base_url,
         user,
         password,
@@ -957,7 +1153,8 @@ fn ch_query_as(
         url.push_str(&params.join("&"));
     }
     let start = Instant::now();
-    let resp = ureq::post(&url)
+    let resp = agent
+        .post(&url)
         .set("X-ClickHouse-User", user)
         .set("X-ClickHouse-Key", password)
         .send_string(&body);
@@ -2741,6 +2938,198 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
             snapshot,
         ),
         other => Err(format!("restore not supported for {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    fn cfg(engine: &str, host: &str, tls: &str) -> DbConfig {
+        DbConfig {
+            engine: engine.into(),
+            host: host.into(),
+            tls: tls.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tls_modes_read_libpq_and_mysql_names() {
+        assert_eq!(TlsMode::parse(""), TlsMode::Auto);
+        assert_eq!(TlsMode::parse("prefer"), TlsMode::Auto);
+        assert_eq!(TlsMode::parse("disable"), TlsMode::Disable);
+        assert_eq!(TlsMode::parse("require"), TlsMode::Require);
+        assert_eq!(TlsMode::parse("verify-full"), TlsMode::Verify);
+        assert_eq!(TlsMode::parse("VERIFY_IDENTITY"), TlsMode::Verify);
+        for m in [
+            TlsMode::Auto,
+            TlsMode::Disable,
+            TlsMode::Require,
+            TlsMode::Verify,
+        ] {
+            assert_eq!(TlsMode::parse(m.as_str()), m);
+        }
+    }
+
+    #[test]
+    fn auto_encrypts_only_direct_connections_to_other_hosts() {
+        assert!(mysql_ssl(&cfg("mysql", "127.0.0.1", "")).is_none());
+        assert!(mysql_ssl(&cfg("mysql", "shop.test", "")).is_none());
+        assert!(mysql_ssl(&cfg("mysql", "db.example.com", "")).is_some());
+        let mut tunnelled = cfg("mysql", "db.example.com", "");
+        tunnelled.use_ssh = true;
+        assert!(mysql_ssl(&tunnelled).is_none());
+        assert!(mysql_ssl(&cfg("mysql", "db.example.com", "disable")).is_none());
+        // Asked for, it's used even locally.
+        assert!(mysql_ssl(&cfg("mysql", "127.0.0.1", "require")).is_some());
+    }
+
+    #[test]
+    fn a_ca_that_cant_be_read_is_said_plainly() {
+        let err = tls_connector(TlsMode::Verify, "/no/such/ca.pem").unwrap_err();
+        assert!(err.contains("/no/such/ca.pem"), "{err}");
+        let dir = std::env::temp_dir().join(format!("e-db-tls-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let junk = dir.join("junk.pem");
+        std::fs::write(&junk, "not a certificate").unwrap();
+        let err = tls_connector(TlsMode::Verify, junk.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("isn't PEM"), "{err}");
+        assert!(tls_connector(TlsMode::Require, "").is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn env_tls_settings_carry_over() {
+        let dir = std::env::temp_dir().join(format!("e-db-tls-env-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(".env"),
+            "DB_CONNECTION=pgsql\nDB_HOST=db.example.com\nDB_SSLMODE=verify-full\n",
+        )
+        .unwrap();
+        assert_eq!(from_env(&dir).unwrap().tls_mode(), TlsMode::Verify);
+        std::fs::write(
+            dir.join(".env"),
+            "DB_CONNECTION=pgsql\nDB_HOST=db.example.com\nDB_SSLMODE=prefer\n",
+        )
+        .unwrap();
+        assert_eq!(from_env(&dir).unwrap().tls_mode(), TlsMode::Auto);
+        std::fs::write(
+            dir.join(".env"),
+            "DB_CONNECTION=mysql\nDB_HOST=db.example.com\nMYSQL_ATTR_SSL_CA=storage/ca.pem\n",
+        )
+        .unwrap();
+        let c = from_env(&dir).unwrap();
+        assert_eq!(c.tls_mode(), TlsMode::Verify);
+        assert_eq!(Path::new(&c.tls_ca), dir.join("storage/ca.pem"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Against real servers — `--ignored`, with whichever of these are set:
+    /// `E_TLS_PG=port`, `E_TLS_CH=https-port`, `E_TLS_MYSQL=port` (user root,
+    /// no password), `E_TLS_CA=ca.pem` (the CA that signed the PostgreSQL and
+    /// ClickHouse certificates, issued for `localhost`), `E_TLS_REMOTE=ip` (an
+    /// address of this machine that isn't loopback, for auto), and
+    /// `E_TLS_PASSWORD` for PostgreSQL's `postgres` user.
+    #[test]
+    #[ignore]
+    fn live_tls_connections() {
+        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let ca = env("E_TLS_CA").unwrap_or_default();
+        let scalar = |conn: &Conn, sql: &str| -> String {
+            let r = query(conn, sql, 1).unwrap();
+            r.rows
+                .first()
+                .and_then(|row| row.first())
+                .cloned()
+                .flatten()
+                .unwrap_or_default()
+        };
+        if let Some(port) = env("E_TLS_PG") {
+            let pg = |host: &str, tls: &str, ca: &str| DbConfig {
+                engine: "postgres".into(),
+                host: host.into(),
+                port: port.parse().unwrap(),
+                username: "postgres".into(),
+                password: env("E_TLS_PASSWORD").unwrap_or_default(),
+                database: "postgres".into(),
+                tls: tls.into(),
+                tls_ca: ca.into(),
+                ..Default::default()
+            };
+            let ssl = "SELECT ssl::text FROM pg_stat_ssl WHERE pid = pg_backend_pid()";
+            let c = connect(&pg("localhost", "require", "")).unwrap();
+            assert_eq!(scalar(&c, ssl), "true", "require");
+            let c = connect(&pg("localhost", "verify", &ca)).unwrap();
+            assert_eq!(scalar(&c, ssl), "true", "verify with the CA");
+            let err = connect(&pg("localhost", "verify", ""))
+                .err()
+                .expect("untrusted CA");
+            eprintln!("verify without the CA: {err}");
+            let err = connect(&pg("127.0.0.1", "verify", &ca))
+                .err()
+                .expect("wrong name");
+            eprintln!("verify against another name: {err}");
+            let c = connect(&pg("localhost", "disable", "")).unwrap();
+            assert_eq!(scalar(&c, ssl), "false", "disable");
+            let c = connect(&pg("localhost", "", "")).unwrap();
+            assert_eq!(scalar(&c, ssl), "false", "auto, local");
+            if let Some(ip) = env("E_TLS_REMOTE") {
+                let c = connect(&pg(&ip, "", "")).unwrap();
+                assert_eq!(scalar(&c, ssl), "true", "auto, not local");
+            }
+            eprintln!("postgres: ok");
+        }
+        if let Some(port) = env("E_TLS_CH") {
+            let ch = |host: &str, tls: &str, ca: &str| DbConfig {
+                engine: "clickhouse".into(),
+                host: host.into(),
+                port: port.parse().unwrap(),
+                tls: tls.into(),
+                tls_ca: ca.into(),
+                ..Default::default()
+            };
+            let c = connect(&ch("localhost", "require", "")).unwrap();
+            assert_eq!(scalar(&c, "SELECT 1"), "1");
+            let c = connect(&ch("localhost", "verify", &ca)).unwrap();
+            assert_eq!(scalar(&c, "SELECT 1"), "1");
+            assert!(
+                connect(&ch("localhost", "verify", "")).is_err(),
+                "untrusted CA"
+            );
+            // Auto follows the port: 8443 speaks HTTPS.
+            if port == "8443" {
+                assert!(connect(&ch("localhost", "", "")).is_ok(), "auto on 8443");
+            }
+            assert!(
+                connect(&ch("localhost", "disable", "")).is_err(),
+                "HTTP to HTTPS"
+            );
+            eprintln!("clickhouse: ok");
+        }
+        if let Some(port) = env("E_TLS_MYSQL") {
+            let my = |tls: &str| DbConfig {
+                engine: "mysql".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                username: "root".into(),
+                tls: tls.into(),
+                ..Default::default()
+            };
+            let cipher = "SHOW SESSION STATUS LIKE 'Ssl_cipher'";
+            let row = |c: &Conn| {
+                query(c, cipher, 1).unwrap().rows[0][1]
+                    .clone()
+                    .unwrap_or_default()
+            };
+            assert!(
+                !row(&connect(&my("require")).unwrap()).is_empty(),
+                "require"
+            );
+            assert!(row(&connect(&my("")).unwrap()).is_empty(), "auto, local");
+            eprintln!("mysql: ok");
+        }
     }
 }
 

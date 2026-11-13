@@ -26,6 +26,26 @@ either a private key or a password — `e` forwards a local port through the sys
 Connections are saved per project in `~/.config/e/databases.json` — never written
 into the project folder, so nothing can be committed.
 
+### TLS
+
+The **TLS** row sets how MySQL, PostgreSQL and ClickHouse connections are
+encrypted:
+
+| Setting | What happens |
+| --- | --- |
+| **Auto** (default) | A direct connection to a host that isn't this machine is encrypted when the server offers TLS, without checking its certificate (PostgreSQL's `prefer`). Local hosts and SSH tunnels go without, since a tunnel is already encrypted. ClickHouse serves HTTP and HTTPS on different ports, so auto uses HTTPS on 8443 and 443 and HTTP otherwise. |
+| **Off** | Never encrypted. |
+| **Require** | Always encrypted; the server's certificate isn't checked. |
+| **Verify** | Always encrypted; the certificate must chain to a CA the system trusts, or to the **CA certificate** file you give (for RDS, Cloud SQL or your own CA), and name the host. |
+
+Through an SSH tunnel, **Verify** checks the certificate against the database
+host's real name, not `127.0.0.1`. MySQL is the exception: its driver can't be
+told the name, so there only the chain is checked.
+
+**From .env** carries TLS over: PostgreSQL's `DB_SSLMODE` (`disable`, `require`,
+`verify-ca`/`verify-full` → Verify, anything else → Auto), and MySQL's
+`MYSQL_ATTR_SSL_CA`, which turns on Verify with that CA.
+
 ### Where passwords are kept
 
 Database passwords, SSH passwords and SSH key passphrases are **not** stored in

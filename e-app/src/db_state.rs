@@ -683,6 +683,8 @@ impl AppState {
             ssh_password: c.ssh_password.clone(),
             ssh_key_path: c.ssh_key_path.clone(),
             ssh_passphrase: c.ssh_passphrase.clone(),
+            tls: c.tls.clone(),
+            tls_ca: c.tls_ca.clone(),
         });
         self.db.editing_key.set(Some(entry.key()));
         self.db.test_state.set(String::new());

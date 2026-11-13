@@ -88,6 +88,7 @@ mod navigation;
 mod outline;
 mod palette;
 use e_laravel::phptools;
+mod per_pane;
 mod picker;
 mod platform;
 use e_laravel::policies;

@@ -80,6 +80,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         // Panels & view.
         "toggle-sidebar" => state.sidebar_open.update(|o| *o = !*o),
         "split" => state.toggle_split(),
+        "focus-other-pane" => state.focus_other_pane(),
         "terminal" | "toggle-terminal" => state.toggle_terminal(),
         "new-terminal" => state.new_terminal(),
         "split-terminal" => state.split_terminal(),

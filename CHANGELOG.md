@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A split editor mixed up its two panes.** Both panes kept their editor
+  for a file in one place, and the right one won, so in the left pane
+  auto-closing brackets, completion, go-to and hover moved the caret in the
+  right one. Each pane now has its own editor and caret. Splitting keeps
+  your place and opens the new pane there, and **Focus Other Pane** (`⌘⇧P`)
+  moves between them from the keyboard.
 - **Updating on macOS kept e's signature intact.** The updater used to swap
   the binary inside `e.app` for an unsigned build and rewrite its
   `Info.plist`, which broke the app's code signature, and with it

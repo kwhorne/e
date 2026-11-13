@@ -331,10 +331,14 @@ pub struct Buffer {
     pub lsp_version: RwSignal<i64>,
     /// Bumped per edit; a lint run for an older generation is dropped.
     pub lint_gen: Rc<std::cell::Cell<u64>>,
-    /// The live editor, set once its view is built.
-    pub editor: RwSignal<Option<Editor>>,
-    /// The editor's top-left position in the window (for popups).
-    pub win_origin: RwSignal<Point>,
+    /// The live editor in each pane, set once its view is built; a read gets
+    /// the one the buffer is being worked in (see `per_pane`).
+    pub editor: crate::per_pane::PerPane<Option<Editor>>,
+    /// Each pane's editor's top-left position in the window (for popups).
+    pub win_origin: crate::per_pane::PerPane<Point>,
+    /// Each pane's caret as last seen, kept past its editor: splitting builds
+    /// the panes' editors afresh, and they start from here.
+    pub caret: crate::per_pane::PerPane<Option<Cursor>>,
     /// A `(line, col)` to move the caret to once the editor exists.
     pub pending_goto: RwSignal<Option<(usize, usize)>>,
     /// Last-seen modification time of the file on disk (for change detection).
@@ -4126,8 +4130,9 @@ impl AppState {
             uri: None,
             lsp_version: RwSignal::new(1),
             lint_gen: Rc::new(std::cell::Cell::new(0)),
-            editor: RwSignal::new(None),
-            win_origin: RwSignal::new(Point::ZERO),
+            editor: crate::per_pane::PerPane::new(id, self.panes(), None),
+            win_origin: crate::per_pane::PerPane::new(id, self.panes(), Point::ZERO),
+            caret: crate::per_pane::PerPane::new(id, self.panes(), None),
             pending_goto: RwSignal::new(None),
             disk_mtime: RwSignal::new(None),
             disk_changed: RwSignal::new(false),
@@ -4713,6 +4718,31 @@ impl AppState {
     }
 
     /// Toggle the two-pane split view.
+    /// The editor panes, for a buffer's per-pane state.
+    pub(crate) fn panes(&self) -> crate::per_pane::Panes {
+        crate::per_pane::Panes {
+            split: self.split,
+            focused: self.focused,
+            active: [self.active, self.active2],
+        }
+    }
+
+    /// Move the keyboard to the other editor pane.
+    pub fn focus_other_pane(&self) {
+        if !self.split.get_untracked() {
+            return;
+        }
+        let other = 1 - self.focused.get_untracked().min(1);
+        self.focused.set(other);
+        let view = self
+            .active_buffer()
+            .and_then(|b| b.editor.get_in(other))
+            .and_then(|ed| ed.editor_view_id.get_untracked());
+        if let Some(view) = view {
+            view.request_focus();
+        }
+    }
+
     pub fn toggle_split(&self) {
         let on = !self.split.get_untracked();
         self.split.set(on);
@@ -4723,6 +4753,10 @@ impl AppState {
             self.focused.set(1);
         } else {
             self.focused.set(0);
+            // The right pane's editors are gone with its view.
+            for b in self.buffers.get_untracked() {
+                b.editor.set_in(1, None);
+            }
         }
     }
 
@@ -6818,8 +6852,9 @@ impl AppState {
             uri,
             lsp_version: version,
             lint_gen: Rc::new(std::cell::Cell::new(0)),
-            editor: RwSignal::new(None),
-            win_origin: RwSignal::new(Point::ZERO),
+            editor: crate::per_pane::PerPane::new(id, self.panes(), None),
+            win_origin: crate::per_pane::PerPane::new(id, self.panes(), Point::ZERO),
+            caret: crate::per_pane::PerPane::new(id, self.panes(), None),
             pending_goto: RwSignal::new(None),
             disk_mtime: RwSignal::new(disk_mtime),
             disk_changed: RwSignal::new(false),

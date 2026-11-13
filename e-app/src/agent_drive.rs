@@ -281,12 +281,38 @@ impl AppState {
             })
         });
 
+        // With the editor split: each pane's file and caret, and which has
+        // the keyboard.
+        let panes = self.split.get_untracked().then(|| {
+            [self.active, self.active2]
+                .iter()
+                .enumerate()
+                .map(|(pane, active)| {
+                    let buf = active.get_untracked().and_then(|id| {
+                        self.buffers
+                            .with_untracked(|bs| bs.iter().find(|b| b.id == id).cloned())
+                    });
+                    let caret = buf.as_ref().and_then(|b| b.editor.get_in(pane as u8)).map(|ed| {
+                        let (l, c) = ed.offset_to_line_col(ed.cursor.get_untracked().offset());
+                        (l + 1, c + 1)
+                    });
+                    json!({
+                        "path": buf.and_then(|b| b.file.path).map(|p| p.to_string_lossy().into_owned()),
+                        "line": caret.map(|c| c.0),
+                        "col": caret.map(|c| c.1),
+                        "focused": self.focused.get_untracked() as usize == pane,
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+
         json!({
             "ok": true,
             "open": open,
             "dialog": dialog,
             "code_actions": code_actions,
             "editor": editor,
+            "panes": panes,
             "tests_on_save": tests_on_save,
             "migration_drift": self.migration_drift.get_untracked().map(|d| json!({
                 "pending": d.pending,

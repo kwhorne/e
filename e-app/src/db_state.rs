@@ -279,6 +279,9 @@ impl AppState {
             entry.connecting.set(false);
             match res {
                 Ok((conn, tables, views)) => {
+                    // e-db enforces the panel's read-only toggle itself, so the
+                    // console, CSV import and agent queries all honour it.
+                    conn.set_read_only(entry.read_only.get_untracked());
                     entry.conn.set(Some(conn));
                     entry.tables.set(tables);
                     entry.views.set(views);
@@ -993,6 +996,13 @@ impl AppState {
         else {
             return;
         };
+        if entry.read_only.get_untracked() {
+            Self::notify(
+                "Read-only: this connection is protected from writes. Toggle read-only off \
+                 in the Database panel to import.",
+            );
+            return;
+        }
         let engine = entry.config.engine.clone();
         let env = entry.config.environment();
         let columns: Vec<String> = self
@@ -1134,6 +1144,14 @@ impl AppState {
         if statements.is_empty() {
             return;
         }
+        if entry.read_only.get_untracked() && statements.iter().any(|s| e_db::is_write_statement(s))
+        {
+            Self::notify(
+                "Read-only: this connection is protected from writes. Toggle read-only off \
+                 in the Database panel to run statements that write.",
+            );
+            return;
+        }
         let env = entry.config.environment();
         let non_local = !env.is_local();
         let flagged: Vec<String> = statements
@@ -1172,7 +1190,19 @@ impl AppState {
             }
         });
         self.db.params.set(None);
-        let sql = e_db::substitute_params(&p.sql, &values);
+        let engine = self
+            .db
+            .result_key
+            .get_untracked()
+            .and_then(|key| {
+                self.db.conns.with_untracked(|c| {
+                    c.iter()
+                        .find(|e| e.key() == key)
+                        .map(|e| e.config.engine.clone())
+                })
+            })
+            .unwrap_or_default();
+        let sql = e_db::substitute_params(&engine, &p.sql, &values);
         self.run_console_sql(sql);
     }
 
@@ -1591,6 +1621,9 @@ impl AppState {
     pub fn db_toggle_read_only(&self, entry: DbEntry) {
         let now = !entry.read_only.get_untracked();
         entry.read_only.set(now);
+        if let Some(conn) = entry.conn.get_untracked() {
+            conn.set_read_only(now);
+        }
         Self::notify(if now {
             "Database set to read-only"
         } else {

@@ -145,6 +145,11 @@ pub fn shared_props(root: &Path) -> Vec<String> {
     let Ok(src) = std::fs::read_to_string(&file) else {
         return Vec::new();
     };
+    shared_props_in(&src)
+}
+
+/// [`shared_props`] over the middleware's source.
+fn shared_props_in(src: &str) -> Vec<String> {
     let Some(start) = src.find("function share") else {
         return Vec::new();
     };
@@ -176,14 +181,22 @@ pub fn shared_props(root: &Path) -> Vec<String> {
                     break; // finished the props array
                 }
             }
+            // Comments: `// …`, `# …` (but not a `#[` attribute), `/* … */`.
+            '/' if bytes.get(i + 1) == Some(&b'/') => i = line_end(bytes, i),
+            '#' if bytes.get(i + 1) != Some(&b'[') => i = line_end(bytes, i),
+            '/' if bytes.get(i + 1) == Some(&b'*') => {
+                i = s[i + 2..].find("*/").map_or(s.len(), |e| i + 2 + e + 2);
+            }
             c @ ('\'' | '"') => {
                 let mut j = i + 1;
                 while j < s.len() && bytes[j] as char != c {
-                    j += 1;
+                    // A backslash escapes the next byte (`\'`, `\\`).
+                    j += if bytes[j] == b'\\' { 2 } else { 1 };
                 }
-                let key = &s[i + 1..j.min(s.len())];
+                let j = j.min(s.len());
+                let key = &s[i + 1..j];
                 // Key only if followed by `=>`.
-                let mut k = j + 1;
+                let mut k = (j + 1).min(s.len());
                 while k < s.len() && (bytes[k] as char).is_whitespace() {
                     k += 1;
                 }
@@ -211,6 +224,14 @@ pub fn shared_props(root: &Path) -> Vec<String> {
     out
 }
 
+/// Index of the newline ending the line at `i` (or the end of `bytes`).
+fn line_end(bytes: &[u8], i: usize) -> usize {
+    bytes[i..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(bytes.len(), |e| i + e)
+}
+
 /// Partial dotted path typed after `.props.` (for shared-prop completion).
 pub fn props_partial(line_before: &str) -> Option<String> {
     let at = line_before.rfind(".props.")? + ".props.".len();
@@ -228,6 +249,31 @@ pub fn props_partial(line_before: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A quote inside a comment used to unbalance the scan and panic.
+    #[test]
+    fn shared_props_skip_comments_and_escapes() {
+        let src = r#"<?php
+        public function share(Request $request): array {
+            return [
+                // don't cache this
+                # it's fine
+                /* won't */ 'auth' => ['user' => 1],
+                'flash' => 'it\'s',
+                #[Attr] 'name' => 'x',
+            ];
+        }"#;
+        assert_eq!(shared_props_in(src), ["auth", "auth.user", "flash", "name"]);
+        // Unbalanced quote at the very end: no panic.
+        assert_eq!(
+            shared_props_in("function share() { return ['a"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            shared_props_in("function share() { return ['a'"),
+            Vec::<String>::new()
+        );
+    }
 
     #[test]
     fn parses_shared_props() {

@@ -5,8 +5,10 @@
 //!
 //! The expression runs in the booted app, as the file would see it: in its
 //! namespace, with its `use` imports. Writes are rolled back — it runs in a
-//! transaction on the default connection — and mail, notifications and
-//! queued jobs are faked, so evaluating `$order->ship()` sends nothing.
+//! transaction on every connection it reaches — mail, notifications and
+//! queued jobs are faked and outgoing HTTP is stopped, so evaluating
+//! `$order->ship()` sends nothing. Files written through `Storage` are not
+//! held back.
 
 use std::ops::Range;
 use std::path::Path;
@@ -350,23 +352,13 @@ pub fn runner(root: &Path, context: &str, code: &str, explain: bool) -> String {
 const RUNNER: &str = r#"<?php
 require {autoload};
 $__eApp = require {bootstrap};
-$__eApp->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
-set_error_handler(function ($no, $message, $file, $line) {
-    if (!(error_reporting() & $no)) {
-        return false;
-    }
-    throw new \ErrorException($message, 0, $no, $file, $line);
-});
 
-// What the app booted with, not what `.env` says: a cached config ignores
-// it. Fails closed — a guard that can't tell says no.
-$__eRefused = (function () use ($__eApp) {
+// Why a database connection must not be touched, from what the app is
+// configured with — not what `.env` says: a cached config ignores it. Fails
+// closed: a guard that can't tell says no.
+function __e_refuses_connection(string $name): ?string {
     try {
-        if ($__eApp->environment('production')) {
-            return 'the app runs as production';
-        }
-        $connection = config('database.connections.' . config('database.default')) ?? [];
+        $connection = config('database.connections.' . $name) ?? [];
         $database = (string) ($connection['database'] ?? '');
         $named = preg_match('/(^|[^a-z])(prod|production|live)([^a-z]|$)/i', basename($database));
         if (($connection['driver'] ?? '') === 'sqlite') {
@@ -381,10 +373,57 @@ $__eRefused = (function () use ($__eApp) {
     } catch (\Throwable $e) {
         return 'its environment could not be read (' . $e->getMessage() . ')';
     }
-})();
-if ($__eRefused !== null) {
-    echo "\n{mark}" . json_encode(['value' => '', 'full' => '', 'error' => "Not evaluated: $__eRefused", 'printed' => '', 'ms' => 0, 'queries' => []]) . "\n";
+}
+
+function __e_refuses($app): ?string {
+    try {
+        if ($app->environment('production')) {
+            return 'the app runs as production';
+        }
+        return __e_refuses_connection((string) config('database.default'));
+    } catch (\Throwable $e) {
+        return 'its environment could not be read (' . $e->getMessage() . ')';
+    }
+}
+
+function __e_refuse(string $why): void {
+    echo "\n{mark}" . json_encode(['value' => '', 'full' => '', 'error' => "Not evaluated: $why", 'printed' => '', 'ms' => 0, 'queries' => []]) . "\n";
     exit(0);
+}
+
+// Boot in two steps where the kernel allows it: environment and config
+// first, so the guard runs before any service provider can act, then the
+// rest.
+$__eKernel = $__eApp->make(\Illuminate\Contracts\Console\Kernel::class);
+$__eSteps = null;
+try {
+    $__eSteps = (function () {
+        return $this->bootstrappers();
+    })->call($__eKernel);
+} catch (\Throwable $e) {
+}
+$__eSplit = is_array($__eSteps)
+    ? array_search(\Illuminate\Foundation\Bootstrap\RegisterProviders::class, $__eSteps, true)
+    : false;
+if ($__eSplit !== false) {
+    $__eApp->bootstrapWith(array_slice($__eSteps, 0, $__eSplit));
+    if (($__eRefused = __e_refuses($__eApp)) !== null) {
+        __e_refuse($__eRefused);
+    }
+    $__eApp->bootstrapWith(array_slice($__eSteps, $__eSplit));
+}
+$__eKernel->bootstrap();
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+set_error_handler(function ($no, $message, $file, $line) {
+    if (!(error_reporting() & $no)) {
+        return false;
+    }
+    throw new \ErrorException($message, 0, $no, $file, $line);
+});
+
+// Again once booted: a provider may have changed the config.
+if (($__eRefused = __e_refuses($__eApp)) !== null) {
+    __e_refuse($__eRefused);
 }
 
 function __e_base($v): string {
@@ -564,11 +603,64 @@ function __e_full($v): string {
 }
 
 $__eQueries = [];
-$__eConnection = null;
+// Every connection the expression reaches — the default, a model's own
+// `$connection`, `DB::connection('billing')` — runs in a transaction that is
+// rolled back, and one that looks like production, or can't be held in a
+// transaction, can't be queried at all.
+$__eConnections = [];
+$__eHold = function ($connection) use (&$__eConnections) {
+    $name = (string) $connection->getName();
+    if (isset($__eConnections[$name])) {
+        return;
+    }
+    $__eConnections[$name] = $connection;
+    $why = __e_refuses_connection($name);
+    if ($why === null) {
+        try {
+            $connection->beginTransaction();
+            return;
+        } catch (\Throwable $e) {
+            $why = 'it could not be held in a transaction (' . $e->getMessage() . ')';
+        }
+    }
+    $blocked = function () use ($name, $why) {
+        throw new \RuntimeException("Not run on connection $name: $why");
+    };
+    $connection->setPdo($blocked);
+    $connection->setReadPdo($blocked);
+};
 try {
     \Illuminate\Support\Facades\Mail::fake();
     \Illuminate\Support\Facades\Notification::fake();
     \Illuminate\Support\Facades\Queue::fake();
+} catch (\Throwable $e) {
+}
+try {
+    // Outgoing HTTP fails instead of reaching Stripe or a webhook.
+    if (method_exists(\Illuminate\Http\Client\Factory::class, 'preventStrayRequests')) {
+        \Illuminate\Support\Facades\Http::preventStrayRequests();
+    } else {
+        \Illuminate\Support\Facades\Http::fake();
+    }
+} catch (\Throwable $e) {
+}
+try {
+    // Before anything resolves a connection: each one is held as it opens.
+    if (class_exists(\Illuminate\Database\Events\ConnectionEstablished::class)) {
+        \Illuminate\Support\Facades\Event::listen(
+            \Illuminate\Database\Events\ConnectionEstablished::class,
+            function ($event) use ($__eHold) {
+                $__eHold($event->connection);
+            }
+        );
+    }
+    // And those booting the app already opened.
+    foreach (\Illuminate\Support\Facades\DB::getConnections() as $connection) {
+        $__eHold($connection);
+    }
+} catch (\Throwable $e) {
+}
+try {
     \Illuminate\Support\Facades\DB::listen(function ($q) use (&$__eQueries) {
         $sql = $q->sql;
         try {
@@ -577,8 +669,7 @@ try {
         }
         $__eQueries[] = [$sql, (float) $q->time, $q->connectionName];
     });
-    $__eConnection = \Illuminate\Support\Facades\DB::connection();
-    $__eConnection->beginTransaction();
+    $__eHold(\Illuminate\Support\Facades\DB::connection());
 } catch (\Throwable $e) {
     // No database: the expression may not need one.
 }
@@ -611,11 +702,13 @@ if ({explain}) {
         $__eOut['explains'] = [];
     }
 }
-try {
-    while ($__eConnection && $__eConnection->transactionLevel() > 0) {
-        $__eConnection->rollBack();
+foreach ($__eConnections as $connection) {
+    try {
+        while ($connection->transactionLevel() > 0) {
+            $connection->rollBack();
+        }
+    } catch (\Throwable $e) {
     }
-} catch (\Throwable $e) {
 }
 echo "\n{mark}" . json_encode($__eOut, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) . "\n";
 "#;

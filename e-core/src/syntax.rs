@@ -118,9 +118,14 @@ fn grammar(language: Language) -> Option<Grammar> {
             String::new(),
             String::new(),
         ),
+        // The JavaScript grammar parses JSX in `.js` and `.jsx` alike.
         Language::JavaScript => (
             tree_sitter_javascript::LANGUAGE.into(),
-            tree_sitter_javascript::HIGHLIGHT_QUERY.into(),
+            format!(
+                "{}\n{}",
+                tree_sitter_javascript::HIGHLIGHT_QUERY,
+                tree_sitter_javascript::JSX_HIGHLIGHT_QUERY
+            ),
             tree_sitter_javascript::INJECTIONS_QUERY.into(),
             tree_sitter_javascript::LOCALS_QUERY.into(),
         ),
@@ -129,6 +134,17 @@ fn grammar(language: Language) -> Option<Grammar> {
             format!(
                 "{}\n{}",
                 tree_sitter_javascript::HIGHLIGHT_QUERY,
+                tree_sitter_typescript::HIGHLIGHTS_QUERY
+            ),
+            tree_sitter_javascript::INJECTIONS_QUERY.into(),
+            tree_sitter_typescript::LOCALS_QUERY.into(),
+        ),
+        Language::Tsx => (
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            format!(
+                "{}\n{}\n{}",
+                tree_sitter_javascript::HIGHLIGHT_QUERY,
+                tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
                 tree_sitter_typescript::HIGHLIGHTS_QUERY
             ),
             tree_sitter_javascript::INJECTIONS_QUERY.into(),
@@ -149,6 +165,17 @@ fn grammar(language: Language) -> Option<Grammar> {
         Language::C => (
             tree_sitter_c::LANGUAGE.into(),
             tree_sitter_c::HIGHLIGHT_QUERY.into(),
+            String::new(),
+            String::new(),
+        ),
+        // C++'s queries only add to C's.
+        Language::Cpp => (
+            tree_sitter_cpp::LANGUAGE.into(),
+            format!(
+                "{}\n{}",
+                tree_sitter_c::HIGHLIGHT_QUERY,
+                tree_sitter_cpp::HIGHLIGHT_QUERY
+            ),
             String::new(),
             String::new(),
         ),
@@ -725,9 +752,8 @@ fn script_language(start_tag: tree_sitter::Node, src: &[u8]) -> Option<Language>
         }
         let value = value.to_ascii_lowercase();
         match name {
-            "lang" if value == "ts" || value == "tsx" || value == "typescript" => {
-                lang = Language::TypeScript
-            }
+            "lang" if value == "ts" || value == "typescript" => lang = Language::TypeScript,
+            "lang" if value == "tsx" => lang = Language::Tsx,
             "type" if value.contains("json") => lang = Language::Json,
             "type" if !(value.contains("javascript") || value == "module" || value.is_empty()) => {
                 return None
@@ -1212,6 +1238,7 @@ impl SyntaxTree {
                 | Language::Python
                 | Language::Go
                 | Language::C
+                | Language::Cpp
                 | Language::Json
                 | Language::Css
         )
@@ -1711,6 +1738,33 @@ mod embedded_tests {
             .iter()
             .find(|s| s.start <= at && at < s.end)
             .map(|s| s.kind)
+    }
+
+    #[test]
+    fn tsx_jsx_and_cpp_highlight() {
+        let tsx = "const a = (p: Props) => <div title={p.n} />;\n";
+        assert_eq!(
+            kind_at(Language::Tsx, tsx, 0, "Props"),
+            Some(HighlightKind::Type)
+        );
+        assert_eq!(
+            kind_at(Language::Tsx, tsx, 0, "div"),
+            Some(HighlightKind::Tag)
+        );
+        let jsx = "const a = <div className=\"x\">hi</div>;\n";
+        assert_eq!(
+            kind_at(Language::JavaScript, jsx, 0, "div"),
+            Some(HighlightKind::Tag)
+        );
+        let cpp = "namespace app { class Foo { public: int n; }; }\n";
+        assert_eq!(
+            kind_at(Language::Cpp, cpp, 0, "namespace"),
+            Some(HighlightKind::Keyword)
+        );
+        assert_eq!(
+            kind_at(Language::Cpp, cpp, 0, "class"),
+            Some(HighlightKind::Keyword)
+        );
     }
 
     const SFC: &str = r#"<template>

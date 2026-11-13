@@ -350,17 +350,22 @@ pub struct Terminal {
 }
 
 impl Terminal {
-    /// Spawn `shell` in `cwd`. `on_update` is called (on the reader thread)
-    /// whenever output is received, so the UI can repaint.
+    /// Spawn `shell` in `cwd`, with `env` added to the inherited environment.
+    /// `on_update` is called (on the reader thread) whenever output is
+    /// received, so the UI can repaint.
     pub fn spawn(
         shell: &str,
         cwd: &Path,
+        env: &[(String, String)],
         rows: usize,
         cols: usize,
         on_update: Box<dyn Fn() + Send>,
     ) -> Result<Self> {
         let mut cmd = CommandBuilder::new(shell);
         cmd.cwd(cwd);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
         Self::spawn_builder(cmd, rows, cols, on_update)
     }
 
@@ -373,6 +378,7 @@ impl Terminal {
     pub fn spawn_command(
         cmdline: &str,
         cwd: &Path,
+        env: &[(String, String)],
         rows: usize,
         cols: usize,
         on_update: Box<dyn Fn() + Send>,
@@ -381,6 +387,9 @@ impl Terminal {
         cmd.arg("-ilc");
         cmd.arg(cmdline);
         cmd.cwd(cwd);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
         Self::spawn_builder(cmd, rows, cols, on_update)
     }
 
@@ -588,6 +597,7 @@ mod scroll_tests {
         let mut term = Terminal::spawn(
             "/bin/sh",
             std::path::Path::new("/"),
+            &[],
             24,
             80,
             Box::new(move || {

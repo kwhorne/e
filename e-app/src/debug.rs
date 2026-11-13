@@ -515,6 +515,7 @@ fn adapter_spec(
         }
         Some(Language::JavaScript)
         | Some(Language::TypeScript)
+        | Some(Language::Tsx)
         | Some(Language::Vue)
         | Some(Language::Svelte) => {
             let server = js_debug_server().ok_or_else(|| {

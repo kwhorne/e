@@ -258,7 +258,9 @@ impl DapClient {
                 "linesStartAt1": true,
                 "columnsStartAt1": true,
                 "pathFormat": "path",
-                "supportsRunInTerminalRequest": true,
+                // No terminal to run in: an adapter that asks would be told it
+                // ran, and the debuggee would never start.
+                "supportsRunInTerminalRequest": false,
                 "supportsProgressReporting": false,
             }),
             Duration::from_secs(15),
@@ -567,14 +569,28 @@ fn read_loop(reader: impl Read, pending: Pending, writer: Writer, on_event: Even
 fn respond_to_reverse_request(msg: &Value, seq: i64, writer: &Writer) {
     let request_seq = msg["seq"].as_i64().unwrap_or(0);
     let command = msg["command"].as_str().unwrap_or("");
-    let reply = json!({
-        "seq": seq,
-        "type": "response",
-        "request_seq": request_seq,
-        "success": true,
-        "command": command,
-        "body": {},
-    });
+    // Only `startDebugging` is safe to acknowledge without acting on it (the
+    // session carries on in the parent); anything else, `runInTerminal` above
+    // all, must not be reported as done when it wasn't.
+    let reply = if command == "startDebugging" {
+        json!({
+            "seq": seq,
+            "type": "response",
+            "request_seq": request_seq,
+            "success": true,
+            "command": command,
+            "body": {},
+        })
+    } else {
+        json!({
+            "seq": seq,
+            "type": "response",
+            "request_seq": request_seq,
+            "success": false,
+            "command": command,
+            "message": format!("e does not support `{command}`"),
+        })
+    };
     if let Ok(body) = serde_json::to_vec(&reply) {
         if let Ok(mut w) = writer.lock() {
             let _ = write!(w, "Content-Length: {}\r\n\r\n", body.len());

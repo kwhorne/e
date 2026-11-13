@@ -55,8 +55,8 @@ body{font-family:-apple-system,sans-serif;font-size:12px;color:#333;text-align:c
 a{color:#2563eb;text-decoration:none}
 </style></head><body>
 <p>The editor for the rest of us</p>
-<p><a href="https://elyracode.com/e">elyracode.com/e</a> Â·
-<a href="https://elyracode.com/docs/e">docs</a> Â·
+<p><a href="https://elyracode.com/e">elyracode.com/e</a> ·
+<a href="https://elyracode.com/docs/e">docs</a> ·
 <a href="https://github.com/kwhorne/e">github.com/kwhorne/e</a></p>
 </body></html>
 CREDITS

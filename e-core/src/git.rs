@@ -125,31 +125,35 @@ pub fn status(root: &Path) -> Vec<StatusEntry> {
     let out = match Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["status", "--porcelain"])
+        .args(["status", "--porcelain", "-z"])
         .output()
     {
         Ok(o) if o.status.success() => o,
         _ => return Vec::new(),
     };
-    let text = String::from_utf8_lossy(&out.stdout);
+    parse_status_z(&out.stdout)
+}
+
+/// Parse `git status --porcelain -z`: `XY path` records separated by NUL,
+/// unquoted, so names with spaces or non-ASCII letters come through as they
+/// are. A rename or copy is followed by one more record holding the old path.
+fn parse_status_z(out: &[u8]) -> Vec<StatusEntry> {
     let mut entries = Vec::new();
-    for line in text.lines() {
-        if line.len() < 3 {
+    let mut records = out.split(|&b| b == 0);
+    while let Some(rec) = records.next() {
+        let rec = String::from_utf8_lossy(rec);
+        let mut chars = rec.chars();
+        let (Some(index), Some(worktree), Some(' ')) = (chars.next(), chars.next(), chars.next())
+        else {
             continue;
+        };
+        if index == 'R' || index == 'C' {
+            records.next(); // the old path
         }
-        let bytes: Vec<char> = line.chars().collect();
-        let index = bytes[0];
-        let worktree = bytes[1];
-        let mut path = line[3..].to_string();
-        // Renames are shown as "old -> new"; keep the new path.
-        if let Some(pos) = path.find(" -> ") {
-            path = path[pos + 4..].to_string();
-        }
-        let path = path.trim_matches('"').to_string();
         entries.push(StatusEntry {
             index,
             worktree,
-            path,
+            path: chars.as_str().to_string(),
         });
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -636,8 +640,11 @@ pub fn last_head_move(reflog: &Path) -> Option<String> {
     let mut file = std::fs::File::open(reflog).ok()?;
     let len = file.metadata().ok()?.len();
     file.seek(SeekFrom::Start(len.saturating_sub(4096))).ok()?;
-    let mut tail = String::new();
-    file.read_to_string(&mut tail).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    // The seek can land inside a line, even inside a character; the tail
+    // after that point is all whole lines.
+    let tail = String::from_utf8_lossy(&bytes);
     let line = tail.lines().rev().find(|l| !l.trim().is_empty())?;
     Some(line.split_once('\t')?.1.trim().to_string())
 }
@@ -773,8 +780,13 @@ fn git_out(root: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 fn untracked_files(root: &Path) -> Vec<String> {
-    git_out(root, &["ls-files", "--others", "--exclude-standard"])
-        .map(|s| s.lines().map(str::to_string).collect())
+    git_bytes(root, &["ls-files", "-z", "--others", "--exclude-standard"])
+        .map(|out| {
+            out.split(|&b| b == 0)
+                .filter(|p| !p.is_empty())
+                .map(|p| String::from_utf8_lossy(p).into_owned())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -1090,8 +1102,27 @@ pub fn undo_tree_change(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_hunk, diff, hunk_at, line_bytes, marks, parse_worktrees, DiffKind, Hunk, LineMark,
+        apply_hunk, diff, hunk_at, line_bytes, marks, parse_status_z, parse_worktrees, DiffKind,
+        Hunk, LineMark,
     };
+
+    #[test]
+    fn status_keeps_spaces_non_ascii_and_the_new_side_of_a_rename() {
+        let out = " M lang/nb/bøker.php\0?? notes with space.md\0R  new name.php\0old.php\0";
+        let entries = parse_status_z(out.as_bytes());
+        let got: Vec<(char, char, &str)> = entries
+            .iter()
+            .map(|e| (e.index, e.worktree, e.path.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (' ', 'M', "lang/nb/bøker.php"),
+                ('R', ' ', "new name.php"),
+                ('?', '?', "notes with space.md"),
+            ]
+        );
+    }
 
     #[test]
     fn the_hunk_at_a_line_covers_its_run_of_changes() {

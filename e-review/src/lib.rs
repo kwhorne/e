@@ -186,10 +186,52 @@ pub fn classify_risk(path: &str) -> (Risk, &'static str) {
 }
 
 fn split_diff_git_paths(rest: &str) -> Option<String> {
-    // `a/foo/bar.rs b/foo/bar.rs` — take the `b/` side (the new path).
-    // Note: git quotes paths containing spaces (`"a/x y"`); those fall back to None.
+    // `a/foo/bar.rs b/foo/bar.rs` — take the `b/` side (the new path). Git
+    // quotes a path holding non-ASCII letters, quotes or backslashes:
+    // `"a/bl\303\245.php" "b/bl\303\245.php"`.
+    if let Some(head) = rest.strip_suffix('"') {
+        let start = head.rfind(" \"b/")?;
+        let b = unquote_git_path(&rest[start + 1..])?;
+        return b.strip_prefix("b/").map(str::to_string);
+    }
     let idx = rest.find(" b/")?;
     Some(rest[idx + 3..].to_string())
+}
+
+/// A path as git prints it in a header: as is, or C-quoted (`"x\303\245"`,
+/// octal bytes of UTF-8, `\"`, `\\`, `\t`, `\n`).
+fn unquote_git_path(s: &str) -> Option<String> {
+    let Some(inner) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+        return Some(s.to_string());
+    };
+    let mut out: Vec<u8> = Vec::with_capacity(inner.len());
+    let bytes = inner.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        let c = *bytes.get(i + 1)?;
+        i += 2;
+        match c {
+            b'0'..=b'7' => {
+                let oct = inner.get(i - 1..i + 2)?;
+                out.push(u8::from_str_radix(oct, 8).ok()?);
+                i += 2;
+            }
+            b'a' => out.push(7),
+            b'b' => out.push(8),
+            b't' => out.push(b'\t'),
+            b'n' => out.push(b'\n'),
+            b'v' => out.push(11),
+            b'f' => out.push(12),
+            b'r' => out.push(b'\r'),
+            other => out.push(other),
+        }
+    }
+    Some(String::from_utf8_lossy(&out).into_owned())
 }
 
 fn parse_hunk_header(line: &str) -> (usize, usize) {
@@ -277,10 +319,10 @@ pub fn parse_unified_diff(text: &str) -> Vec<FileChange> {
         } else if line.starts_with("deleted file mode") {
             f.kind = ChangeKind::Deleted;
         } else if let Some(p) = line.strip_prefix("rename from ") {
-            f.old_path = Some(p.to_string());
+            f.old_path = unquote_git_path(p);
             f.kind = ChangeKind::Renamed;
         } else if let Some(p) = line.strip_prefix("rename to ") {
-            f.path = p.to_string();
+            f.path = unquote_git_path(p).unwrap_or_else(|| p.to_string());
             f.kind = ChangeKind::Renamed;
         } else if line.starts_with("Binary files") || line.starts_with("GIT binary patch") {
             f.binary = true;
@@ -519,6 +561,38 @@ Binary files a/public/logo.png and b/public/logo.png differ
         let bin = files.iter().find(|f| f.path.ends_with(".png")).unwrap();
         assert!(bin.binary);
         assert!(bin.hunks.is_empty());
+    }
+
+    #[test]
+    fn keeps_files_git_quotes() {
+        let d = "\
+diff --git \"a/lang/nb/bl\\303\\245b\\303\\246r.php\" \"b/lang/nb/bl\\303\\245b\\303\\246r.php\"
+--- \"a/lang/nb/bl\\303\\245b\\303\\246r.php\"
++++ \"b/lang/nb/bl\\303\\245b\\303\\246r.php\"
+@@ -1 +1 @@
+-a
++b
+diff --git a/notes with space.md b/notes with space.md
+--- a/notes with space.md
++++ b/notes with space.md
+@@ -1 +1 @@
+-a
++b
+diff --git a/old.php \"b/ny \\\"fil\\\".php\"
+similarity index 90%
+rename from old.php
+rename to \"ny \\\"fil\\\".php\"
+";
+        let files = parse_unified_diff(d);
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "lang/nb/blåbær.php",
+                "notes with space.md",
+                "ny \"fil\".php"
+            ]
+        );
     }
 
     #[test]

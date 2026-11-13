@@ -299,7 +299,11 @@ impl AppState {
         // Ziggy: `route('…')` in JS completes from the Laravel route table.
         if matches!(
             buf.file.language,
-            Language::TypeScript | Language::JavaScript | Language::Vue | Language::Svelte
+            Language::TypeScript
+                | Language::Tsx
+                | Language::JavaScript
+                | Language::Vue
+                | Language::Svelte
         ) {
             if let Some(partial) = crate::inertia::route_partial(line_before) {
                 if let Some(data) = self.laravel.get_untracked() {
@@ -341,7 +345,11 @@ impl AppState {
         // Inertia shared props: `$page.props.…` from HandleInertiaRequests::share().
         if matches!(
             buf.file.language,
-            Language::TypeScript | Language::JavaScript | Language::Vue | Language::Svelte
+            Language::TypeScript
+                | Language::Tsx
+                | Language::JavaScript
+                | Language::Vue
+                | Language::Svelte
         ) {
             if let Some(partial) = crate::inertia::props_partial(line_before) {
                 let lower = partial.to_lowercase();
@@ -936,7 +944,11 @@ impl AppState {
         let buf = self.active_buffer()?;
         if !matches!(
             buf.file.language,
-            Language::TypeScript | Language::JavaScript | Language::Vue | Language::Svelte
+            Language::TypeScript
+                | Language::Tsx
+                | Language::JavaScript
+                | Language::Vue
+                | Language::Svelte
         ) {
             return None;
         }

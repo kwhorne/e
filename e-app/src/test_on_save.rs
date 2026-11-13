@@ -67,6 +67,7 @@ impl AppState {
                 | Language::Svelte
                 | Language::JavaScript
                 | Language::TypeScript
+                | Language::Tsx
         );
         if !self.settings.get_untracked().test_on_save || !view_or_php {
             return;

@@ -53,7 +53,7 @@ fn file_glyph(name: &str, is_dir: bool, expanded: bool) -> &'static str {
         Language::Php => "🐘",
         Language::Blade => "🍃",
         Language::JavaScript => "🟨",
-        Language::TypeScript => "🟦",
+        Language::TypeScript | Language::Tsx => "🟦",
         Language::Vue => "💚",
         Language::Svelte => "🧡",
         Language::Python => "🐍",

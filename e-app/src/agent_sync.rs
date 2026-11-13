@@ -23,23 +23,28 @@
 //!   → a feature test made from the newest captured request to that path or
 //!   route (or the Runtime panel's `id`): the test file's path and content
 //!   with the test added, and notes. Writes nothing.
-//! - Driving the UI as a person would, for testing it (see `agent_drive`):
+//! - Driving the UI as a person would, for testing it (see `agent_drive`; the
+//!   ones marked † need `E_UI_AUTOMATION=1`):
 //!   `{"method":"commands"}`, `{"method":"command","id":"session-review"}`,
 //!   `{"method":"code_actions"}` then `{"method":"apply_code_action","index":0}`,
-//!   `{"method":"dialog","action":"confirm|cancel"}`,
+//!   `{"method":"dialog","action":"confirm|cancel"}` †,
 //!   `{"method":"cascade","action":"send","text":"…"}` (and steer, next, stop,
-//!   new_session, new_worktree, take_down, review_turn, undo_turn…),
+//!   new_session, new_worktree, take_down, review_turn, undo_turn…; `answer` †),
 //!   `{"method":"wait_idle","timeout_ms":120000}` and `{"method":"ui_state"}`.
 //! - `{"method":"key","keys":["cmd+p","down","enter"]}` or
 //!   `{"method":"key","text":"orders"}` → presses keys in the editor's window
-//!   as the keyboard would (macOS; see `synthetic_keys`).
+//!   as the keyboard would (macOS; see `synthetic_keys`) †.
 //! - `{"method":"click","x":40,"y":120,"modifiers":"alt"}` → clicks at a point
-//!   in the window, in points from the top left of its content (macOS).
+//!   in the window, in points from the top left of its content (macOS) †.
 //! - `{"method":"focus","target":"terminal|editor|agent"}`.
 //! - `{"method":"notify","message":"…"}`.
 //!
-//! The socket path is exported to spawned agents as `$E_EDITOR_SOCK`, so an
-//! agent can e.g. `printf '{"method":"context"}\n' | nc -U "$E_EDITOR_SOCK"`.
+//! The socket path is handed to agents and the integrated terminal (and to
+//! nothing else the editor spawns) as `$E_EDITOR_SOCK`, so an agent can e.g.
+//! `printf '{"method":"context"}\n' | nc -U "$E_EDITOR_SOCK"`. The methods that
+//! act for the person at the keyboard — `key`, `click`, `dialog` and Cascade's
+//! `answer` — are refused unless `e` was started with `E_UI_AUTOMATION=1`.
+//! `propose_edit` only edits files inside the workspace.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
@@ -138,6 +143,108 @@ fn socket_path() -> Option<std::path::PathBuf> {
     Some(short)
 }
 
+/// This editor's socket, once [`start`] has bound it.
+static SOCKET: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// `E_EDITOR_SOCK=<path>` for a process that is meant to drive the editor: an
+/// agent (Cascade's, or one launched in the agent panel) and the integrated
+/// terminal, where CLI agents are run. Nothing else the editor spawns gets it.
+pub fn socket_env() -> Vec<(String, String)> {
+    SOCKET
+        .get()
+        .map(|p| {
+            vec![(
+                "E_EDITOR_SOCK".to_string(),
+                p.to_string_lossy().into_owned(),
+            )]
+        })
+        .unwrap_or_default()
+}
+
+/// Whether the socket may drive the UI as a person would — press keys, click,
+/// confirm dialogs, answer Cascade's permission cards. Those can approve what
+/// the person is being asked to approve, so an agent must not have them: they
+/// are on only when `e` is started with `E_UI_AUTOMATION=1`, as the end-to-end
+/// tests (`tests/ui_flows.rs`) start it.
+fn ui_automation() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("E_UI_AUTOMATION").is_ok_and(|v| v == "1" || v == "true"))
+}
+
+/// Is `method` (with its request) one that acts for the person in the UI, and
+/// so is refused unless [`ui_automation`] is on?
+fn drives_ui_as_person(method: &str, req: &Value) -> bool {
+    match method {
+        "key" | "click" | "dialog" => true,
+        "cascade" => req.get("action").and_then(Value::as_str) == Some("answer"),
+        _ => false,
+    }
+}
+
+/// Resolve the path a `propose_edit` names against the workspace, and refuse
+/// one outside it.
+///
+/// A relative path is taken from the first root (where the agent works). The
+/// check is made on the canonical form of the deepest part of the path that
+/// exists, so neither `..` nor a symlink inside the project can point a write
+/// at `~/.zshrc` or e's own config. The path handed back is the lexical one,
+/// so it still matches an open buffer's path.
+fn resolve_in_workspace(
+    roots: &[std::path::PathBuf],
+    path: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    use std::path::{Component, PathBuf};
+    let first = roots.first().ok_or("no workspace is open")?;
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        first.join(path)
+    };
+    // Lexically normalised: `.` dropped, `..` applied.
+    let mut lexical = PathBuf::new();
+    for c in joined.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                lexical.pop();
+            }
+            other => lexical.push(other),
+        }
+    }
+    let canonical = |p: &std::path::Path| -> PathBuf {
+        // The deepest existing ancestor, canonicalised, plus the rest.
+        let mut existing = p.to_path_buf();
+        let mut rest = Vec::new();
+        loop {
+            if let Ok(c) = existing.canonicalize() {
+                return rest.into_iter().rev().fold(c, |acc, part| acc.join(part));
+            }
+            match (
+                existing.file_name().map(|f| f.to_os_string()),
+                existing.parent(),
+            ) {
+                (Some(name), Some(parent)) => {
+                    rest.push(name);
+                    existing = parent.to_path_buf();
+                }
+                _ => return p.to_path_buf(),
+            }
+        }
+    };
+    let target = canonical(&lexical);
+    let inside = roots
+        .iter()
+        .any(|r| target.starts_with(canonical(r)) && target != canonical(r));
+    if inside {
+        Ok(lexical)
+    } else {
+        Err(format!(
+            "{} is outside the workspace; propose_edit only edits files in the project",
+            lexical.display()
+        ))
+    }
+}
+
 /// Stay clear of the smaller of the two `sun_path` limits.
 const SUN_PATH_BUDGET: usize = 100;
 
@@ -228,9 +335,13 @@ pub fn start(state: AppState) {
             eprintln!("e: could not restrict agent socket permissions: {e}");
         }
     }
-    // Let spawned agents discover the socket. This variable *is* the capability:
-    // anything that inherits it can drive the editor, including `run`.
-    std::env::set_var("E_EDITOR_SOCK", &path);
+    // Hand the socket to the processes meant to drive the editor (see
+    // [`socket_env`]). This path *is* the capability — anything holding it can
+    // drive the editor, including `run` — so it is not put in the editor's own
+    // environment, where every child (composer, npm, test runners, language
+    // servers) would inherit it. (`set_var` with threads running is unsound
+    // besides.)
+    let _ = SOCKET.set(path.clone());
 
     let pending: Pending = Arc::new(Mutex::new(VecDeque::new()));
     let (wake_tx, wake_rx) = mpsc::channel::<u64>();
@@ -354,6 +465,18 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
     // Audit everything the agent does.
     state.agent_log_push(method, log_summary(req));
 
+    if drives_ui_as_person(method, req) && !ui_automation() {
+        let _ = reply.send(json!({
+            "ok": false,
+            "error": format!(
+                "{method} acts for the person at the keyboard (it could approve what they are \
+                 being asked to approve), so it is only available when e is started with \
+                 E_UI_AUTOMATION=1 for testing"
+            ),
+        }));
+        return;
+    }
+
     let sync: Value = match method {
         "context" => context(state),
         "diagnostics" => json!({ "ok": true, "diagnostics": diagnostics(state) }),
@@ -419,7 +542,17 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 let _ = reply.send(json!({"ok": false, "error": "missing content"}));
                 return;
             };
-            state.agent_propose_edit(std::path::PathBuf::from(path), content, reply);
+            let mut roots = vec![state.agent_root()];
+            let project = state.root.get_untracked();
+            if !roots.contains(&project) {
+                roots.push(project);
+            }
+            match resolve_in_workspace(&roots, std::path::Path::new(&path)) {
+                Ok(path) => state.agent_propose_edit(path, content, reply),
+                Err(e) => {
+                    let _ = reply.send(json!({"ok": false, "error": e}));
+                }
+            }
             return;
         }
         "focus" => {
@@ -1225,5 +1358,59 @@ mod tests {
             &std::env::temp_dir().join("e-sock-sweep-does-not-exist"),
             Duration::ZERO,
         );
+    }
+
+    #[test]
+    fn propose_edit_stays_inside_the_workspace() {
+        use std::path::Path;
+        let base = std::env::temp_dir().join(format!("e-ws-{}", std::process::id()));
+        let root = base.join("shop");
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        std::fs::write(root.join("app/User.php"), "<?php").unwrap();
+        let roots = vec![root.clone()];
+
+        // Relative paths are taken from the project; new files are fine.
+        assert_eq!(
+            resolve_in_workspace(&roots, Path::new("app/User.php")).unwrap(),
+            root.join("app/User.php")
+        );
+        assert!(resolve_in_workspace(&roots, &root.join("app/New/Thing.php")).is_ok());
+        assert_eq!(
+            resolve_in_workspace(&roots, Path::new("./app/../app/User.php")).unwrap(),
+            root.join("app/User.php")
+        );
+
+        // Out of it, by `..`, by absolute path, or through a symlink.
+        assert!(resolve_in_workspace(&roots, Path::new("../outside.txt")).is_err());
+        assert!(resolve_in_workspace(&roots, Path::new("/etc/hosts")).is_err());
+        assert!(resolve_in_workspace(&roots, &base.join("shop-other/x.php")).is_err());
+        assert!(resolve_in_workspace(&roots, &root).is_err());
+        std::os::unix::fs::symlink(&base, root.join("escape")).unwrap();
+        assert!(resolve_in_workspace(&roots, Path::new("escape/secret")).is_err());
+
+        // A second root (the project, when the agent is in a worktree) counts.
+        let other = base.join("worktree");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(resolve_in_workspace(&[other, root.clone()], &root.join("app/User.php")).is_ok());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn only_acting_for_the_person_needs_automation() {
+        for m in ["key", "click", "dialog"] {
+            assert!(drives_ui_as_person(m, &json!({})));
+        }
+        assert!(drives_ui_as_person(
+            "cascade",
+            &json!({"action": "answer", "index": 3, "choice": "allow"})
+        ));
+        assert!(!drives_ui_as_person(
+            "cascade",
+            &json!({"action": "send", "text": "hi"})
+        ));
+        for m in ["context", "ui_state", "command", "propose_edit", "run"] {
+            assert!(!drives_ui_as_person(m, &json!({})));
+        }
     }
 }

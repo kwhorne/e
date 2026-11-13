@@ -71,7 +71,11 @@ fn snippets(language: Language) -> &'static [(&'static str, &'static str)] {
             ("if", "if ($0) {\n    \n}"),
             ("dd", "dd($0);"),
         ],
-        Language::JavaScript | Language::TypeScript | Language::Vue | Language::Svelte => &[
+        Language::JavaScript
+        | Language::TypeScript
+        | Language::Tsx
+        | Language::Vue
+        | Language::Svelte => &[
             ("fn", "function $0() {\n    \n}"),
             ("arrow", "const $0 = () => {\n    \n}"),
             ("log", "console.log($0);"),

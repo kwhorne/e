@@ -214,15 +214,22 @@ pub fn compare(before: &RequestMetrics, after: &RequestMetrics) -> Comparison {
         (Some(a), Some(b)) => a != b,
         _ => false,
     };
-    // "Broke" = the response went from OK to an error, or its shape changed.
-    let broke = (after.status >= 400 && before.status < 400) || shape_changed;
+    // "Broke" = the response went from OK to an error, a page became a
+    // redirect (`200` → `302 /login` is fast and runs no queries, but serves
+    // nothing), or its shape changed.
+    let broke = (after.status >= 400 && before.status < 400)
+        || ((200..300).contains(&before.status) && (300..400).contains(&after.status))
+        || shape_changed;
+    let n1_introduced = n1_after && !n1_before;
 
+    // A regression anywhere outweighs a gain elsewhere: fewer queries that
+    // run slower is not an improvement.
     let verdict = if broke {
         Verdict::Broke
+    } else if query_delta > 0 || slower || n1_introduced {
+        Verdict::Regressed
     } else if n1_fixed || query_delta < 0 || faster {
         Verdict::Improved
-    } else if query_delta > 0 || slower {
-        Verdict::Regressed
     } else {
         Verdict::NoChange
     };
@@ -733,6 +740,43 @@ mod tests {
         let c = compare(&before, &after);
         assert!(c.slower);
         assert_eq!(c.query_delta, 2);
+        assert_eq!(c.verdict, Verdict::Regressed);
+    }
+
+    #[test]
+    fn a_page_turned_redirect_is_broke_not_faster() {
+        let before = metrics_of(&RequestSample {
+            status: 200,
+            duration_ms: 120.0,
+            queries: vec![q("select * from orders", 3.0)],
+            response_shape: None,
+        });
+        let after = metrics_of(&RequestSample {
+            status: 302,
+            duration_ms: 4.0,
+            queries: vec![],
+            response_shape: None,
+        });
+        assert_eq!(compare(&before, &after).verdict, Verdict::Broke);
+    }
+
+    #[test]
+    fn fewer_queries_but_slower_is_a_regression() {
+        let before = metrics_of(&RequestSample {
+            status: 200,
+            duration_ms: 40.0,
+            queries: vec![q("select 1", 1.0), q("select 2", 1.0)],
+            response_shape: None,
+        });
+        let after = metrics_of(&RequestSample {
+            status: 200,
+            duration_ms: 200.0,
+            queries: vec![q("select 1", 1.0)],
+            response_shape: None,
+        });
+        let c = compare(&before, &after);
+        assert_eq!(c.query_delta, -1);
+        assert!(c.slower);
         assert_eq!(c.verdict, Verdict::Regressed);
     }
 

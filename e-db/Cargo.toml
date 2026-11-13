@@ -26,7 +26,11 @@ mysql = { version = "25", default-features = false, features = [
 ] }
 postgres   = "0.19"
 rusqlite   = { version = "0.32", features = ["bundled"] }
-ureq       = "2"
+# TLS for PostgreSQL and ClickHouse through the same native stack MySQL uses
+# (the Security framework on macOS, OpenSSL on Linux).
+native-tls          = "0.2"
+postgres-native-tls = "0.5"
+ureq       = { version = "2", features = ["native-tls"] }
 
 # Connection secrets live in the OS credential store, not in our JSON. The
 # backend is picked per platform so neither one drags the other's system

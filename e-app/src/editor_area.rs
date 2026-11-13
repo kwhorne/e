@@ -382,7 +382,24 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
             .style(|s| s.size_full());
 
             let editor_handle = te.editor().clone();
-            b.editor.set(Some(editor_handle.clone()));
+            // Splitting (or unsplitting) builds the panes' editors afresh:
+            // carry the caret over from this pane's last editor, or open the
+            // new pane where the other one is.
+            if let Some(caret) = b
+                .caret
+                .get_in(pane_idx)
+                .or_else(|| b.caret.get_in(1 - pane_idx.min(1)))
+            {
+                editor_handle.cursor.set(caret);
+            }
+            b.editor.set_in(pane_idx, Some(editor_handle.clone()));
+            {
+                let cursor = editor_handle.cursor;
+                let caret = b.caret;
+                floem::reactive::create_effect(move |_| {
+                    caret.set_in(pane_idx, Some(cursor.get()));
+                });
+            }
 
             // Intercept Up/Down/Enter/Tab to drive the completion popup. This
             // MUST be registered on the inner TextDocument (`b.doc`), not via
@@ -449,6 +466,8 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 });
             }
 
+            // Both panes build an editor for a new buffer in the same update;
+            // each starts at the goto, which is dropped once both have.
             if let Some((l, c)) = b.pending_goto.get_untracked() {
                 let offset = editor_handle.offset_of_line_col(l, c);
                 editor_handle.cursor.set(Cursor::new(
@@ -456,11 +475,12 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                     None,
                     None,
                 ));
-                b.pending_goto.set(None);
+                let pending = b.pending_goto;
+                floem::action::exec_after(std::time::Duration::ZERO, move |_| pending.set(None));
             }
 
             container(te)
-                .on_move(move |point| win_origin.set(point))
+                .on_move(move |point| win_origin.set_in(pane_idx, point))
                 .on_event(EventListener::PointerDown, move |_| {
                     state.focused.set(pane_idx);
                     EventPropagation::Continue

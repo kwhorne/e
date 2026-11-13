@@ -139,6 +139,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("run-test", "Run Tests"),
     ("source-control", "Toggle Source Control"),
     ("split", "Toggle Split View"),
+    ("focus-other-pane", "Focus Other Pane"),
     ("terminal", "Toggle Terminal"),
     ("new-terminal", "New Terminal"),
     ("split-terminal", "Split Terminal"),

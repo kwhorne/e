@@ -416,6 +416,51 @@ fn typing_marks_the_file_and_undo_unmarks_it() {
 
 #[test]
 #[ignore = "opens a window; run with --ignored"]
+fn each_pane_of_a_split_keeps_its_own_caret() {
+    let app = App::launch(json!({}));
+    app.open("Order.php");
+    app.caret_to(9);
+    app.wait_for("the caret on line 9", |s| s["editor"]["line"] == 9);
+    // The right pane opens on the same file, where the left one is, with a
+    // caret of its own.
+    app.command("split");
+    let s = app.wait_for("two panes", |s| {
+        s["panes"].as_array().is_some_and(|p| p.len() == 2)
+    });
+    assert_eq!(
+        s["panes"][0]["line"], 9,
+        "splitting keeps the left caret: {}",
+        s["panes"]
+    );
+    assert_eq!(
+        s["panes"][1]["line"], 9,
+        "the right pane opens there: {}",
+        s["panes"]
+    );
+    app.keys(&["cmd+up", "down", "down"]);
+    let s = app.wait_for("the right caret on line 3", |s| s["panes"][1]["line"] == 3);
+    assert_eq!(
+        s["panes"][0]["line"], 9,
+        "the left caret stays: {}",
+        s["panes"]
+    );
+    // Back on the left, e works with the left editor, not the last one built.
+    app.command("focus-other-pane");
+    let s = app.wait_for("the left pane focused", |s| {
+        s["panes"][0]["focused"] == true
+    });
+    assert_eq!(s["editor"]["line"], 9, "the active editor is the left one");
+    app.keys(&["down"]);
+    let s = app.wait_for("the left caret on line 10", |s| s["panes"][0]["line"] == 10);
+    assert_eq!(
+        s["panes"][1]["line"], 3,
+        "the right caret stays: {}",
+        s["panes"]
+    );
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
 fn saving_writes_the_file() {
     let app = App::launch(json!({"format_on_save": false}));
     app.open("Order.php");

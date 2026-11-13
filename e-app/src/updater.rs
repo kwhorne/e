@@ -161,6 +161,7 @@ pub fn check() -> Result<Option<UpdateInfo>> {
 }
 
 /// The `<string>` value that follows `<key>{key}</key>` in a plist.
+#[cfg(target_os = "macos")]
 fn plist_string<'a>(content: &'a str, key: &str) -> Option<&'a str> {
     let kpos = content.find(&format!("<key>{key}</key>"))?;
     let sstart = kpos + content[kpos..].find("<string>")? + "<string>".len();
@@ -205,6 +206,7 @@ fn download_verified(base: &str, asset: &str, dir: &Path) -> Result<PathBuf> {
 }
 
 /// The macOS app bundle the running executable lives in, if any.
+#[cfg(target_os = "macos")]
 pub fn running_bundle() -> Option<PathBuf> {
     let exe = crate::platform::current_exe().ok()?;
     exe.ancestors()
@@ -251,6 +253,7 @@ fn install_binary(base: &str, version: &str) -> Result<()> {
 }
 
 /// The release asset holding the signed, notarized app bundle.
+#[cfg(target_os = "macos")]
 pub fn bundle_asset(version: &str) -> String {
     format!("{REPO_NAME}-{version}-universal.app.zip")
 }
@@ -405,6 +408,7 @@ mod tests {
         eprintln!("latest {v}: {} bytes of notes", notes.len());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn reads_a_string_out_of_a_plist() {
         let plist = "<key>CFBundleShortVersionString</key>\n<string>0.9.16</string>\n<key>Other</key><string>x</string>";
@@ -416,6 +420,7 @@ mod tests {
         assert_eq!(plist_string(plist, "Missing"), None);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn the_bundle_asset_is_the_universal_app_zip() {
         assert_eq!(bundle_asset("0.20.0"), "e-0.20.0-universal.app.zip");

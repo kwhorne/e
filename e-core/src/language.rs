@@ -18,6 +18,8 @@ pub enum Language {
     Markdown,
     JavaScript,
     TypeScript,
+    /// TypeScript with JSX (`.tsx`): its own grammar.
+    Tsx,
     Python,
     Html,
     Css,
@@ -60,7 +62,8 @@ impl Language {
             "json" => Language::Json,
             "md" | "markdown" => Language::Markdown,
             "js" | "mjs" | "cjs" | "jsx" => Language::JavaScript,
-            "ts" | "tsx" | "mts" | "cts" => Language::TypeScript,
+            "ts" | "mts" | "cts" => Language::TypeScript,
+            "tsx" => Language::Tsx,
             "py" | "pyi" => Language::Python,
             "html" | "htm" => Language::Html,
             "css" | "scss" | "sass" | "less" | "pcss" | "postcss" => Language::Css,
@@ -80,7 +83,7 @@ impl Language {
     pub fn line_comment(self) -> Option<&'static str> {
         use Language::*;
         match self {
-            Rust | C | Cpp | Go | JavaScript | TypeScript | Php | Vue | Svelte => Some("//"),
+            Rust | C | Cpp | Go | JavaScript | TypeScript | Tsx | Php | Vue | Svelte => Some("//"),
             Python | Shell | Toml => Some("#"),
             Sql => Some("--"),
             // Languages without a line comment (block-only or none).
@@ -98,6 +101,7 @@ impl Language {
             Language::Markdown => "Markdown",
             Language::JavaScript => "JavaScript",
             Language::TypeScript => "TypeScript",
+            Language::Tsx => "TypeScript JSX",
             Language::Python => "Python",
             Language::Html => "HTML",
             Language::Css => "CSS",

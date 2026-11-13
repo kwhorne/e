@@ -234,6 +234,35 @@ pub fn minimal_change<'n>(old: &str, new: &'n str) -> Option<(usize, usize, &'n 
     Some((prefix, ob.len() - suffix, &new[prefix..nb.len() - suffix]))
 }
 
+/// A change whose start or end falls between the `\r` and `\n` of a line
+/// break can't be said in protocol positions (both sides of the `\r` are the
+/// end of the line), so it would reach the server as a different edit. Widen
+/// such a change to take in the whole break, carrying its unchanged half
+/// along in the replacement text.
+fn widen_past_crlf<'n>(
+    old: &str,
+    mut start: usize,
+    mut end: usize,
+    new_text: &'n str,
+) -> (usize, usize, std::borrow::Cow<'n, str>) {
+    let b = old.as_bytes();
+    let splits = |i: usize| i > 0 && b.get(i - 1) == Some(&b'\r') && b.get(i) == Some(&b'\n');
+    if !splits(start) && !splits(end) {
+        return (start, end, std::borrow::Cow::Borrowed(new_text));
+    }
+    let mut text = String::with_capacity(new_text.len() + 2);
+    if splits(start) {
+        start -= 1;
+        text.push('\r');
+    }
+    text.push_str(new_text);
+    if splits(end) {
+        end += 1;
+        text.push('\n');
+    }
+    (start, end, std::borrow::Cow::Owned(text))
+}
+
 /// One document as the server currently knows it.
 struct Doc {
     text: String,
@@ -913,6 +942,7 @@ impl LspClient {
                     return;
                 }
                 Some((start, end, new_text)) => {
+                    let (start, end, new_text) = widen_past_crlf(&doc.text, start, end, new_text);
                     let enc = self.inner.encoding();
                     let range = Range::new(doc.position(start, enc), doc.position(end, enc));
                     json!([{ "range": range, "text": new_text }])
@@ -1369,12 +1399,23 @@ fn collect_symbol(s: &Value, depth: usize, out: &mut Vec<(String, i64, u32, u32,
 /// Resolve a parameter label (string or `[start,end]` offsets) to a char range.
 fn param_range(plabel: &Value, sig_label: &str) -> Option<(u32, u32)> {
     if let Some(arr) = plabel.as_array() {
-        let a = arr.first()?.as_u64()? as u32;
-        let b = arr.get(1)?.as_u64()? as u32;
-        return Some((a, b));
+        // Offsets in UTF-16 code units, as the protocol counts them.
+        let a = arr.first()?.as_u64()? as usize;
+        let b = arr.get(1)?.as_u64()? as usize;
+        let chars_at = |units: usize| {
+            let mut n = 0;
+            sig_label
+                .chars()
+                .take_while(|c| {
+                    n += c.len_utf16();
+                    n <= units
+                })
+                .count() as u32
+        };
+        return Some((chars_at(a), chars_at(b)));
     }
     if let Some(s) = plabel.as_str() {
-        let idx = sig_label.find(s)? as u32;
+        let idx = sig_label[..sig_label.find(s)?].chars().count() as u32;
         return Some((idx, idx + s.chars().count() as u32));
     }
     None
@@ -1856,6 +1897,38 @@ mod tests {
             assert_eq!(col_to_lsp(line, c, PositionEncoding::Utf16) as usize, c);
             assert_eq!(col_from_lsp(line, c as u32, PositionEncoding::Utf16), c);
         }
+    }
+
+    #[test]
+    fn a_change_inside_a_crlf_takes_in_the_whole_break() {
+        let apply = |old: &str, new: &str| {
+            let (s, e, t) = minimal_change(old, new).unwrap();
+            let (s, e, t) = widen_past_crlf(old, s, e, t);
+            let d = Doc::new(old, "php", 1);
+            let enc = PositionEncoding::Utf16;
+            // Neither end may sit between `\r` and `\n`.
+            assert!(!(s > 0 && &old[s - 1..s] == "\r" && old[s..].starts_with('\n')));
+            assert!(!(e > 0 && &old[e - 1..e] == "\r" && old[e..].starts_with('\n')));
+            let _ = (d.position(s, enc), d.position(e, enc));
+            format!("{}{}{}", &old[..s], t, &old[e..])
+        };
+        // CRLF → LF: deleting just the `\r`.
+        assert_eq!(apply("a\r\nb", "a\nb"), "a\nb");
+        // Typing between `\r` and `\n`.
+        assert_eq!(apply("a\r\nb", "a\rx\nb"), "a\rx\nb");
+        // Ordinary edits are left alone.
+        let (s, e, t) = widen_past_crlf("ab\r\n", 1, 2, "x");
+        assert_eq!((s, e, &*t), (1, 2, "x"));
+    }
+
+    #[test]
+    fn parameter_ranges_are_in_characters() {
+        let label = "fn(størrelse: i32, b: i32)";
+        assert_eq!(param_range(&json!("b: i32"), label), Some((19, 25)));
+        assert_eq!(param_range(&json!([3, 17]), label), Some((3, 17)));
+        let emoji = "f(😀: A, b: B)";
+        // `b` starts at UTF-16 offset 9 (😀 is two units), character 8.
+        assert_eq!(param_range(&json!([9, 13]), emoji), Some((8, 12)));
     }
 
     #[test]

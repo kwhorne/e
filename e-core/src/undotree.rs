@@ -203,8 +203,7 @@ impl UndoTree {
         // Coalesce a typing burst into the current leaf.
         let is_leaf = self.nodes[cur].children.is_empty();
         let bursting = now_ms.saturating_sub(self.last_ms) < coalesce_ms;
-        let full = self.nodes.len() >= MAX_NODES || self.edit_bytes >= MAX_EDIT_BYTES;
-        if cur != 0 && is_leaf && (bursting || full) {
+        if cur != 0 && is_leaf && bursting {
             let mut parent_text = std::mem::take(&mut self.text);
             self.nodes[cur].revert(&mut parent_text);
             let (at, removed, inserted) = splice(&parent_text, text);
@@ -218,7 +217,9 @@ impl UndoTree {
             self.last_ms = now_ms;
             return true;
         }
-        // New branch.
+        // New branch, after forgetting the oldest history if the tree is full.
+        self.make_room();
+        let cur = self.current;
         let id = self.nodes.len();
         let (at, removed, inserted) = splice(&self.text, text);
         self.edit_bytes += removed.len() + inserted.len();
@@ -236,6 +237,86 @@ impl UndoTree {
         self.text = text.to_string();
         self.last_ms = now_ms;
         true
+    }
+
+    fn is_full(&self) -> bool {
+        self.nodes.len() >= MAX_NODES || self.edit_bytes >= MAX_EDIT_BYTES
+    }
+
+    /// Forget the oldest history until there is room for one more node: the
+    /// root moves one step towards `current`, dropping the branches that
+    /// leave it on the way. Undo then stops at the new root, as an editor
+    /// with a bounded linear history would.
+    fn make_room(&mut self) {
+        while self.is_full() {
+            let mut path = vec![self.current];
+            while let Some(p) = self.nodes[*path.last().unwrap_or(&0)].parent {
+                path.push(p);
+            }
+            path.reverse(); // root … current
+            let keep_root = if path.len() > 1 {
+                path[1]
+            } else if let Some(&oldest) = self.nodes[0].children.first() {
+                // At the root itself: drop its oldest branch.
+                let mut drop = vec![oldest];
+                let mut i = 0;
+                while i < drop.len() {
+                    drop.extend(self.nodes[drop[i]].children.iter().copied());
+                    i += 1;
+                }
+                self.retain(0, &drop);
+                continue;
+            } else {
+                return;
+            };
+            self.retain(keep_root, &[]);
+        }
+    }
+
+    /// Keep only the subtree under `root` (which becomes the root, its state
+    /// the base), minus `drop`; renumber the survivors in their old order.
+    fn retain(&mut self, root: usize, drop: &[usize]) {
+        let mut keep = vec![false; self.nodes.len()];
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            if drop.contains(&n) {
+                continue;
+            }
+            keep[n] = true;
+            stack.extend(self.nodes[n].children.iter().copied());
+        }
+        let mut new_id = vec![usize::MAX; self.nodes.len()];
+        let mut next = 0;
+        for (old, &k) in keep.iter().enumerate() {
+            if k {
+                new_id[old] = next;
+                next += 1;
+            }
+        }
+        let old_nodes = std::mem::take(&mut self.nodes);
+        for (old, mut node) in old_nodes.into_iter().enumerate() {
+            if !keep[old] {
+                continue;
+            }
+            node.id = new_id[old];
+            node.children = node
+                .children
+                .iter()
+                .filter(|&&c| keep[c])
+                .map(|&c| new_id[c])
+                .collect();
+            if old == root {
+                node.parent = None;
+                node.at = 0;
+                node.removed.clear();
+                node.inserted.clear();
+            } else {
+                node.parent = node.parent.map(|p| new_id[p]);
+            }
+            self.nodes.push(node);
+        }
+        self.current = new_id[self.current];
+        self.edit_bytes = self.nodes.iter().map(UndoNode::edit_bytes).sum();
     }
 
     /// Move to the parent state.
@@ -471,6 +552,33 @@ mod tests {
         // Redo picks the most recent child ("ax").
         assert_eq!(t.undo().as_deref(), Some("a"));
         assert_eq!(t.redo().as_deref(), Some("ax"));
+    }
+
+    #[test]
+    fn a_full_tree_forgets_its_oldest_history_and_keeps_recording() {
+        let mut t = UndoTree::new("");
+        let mut text = String::new();
+        // Two branches early on, then a long linear run past the limit.
+        t.record("x", 0, 0);
+        t.undo();
+        for i in 0..MAX_NODES + 50 {
+            text.push(char::from(b'a' + (i % 26) as u8));
+            t.record(&text, (i as u64 + 1) * 10_000, 700);
+        }
+        assert!(t.len() <= MAX_NODES);
+        assert_eq!(t.current_text(), text);
+        // Each recent edit is still its own step.
+        assert_eq!(t.undo().as_deref(), Some(&text[..text.len() - 1]));
+        assert_eq!(t.undo().as_deref(), Some(&text[..text.len() - 2]));
+        // Every node still reconstructs, and ids match positions.
+        for (i, n) in t.nodes.iter().enumerate() {
+            assert_eq!(n.id, i);
+        }
+        assert!(texts(&t).iter().all(|s| text.starts_with(s.as_str())));
+        // The rest of the session keeps branching.
+        t.record("other", 99_000_000, 700);
+        assert_eq!(t.current_text(), "other");
+        assert!(t.len() <= MAX_NODES);
     }
 
     #[test]

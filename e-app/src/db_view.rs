@@ -333,18 +333,48 @@ fn form_field(
     label_text: &'static str,
     sig: RwSignal<String>,
     placeholder: &'static str,
-    _password: bool,
+    password: bool,
 ) -> impl IntoView {
-    let input = text_input(sig).placeholder(placeholder);
+    let field_style = |s: floem::style::Style| {
+        theme::input_colors(s)
+            .width_full()
+            .font_size(12.0)
+            .padding_horiz(6.0)
+            .padding_vert(3.0)
+    };
+    // The text input has no masked mode, so a stored secret is shown as dots
+    // until the user asks to see or change it — opening the form (say, on a
+    // shared screen) no longer prints the password in clear.
+    let revealed = create_rw_signal(!password || sig.with_untracked(|v| v.is_empty()));
+    let field = dyn_container(
+        move || revealed.get(),
+        move |shown| {
+            if shown {
+                text_input(sig)
+                    .placeholder(placeholder)
+                    .style(field_style)
+                    .into_any()
+            } else {
+                stack((
+                    label(move || "•".repeat(sig.with(|v| v.chars().count()).clamp(8, 16)))
+                        .style(move |s| field_style(s).flex_grow(1.0_f32)),
+                    label(|| "Show".to_string())
+                        .style(|s| {
+                            s.font_size(11.0)
+                                .color(theme::accent())
+                                .cursor(floem::style::CursorStyle::Pointer)
+                        })
+                        .on_click_stop(move |_| revealed.set(true)),
+                ))
+                .style(|s| s.items_center().gap(6.0).width_full())
+                .into_any()
+            }
+        },
+    )
+    .style(|s| s.width_full());
     stack((
         label(move || label_text.to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
-        input.style(|s| {
-            theme::input_colors(s)
-                .width_full()
-                .font_size(12.0)
-                .padding_horiz(6.0)
-                .padding_vert(3.0)
-        }),
+        field,
     ))
     .style(|s| s.flex_col().gap(2.0).width_full())
 }

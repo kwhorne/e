@@ -46,6 +46,12 @@ use crate::update_view::update_notice;
 
 /// Launch the editor.
 pub fn launch() {
+    // An `e` started from another editor's terminal inherits that editor's
+    // socket. Drop it while this is still the only thread, so the language
+    // servers, test runners and tools this editor starts don't get it (this
+    // editor hands out its own only to agents and its terminal; see
+    // `agent_sync::socket_env`).
+    std::env::remove_var("E_EDITOR_SOCK");
     // Before anything spawns: a Dock launch has launchd's PATH, and every
     // tool lookup below wants the shell's.
     crate::shell_env::adopt_login_path();

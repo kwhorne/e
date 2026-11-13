@@ -5,10 +5,14 @@
 //! [`DbConfig`], opened into a live [`Conn`], and queried into a [`QueryResult`]
 //! whose cells are all stringified for display in a grid.
 
+mod classify;
 pub mod history;
+
+pub use classify::is_read_only;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -188,6 +192,11 @@ enum Backend {
 /// A live connection, optionally keeping an SSH tunnel alive for its lifetime.
 pub struct Conn {
     backend: Backend,
+    /// Refuse anything but reads (see [`Conn::set_read_only`]).
+    read_only: AtomicBool,
+    /// Whether the server-side session may still be in read-only mode, so a
+    /// connection switched back to read-write knows to undo it.
+    session_ro: AtomicBool,
     /// Dropped (killing the `ssh` child) when the connection is dropped.
     _tunnel: Option<Mutex<SshTunnel>>,
 }
@@ -334,8 +343,94 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
     let backend = build_backend(&eff)?;
     Ok(Conn {
         backend,
+        read_only: AtomicBool::new(false),
+        session_ro: AtomicBool::new(false),
         _tunnel: tunnel.map(Mutex::new),
     })
+}
+
+impl Conn {
+    /// Make this connection read-only (or writable again). While read-only,
+    /// [`query`] and [`execute_transaction`] refuse any statement that
+    /// [`is_read_only`] can't vouch for, and the server is asked to enforce it
+    /// too where that's cheap: a read-only session on PostgreSQL and MySQL, a
+    /// read-only open on SQLite and `readonly=1` on ClickHouse — so a write the
+    /// classifier misses (a side-effecting function, say) still fails.
+    pub fn set_read_only(&self, on: bool) {
+        self.read_only.store(on, Ordering::SeqCst);
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.read_only.load(Ordering::SeqCst)
+    }
+
+    /// Refuse `statements` if this connection is read-only and any of them
+    /// might write.
+    fn guard(&self, statements: &[&str]) -> Result<(), String> {
+        if self.is_read_only() {
+            if let Some(s) = statements.iter().find(|s| !is_read_only(s)) {
+                let head: String = s.trim().chars().take(60).collect();
+                return Err(format!(
+                    "Read-only connection: refusing a statement that may write ({head}). \
+                     Toggle read-only off in the Database panel to run it."
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Open the SQLite file, read-only while the connection is.
+    fn sqlite(&self, path: &str) -> Result<rusqlite::Connection, String> {
+        sqlite_open(path, self.is_read_only())
+    }
+
+    /// Bring a pooled MySQL session in line with the read-only flag.
+    fn sync_mysql_session(&self, c: &mut mysql::PooledConn) -> Result<(), String> {
+        use mysql::prelude::Queryable;
+        if self.is_read_only() {
+            self.session_ro.store(true, Ordering::SeqCst);
+            c.query_drop("SET SESSION TRANSACTION READ ONLY")
+                .map_err(|e| e.to_string())
+        } else if self.session_ro.load(Ordering::SeqCst) {
+            // Some pooled session may still be read-only; this one won't be.
+            c.query_drop("SET SESSION TRANSACTION READ WRITE")
+                .map_err(|e| e.to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Bring the PostgreSQL session in line with the read-only flag.
+    fn sync_pg_session(&self, client: &mut postgres::Client) -> Result<(), String> {
+        let want = self.is_read_only();
+        if self.session_ro.load(Ordering::SeqCst) == want {
+            return Ok(());
+        }
+        client
+            .batch_execute(if want {
+                "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
+            } else {
+                "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE"
+            })
+            .map_err(|e| e.to_string())?;
+        self.session_ro.store(want, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+fn sqlite_open(path: &str, read_only: bool) -> Result<rusqlite::Connection, String> {
+    if read_only {
+        use rusqlite::OpenFlags;
+        rusqlite::Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_URI
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+    } else {
+        rusqlite::Connection::open(path)
+    }
+    .map_err(|e| e.to_string())
 }
 
 fn build_backend(config: &DbConfig) -> Result<Backend, String> {
@@ -491,6 +586,22 @@ fn wait_port(
     }
 }
 
+/// Refuse an SSH user or host that `ssh` could take for an option (a host of
+/// `-oProxyCommand=…` runs a command), or that would change the destination
+/// (whitespace, a second `@`).
+#[cfg_attr(not(unix), allow(dead_code))]
+fn ssh_target_ok(user: &str, host: &str) -> Result<(), String> {
+    for (what, v) in [("user", user), ("host", host)] {
+        if v.starts_with('-') || v.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(format!("Invalid SSH {what}: {v:?}"));
+        }
+    }
+    if host.contains('@') {
+        return Err(format!("Invalid SSH host: {host:?}"));
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn start_tunnel(config: &DbConfig) -> Result<SshTunnel, String> {
     if config.ssh_host.trim().is_empty() {
@@ -499,6 +610,7 @@ fn start_tunnel(config: &DbConfig) -> Result<SshTunnel, String> {
     if config.ssh_user.trim().is_empty() {
         return Err("SSH user is required".to_string());
     }
+    ssh_target_ok(&config.ssh_user, &config.ssh_host)?;
     let local_port = free_local_port()?;
     let db_host = if config.host.is_empty() {
         "127.0.0.1".to_string()
@@ -556,7 +668,9 @@ fn start_tunnel(config: &DbConfig) -> Result<SshTunnel, String> {
         askpass = Some(p);
     }
 
-    cmd.arg(format!("{}@{}", config.ssh_user, config.ssh_host));
+    // `--` ends option parsing, so the destination can never be read as one.
+    cmd.arg("--")
+        .arg(format!("{}@{}", config.ssh_user, config.ssh_host));
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
@@ -720,10 +834,10 @@ pub fn view_definition(conn: &Conn, view: &str) -> Result<String, String> {
         }
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
-            let v = view.replace('\'', "''");
+            let v = quote_literal("postgres", &quote_ident("postgres", view));
             let res = pg_query(
                 &mut client,
-                &format!("SELECT pg_get_viewdef('{v}'::regclass, true)"),
+                &format!("SELECT pg_get_viewdef({v}::regclass, true)"),
                 1,
             )?;
             Ok(res
@@ -805,6 +919,16 @@ fn tsv_unescape(s: &str) -> String {
 }
 
 fn ch_query(backend: &Backend, sql: &str, max: usize) -> Result<QueryResult, String> {
+    ch_query_as(backend, sql, max, false)
+}
+
+/// [`ch_query`], with ClickHouse itself refusing writes when `read_only`.
+fn ch_query_as(
+    backend: &Backend,
+    sql: &str,
+    max: usize,
+    read_only: bool,
+) -> Result<QueryResult, String> {
     let Backend::Clickhouse {
         base_url,
         user,
@@ -814,16 +938,23 @@ fn ch_query(backend: &Backend, sql: &str, max: usize) -> Result<QueryResult, Str
     else {
         return Err("not a ClickHouse connection".into());
     };
-    let select = is_select(sql);
+    let select = classify::returns_rows(sql);
     let body = if select {
         format!("{sql}\nFORMAT TabSeparatedWithNames")
     } else {
         sql.to_string()
     };
     let mut url = base_url.clone();
+    let mut params: Vec<String> = Vec::new();
     if !database.is_empty() {
-        url.push_str("?database=");
-        url.push_str(database);
+        params.push(format!("database={}", url_encode(database)));
+    }
+    if read_only {
+        params.push("readonly=1".into());
+    }
+    if !params.is_empty() {
+        url.push('?');
+        url.push_str(&params.join("&"));
     }
     let start = Instant::now();
     let resp = ureq::post(&url)
@@ -1021,14 +1152,16 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
         }
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
-            let t = table.replace('\'', "''");
+            let t = quote_literal("postgres", table);
+            let schema = pg_table_schema(table);
             let pk = pg_query(
                 &mut client,
                 &format!(
                     "SELECT kcu.column_name FROM information_schema.table_constraints tc \
                      JOIN information_schema.key_column_usage kcu \
                        ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema \
-                     WHERE tc.table_name = '{t}' AND tc.constraint_type = 'PRIMARY KEY'"
+                     WHERE tc.table_name = {t} AND tc.table_schema = {schema} \
+                       AND tc.constraint_type = 'PRIMARY KEY'"
                 ),
                 MAX_ROWS,
             )?;
@@ -1041,7 +1174,7 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
                 &mut client,
                 &format!(
                     "SELECT column_name, data_type, is_nullable FROM information_schema.columns \
-                     WHERE table_name = '{t}' ORDER BY ordinal_position"
+                     WHERE table_name = {t} AND table_schema = {schema} ORDER BY ordinal_position"
                 ),
                 MAX_ROWS,
             )?;
@@ -1092,6 +1225,25 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
                 .collect())
         }
     }
+}
+
+/// SQL for the schema a bare PostgreSQL table name refers to.
+///
+/// The panel lists tables from every user schema by bare name and browses them
+/// as `SELECT * FROM "name"`, which resolves through `search_path`. Metadata has
+/// to come from that same table — matching on the name alone mixes in the
+/// columns and indexes of a namesake in another schema. A table outside
+/// `search_path` falls back to the first schema that has one by that name.
+fn pg_table_schema(table: &str) -> String {
+    let name = quote_literal("postgres", table);
+    let regclass = quote_literal("postgres", &quote_ident("postgres", table));
+    format!(
+        "COALESCE(\
+           (SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE c.oid = to_regclass({regclass})), \
+           (SELECT table_schema FROM information_schema.tables WHERE table_name = {name} \
+             ORDER BY table_schema LIMIT 1))"
+    )
 }
 
 /// A table index (name, uniqueness, and the columns it covers, in order).
@@ -1151,16 +1303,18 @@ pub fn indexes(conn: &Conn, table: &str) -> Result<Vec<IndexInfo>, String> {
         }
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
-            let t = table.replace('\'', "''");
+            let t = quote_literal("postgres", table);
+            let schema = pg_table_schema(table);
             let res = pg_query(
                 &mut client,
                 &format!(
                     "SELECT i.relname, ix.indisunique, a.attname \
                      FROM pg_class t \
+                     JOIN pg_namespace n ON n.oid = t.relnamespace \
                      JOIN pg_index ix ON t.oid = ix.indrelid \
                      JOIN pg_class i ON i.oid = ix.indexrelid \
                      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) \
-                     WHERE t.relname = '{t}' \
+                     WHERE t.relname = {t} AND n.nspname = {schema} \
                      ORDER BY i.relname, array_position(ix.indkey, a.attnum)"
                 ),
                 MAX_ROWS,
@@ -1209,10 +1363,12 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
     if statements.is_empty() {
         return Ok(0);
     }
+    conn.guard(&statements.iter().map(String::as_str).collect::<Vec<_>>())?;
     match &conn.backend {
         Backend::Mysql(pool) => {
             use mysql::prelude::Queryable;
             let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            conn.sync_mysql_session(&mut c)?;
             let mut tx = c
                 .start_transaction(mysql::TxOpts::default())
                 .map_err(|e| e.to_string())?;
@@ -1225,7 +1381,7 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
             Ok(affected)
         }
         Backend::Sqlite(path) => {
-            let mut c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let mut c = conn.sqlite(path)?;
             let tx = c.transaction().map_err(|e| e.to_string())?;
             let mut affected = 0u64;
             for s in statements {
@@ -1236,6 +1392,7 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
         }
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
+            conn.sync_pg_session(&mut client)?;
             let mut tx = client.transaction().map_err(|e| e.to_string())?;
             let mut affected = 0u64;
             for s in statements {
@@ -1246,7 +1403,7 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
         }
         Backend::Clickhouse { .. } => {
             for s in statements {
-                ch_query(&conn.backend, s, 0)?;
+                ch_query_as(&conn.backend, s, 0, conn.is_read_only())?;
             }
             Ok(0)
         }
@@ -1262,9 +1419,31 @@ pub fn quote_ident(engine: &str, ident: &str) -> String {
     }
 }
 
-/// Escape a string literal (double single-quotes).
-fn esc(s: &str) -> String {
-    s.replace('\'', "''")
+/// Quote `s` as a string literal for `engine`.
+///
+/// Doubling `'` is enough only where `\` is an ordinary character. MySQL and
+/// ClickHouse treat it as an escape, so a value ending in `\` would otherwise
+/// swallow the closing quote and let the rest of the statement out of the
+/// string. PostgreSQL is safe with standard strings, but a server running
+/// `standard_conforming_strings = off` behaves like MySQL — so a value with a
+/// backslash goes in an `E'…'` string, whose escaping doesn't depend on that
+/// setting.
+pub fn quote_literal(engine: &str, s: &str) -> String {
+    match engine {
+        "sqlite" => format!("'{}'", s.replace('\'', "''")),
+        "postgres" | "postgresql" | "pgsql" => {
+            if s.contains('\\') {
+                format!("E'{}'", s.replace('\\', "\\\\").replace('\'', "''"))
+            } else {
+                format!("'{}'", s.replace('\'', "''"))
+            }
+        }
+        // ClickHouse documents `\'`; MySQL needs `''`, which is also read right
+        // in NO_BACKSLASH_ESCAPES mode, where `\'` would not be — hence the split.
+        "clickhouse" | "ch" => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
+        // MySQL/MariaDB, and anything unrecognised: assume backslash escapes.
+        _ => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''")),
+    }
 }
 
 /// Update a single cell, identified by the table's primary-key columns.
@@ -1286,9 +1465,9 @@ pub fn update_cell(
 }
 
 /// A scalar SQL literal: quoted+escaped string, or NULL.
-fn sql_literal(v: Option<&str>) -> String {
+fn sql_literal(engine: &str, v: Option<&str>) -> String {
     match v {
-        Some(v) => format!("'{}'", esc(v)),
+        Some(v) => quote_literal(engine, v),
         None => "NULL".to_string(),
     }
 }
@@ -1297,7 +1476,7 @@ fn sql_literal(v: Option<&str>) -> String {
 fn pk_conds(engine: &str, pk: &[(String, Option<String>)]) -> String {
     pk.iter()
         .map(|(c, v)| match v {
-            Some(v) => format!("{} = '{}'", quote_ident(engine, c), esc(v)),
+            Some(v) => format!("{} = {}", quote_ident(engine, c), quote_literal(engine, v)),
             None => format!("{} IS NULL", quote_ident(engine, c)),
         })
         .collect::<Vec<_>>()
@@ -1316,7 +1495,7 @@ pub fn update_sql(
         "UPDATE {} SET {} = {} WHERE {}",
         quote_ident(engine, table),
         quote_ident(engine, set_col),
-        sql_literal(set_val),
+        sql_literal(engine, set_val),
         pk_conds(engine, pk)
     )
 }
@@ -1335,7 +1514,7 @@ pub fn insert_sql(engine: &str, table: &str, values: &[(String, Option<String>)]
     let cols: Vec<String> = values.iter().map(|(c, _)| quote_ident(engine, c)).collect();
     let vals: Vec<String> = values
         .iter()
-        .map(|(_, v)| sql_literal(v.as_deref()))
+        .map(|(_, v)| sql_literal(engine, v.as_deref()))
         .collect();
     format!(
         "INSERT INTO {} ({}) VALUES ({})",
@@ -1433,10 +1612,10 @@ pub fn search_all(
         if text_cols.is_empty() {
             continue;
         }
-        let esc_needle = esc(needle);
+        let pattern = quote_literal(engine, &format!("%{needle}%"));
         let conds: Vec<String> = text_cols
             .iter()
-            .map(|c| format!("{} LIKE '%{}%'", quote_ident(engine, &c.name), esc_needle))
+            .map(|c| format!("{} LIKE {}", quote_ident(engine, &c.name), pattern))
             .collect();
         let sql = format!(
             "SELECT * FROM {} WHERE {} LIMIT {}",
@@ -1464,7 +1643,11 @@ pub fn count_rows(
     let mut sql = format!("SELECT COUNT(*) FROM {}", quote_ident(engine, table));
     if let Some((col, val)) = filter {
         let cond = match val {
-            Some(v) => format!("{} = '{}'", quote_ident(engine, col), esc(v)),
+            Some(v) => format!(
+                "{} = {}",
+                quote_ident(engine, col),
+                quote_literal(engine, v)
+            ),
             None => format!("{} IS NULL", quote_ident(engine, col)),
         };
         sql.push_str(&format!(" WHERE {cond}"));
@@ -1491,7 +1674,11 @@ pub fn rows_where(
     max: usize,
 ) -> Result<QueryResult, String> {
     let cond = match value {
-        Some(v) => format!("{} = '{}'", quote_ident(engine, column), esc(v)),
+        Some(v) => format!(
+            "{} = {}",
+            quote_ident(engine, column),
+            quote_literal(engine, v)
+        ),
         None => format!("{} IS NULL", quote_ident(engine, column)),
     };
     let sql = format!(
@@ -1527,7 +1714,11 @@ pub fn browse_sql(
     let mut sql = format!("SELECT * FROM {}", quote_ident(engine, table));
     if let Some((col, val)) = filter {
         let cond = match val {
-            Some(v) => format!("{} = '{}'", quote_ident(engine, col), esc(v)),
+            Some(v) => format!(
+                "{} = {}",
+                quote_ident(engine, col),
+                quote_literal(engine, v)
+            ),
             None => format!("{} IS NULL", quote_ident(engine, col)),
         };
         sql.push_str(&format!(" WHERE {cond}"));
@@ -1637,7 +1828,7 @@ pub fn find_params(sql: &str) -> Vec<String> {
 /// Substitute `:param` placeholders with quoted SQL literals from `values`
 /// (missing values become NULL). Ignores strings/comments and `::` casts, like
 /// [`find_params`].
-pub fn substitute_params(sql: &str, values: &HashMap<String, String>) -> String {
+pub fn substitute_params(engine: &str, sql: &str, values: &HashMap<String, String>) -> String {
     let chars: Vec<char> = sql.chars().collect();
     let mut out = String::new();
     let mut i = 0;
@@ -1694,7 +1885,7 @@ pub fn substitute_params(sql: &str, values: &HashMap<String, String>) -> String 
                         j += 1;
                     }
                     match values.get(&name) {
-                        Some(v) => out.push_str(&format!("'{}'", esc(v))),
+                        Some(v) => out.push_str(&quote_literal(engine, v)),
                         None => out.push_str("NULL"),
                     }
                     i = j;
@@ -1702,6 +1893,17 @@ pub fn substitute_params(sql: &str, values: &HashMap<String, String>) -> String 
                 }
                 _ => out.push(c),
             },
+            // A backslash escapes the next character inside a string, as in
+            // `find_params` — otherwise `'it\'s :x'` would end the string early
+            // and substitute a placeholder that sits inside it.
+            St::Single | St::Double if c == '\\' => {
+                out.push(c);
+                if let Some(n) = next {
+                    out.push(n);
+                }
+                i += 2;
+                continue;
+            }
             _ => {
                 out.push(c);
                 match st {
@@ -1817,30 +2019,35 @@ pub fn split_statement_ranges(sql: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// Whether a statement writes (anything that isn't a read: not SELECT/SHOW/
-/// EXPLAIN/PRAGMA/DESCRIBE/WITH). Used to gate writes to non-local databases.
+/// Whether a statement may write — anything [`is_read_only`] can't vouch for,
+/// including writable CTEs and `EXPLAIN ANALYZE` of a write. Used to gate
+/// writes to non-local databases.
 pub fn is_write_statement(sql: &str) -> bool {
-    !is_select(sql)
+    !is_read_only(sql)
 }
 
-fn is_select(sql: &str) -> bool {
-    let s = sql.trim_start().to_lowercase();
-    s.starts_with("select")
-        || s.starts_with("show")
-        || s.starts_with("pragma")
-        || s.starts_with("explain")
-        || s.starts_with("describe")
-        || s.starts_with("desc ")
-        || s.starts_with("with")
+/// Percent-encode a URL query value.
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> {
-    let select = is_select(sql);
+    conn.guard(&[sql])?;
+    let select = classify::returns_rows(sql);
     let start = Instant::now();
     match &conn.backend {
         Backend::Mysql(pool) => {
             use mysql::prelude::Queryable;
             let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            conn.sync_mysql_session(&mut c)?;
             if select {
                 let result = c.query_iter(sql).map_err(|e| e.to_string())?;
                 let columns: Vec<String> = result
@@ -1880,7 +2087,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
             }
         }
         Backend::Sqlite(path) => {
-            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let c = conn.sqlite(path)?;
             if select {
                 let mut stmt = c.prepare(sql).map_err(|e| e.to_string())?;
                 let columns: Vec<String> =
@@ -1927,6 +2134,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
         }
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
+            conn.sync_pg_session(&mut client)?;
             let res = pg_query(&mut client, sql, max)?;
             if select || !res.columns.is_empty() {
                 Ok(QueryResult {
@@ -1945,7 +2153,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
                 })
             }
         }
-        Backend::Clickhouse { .. } => ch_query(&conn.backend, sql, max),
+        Backend::Clickhouse { .. } => ch_query_as(&conn.backend, sql, max, conn.is_read_only()),
     }
 }
 
@@ -2754,6 +2962,95 @@ mod tests {
     }
 
     #[test]
+    fn literals_cannot_escape_on_backslash_engines() {
+        // A trailing backslash used to turn `'x\'` into an escaped quote on
+        // MySQL/ClickHouse, letting the rest of the statement out of the string.
+        assert_eq!(quote_literal("mysql", r"x\"), r"'x\\'");
+        assert_eq!(
+            quote_literal("mysql", r"a\' OR 1=1 -- "),
+            r"'a\\'' OR 1=1 -- '"
+        );
+        assert_eq!(quote_literal("clickhouse", r"x\'"), r"'x\\\''");
+        // Standard-strings engines keep backslashes as they are…
+        assert_eq!(quote_literal("sqlite", r"C:\x'"), r"'C:\x'''");
+        assert_eq!(quote_literal("postgres", "it's"), "'it''s'");
+        // …except Postgres uses an E-string so the server setting doesn't matter.
+        assert_eq!(quote_literal("postgres", r"a\"), r"E'a\\'");
+    }
+
+    #[test]
+    fn generated_statements_use_engine_escaping() {
+        let pk = vec![("id".to_string(), Some(r"7\".to_string()))];
+        let sql = update_sql("mysql", "t", "name", Some(r"v\"), &pk);
+        assert_eq!(sql, r"UPDATE `t` SET `name` = 'v\\' WHERE `id` = '7\\'");
+        let sql = delete_sql("sqlite", "t", &pk);
+        assert_eq!(sql, r"DELETE FROM `t` WHERE `id` = '7\'");
+        let sql = browse_sql("mysql", "t", Some(("c", Some(r"\"))), None, 10, 0);
+        assert!(sql.contains(r"`c` = '\\'"), "{sql}");
+    }
+
+    #[test]
+    fn substitute_params_respects_backslash_escapes_like_find_params() {
+        // `\'` doesn't end the string, so `:x` inside it is not a parameter.
+        let sql = r"SELECT 'it\'s :x' AS s, :y AS y";
+        assert_eq!(find_params(sql), vec!["y".to_string()]);
+        let mut vals = std::collections::HashMap::new();
+        vals.insert("x".to_string(), "X".to_string());
+        vals.insert("y".to_string(), r"a\".to_string());
+        let out = substitute_params("mysql", sql, &vals);
+        assert_eq!(out, r"SELECT 'it\'s :x' AS s, 'a\\' AS y");
+    }
+
+    #[test]
+    fn ssh_targets_that_look_like_options_are_refused() {
+        assert!(ssh_target_ok("deploy", "db.example.com").is_ok());
+        assert!(ssh_target_ok("deploy", "-oProxyCommand=touch /tmp/x").is_err());
+        assert!(ssh_target_ok("-oProxyCommand=x", "host").is_err());
+        assert!(ssh_target_ok("deploy", "host extra").is_err());
+        assert!(ssh_target_ok("deploy", "evil@host").is_err());
+    }
+
+    #[test]
+    fn read_only_sqlite_connection_refuses_writes() {
+        let dir = std::env::temp_dir().join(format!("e-db-ro-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("ro.sqlite");
+        let _ = std::fs::remove_file(&file);
+        rusqlite::Connection::open(&file)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO t VALUES (1, 'a');",
+            )
+            .unwrap();
+        let path = file.to_string_lossy().into_owned();
+        let conn = connect(&DbConfig {
+            engine: "sqlite".into(),
+            path: path.clone(),
+            ..Default::default()
+        })
+        .unwrap();
+        conn.set_read_only(true);
+        assert!(query(&conn, "SELECT * FROM t", 10).is_ok());
+        assert!(query(&conn, "-- c\nSELECT * FROM t", 10).unwrap().is_select);
+        assert!(query(&conn, "DELETE FROM t", 0).is_err());
+        assert!(query(&conn, "WITH d AS (SELECT 1) DELETE FROM t", 0).is_err());
+        assert!(execute_transaction(&conn, &["UPDATE t SET v = 'b'".into()]).is_err());
+        // A write the classifier would wave through still fails at the driver,
+        // because the file is opened read-only.
+        assert!(conn
+            .sqlite(&path)
+            .unwrap()
+            .execute("DELETE FROM t", [])
+            .is_err());
+        conn.set_read_only(false);
+        assert_eq!(
+            query(&conn, "DELETE FROM t", 0).unwrap().rows_affected,
+            Some(1)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn find_and_substitute_params() {
         let sql =
             "SELECT * FROM t WHERE id = :id AND name = ':notparam' -- :nope\n  AND x = :id::int";
@@ -2761,7 +3058,7 @@ mod tests {
         assert_eq!(find_params(sql), vec!["id".to_string()]);
         let mut vals = std::collections::HashMap::new();
         vals.insert("id".to_string(), "O'x".to_string());
-        let out = substitute_params(sql, &vals);
+        let out = substitute_params("mysql", sql, &vals);
         assert!(out.contains("id = 'O''x'"), "{out}");
         assert!(out.contains("':notparam'"), "{out}"); // untouched in string
         assert!(

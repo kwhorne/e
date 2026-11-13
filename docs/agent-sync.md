@@ -218,7 +218,13 @@ could not set up by itself.
 
 An agent can use the editor's UI the way a person does — run a command, pick a
 code action, confirm a dialog, work Cascade, press keys — and read back what
-is on screen. That is how `e` is tested end to end:
+is on screen. That is how `e` is tested end to end.
+
+`key`, `click`, `dialog` and Cascade's `answer` act for the person at the
+keyboard — they could approve the very permission card or consent dialog the
+person is being asked about — so they are refused unless `e` was started with
+`E_UI_AUTOMATION=1`, as the end-to-end tests start it. The rest of this section
+works for any agent.
 
 ```sh
 q() { printf '%s\n' "$1" | nc -U "$E_EDITOR_SOCK"; }
@@ -259,7 +265,8 @@ given up on after 60 seconds.
 ## Proposing edits (reviewed)
 
 Instead of writing files blindly, an agent can propose a new version and let you
-review it hunk-by-hunk:
+review it hunk-by-hunk. The path may be relative to the project; a path outside
+the workspace (by `..`, an absolute path or a symlink) is refused:
 
 ```sh
 printf '{"method":"propose_edit","path":"app/Models/User.php","content":"<full new file>"}\n' \
@@ -288,8 +295,11 @@ editor — including `run`, which executes shell commands. Three things guard it
   can't be found by guessing.
 - `~/.config/e` is `0700` and the socket itself `0600`, so no other account on
   the machine can list or open it.
-- The path is handed out only through `$E_EDITOR_SOCK`, which processes inherit
-  from the editor that spawned them.
+- The path is handed out only through `$E_EDITOR_SOCK`, and only to the
+  processes meant to drive the editor: agents (Cascade's, and the one in the
+  agent panel) and the integrated terminal, where CLI agents run. It is not in
+  the editor's own environment, so language servers, test runners, `composer`,
+  `npm` and formatters the editor starts don't get it.
 
 So an agent you started from `e` can use the socket, and a stray process that
 merely knows `~/.config/e` exists cannot.

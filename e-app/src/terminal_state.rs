@@ -54,7 +54,10 @@ impl AppState {
             let _ = tx.send(());
         });
         let root = self.root.get();
-        match Terminal::spawn(&e_term::default_shell(), &root, 24, 100, on_update) {
+        // The terminal is where CLI agents (Claude Code, Codex …) are run, so it
+        // carries the editor's socket.
+        let env = crate::agent_sync::socket_env();
+        match Terminal::spawn(&e_term::default_shell(), &root, &env, 24, 100, on_update) {
             Ok(t) => {
                 let id = self.next_term_id.get_untracked();
                 self.next_term_id.set(id + 1);

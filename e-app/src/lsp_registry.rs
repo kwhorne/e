@@ -111,6 +111,13 @@ pub fn server_specs(language: Language, laravel: bool) -> Vec<ServerSpec> {
             "typescript",
             TSSERVER_INSTALL,
         )],
+        Language::Tsx => vec![spec(
+            "tsserver",
+            "typescript-language-server",
+            &["--stdio"],
+            "typescriptreact",
+            TSSERVER_INSTALL,
+        )],
         Language::JavaScript => vec![spec(
             "tsserver",
             "typescript-language-server",
@@ -240,6 +247,7 @@ mod tests {
             Language::C,
             Language::Cpp,
             Language::TypeScript,
+            Language::Tsx,
             Language::JavaScript,
             Language::Go,
             Language::Python,

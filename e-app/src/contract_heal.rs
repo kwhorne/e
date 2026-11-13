@@ -22,6 +22,7 @@ fn has_forms(language: Language) -> bool {
             | Language::Svelte
             | Language::JavaScript
             | Language::TypeScript
+            | Language::Tsx
             | Language::Blade
     )
 }

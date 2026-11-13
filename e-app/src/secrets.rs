@@ -1,15 +1,23 @@
 //! API keys for the model providers, kept out of `config.json`.
 //!
-//! On macOS a key goes into the login Keychain through the `security` tool
-//! (one generic-password item per provider, account = the user); elsewhere
-//! into `~/.config/e/secrets.json` with mode 0600. Elyra reads providers'
-//! keys from environment variables, so [`elyra_env`] hands the stored keys to
-//! it when it is spawned — the user enters a key once, in Settings.
+//! A key goes into the OS credential store, in-process through the `keyring`
+//! crate (one generic-password item per provider, account = the user): the
+//! login Keychain on macOS, the Secret Service on Linux. It used to be handed
+//! to `/usr/bin/security … -w <key>`, which put the key on a command line any
+//! local process could read with `ps`. Where no credential store is reachable
+//! (another platform, a headless Linux box) keys stay in
+//! `~/.config/e/secrets.json` with mode 0600. Elyra reads providers' keys from
+//! environment variables, so [`elyra_env`] hands the stored keys to it when it
+//! is spawned — the user enters a key once, in Settings.
+//!
+//! Keys stored the old way are still found: on macOS the item is the same one
+//! (same service and account), and if the Keychain won't hand it to e
+//! directly it is read once through `security` and stored again by e; on Linux
+//! a key in `secrets.json` moves into the Secret Service the first time it is
+//! read.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "macos")]
-use std::process::Command;
 
 /// The providers the Settings page offers a key field for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,8 +87,8 @@ impl Provider {
 
 /// Where keys live. Chosen once per call so tests can point at a file.
 enum Store {
-    #[cfg(target_os = "macos")]
-    Keychain,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    Keyring,
     File(PathBuf),
 }
 
@@ -88,16 +96,18 @@ fn store() -> Store {
     if let Some(p) = std::env::var_os("E_SECRETS_FILE") {
         return Store::File(PathBuf::from(p));
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        Store::Keychain
+        Store::Keyring
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         Store::File(default_file())
     }
 }
 
+/// The 0600 file: the store where there is no credential store, and where
+/// Linux kept keys before the Secret Service.
 #[cfg(not(target_os = "macos"))]
 fn default_file() -> PathBuf {
     let home = std::env::var_os("HOME").unwrap_or_default();
@@ -110,8 +120,8 @@ fn default_file() -> PathBuf {
 /// The stored key for `p`, if any.
 pub fn get(p: Provider) -> Option<String> {
     match store() {
-        #[cfg(target_os = "macos")]
-        Store::Keychain => keychain_get(&p.slot()),
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Store::Keyring => keyring_get(&p.slot()),
         Store::File(path) => file_read(&path).get(&p.slot()).cloned(),
     }
     .filter(|k| !k.trim().is_empty())
@@ -124,26 +134,18 @@ pub fn set(p: Provider, key: &str) -> Result<(), String> {
         return clear(p);
     }
     match store() {
-        #[cfg(target_os = "macos")]
-        Store::Keychain => keychain_set(&p.slot(), key),
-        Store::File(path) => {
-            let mut all = file_read(&path);
-            all.insert(p.slot(), key.to_string());
-            file_write(&path, &all)
-        }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Store::Keyring => keyring_set(&p.slot(), key),
+        Store::File(path) => file_set(&path, &p.slot(), Some(key)),
     }
 }
 
 /// Remove the key for `p`.
 pub fn clear(p: Provider) -> Result<(), String> {
     match store() {
-        #[cfg(target_os = "macos")]
-        Store::Keychain => keychain_delete(&p.slot()),
-        Store::File(path) => {
-            let mut all = file_read(&path);
-            all.remove(&p.slot());
-            file_write(&path, &all)
-        }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Store::Keyring => keyring_delete(&p.slot()),
+        Store::File(path) => file_set(&path, &p.slot(), None),
     }
 }
 
@@ -210,16 +212,79 @@ pub fn auth_has_credentials(text: &str) -> bool {
     })
 }
 
-// ---- Keychain (macOS) ------------------------------------------------------
+// ---- OS credential store ---------------------------------------------------
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn account() -> String {
     std::env::var("USER").unwrap_or_else(|_| "e".to_string())
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn entry(service: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(service, &account()).map_err(|e| e.to_string())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn keyring_get(service: &str) -> Option<String> {
+    if let Some(Ok(key)) = entry(service).ok().map(|e| e.get_password()) {
+        return Some(key);
+    }
+    // Not there, or the store wouldn't answer (macOS: an item `security`
+    // created that e may not read; Linux: no Secret Service running) — look
+    // where older versions kept it.
+    let key = legacy_get(service)?;
+    // Store it again in the credential store itself, so this is the last time.
+    // Not through `keyring_set`, whose Linux fallback is the very file the old
+    // copy is about to be removed from. If it fails the key stays where it was
+    // and is found this way next time.
+    if entry(service).is_ok_and(|e| e.set_password(&key).is_ok()) {
+        legacy_forget(service);
+    }
+    Some(key)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn keyring_set(service: &str, key: &str) -> Result<(), String> {
+    let e = entry(service)?;
+    match e.set_password(key) {
+        Ok(()) => Ok(()),
+        // macOS: an item `security` created, which e may not update. Remove it
+        // (no secret on that command line) and store the key afresh.
+        #[cfg(target_os = "macos")]
+        Err(err) => {
+            legacy_forget(service);
+            e.set_password(key)
+                .map_err(|_| format!("couldn't store the key in the Keychain: {err}"))
+        }
+        // Linux without a Secret Service (a headless box): the 0600 file, as
+        // e-db does with connection passwords.
+        #[cfg(target_os = "linux")]
+        Err(err) => file_set(&default_file(), service, Some(key))
+            .map_err(|e| format!("no credential store ({err}), and the file failed: {e}")),
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn keyring_delete(service: &str) -> Result<(), String> {
+    let result = match entry(service)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        // Linux with no Secret Service running: the key can only have been in
+        // the file, which `legacy_forget` clears below.
+        #[cfg(target_os = "linux")]
+        Err(keyring::Error::NoStorageAccess(_)) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    };
+    // Wherever else it may be.
+    legacy_forget(service);
+    result
+}
+
+/// A key where this version of e no longer puts it: macOS, a Keychain item
+/// read through `security` (the key comes back on stdout, never on a command
+/// line); Linux, `secrets.json`.
 #[cfg(target_os = "macos")]
-fn keychain_get(service: &str) -> Option<String> {
-    let out = Command::new("/usr/bin/security")
+fn legacy_get(service: &str) -> Option<String> {
+    let out = std::process::Command::new("/usr/bin/security")
         .args([
             "find-generic-password",
             "-a",
@@ -233,45 +298,27 @@ fn keychain_get(service: &str) -> Option<String> {
     if !out.status.success() {
         return None;
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|k| !k.is_empty())
 }
 
-#[cfg(target_os = "macos")]
-fn keychain_set(service: &str, key: &str) -> Result<(), String> {
-    // `-U` updates the item in place when it exists.
-    let out = Command::new("/usr/bin/security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-a",
-            &account(),
-            "-s",
-            service,
-            "-l",
-            service,
-            "-w",
-            key,
-        ])
-        .output()
-        .map_err(|e| format!("couldn't run security: {e}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
+#[cfg(target_os = "linux")]
+fn legacy_get(service: &str) -> Option<String> {
+    file_read(&default_file()).get(service).cloned()
 }
 
+/// Remove the old copy [`legacy_get`] finds.
 #[cfg(target_os = "macos")]
-fn keychain_delete(service: &str) -> Result<(), String> {
-    let out = Command::new("/usr/bin/security")
+fn legacy_forget(service: &str) {
+    let _ = std::process::Command::new("/usr/bin/security")
         .args(["delete-generic-password", "-a", &account(), "-s", service])
-        .output()
-        .map_err(|e| format!("couldn't run security: {e}"))?;
-    // Deleting what isn't there is fine.
-    if out.status.success() || String::from_utf8_lossy(&out.stderr).contains("could not be found") {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        .output();
+}
+
+#[cfg(target_os = "linux")]
+fn legacy_forget(service: &str) {
+    let path = default_file();
+    if file_read(&path).contains_key(service) {
+        let _ = file_set(&path, service, None);
     }
 }
 
@@ -282,6 +329,20 @@ fn file_read(path: &Path) -> BTreeMap<String, String> {
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default()
+}
+
+/// Put `key` under `slot` in the file at `path`, or remove it with `None`.
+fn file_set(path: &Path, slot: &str, key: Option<&str>) -> Result<(), String> {
+    let mut all = file_read(path);
+    match key {
+        Some(k) => {
+            all.insert(slot.to_string(), k.to_string());
+        }
+        None => {
+            all.remove(slot);
+        }
+    }
+    file_write(path, &all)
 }
 
 fn file_write(path: &Path, all: &BTreeMap<String, String>) -> Result<(), String> {

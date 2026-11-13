@@ -448,6 +448,8 @@ fn collect_translations(root: &Path, base: &Path, out: &mut Vec<TransEntry>) {
     let Ok(read) = std::fs::read_dir(base) else {
         return;
     };
+    // PHP locale files, loaded together in one `php` run at the end.
+    let mut php_files: Vec<(String, PathBuf)> = Vec::new();
     for entry in read.filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.is_dir() {
@@ -464,15 +466,7 @@ fn collect_translations(root: &Path, base: &Path, out: &mut Vec<TransEntry>) {
                         .and_then(|s| s.to_str())
                         .unwrap_or("")
                         .to_string();
-                    if let Some(pairs) = php_dump_array(root, &p) {
-                        for (k, v) in pairs {
-                            out.push(TransEntry {
-                                key: format!("{ns}.{k}"),
-                                value: v,
-                                file: p.clone(),
-                            });
-                        }
-                    }
+                    php_files.push((ns, p));
                 }
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
@@ -490,24 +484,70 @@ fn collect_translations(root: &Path, base: &Path, out: &mut Vec<TransEntry>) {
             }
         }
     }
+    let paths: Vec<&Path> = php_files.iter().map(|(_, p)| p.as_path()).collect();
+    for ((ns, p), pairs) in php_files.iter().zip(php_dump_arrays(root, &paths)) {
+        for (k, v) in pairs.into_iter().flatten() {
+            out.push(TransEntry {
+                key: format!("{ns}.{k}"),
+                value: v,
+                file: p.clone(),
+            });
+        }
+    }
 }
 
-/// Dump a PHP file that `return`s an array as flattened `key => value` pairs.
-fn php_dump_array(cwd: &Path, file: &Path) -> Option<Vec<(String, String)>> {
-    let code = format!(
-        "echo json_encode(Illuminate\\Support\\Arr::dot(require '{}'));",
-        file.display()
-    );
-    // Needs the autoloader for Arr::dot.
-    let full = format!("require 'vendor/autoload.php';{code}");
-    let output = crate::phptools::php(cwd, &["-r", &full], ARTISAN_TIMEOUT).ok()?;
-    let value = parse_json(&output.stdout)?;
-    let obj = value.as_object()?;
-    Some(
-        obj.iter()
-            .map(|(k, v)| (k.clone(), json_scalar(v)))
-            .collect(),
-    )
+/// Loads each path (sent on stdin as a JSON list, never spliced into the
+/// code, so a file name can't inject PHP) and prints one JSON list with each
+/// file's flattened array, or null for a file that fails to load.
+const DUMP_ARRAYS_PHP: &str = r#"require 'vendor/autoload.php';
+$out = [];
+foreach ((array) json_decode(stream_get_contents(STDIN), true) as $f) {
+    try {
+        $v = require $f;
+        $out[] = is_array($v) ? (object) Illuminate\Support\Arr::dot($v) : null;
+    } catch (\Throwable $e) {
+        $out[] = null;
+    }
+}
+echo json_encode($out, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);"#;
+
+/// Dump PHP files that each `return` an array as flattened `key => value`
+/// pairs, in one `php` run for all of them. One entry per file, in order;
+/// `None` for a file that couldn't be loaded.
+fn php_dump_arrays(cwd: &Path, files: &[&Path]) -> Vec<Option<Vec<(String, String)>>> {
+    let mut result = vec![None; files.len()];
+    // A path that isn't UTF-8 can't travel as JSON; it's skipped.
+    let idx: Vec<usize> = (0..files.len())
+        .filter(|&i| files[i].to_str().is_some())
+        .collect();
+    if idx.is_empty() {
+        return result;
+    }
+    let list: Vec<&str> = idx.iter().filter_map(|&i| files[i].to_str()).collect();
+    let Ok(input) = serde_json::to_vec(&list) else {
+        return result;
+    };
+    let Ok(output) = crate::phptools::php_with_input(
+        cwd,
+        &["-r", DUMP_ARRAYS_PHP],
+        Some(input),
+        ARTISAN_TIMEOUT,
+    ) else {
+        return result;
+    };
+    let Some(serde_json::Value::Array(items)) = parse_json(&output.stdout) else {
+        return result;
+    };
+    for (&i, item) in idx.iter().zip(items) {
+        if let serde_json::Value::Object(obj) = item {
+            result[i] = Some(
+                obj.iter()
+                    .map(|(k, v)| (k.clone(), json_scalar(v)))
+                    .collect(),
+            );
+        }
+    }
+    result
 }
 
 // ---- Blade components -----------------------------------------------------
@@ -1555,6 +1595,47 @@ pub fn model_class_from_table(table: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// File names are data, not code: a quote in a lang file's name loads
+    /// normally and can't break out into PHP. Needs `php`; skipped without it.
+    #[test]
+    fn lang_file_names_cannot_inject_php() {
+        let ok = std::process::Command::new("php")
+            .arg("-v")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !ok {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("e-lang-inject-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("vendor")).unwrap();
+        std::fs::create_dir_all(root.join("lang/en")).unwrap();
+        // A stand-in for Laravel's Arr::dot.
+        std::fs::write(
+            root.join("vendor/autoload.php"),
+            r#"<?php namespace Illuminate\Support; class Arr { public static function dot($a, $p = '') { $r = []; foreach ($a as $k => $v) { if (is_array($v)) { $r += self::dot($v, $p.$k.'.'); } else { $r[$p.$k] = $v; } } return $r; } }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("lang/en/o'clock.php"),
+            "<?php return ['at' => ['noon' => 'Noon']];",
+        )
+        .unwrap();
+        let evil = "'.file_put_contents('pwned','1').'.php";
+        std::fs::write(
+            root.join("lang/en").join(evil),
+            "<?php return ['a' => 'b'];",
+        )
+        .unwrap();
+        std::fs::write(root.join("lang/en/broken.php"), "<?php return [").unwrap();
+        let entries = load_translations(&root);
+        let keys: Vec<&str> = entries.iter().map(|e| e.key.as_str()).collect();
+        assert!(keys.contains(&"o'clock.at.noon"), "{keys:?}");
+        assert!(keys.iter().any(|k| k.ends_with(".a")), "{keys:?}");
+        assert!(!root.join("pwned").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn guest_middleware_is_not_authentication() {

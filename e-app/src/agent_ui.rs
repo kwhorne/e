@@ -36,13 +36,17 @@ pub fn agent_edit_review(state: AppState) -> impl IntoView {
                 .iter()
                 .filter(|s| matches!(s, EditSeg::Change { .. }))
                 .count();
-            format!(
-                "Agent proposes {n} change(s) — {}",
-                e.path
-                    .file_name()
-                    .map(|f| f.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            )
+            // The path from the project, not just the file name: `config.json`
+            // alone says nothing about which one is about to change.
+            let root = state.agent_root();
+            let shown = e
+                .path
+                .strip_prefix(&root)
+                .or_else(|_| e.path.strip_prefix(state.root.get_untracked()))
+                .unwrap_or(&e.path)
+                .display()
+                .to_string();
+            format!("Agent proposes {n} change(s) — {shown}")
         }
         None => String::new(),
     })

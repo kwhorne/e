@@ -272,10 +272,11 @@ pub fn generate_rules(table: &str, cols: &[ColumnInfo]) -> String {
         let t = c.data_type.to_lowercase();
         if c.name == "email" {
             rules.push("email".into());
+        } else if t.contains("bool") || t == "tinyint(1)" {
+            // Before the integer check: `tinyint(1)` contains "int".
+            rules.push("boolean".into());
         } else if t.contains("int") {
             rules.push("integer".into());
-        } else if t.contains("bool") || t == "tinyint(1)" {
-            rules.push("boolean".into());
         } else if t.contains("decimal")
             || t.contains("float")
             || t.contains("double")
@@ -346,8 +347,15 @@ mod tests {
                 nullable: true,
                 key: String::new(),
             },
+            ColumnInfo {
+                name: "active".into(),
+                data_type: "tinyint(1)".into(),
+                nullable: false,
+                key: String::new(),
+            },
         ];
         let r = generate_rules("users", &cols);
+        assert!(r.contains("'active' => 'required|boolean',"), "{r}");
         assert!(!r.contains("'id'")); // skipped
         assert!(r.contains("'email' => 'required|email',"));
         assert!(r.contains("'age' => 'nullable|integer',"));

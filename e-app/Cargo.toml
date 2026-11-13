@@ -21,6 +21,18 @@ objc2-app-kit    = { version = "0.3", default-features = false, features = ["std
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Provider API keys go to the OS credential store in-process, the same way and
+# with the same backends as e-db's connection secrets (see e-db/Cargo.toml).
+[target.'cfg(target_os = "macos")'.dependencies.keyring]
+version = "3.6.3"
+default-features = false
+features = ["apple-native"]
+
+[target.'cfg(target_os = "linux")'.dependencies.keyring]
+version = "3.6.3"
+default-features = false
+features = ["sync-secret-service", "crypto-rust"]
+
 [dependencies]
 e-laravel          = { workspace = true }
 e-agent            = { workspace = true }

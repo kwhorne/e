@@ -53,6 +53,8 @@ impl App {
             .arg(&project)
             .env("HOME", &home)
             .env("E_DETACHED", "1")
+            // Keys, clicks and dialogs over the socket are for tests only.
+            .env("E_UI_AUTOMATION", "1")
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
             .stderr(log)

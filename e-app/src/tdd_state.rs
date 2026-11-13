@@ -57,10 +57,7 @@ impl AppState {
             if passed {
                 state.tdd_loop.set(false);
             } else if state.tdd_loop.get_untracked() {
-                let tail: String = {
-                    let n = text.len().saturating_sub(4000);
-                    text[n..].to_string()
-                };
+                let tail = output_tail(&text, 4000);
                 state.send_to_agent(&format!(
                     "The test suite is failing. Fix the code so the tests pass. \
                  Use propose_edit over $E_EDITOR_SOCK for your changes so I can review them. \
@@ -229,5 +226,34 @@ impl AppState {
 
     pub fn tdd_stop(&self) {
         self.tdd_loop.set(false);
+    }
+}
+
+/// The last `max` bytes of `text`, moved forward to a character boundary.
+///
+/// Test runners print `✓`, `⨯` and box-drawing characters (three bytes each),
+/// so a plain byte offset lands inside one about as often as not — and slicing
+/// there panics on the UI thread.
+fn output_tail(text: &str, max: usize) -> &str {
+    let mut n = text.len().saturating_sub(max);
+    while !text.is_char_boundary(n) {
+        n += 1;
+    }
+    &text[n..]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::output_tail;
+
+    #[test]
+    fn tail_never_splits_a_character() {
+        let text = format!("x{}", "✓".repeat(2000));
+        for max in 0..10 {
+            let tail = output_tail(&text, max);
+            assert!(tail.len() <= max);
+            assert!(tail.chars().all(|c| c == '✓'));
+        }
+        assert_eq!(output_tail("short", 4000), "short");
     }
 }

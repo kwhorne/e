@@ -48,6 +48,12 @@ impl App {
         let project = home.join("shop");
         fixture(&project);
         let project = project.canonicalize().unwrap();
+        // The fixture is ours: trusted, so its code runs as a user's would.
+        std::fs::write(
+            home.join(".config/e/trusted.json"),
+            serde_json::json!({ "trusted": [project] }).to_string(),
+        )
+        .unwrap();
         let log = std::fs::File::create(home.join("e.log")).unwrap();
         let child = Command::new(env!("CARGO_BIN_EXE_e"))
             .arg(&project)

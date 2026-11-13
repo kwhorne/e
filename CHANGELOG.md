@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Workspace trust.** Opening a folder no longer runs its code. Until you
+  trust a project, `e` reads it but doesn't run it:
+  - no `php artisan`, Pint, PHPStan, tests, tasks or debugger
+  - no language server that loads project code
+  - no `.e/rules.toml` handed to an agent as instructions
+
+  A banner says what is held back, and **Trust Project** starts it.
+  Projects in your recent list are trusted automatically the first time.
+  See [Workspace trust](docs/workspace-trust.md).
+
 ### Fixed
 
 - **Updating on macOS kept e's signature intact.** The updater used to swap

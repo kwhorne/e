@@ -687,6 +687,10 @@ pub struct AppState {
     pub cx: Scope,
     /// Workspace root shown in the file tree.
     pub root: RwSignal<PathBuf>,
+    /// Whether the project at `root` may run its own code (see `trust`).
+    pub trusted: RwSignal<bool>,
+    /// The restricted-mode banner was put away for this session.
+    pub trust_banner_dismissed: RwSignal<bool>,
     /// All workspace root folders (multi-root). The first is the primary root.
     pub roots: RwSignal<Vec<PathBuf>>,
     /// All open buffers, in tab order.
@@ -1733,6 +1737,8 @@ impl AppState {
             cx,
             roots: RwSignal::new(vec![root.clone()]),
             root: RwSignal::new(root),
+            trusted: RwSignal::new(false),
+            trust_banner_dismissed: RwSignal::new(false),
             buffers: RwSignal::new(Vec::new()),
             active: RwSignal::new(None),
             active2: RwSignal::new(None),
@@ -3533,10 +3539,73 @@ impl AppState {
         );
     }
 
+    // ---- Workspace trust ------------------------------------------------
+
+    /// Take the project's trust as it stands: what may run, and the banner.
+    pub fn apply_trust(&self, trusted: bool) {
+        crate::phptools::allow_project_code(trusted);
+        self.trusted.set(trusted);
+    }
+
+    /// Whether the project's code may run for `what` (a feature the user asked
+    /// for); if not, say how to allow it.
+    pub(crate) fn may_run_project_code(&self, what: &str) -> bool {
+        if self.trusted.get_untracked() {
+            return true;
+        }
+        crate::toast::post(&format!(
+            "This project isn't trusted yet, so e doesn't run its code ({what}). \
+             Trust it from the banner or with “Trust Project” (⌘⇧P)."
+        ));
+        false
+    }
+
+    /// Trust the project: remember it, then start what was held back.
+    pub fn trust_project(&self) {
+        let root = self.root.get_untracked();
+        if let Err(e) = crate::trust::set_trusted(&root, true) {
+            crate::toast::post(&format!("Couldn't save the project as trusted: {e}"));
+        }
+        self.apply_trust(true);
+        self.trust_banner_dismissed.set(false);
+        // Language servers that waited, for the files already open.
+        let laravel = self.is_laravel_project();
+        let mut ids: Vec<&'static str> = Vec::new();
+        for b in self.buffers.get_untracked() {
+            for spec in lsp_registry::server_specs(b.file.language, laravel) {
+                if !ids.contains(&spec.id) {
+                    ids.push(spec.id);
+                }
+            }
+        }
+        for id in ids {
+            if self.lsp_clients.with_untracked(|m| !m.contains_key(id)) {
+                self.restart_lsp(id, 0);
+            }
+        }
+        self.load_laravel();
+        crate::toast::post("Project trusted");
+    }
+
+    /// Stop trusting the project. What already runs keeps running until e
+    /// restarts; nothing new starts.
+    pub fn restrict_project(&self) {
+        let root = self.root.get_untracked();
+        if let Err(e) = crate::trust::set_trusted(&root, false) {
+            crate::toast::post(&format!("Couldn't save the project as restricted: {e}"));
+        }
+        self.apply_trust(false);
+        self.trust_banner_dismissed.set(false);
+        crate::toast::post("Project restricted. Restart e to stop what's already running.");
+    }
+
     // ---- Task runner ---------------------------------------------------
 
     /// Run a shell command in a new, named terminal tab.
     pub fn run_task(&self, name: &str, command: &str) {
+        if !self.may_run_project_code("tasks") {
+            return;
+        }
         let Some(id) = self.spawn_terminal() else {
             return;
         };
@@ -5940,6 +6009,11 @@ impl AppState {
     /// Spawn one server and record how it went. `restarts` is carried into its
     /// health so a crash loop can be counted across restarts.
     fn start_lsp(&self, spec: &lsp_registry::ServerSpec, restarts: u32) -> Option<Arc<LspClient>> {
+        // Servers that load the project's own code wait for it to be trusted;
+        // trusting it starts them (`trust_project`).
+        if !self.trusted.get_untracked() && !crate::trust::server_reads_only(spec.program) {
+            return None;
+        }
         let tx = self.lsp_tx.get();
         let queue = self.lsp_queue.get_untracked();
         // Tag events with the server that produced them so two servers on the
@@ -7382,6 +7456,10 @@ impl AppState {
     /// wrong. Analysing the single saved file rather than the whole project
     /// keeps it to something worth doing on every save.
     pub fn run_phpstan(&self, buffer_id: u64) {
+        // `vendor/bin/phpstan` is the project's code.
+        if !self.trusted.get_untracked() {
+            return;
+        }
         let Some(buf) = self.buffer_by_id(buffer_id) else {
             return;
         };

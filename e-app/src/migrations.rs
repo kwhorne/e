@@ -168,7 +168,11 @@ impl AppState {
         let Some(path) = buf.file.path.clone().filter(|p| is_migration(&root, p)) else {
             return;
         };
-        if buf.dirty.get_untracked() || !root.join("artisan").is_file() {
+        // `migrate --pretend` boots the app: only in a trusted project.
+        if buf.dirty.get_untracked()
+            || !root.join("artisan").is_file()
+            || !self.trusted.get_untracked()
+        {
             return;
         }
         let app = *self;

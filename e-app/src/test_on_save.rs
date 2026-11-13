@@ -69,7 +69,10 @@ impl AppState {
                 | Language::TypeScript
                 | Language::Tsx
         );
-        if !self.settings.get_untracked().test_on_save || !view_or_php {
+        if !self.settings.get_untracked().test_on_save
+            || !view_or_php
+            || !self.trusted.get_untracked()
+        {
             return;
         }
         let first = self.save_run_queue.with_untracked(Vec::is_empty);

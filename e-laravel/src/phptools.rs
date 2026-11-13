@@ -12,8 +12,32 @@ use std::path::{Path, PathBuf};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
-/// A tool installed in the project's `vendor/bin`.
+/// Whether the project's own code may run: `php` in it (which loads its
+/// `vendor/autoload.php`, `bootstrap/app.php`, service providers …) and the
+/// tools in its `vendor/bin`. Off until the editor says the project is
+/// trusted, so opening a folder someone else wrote runs nothing of theirs.
+/// On in this crate's own tests, which run fixture projects.
+static PROJECT_CODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(cfg!(test));
+
+/// Allow (or stop) running the project's code. See [`PROJECT_CODE`].
+pub fn allow_project_code(allowed: bool) {
+    PROJECT_CODE.store(allowed, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn project_code_allowed() -> bool {
+    PROJECT_CODE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// What a refused run says.
+pub const NOT_TRUSTED: &str =
+    "this project isn't trusted yet, so e doesn't run its code (Trust Project to allow it)";
+
+/// A tool installed in the project's `vendor/bin`, if the project's code may
+/// run.
 fn vendor_bin(root: &Path, name: &str) -> Option<PathBuf> {
+    if !project_code_allowed() {
+        return None;
+    }
     let p = root.join("vendor").join("bin").join(name);
     p.is_file().then_some(p)
 }
@@ -192,6 +216,9 @@ pub fn php_with_input(
 ) -> Result<std::process::Output, String> {
     use std::io::{Read, Write};
     use std::process::Stdio;
+    if !project_code_allowed() {
+        return Err(NOT_TRUSTED.to_string());
+    }
     let mut child = std::process::Command::new("php")
         .args(["-d", "error_reporting=0", "-d", "display_errors=0"])
         .args(args)

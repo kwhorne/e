@@ -6,7 +6,9 @@
 #   ./scripts/bundle-dmg.sh --universal # universal (arm64 + x86_64)
 #
 # Produces dist/e-<version>[-arch].dmg containing e.app and an Applications
-# symlink, so users just drag the app into Applications.
+# symlink, so users just drag the app into Applications. When signed with a
+# Developer ID it also produces dist/e-<version>[-arch].app.zip, the bundle the
+# in-app updater installs.
 #
 # Code signing / notarization (optional, for distribution without Gatekeeper
 # warnings) is described in docs/installation.md. By default the app is ad-hoc
@@ -192,6 +194,21 @@ if [[ "$IDENTITY" != "-" ]]; then
 elif [[ "${E_REQUIRE_NOTARIZATION:-}" == "1" ]]; then
   echo "error: no Developer ID to sign with; not releasing an unsigned DMG" >&2
   exit 1
+fi
+
+# --- 6. the app on its own, for the in-app updater ---------------------------
+# The updater replaces the whole bundle with this one, never just the binary
+# inside it (that breaks the signature). Apple's ticket for the DMG covers the
+# app too, so staple it where that works; the signature is what the updater
+# checks either way.
+APP_ZIP="dist/e-${VERSION}${ARCH_SUFFIX}.app.zip"
+if [[ "$IDENTITY" != "-" ]]; then
+  xcrun stapler staple "$APP" >/dev/null 2>&1 \
+    && echo "==> stapled $APP" \
+    || echo "==> $APP not stapled (the updater checks its signature regardless)"
+  rm -f "$APP_ZIP"
+  ditto -c -k --keepParent "$APP" "$APP_ZIP"
+  echo "✓ Built $APP_ZIP"
 fi
 
 echo

@@ -20,6 +20,7 @@
 enum Tok {
     Word(String),
     Open,
+    Close,
     Eq,
 }
 
@@ -88,6 +89,10 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
             }
             '(' => {
                 out.push(Tok::Open);
+                i += 1;
+            }
+            ')' => {
+                out.push(Tok::Close);
                 i += 1;
             }
             '=' => {
@@ -208,9 +213,152 @@ pub fn is_read_only(sql: &str) -> bool {
     read_only_in(sql, MYSQLISH) && read_only_in(sql, STANDARD)
 }
 
+fn destructive_in(sql: &str, d: Dialect) -> Option<&'static str> {
+    let toks = tokens(sql, d);
+    let word = |i: usize| match toks.get(i) {
+        Some(Tok::Word(w)) => Some(w.as_str()),
+        _ => None,
+    };
+    for (i, t) in toks.iter().enumerate() {
+        let Tok::Word(w) = t else { continue };
+        match w.as_str() {
+            // `DROP TABLE`, and `ALTER TABLE … DROP COLUMN` with it.
+            "drop" => return Some("DROP"),
+            // MySQL also has a `TRUNCATE(x, d)` number function.
+            "truncate" if toks.get(i + 1) != Some(&Tok::Open) => return Some("TRUNCATE"),
+            "delete" | "update" => {
+                // The statement verb only: at the start, after `(` or `)` (a
+                // CTE's body, the statement after a CTE) or after EXPLAIN's
+                // words — not `FOR UPDATE`, `ON DELETE CASCADE` or
+                // `ON DUPLICATE KEY UPDATE`.
+                let verb = i == 0
+                    || matches!(toks.get(i - 1), Some(Tok::Open | Tok::Close))
+                    || matches!(
+                        word(i - 1),
+                        Some("explain" | "analyze" | "analyse" | "verbose")
+                    );
+                if !verb {
+                    continue;
+                }
+                // Its own WHERE: at its own depth, before the statement (or
+                // the parenthesis it sits in) ends — not one in a subquery.
+                let mut depth = 0i32;
+                let mut has_where = false;
+                for t in &toks[i + 1..] {
+                    match t {
+                        Tok::Open => depth += 1,
+                        Tok::Close => {
+                            depth -= 1;
+                            if depth < 0 {
+                                break;
+                            }
+                        }
+                        Tok::Word(w) if depth == 0 && w == "where" => {
+                            has_where = true;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                if !has_where {
+                    return Some(if w == "delete" {
+                        "DELETE without WHERE"
+                    } else {
+                        "UPDATE without WHERE"
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// If the statement destroys data wholesale — DROP (also `ALTER … DROP`),
+/// TRUNCATE, or a DELETE or UPDATE with no WHERE of its own — a short reason
+/// for the confirmation; otherwise `None`. Comments, strings and quoted names
+/// don't count, and as with [`is_read_only`] both readings are taken: either
+/// one finding a reason is enough.
+pub fn is_destructive(sql: &str) -> Option<&'static str> {
+    destructive_in(sql, MYSQLISH).or_else(|| destructive_in(sql, STANDARD))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn destruction_is_found_past_comments_and_inside_statements() {
+        assert_eq!(is_destructive("-- tidy up\nDROP TABLE users"), Some("DROP"));
+        assert_eq!(
+            is_destructive("/* nightly */ DELETE FROM orders"),
+            Some("DELETE without WHERE")
+        );
+        assert_eq!(is_destructive("# mysql\ntruncate t"), Some("TRUNCATE"));
+        assert_eq!(
+            is_destructive("ALTER TABLE users DROP COLUMN email"),
+            Some("DROP")
+        );
+        assert_eq!(
+            is_destructive(
+                "WITH gone AS (DELETE FROM orders RETURNING id) SELECT count(*) FROM gone"
+            ),
+            Some("DELETE without WHERE")
+        );
+        assert_eq!(
+            is_destructive("WITH x AS (SELECT 1) UPDATE orders SET total = 0"),
+            Some("UPDATE without WHERE")
+        );
+        assert_eq!(
+            is_destructive("EXPLAIN ANALYZE DELETE FROM t"),
+            Some("DELETE without WHERE")
+        );
+        // A WHERE in a subquery isn't the statement's own.
+        assert_eq!(
+            is_destructive("DELETE FROM t USING (SELECT id FROM u WHERE u.x = 1) s"),
+            Some("DELETE without WHERE")
+        );
+        assert_eq!(
+            is_destructive("UPDATE t SET note = 'where'"),
+            Some("UPDATE without WHERE")
+        );
+        // MySQL runs `/*! … */`.
+        assert_eq!(is_destructive("/*! DROP TABLE t */"), Some("DROP"));
+    }
+
+    #[test]
+    fn what_isnt_destruction_stays_quiet() {
+        assert_eq!(
+            is_destructive("DELETE FROM t WHERE id IN (SELECT id FROM u)"),
+            None
+        );
+        assert_eq!(
+            is_destructive("UPDATE t SET a = (SELECT 1) WHERE id = 2"),
+            None
+        );
+        assert_eq!(
+            is_destructive("SELECT * FROM t WHERE id = 1 FOR UPDATE"),
+            None
+        );
+        assert_eq!(
+            is_destructive(
+                "CREATE TABLE c (p_id INT REFERENCES p ON DELETE CASCADE ON UPDATE CASCADE)"
+            ),
+            None
+        );
+        assert_eq!(
+            is_destructive("INSERT INTO t (id, n) VALUES (1, 2) ON DUPLICATE KEY UPDATE n = 2"),
+            None
+        );
+        assert_eq!(
+            is_destructive("INSERT INTO t (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET n = 2"),
+            None
+        );
+        assert_eq!(is_destructive("SELECT TRUNCATE(1.234, 1)"), None);
+        assert_eq!(is_destructive("SELECT 'drop table x' AS note"), None);
+        assert_eq!(is_destructive("-- DROP TABLE users\nSELECT 1"), None);
+        assert_eq!(is_destructive("SELECT \"delete\" FROM t"), None);
+    }
 
     #[test]
     fn plain_reads_are_read_only() {

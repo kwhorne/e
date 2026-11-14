@@ -650,7 +650,7 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
             32,
             move |n| {
                 s.settings.update(|st| st.font_size = n);
-                s.font_size.set(n);
+                s.editor.font_size.set(n);
                 config::set_usize("font_size", n);
             },
         )
@@ -1063,7 +1063,7 @@ pub fn settings_view(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.settings_open.set(false));
+        .on_click_stop(move |_| state.ui.settings_open.set(false));
     let header = stack((title, search_box, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -1157,7 +1157,7 @@ pub fn settings_view(state: AppState) -> impl IntoView {
             })
             .on_click_stop(move |_| {
                 if let Some(p) = config::settings_path() {
-                    state.settings_open.set(false);
+                    state.ui.settings_open.set(false);
                     state.open_path(p);
                 }
             }),
@@ -1193,11 +1193,11 @@ pub fn settings_view(state: AppState) -> impl IntoView {
                 .items_center()
                 .justify_center()
                 .background(Color::from_rgba8(0, 0, 0, 0xCC));
-            if state.settings_open.get() {
+            if state.ui.settings_open.get() {
                 s
             } else {
                 s.hide()
             }
         })
-        .on_click_stop(move |_| state.settings_open.set(false))
+        .on_click_stop(move |_| state.ui.settings_open.set(false))
 }

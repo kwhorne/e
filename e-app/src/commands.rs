@@ -10,7 +10,7 @@ use crate::state::AppState;
 pub fn dispatch(state: AppState, id: &str) -> bool {
     match id {
         // Navigation & palettes.
-        "goto-file" => state.palette_open.update(|o| *o = !*o),
+        "goto-file" => state.ui.palette_open.update(|o| *o = !*o),
         "command-palette" => state.cmd.open.set(true),
         "recent" => state.open_recent(),
         "open-folder" => state.open_project_dialog(),
@@ -83,7 +83,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "diff" => state.toggle_diff(),
 
         // Panels & view.
-        "toggle-sidebar" => state.sidebar_open.update(|o| *o = !*o),
+        "toggle-sidebar" => state.ui.sidebar_open.update(|o| *o = !*o),
         "split" => state.toggle_split(),
         "focus-other-pane" => state.focus_other_pane(),
         "terminal" | "toggle-terminal" => state.toggle_terminal(),
@@ -165,9 +165,9 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "word-wrap" => state.toggle_word_wrap(),
 
         // App.
-        "settings" => state.settings_open.set(true),
+        "settings" => state.ui.settings_open.set(true),
         "settings-json" => state.open_settings(),
-        "about" => state.about_open.set(true),
+        "about" => state.ui.about_open.set(true),
         "check-updates" => state.check_for_updates(true),
         "install-cli" => state.install_cli(),
 
@@ -205,7 +205,7 @@ fn close_focused(state: AppState) {
 
 /// Dismiss every open overlay (Escape).
 fn close_overlays(state: AppState) {
-    if state.confirm.with_untracked(Option::is_some) {
+    if state.ui.confirm.with_untracked(Option::is_some) {
         state.confirm_cancel();
         return;
     }
@@ -265,8 +265,8 @@ fn close_overlays(state: AppState) {
         state.views.related_open.set(false);
         return;
     }
-    if state.undo_open.get() {
-        state.undo_open.set(false);
+    if state.editor.undo_open.get() {
+        state.editor.undo_open.set(false);
         return;
     }
     if state.sem.open.get() {
@@ -300,16 +300,16 @@ fn close_overlays(state: AppState) {
     state.close_hunk_peek();
     state.close_signature();
     state.picker.open.set(false);
-    state.palette_open.set(false);
+    state.ui.palette_open.set(false);
     state.cmd.open.set(false);
-    state.md_preview.set(false);
-    state.diff_open.set(false);
-    state.about_open.set(false);
+    state.editor.md_preview.set(false);
+    state.editor.diff_open.set(false);
+    state.ui.about_open.set(false);
     state.close_find();
     state.close_rename();
     state.close_goto_line();
     state.cancel_close();
     state.close_recent();
     state.task.open.set(false);
-    state.settings_open.set(false);
+    state.ui.settings_open.set(false);
 }

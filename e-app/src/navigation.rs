@@ -236,7 +236,7 @@ impl AppState {
     /// to match on, name and action beside — and Enter opens the controller
     /// action, or the routes file line for a closure.
     pub fn open_route_search(&self) {
-        let Some(data) = self.laravel.get_untracked() else {
+        let Some(data) = self.project.laravel.get_untracked() else {
             Self::notify("Not a Laravel project (no routes loaded)");
             return;
         };
@@ -282,7 +282,7 @@ impl AppState {
     /// Find Unused Views: Blade views nothing references, in the picker; Enter
     /// opens one so it can be checked and deleted.
     pub fn find_unused_views(&self) {
-        let Some(data) = self.laravel.get_untracked() else {
+        let Some(data) = self.project.laravel.get_untracked() else {
             Self::notify("Not a Laravel project (no views loaded)");
             return;
         };

@@ -219,9 +219,9 @@ fn scope_headers<S: AsRef<str>>(
 /// the editor as you scroll. Click a line to jump to it.
 fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
     let active_sig = if pane_idx == 1 {
-        state.active2
+        state.editor.active2
     } else {
-        state.active
+        state.editor.active
     };
 
     let headers = move || -> Vec<(usize, String)> {
@@ -262,7 +262,7 @@ fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
                         .padding_right(10.0)
                         .padding_vert(2.0)
                         .font_family(theme::mono_family())
-                        .font_size(state.font_size.get() as f32)
+                        .font_size(state.editor.font_size.get() as f32)
                         .color(theme::fg())
                         .text_ellipsis()
                         .cursor(floem::style::CursorStyle::Pointer)
@@ -292,13 +292,13 @@ fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
 
 fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
     let active_sig: RwSignal<Option<u64>> = if pane_idx == 1 {
-        state.active2
+        state.editor.active2
     } else {
-        state.active
+        state.editor.active
     };
 
     let editors = dyn_stack(
-        move || state.buffers.get(),
+        move || state.editor.buffers.get(),
         |b| b.id,
         move |b| {
             let id = b.id;
@@ -365,12 +365,12 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 b.stop_line.clone(),
                 b.test_marks.clone(),
                 gutter_click(state, b.file.path.clone()),
-                state.font_size,
+                state.editor.font_size,
                 b.tab_width,
             ))
             .editor_style(move |s| {
                 // Prose wraps: a Markdown file reads as a document.
-                let wrap = if state.word_wrap.get() || is_markdown {
+                let wrap = if state.editor.word_wrap.get() || is_markdown {
                     floem::views::editor::text::WrapMethod::EditorWidth
                 } else {
                     floem::views::editor::text::WrapMethod::None
@@ -453,7 +453,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                     // the same file in both panes, both are "active", and the
                     // pane that asked last used to win.
                     if active_sig.get() == Some(id)
-                        && state.focused.get() == pane_idx
+                        && state.editor.focused.get() == pane_idx
                         && !state.any_overlay_open()
                     {
                         if let Some(vid) = vid {
@@ -488,7 +488,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
             container(te)
                 .on_move(move |point| win_origin.set_in(pane_idx, point))
                 .on_event(EventListener::PointerDown, move |_| {
-                    state.focused.set(pane_idx);
+                    state.editor.focused.set(pane_idx);
                     EventPropagation::Continue
                 })
                 // Alt-click toggles a breakpoint on the clicked line (the caret
@@ -518,7 +518,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
 
 pub fn editor_area(state: AppState) -> impl IntoView {
     dyn_container(
-        move || state.split.get(),
+        move || state.editor.split.get(),
         move |split| {
             if split {
                 stack((
@@ -540,7 +540,7 @@ pub fn editor_area(state: AppState) -> impl IntoView {
                         .size_full()
                         .items_center()
                         .justify_center();
-                    if state.buffers.with(|b| b.is_empty()) {
+                    if state.editor.buffers.with(|b| b.is_empty()) {
                         s
                     } else {
                         s.hide()
@@ -573,4 +573,42 @@ fn gutter_click(state: AppState, path: Option<std::path::PathBuf>) -> crate::sty
             floem::views::editor::gutter::GutterLane::Numbers => false,
         }
     })
+}
+
+/// The editor area: open buffers, which pane shows which, and how text is shown.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct EditorArea {
+    /// All open buffers, in tab order.
+    pub buffers: floem::reactive::RwSignal<Vec<crate::state::Buffer>>,
+    /// Pane 0's active buffer id.
+    pub active: floem::reactive::RwSignal<Option<u64>>,
+    /// Pane 1's active buffer id (split view).
+    pub active2: floem::reactive::RwSignal<Option<u64>>,
+    /// Is the editor split into two panes?
+    pub split: floem::reactive::RwSignal<bool>,
+    /// Which pane has focus (0 or 1).
+    pub focused: floem::reactive::RwSignal<u8>,
+    /// Timestamp (ms since epoch) of the last edit, for idle auto-save.
+    pub last_edit: floem::reactive::RwSignal<u128>,
+    /// Markdown reading-mode preview toggle.
+    pub md_preview: floem::reactive::RwSignal<bool>,
+    /// Git diff reading-mode toggle.
+    pub diff_open: floem::reactive::RwSignal<bool>,
+    /// File-comparison panel: `(left name, right name, diff lines)` when open.
+    pub file_diff: floem::reactive::RwSignal<Option<(String, String, Vec<e_core::git::DiffLine>)>>,
+    pub undo_open: floem::reactive::RwSignal<bool>,
+    /// Bumped whenever the active buffer's undo tree changes (drives the panel).
+    pub undo_rev: floem::reactive::RwSignal<u64>,
+    /// Generation counter debouncing inline AI-completion requests.
+    pub ghost_gen: floem::reactive::RwSignal<u64>,
+    /// Buffer id awaiting a close confirmation (unsaved changes).
+    pub close_confirm: floem::reactive::RwSignal<Option<u64>>,
+    /// Editor font size (reactive, for zoom).
+    pub font_size: floem::reactive::RwSignal<usize>,
+    /// Whether soft word-wrap is enabled.
+    pub word_wrap: floem::reactive::RwSignal<bool>,
+    /// Bumped when blame data finishes loading, to refresh the status bar.
+    pub blame_rev: floem::reactive::RwSignal<u64>,
 }

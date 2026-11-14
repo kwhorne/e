@@ -65,7 +65,7 @@ impl AppState {
                 .map(|v| v.iter().map(|l| (*l as usize).saturating_sub(1)).collect())
                 .unwrap_or_default()
         });
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             for b in bs {
                 if buffer_matches(b, path) {
                     *b.bp_marks.borrow_mut() = lines.clone();
@@ -111,7 +111,7 @@ impl AppState {
 
     /// Mark `line0` in the buffer for `path` as the stopped line; clear others.
     fn set_stop_line(&self, path: &str, line0: usize) {
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             for b in bs {
                 let want = if buffer_matches(b, path) {
                     Some(line0)
@@ -128,7 +128,7 @@ impl AppState {
 
     /// Remove the stopped-line highlight from every buffer.
     fn clear_stop_lines(&self) {
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             for b in bs {
                 if b.stop_line.borrow().is_some() {
                     *b.stop_line.borrow_mut() = None;

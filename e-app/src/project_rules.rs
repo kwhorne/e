@@ -169,7 +169,7 @@ impl AppState {
                         if !r.is_empty() {
                             eprintln!("e: {} project rules", r.rules.len());
                         }
-                        app.project_rules.set(Arc::new(r));
+                        app.project.rules.set(Arc::new(r));
                     }
                     // The file shows why; keep the rules that last read.
                     Err(e) => eprintln!("e: {} line {}: {}", rules::FILE, e.line + 1, e.message),
@@ -188,7 +188,7 @@ impl AppState {
 
     /// The project-relative path `path` is checked as, when a rule covers it.
     pub(crate) fn rules_rel(&self, path: &Path) -> Option<String> {
-        let rules = self.project_rules.get_untracked();
+        let rules = self.project.rules.get_untracked();
         let rel = slashed(path.strip_prefix(self.root.get_untracked()).ok()?);
         rules.applies(&rel).then_some(rel)
     }
@@ -213,7 +213,7 @@ impl AppState {
     /// **Project Rules: Check Project** — every place that breaks a rule, in
     /// the picker.
     pub fn check_project_rules(&self) {
-        let rules = self.project_rules.get_untracked();
+        let rules = self.project.rules.get_untracked();
         if !rules.rules.iter().any(|r| r.checked()) {
             Self::notify(&format!(
                 "No rules to check — write them in {} (Project Rules: Open)",
@@ -265,7 +265,7 @@ impl AppState {
         if !self.trusted.get_untracked() {
             return None;
         }
-        let rules = self.project_rules.get_untracked();
+        let rules = self.project.rules.get_untracked();
         (!rules.is_empty()).then(|| rules.for_agents())
     }
 }

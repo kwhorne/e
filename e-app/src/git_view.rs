@@ -20,7 +20,7 @@ impl AppState {
             self.git.panel_open.set(false);
         } else {
             self.git.panel_open.set(true);
-            self.sidebar_open.set(true);
+            self.ui.sidebar_open.set(true);
             self.refresh_git_status();
         }
     }
@@ -139,7 +139,7 @@ impl AppState {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| path.clone());
-        self.confirm.set(Some(crate::dialogs::Confirm {
+        self.ui.confirm.set(Some(crate::dialogs::Confirm {
             title: format!("Discard changes to “{name}”?"),
             detail: "Its uncommitted changes are thrown away. This can't be undone.".into(),
             action: "Discard",

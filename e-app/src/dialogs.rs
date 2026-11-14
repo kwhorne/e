@@ -47,14 +47,14 @@ pub struct Confirm {
 
 impl AppState {
     pub fn confirm_accept(&self) {
-        if let Some(c) = self.confirm.get_untracked() {
-            self.confirm.set(None);
+        if let Some(c) = self.ui.confirm.get_untracked() {
+            self.ui.confirm.set(None);
             (c.on_confirm)();
         }
     }
 
     pub fn confirm_cancel(&self) {
-        self.confirm.set(None);
+        self.ui.confirm.set(None);
     }
 }
 
@@ -63,6 +63,7 @@ pub fn confirm_dialog(state: AppState) -> impl IntoView {
     let field = move |f: fn(&Confirm) -> String| {
         move || {
             state
+                .ui
                 .confirm
                 .with(|c| c.as_ref().map(f).unwrap_or_default())
         }
@@ -107,7 +108,7 @@ pub fn confirm_dialog(state: AppState) -> impl IntoView {
                 .items_center()
                 .justify_center()
                 .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
-            if state.confirm.with(Option::is_some) {
+            if state.ui.confirm.with(Option::is_some) {
                 s
             } else {
                 s.hide()
@@ -119,9 +120,9 @@ pub fn confirm_dialog(state: AppState) -> impl IntoView {
 /// "Save changes before closing?" dialog.
 pub fn close_confirm_dialog(state: AppState) -> impl IntoView {
     let name = move || {
-        let id = state.close_confirm.get();
+        let id = state.editor.close_confirm.get();
         id.and_then(|id| {
-            state.buffers.with(|bs| {
+            state.editor.buffers.with(|bs| {
                 bs.iter()
                     .find(|b| b.id == id)
                     .map(|b| b.file.display_name())
@@ -162,7 +163,7 @@ pub fn close_confirm_dialog(state: AppState) -> impl IntoView {
                 .items_center()
                 .justify_center()
                 .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
-            if state.close_confirm.get().is_some() {
+            if state.editor.close_confirm.get().is_some() {
                 s
             } else {
                 s.hide()

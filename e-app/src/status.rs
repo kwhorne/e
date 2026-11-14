@@ -95,7 +95,7 @@ pub fn status_bar(state: AppState) -> impl IntoView {
     });
 
     let blame = label(move || {
-        state.blame_rev.get();
+        state.editor.blame_rev.get();
         state.cursor_info(); // re-render on caret movement
         state.active_line_blame().unwrap_or_default()
     })

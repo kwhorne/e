@@ -96,7 +96,7 @@ fn add(shown: &mut Vec<Toast>, text: &str) -> (u64, u64) {
 /// pointer is on it.
 fn expire(state: AppState, id: u64, generation: u64, after: Duration) {
     floem::action::exec_after(after, move |_| {
-        let held = state.toasts.with_untracked(|v| {
+        let held = state.ui.toasts.with_untracked(|v| {
             v.iter()
                 .find(|t| t.id == id)
                 .map(|t| (t.generation, t.hovered))
@@ -112,7 +112,7 @@ fn expire(state: AppState, id: u64, generation: u64, after: Duration) {
 }
 
 fn dismiss(state: AppState, id: u64) {
-    state.toasts.update(|v| v.retain(|t| t.id != id));
+    state.ui.toasts.update(|v| v.retain(|t| t.id != id));
 }
 
 /// Take what was said since last time onto the stack.
@@ -123,7 +123,7 @@ fn take(state: AppState) {
         .unwrap_or_default();
     for text in said {
         let mut timer = (0, 0);
-        state.toasts.update(|v| timer = add(v, &text));
+        state.ui.toasts.update(|v| timer = add(v, &text));
         expire(state, timer.0, timer.1, life(&text));
     }
 }
@@ -140,7 +140,7 @@ pub fn toasts(state: AppState) -> impl IntoView {
     });
 
     let rows = dyn_stack(
-        move || state.toasts.get(),
+        move || state.ui.toasts.get(),
         |t| (t.id, t.count),
         move |t| {
             let id = t.id;
@@ -173,14 +173,14 @@ pub fn toasts(state: AppState) -> impl IntoView {
                     .cursor(floem::style::CursorStyle::Pointer)
             })
             .on_event_cont(floem::event::EventListener::PointerEnter, move |_| {
-                state.toasts.update(|v| {
+                state.ui.toasts.update(|v| {
                     if let Some(t) = v.iter_mut().find(|t| t.id == id) {
                         t.hovered = true;
                     }
                 })
             })
             .on_event_cont(floem::event::EventListener::PointerLeave, move |_| {
-                state.toasts.update(|v| {
+                state.ui.toasts.update(|v| {
                     if let Some(t) = v.iter_mut().find(|t| t.id == id) {
                         t.hovered = false;
                     }
@@ -202,7 +202,7 @@ pub fn toasts(state: AppState) -> impl IntoView {
             .inset_right(20.0)
             .inset_bottom(if lifted { 220.0 } else { 46.0 })
             .z_index(60);
-        if state.toasts.with(Vec::is_empty) {
+        if state.ui.toasts.with(Vec::is_empty) {
             s.hide()
         } else {
             s

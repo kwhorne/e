@@ -107,7 +107,7 @@ pub fn palette(state: AppState) -> impl IntoView {
     // (Re)load the file list whenever the palette opens — off the UI thread so
     // it stays instant even when a huge folder (or `/`) is open.
     create_effect(move |_| {
-        if state.palette_open.get() {
+        if state.ui.palette_open.get() {
             query.set(String::new());
             selected.set(0);
             files.set(Vec::new());
@@ -213,7 +213,7 @@ pub fn palette(state: AppState) -> impl IntoView {
         let g = gen.get_untracked() + 1;
         gen.set(g);
         floem::action::exec_after(std::time::Duration::from_millis(120), move |_| {
-            if gen.get_untracked() == g && state.palette_open.get_untracked() {
+            if gen.get_untracked() == g && state.ui.palette_open.get_untracked() {
                 request_async();
             }
         });
@@ -237,7 +237,7 @@ pub fn palette(state: AppState) -> impl IntoView {
     let filtered = move || ranked.get();
 
     let run = move |hit: Hit| {
-        state.palette_open.set(false);
+        state.ui.palette_open.set(false);
         match hit.action {
             Action::Open(p) => state.open_path(p),
             Action::Goto { uri, line, col } => state.jump_to(&uri, line as usize, col as usize),
@@ -271,15 +271,15 @@ pub fn palette(state: AppState) -> impl IntoView {
         })
         .on_event_stop(floem::event::EventListener::FocusLost, move |_| {
             floem::action::exec_after(std::time::Duration::from_millis(150), move |_| {
-                if state.palette_open.get_untracked() {
-                    state.palette_open.set(false);
+                if state.ui.palette_open.get_untracked() {
+                    state.ui.palette_open.set(false);
                 }
             });
         })
         .on_key_down(
             Key::Named(NamedKey::Escape),
             |_| true,
-            move |_| state.palette_open.set(false),
+            move |_| state.ui.palette_open.set(false),
         )
         .on_key_down(
             Key::Named(NamedKey::ArrowDown),
@@ -428,11 +428,11 @@ pub fn palette(state: AppState) -> impl IntoView {
                 .justify_center()
                 .items_start()
                 .padding_top(90.0);
-            if state.palette_open.get() {
+            if state.ui.palette_open.get() {
                 s
             } else {
                 s.hide()
             }
         })
-        .on_click_stop(move |_| state.palette_open.set(false))
+        .on_click_stop(move |_| state.ui.palette_open.set(false))
 }

@@ -235,6 +235,7 @@ impl AppState {
     pub fn refresh_runtime_lenses(&self) {
         let fresh: Vec<Lens> = if self.settings.get_untracked().runtime_lenses {
             let routes = self
+                .project
                 .laravel
                 .get_untracked()
                 .map(|d| d.all_routes.clone())
@@ -266,7 +267,7 @@ impl AppState {
             .map(|l| l.file.clone())
             .collect();
         self.runtime.lenses.set(Arc::new(fresh));
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             for b in bs {
                 if b.file.path.as_ref().is_some_and(|p| touched.contains(p)) {
                     b.doc.cache_rev().update(|r| *r += 1);
@@ -306,7 +307,7 @@ impl AppState {
                     .map(|r| root.join(&r.dir)),
             )
             .collect();
-        let wanted = self.buffers.with_untracked(|bs| {
+        let wanted = self.editor.buffers.with_untracked(|bs| {
             bs.iter().any(|b| {
                 b.file
                     .path

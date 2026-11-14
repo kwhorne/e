@@ -243,7 +243,8 @@ impl AppState {
             *buf.migration_risks.borrow_mut() = diags;
             if let Some(uri) = buf.uri.clone() {
                 let lsp = self
-                    .diagnostics
+                    .problems
+                    .by_file
                     .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
                 self.apply_diagnostics_to_buffer(&uri, &lsp);
             }

@@ -12,6 +12,7 @@ pub fn code_action_picker(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state
+                .problems
                 .code_actions
                 .get()
                 .into_iter()
@@ -67,11 +68,11 @@ pub fn code_action_picker(state: AppState) -> impl IntoView {
                 .justify_center()
                 .items_start()
                 .padding_top(120.0);
-            if state.code_actions_open.get() {
+            if state.problems.code_actions_open.get() {
                 s
             } else {
                 s.hide()
             }
         })
-        .on_click_stop(move |_| state.code_actions_open.set(false))
+        .on_click_stop(move |_| state.problems.code_actions_open.set(false))
 }

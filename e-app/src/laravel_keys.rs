@@ -32,7 +32,7 @@ impl AppState {
     /// Find Usages on a Laravel key: every use and declaration, in the picker.
     /// Returns whether it took over from the language server.
     pub(crate) fn find_laravel_key_usages(&self) -> bool {
-        if self.laravel.get_untracked().is_none() {
+        if self.project.laravel.get_untracked().is_none() {
             return false;
         }
         let Some((helper, key)) = self.laravel_key_at_caret() else {
@@ -130,7 +130,8 @@ impl AppState {
                     }
                 }
                 let mut plan = crate::rename_preview::plan(&old, &new, &edits, |p| {
-                    app.buffers
+                    app.editor
+                        .buffers
                         .with_untracked(|bs| {
                             bs.iter()
                                 .find(|b| b.file.path.as_deref() == Some(p))

@@ -109,7 +109,7 @@ impl AppState {
             return;
         };
         let chat = self.agent.chat;
-        let rules = self.project_rules.get_untracked();
+        let rules = self.project.rules.get_untracked();
         let project = self.agent_project_root();
         self.spawn_bg(
             move || receipt(&root, before, &rules, &project),
@@ -159,7 +159,7 @@ impl AppState {
         };
         // A file open with unsaved edits is the user's now, whatever is on
         // disk: leave it.
-        let dirty: Vec<String> = self.buffers.with_untracked(|bs| {
+        let dirty: Vec<String> = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .filter(|b| b.dirty.get_untracked())
                 .filter_map(|b| b.file.path.as_ref()?.strip_prefix(&root).ok())

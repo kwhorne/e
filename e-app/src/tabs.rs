@@ -14,7 +14,7 @@ pub fn tab_bar(state: AppState) -> impl IntoView {
     let drag_tab: RwSignal<Option<u64>> = RwSignal::new(None);
 
     let tabs = dyn_stack(
-        move || state.buffers.get(),
+        move || state.editor.buffers.get(),
         |b| b.id,
         move |b| {
             let id = b.id;

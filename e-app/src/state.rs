@@ -23,12 +23,15 @@ use floem::views::editor::text_document::TextDocument;
 use floem::views::editor::Editor;
 
 pub use crate::debug::DebugPanel;
+pub use crate::editor_area::EditorArea;
 pub use crate::grove_state::GrovePanel;
+pub use crate::laravel_state::ProjectData;
 pub use crate::log::LogPanel;
 pub use crate::map::LaravelViews;
 pub use crate::migrations::MigrationsPanel;
 pub use crate::model_wizard::ModelWizardPanel;
 pub use crate::navigation::Navigation;
+pub use crate::problems::Problems;
 pub use crate::request::RequestPanel;
 pub use crate::review::ReviewPanel;
 pub use crate::runtime::RuntimePanel;
@@ -767,28 +770,10 @@ pub struct AppState {
     pub trust_banner_dismissed: RwSignal<bool>,
     /// All workspace root folders (multi-root). The first is the primary root.
     pub roots: RwSignal<Vec<PathBuf>>,
-    /// All open buffers, in tab order.
-    pub buffers: RwSignal<Vec<Buffer>>,
-    /// Pane 0's active buffer id.
-    pub active: RwSignal<Option<u64>>,
-    /// Pane 1's active buffer id (split view).
-    pub active2: RwSignal<Option<u64>>,
-    /// Is the editor split into two panes?
-    pub split: RwSignal<bool>,
-    /// Which pane has focus (0 or 1).
-    pub focused: RwSignal<u8>,
     /// Monotonic id source.
     next_id: RwSignal<u64>,
-    /// Is the command palette open?
-    pub palette_open: RwSignal<bool>,
     /// Servers whose install command is running in a terminal tab.
     lsp_installing: RwSignal<HashSet<String>>,
-    /// Diagnostics keyed by `file://` URI.
-    /// Merged view: uri -> diagnostics from every server. Readers use this.
-    pub diagnostics: RwSignal<HashMap<String, Vec<Diagnostic>>>,
-    /// Per-server storage behind [`Self::diagnostics`], keyed `(server id, uri)`,
-    /// so two servers publishing for the same file don't clobber each other.
-    pub diag_by_server: RwSignal<HashMap<(String, String), Vec<Diagnostic>>>,
     /// Cached “is this a Laravel project?” (decides whether laravel-lsp runs).
     laravel_project: RwSignal<Option<bool>>,
     /// Channel the LSP reader threads wake the UI with.
@@ -807,8 +792,6 @@ pub struct AppState {
     pub head_moved: RwSignal<Option<std::time::SystemTime>>,
     /// Signature-help popup state.
     pub signature: SignatureState,
-    /// Laravel project data (routes/views/config/env), if applicable.
-    pub laravel: RwSignal<Option<Arc<LaravelData>>>,
     /// Fingerprint of the files `LaravelData` is scraped from, as of the last
     /// check; a change means the data is stale and is reloaded.
     laravel_fp: RwSignal<Option<u64>>,
@@ -818,10 +801,6 @@ pub struct AppState {
     laravel_reload_pending: RwSignal<bool>,
     /// Idle ticks since the last freshness check.
     laravel_tick: RwSignal<u32>,
-    /// Completion rules the project and its packages declare in `ide.json`.
-    pub ide_rules: RwSignal<Arc<Vec<crate::ide_json::Rule>>>,
-    /// The project's own rules, from `.e/rules.toml`.
-    pub project_rules: RwSignal<Arc<e_review::rules::Rules>>,
     /// References / symbol-search picker.
     pub picker: Picker,
     /// A planned workspace replace awaiting confirmation (`Some` shows the dialog).
@@ -834,40 +813,19 @@ pub struct AppState {
     pub find: FindState,
     /// Local rename state.
     pub rename: RenameState,
-    /// Timestamp (ms since epoch) of the last edit, for idle auto-save.
-    pub last_edit: RwSignal<u128>,
-    /// Markdown reading-mode preview toggle.
-    pub md_preview: RwSignal<bool>,
     /// Command palette (⌘⇧P).
     pub cmd: CmdPalette,
-    /// Git diff reading-mode toggle.
-    pub diff_open: RwSignal<bool>,
     /// User settings loaded from config.json.
     pub settings: RwSignal<Settings>,
-    /// Whether the left sidebar (file explorer) is visible.
-    pub sidebar_open: RwSignal<bool>,
     /// File-operation name prompt (new/rename/duplicate).
     pub file_op: FileOp,
     /// Bumped after any filesystem change to refresh the file tree.
     pub fs_rev: RwSignal<u64>,
-    /// Whether the About dialog is open.
-    pub about_open: RwSignal<bool>,
 
     /// The configured agents (from config.json or built-in defaults).
     pub agents: RwSignal<Vec<AgentConfig>>,
 
     /// Wake sender cloned into each forwarder thread to nudge the UI drain.
-
-    /// Draggable panel widths (pixels).
-    pub sidebar_width: RwSignal<f64>,
-
-    /// File-comparison panel: `(left name, right name, diff lines)` when open.
-    pub file_diff: RwSignal<Option<(String, String, Vec<e_core::git::DiffLine>)>>,
-    /// LSP code actions (quick fixes / refactors) offered at the cursor, and
-    /// whether the picker is open.
-    pub code_actions: RwSignal<Vec<e_lsp::CodeActionItem>>,
-    pub code_actions_open: RwSignal<bool>,
-
     // ---- Tinker scratchpad ---------------------------------------------
 
     // ---- New Eloquent Model / pivot wizard ------------------------------
@@ -877,9 +835,6 @@ pub struct AppState {
     // ---- Semantic search -----------------------------------------------
 
     // ---- Undo tree -----------------------------------------------------
-    pub undo_open: RwSignal<bool>,
-    /// Bumped whenever the active buffer's undo tree changes (drives the panel).
-    pub undo_rev: RwSignal<u64>,
 
     // ---- Schema diff (migrations vs live DB) ---------------------------
 
@@ -892,14 +847,10 @@ pub struct AppState {
     // ---- Related files (model ↔ migration ↔ factory ↔ …) ---------------
 
     // ---- Runtime insight (continuous Clockwork capture) ----------------
-    /// Agents waiting for fresh diagnostics on a file they just wrote.
-    pub diag_waiters: RwSignal<Vec<DiagWaiter>>,
     diag_waiter_seq: RwSignal<u64>,
     // ---- Agent session review (see [`crate::review`]) ----
 
     // ---- Step-debugging (DAP session) ----------------------------------
-    /// Generation counter debouncing inline AI-completion requests.
-    pub ghost_gen: RwSignal<u64>,
 
     // ---- Laravel log tail ----------------------------------------------
 
@@ -908,9 +859,6 @@ pub struct AppState {
     // ---- Autonomous TDD loop -------------------------------------------
 
     // ---- Auto-update ----------------------------------------------------
-    /// Messages on screen (see [`crate::toast`]).
-    pub toasts: RwSignal<Vec<crate::toast::Toast>>,
-
     /// Go-to-line prompt state.
     pub goto: crate::editing::GotoState,
     /// Task-runner palette state + detected tasks.
@@ -918,23 +866,12 @@ pub struct AppState {
     pub task_list: RwSignal<Vec<crate::tasks::Task>>,
     /// The Artisan palette and the app's command list (loaded on first open).
     pub artisan: crate::artisan_palette::ArtisanState,
-    /// Buffer id awaiting a close confirmation (unsaved changes).
-    pub close_confirm: RwSignal<Option<u64>>,
-    /// A pending "are you sure?" question (see [`crate::dialogs::Confirm`]).
-    pub confirm: RwSignal<Option<crate::dialogs::Confirm>>,
     pub recent: crate::recent::RecentState,
 
     // Whether the graphical settings page is open.
-    pub settings_open: RwSignal<bool>,
     // Pinned tab ids.
 
     // ---- Source control (git) ------------------------------------------
-    /// Editor font size (reactive, for zoom).
-    pub font_size: RwSignal<usize>,
-    /// Whether soft word-wrap is enabled.
-    pub word_wrap: RwSignal<bool>,
-    /// Bumped when blame data finishes loading, to refresh the status bar.
-    pub blame_rev: RwSignal<u64>,
     /// Everything behind the database panel (⌘3).
     pub db: DbPanel,
     /// Everything behind the AI agent panel (⌘L).
@@ -975,6 +912,14 @@ pub struct AppState {
     pub nav: Navigation,
     /// The Laravel overlays: the map, relations, events, contracts, related files and the schema diff.
     pub views: LaravelViews,
+    /// The editor area: open buffers, which pane shows which, and how text is shown.
+    pub editor: EditorArea,
+    /// What the language servers and linters report, and the code actions on it.
+    pub problems: Problems,
+    /// The window's furniture: palettes, the sidebar, About and Settings, messages and the confirm dialog.
+    pub ui: Chrome,
+    /// What e knows about the project: the Laravel data, ide.json's rules and the project's own rules.
+    pub project: ProjectData,
 }
 
 /// Extract the request path (`/foo/bar`) from a full replay URL.
@@ -1638,31 +1583,20 @@ impl AppState {
             root: RwSignal::new(root),
             trusted: RwSignal::new(false),
             trust_banner_dismissed: RwSignal::new(false),
-            buffers: RwSignal::new(Vec::new()),
-            active: RwSignal::new(None),
-            active2: RwSignal::new(None),
-            split: RwSignal::new(false),
-            focused: RwSignal::new(0),
             next_id: RwSignal::new(1),
-            palette_open: RwSignal::new(false),
             lsp_installing: RwSignal::new(HashSet::new()),
-            diagnostics: RwSignal::new(HashMap::new()),
             lsp_tx: RwSignal::new(tx),
-            diag_by_server: RwSignal::new(HashMap::new()),
             laravel_project: RwSignal::new(None),
             completion: Completion::new(),
             hover: HoverState::new(),
             hunk_peek: RwSignal::new(None),
             head_moved: RwSignal::new(None),
             signature: SignatureState::new(),
-            laravel: RwSignal::new(None),
             laravel_fp: RwSignal::new(None),
             laravel_fp_busy: RwSignal::new(false),
             laravel_loading: RwSignal::new(false),
             laravel_reload_pending: RwSignal::new(false),
             laravel_tick: RwSignal::new(0),
-            ide_rules: RwSignal::new(Arc::new(Vec::new())),
-            project_rules: RwSignal::new(Arc::new(e_review::rules::Rules::default())),
             picker: Picker::new(),
             replace_confirm: RwSignal::new(None),
             next_term_id: RwSignal::new(1),
@@ -1670,37 +1604,17 @@ impl AppState {
             outline: RwSignal::new(Vec::new()),
             find: FindState::new(),
             rename: RenameState::new(),
-            last_edit: RwSignal::new(0),
-            md_preview: RwSignal::new(false),
             cmd: CmdPalette::new(),
-            diff_open: RwSignal::new(false),
             settings: RwSignal::new(config::load_settings()),
-            sidebar_open: RwSignal::new(true),
             file_op: FileOp::new(),
             fs_rev: RwSignal::new(0),
-            about_open: RwSignal::new(false),
             agents: RwSignal::new(config::load_agents()),
-            sidebar_width: RwSignal::new(240.0),
-            file_diff: RwSignal::new(None),
-            code_actions: RwSignal::new(Vec::new()),
-            code_actions_open: RwSignal::new(false),
-            undo_open: RwSignal::new(false),
-            undo_rev: RwSignal::new(0),
-            diag_waiters: RwSignal::new(Vec::new()),
             diag_waiter_seq: RwSignal::new(0),
-            ghost_gen: RwSignal::new(0),
-            toasts: RwSignal::new(Vec::new()),
             goto: crate::editing::GotoState::new(),
             task: crate::task_palette::TaskState::new(),
             task_list: RwSignal::new(Vec::new()),
             artisan: crate::artisan_palette::ArtisanState::new(),
-            close_confirm: RwSignal::new(None),
-            confirm: RwSignal::new(None),
             recent: crate::recent::RecentState::new(),
-            settings_open: RwSignal::new(false),
-            font_size: RwSignal::new(config::load_settings().font_size),
-            word_wrap: RwSignal::new(false),
-            blame_rev: RwSignal::new(0),
             db: DbPanel::new(),
             agent: AgentPanel::new(agent_wake_tx, agent_wake_rx),
             debug: DebugPanel {
@@ -1864,6 +1778,45 @@ impl AppState {
                 schema_diff_open: RwSignal::new(false),
                 schema_diff: RwSignal::new(Vec::new()),
             },
+            editor: EditorArea {
+                buffers: RwSignal::new(Vec::new()),
+                active: RwSignal::new(None),
+                active2: RwSignal::new(None),
+                split: RwSignal::new(false),
+                focused: RwSignal::new(0),
+                last_edit: RwSignal::new(0),
+                md_preview: RwSignal::new(false),
+                diff_open: RwSignal::new(false),
+                file_diff: RwSignal::new(None),
+                undo_open: RwSignal::new(false),
+                undo_rev: RwSignal::new(0),
+                ghost_gen: RwSignal::new(0),
+                close_confirm: RwSignal::new(None),
+                font_size: RwSignal::new(config::load_settings().font_size),
+                word_wrap: RwSignal::new(false),
+                blame_rev: RwSignal::new(0),
+            },
+            problems: Problems {
+                by_file: RwSignal::new(HashMap::new()),
+                by_server: RwSignal::new(HashMap::new()),
+                code_actions: RwSignal::new(Vec::new()),
+                code_actions_open: RwSignal::new(false),
+                waiters: RwSignal::new(Vec::new()),
+            },
+            ui: Chrome {
+                palette_open: RwSignal::new(false),
+                sidebar_open: RwSignal::new(true),
+                about_open: RwSignal::new(false),
+                sidebar_width: RwSignal::new(240.0),
+                toasts: RwSignal::new(Vec::new()),
+                confirm: RwSignal::new(None),
+                settings_open: RwSignal::new(false),
+            },
+            project: ProjectData {
+                laravel: RwSignal::new(None),
+                ide_rules: RwSignal::new(Arc::new(Vec::new())),
+                rules: RwSignal::new(Arc::new(e_review::rules::Rules::default())),
+            },
         }
     }
 
@@ -1879,7 +1832,7 @@ impl AppState {
             return;
         };
         let blame_cell = buf.blame.clone();
-        let rev = self.blame_rev;
+        let rev = self.editor.blame_rev;
         let send = create_ext_action(self.cx, move |lines: Vec<(String, i64, String)>| {
             *blame_cell.borrow_mut() = lines;
             rev.update(|r| *r += 1);
@@ -1907,19 +1860,21 @@ impl AppState {
     }
 
     pub fn toggle_word_wrap(&self) {
-        self.word_wrap.update(|w| *w = !*w);
+        self.editor.word_wrap.update(|w| *w = !*w);
     }
 
     /// Increase / decrease / reset the editor font size (zoom).
     pub fn zoom(&self, delta: i64) {
-        let cur = self.font_size.get_untracked() as i64;
+        let cur = self.editor.font_size.get_untracked() as i64;
         let next = (cur + delta).clamp(8, 32) as usize;
-        self.font_size.set(next);
+        self.editor.font_size.set(next);
         self.repaint_all_buffers();
     }
 
     pub fn zoom_reset(&self) {
-        self.font_size.set(self.settings.get_untracked().font_size);
+        self.editor
+            .font_size
+            .set(self.settings.get_untracked().font_size);
         self.repaint_all_buffers();
     }
 
@@ -1978,22 +1933,22 @@ impl AppState {
     /// Whether any focus-grabbing overlay (palette, find, prompt, dialog) is
     /// open. The editor must not steal keyboard focus while one of these is up.
     pub fn any_overlay_open(&self) -> bool {
-        self.palette_open.get()
+        self.ui.palette_open.get()
             || self.cmd.open.get()
             || self.picker.open.get()
             || self.find.open.get()
             || self.rename.open.get()
             || self.goto.open.get()
             || self.recent.open.get()
-            || self.about_open.get()
-            || self.close_confirm.get().is_some()
-            || self.confirm.with(Option::is_some)
+            || self.ui.about_open.get()
+            || self.editor.close_confirm.get().is_some()
+            || self.ui.confirm.with(Option::is_some)
             || self.term.rename_id.get().is_some()
     }
 
     /// Force a re-layout of every open buffer (e.g. after a font-size change).
     fn repaint_all_buffers(&self) {
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             for b in bs {
                 b.doc.cache_rev().update(|r| *r += 1);
             }
@@ -2096,7 +2051,7 @@ impl AppState {
                     Self::notify(&format!("Could not move {name} to the trash: {e}"));
                     return;
                 }
-                if let Some(id) = state.buffers.with_untracked(|bs| {
+                if let Some(id) = state.editor.buffers.with_untracked(|bs| {
                     bs.iter()
                         .find(|b| b.file.path.as_deref() == Some(path.as_path()))
                         .map(|b| b.id)
@@ -2117,13 +2072,13 @@ impl AppState {
     }
 
     pub fn toggle_md_preview(&self) {
-        let cur = self.md_preview.get_untracked();
-        self.md_preview.set(!cur);
+        let cur = self.editor.md_preview.get_untracked();
+        self.editor.md_preview.set(!cur);
     }
 
     pub fn toggle_diff(&self) {
-        let cur = self.diff_open.get_untracked();
-        self.diff_open.set(!cur);
+        let cur = self.editor.diff_open.get_untracked();
+        self.editor.diff_open.set(!cur);
     }
 
     /// Compare the active file against another file picked from disk (DB-free
@@ -2141,7 +2096,7 @@ impl AppState {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "current".into());
         let left_text = buf.doc.text().to_string();
-        let sig = self.file_diff;
+        let sig = self.editor.file_diff;
         let opts = floem::file::FileDialogOptions::new().title("Compare active file with…");
         floem::action::open_file(opts, move |info| {
             let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
@@ -2162,7 +2117,7 @@ impl AppState {
     }
 
     pub fn close_file_diff(&self) {
-        self.file_diff.set(None);
+        self.editor.file_diff.set(None);
     }
 
     // ---- Local rename --------------------------------------------------
@@ -2378,7 +2333,7 @@ impl AppState {
         &self,
         comp: &crate::livewire::Component,
     ) -> Option<String> {
-        let open = self.buffers.with_untracked(|bs| {
+        let open = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(comp.class_file.as_path()))
                 .map(|b| b.doc.text().to_string())
@@ -2444,7 +2399,7 @@ impl AppState {
             self.jump_to(&path_to_uri(&p), 0, 0);
             return;
         }
-        if let Some(data) = self.laravel.get_untracked() {
+        if let Some(data) = self.project.laravel.get_untracked() {
             if let Some((p, l, c)) = laravel::navigate(&data, laravel::Helper::View, name) {
                 self.jump_to(&path_to_uri(&p), l, c);
             }
@@ -2565,7 +2520,7 @@ impl AppState {
     /// disk write can fail (full/read-only disk), and callers must not report
     /// success when it did.
     fn rewrite_file(&self, path: &std::path::Path, content: String) -> bool {
-        let open = self.buffers.with_untracked(|bs| {
+        let open = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(path))
                 .map(|b| (b.doc.clone(), b.dirty))
@@ -2692,7 +2647,8 @@ impl AppState {
         let app = *self;
         let plan = crate::move_class::plan_move(&roots, &old_fqn, new_fqn, &files, |p| {
             let abs = project.join(p);
-            app.buffers
+            app.editor
+                .buffers
                 .with_untracked(|bs| {
                     bs.iter()
                         .find(|b| b.file.path.as_deref() == Some(abs.as_path()))
@@ -2790,7 +2746,8 @@ impl AppState {
                     // Prefer the open buffer: renaming against a stale copy of a
                     // file the user has edited would preview one thing and write
                     // another.
-                    app.buffers
+                    app.editor
+                        .buffers
                         .with_untracked(|bs| {
                             bs.iter()
                                 .find(|b| b.file.path.as_deref() == Some(p))
@@ -2826,7 +2783,7 @@ impl AppState {
         for file in &plan.files {
             // Open buffers go through the document, so the change is undoable
             // and the editor stays in sync; the rest are written to disk.
-            let open = self.buffers.with_untracked(|bs| {
+            let open = self.editor.buffers.with_untracked(|bs| {
                 bs.iter()
                     .find(|b| b.file.path.as_deref() == Some(file.path.as_path()))
                     .cloned()
@@ -2860,7 +2817,7 @@ impl AppState {
         for (from, to) in &plan.moves {
             // An open file moves with its buffer's text — the edits above may
             // have just landed there, unsaved — and reopens at its new path.
-            let open = self.buffers.with_untracked(|bs| {
+            let open = self.editor.buffers.with_untracked(|bs| {
                 bs.iter()
                     .find(|b| b.file.path.as_deref() == Some(from.as_path()))
                     .map(|b| (b.id, b.doc.text().to_string()))
@@ -2950,12 +2907,12 @@ impl AppState {
         if !self.settings.get_untracked().autosave {
             return;
         }
-        let last = self.last_edit.get_untracked();
+        let last = self.editor.last_edit.get_untracked();
         if last == 0 || now_ms().saturating_sub(last) < 1500 {
             return;
         }
-        self.last_edit.set(0);
-        let buffers = self.buffers.get_untracked();
+        self.editor.last_edit.set(0);
+        let buffers = self.editor.buffers.get_untracked();
         for b in &buffers {
             // A file that changed on disk under unsaved edits waits for the
             // user's call in the conflict banner; autosave never makes it.
@@ -3131,7 +3088,7 @@ impl AppState {
         // Snapshot (id, path, last-known mtime) cheaply on the UI thread, then
         // do the actual `stat` calls on a worker thread — those can block on
         // slow/network filesystems and must never stall the UI.
-        let buffers = self.buffers.get_untracked();
+        let buffers = self.editor.buffers.get_untracked();
         let mut items: Vec<(u64, PathBuf, Option<std::time::SystemTime>)> = Vec::new();
         for b in &buffers {
             if let Some(path) = b.file.path.as_ref() {
@@ -3500,7 +3457,7 @@ impl AppState {
         // Language servers that waited, for the files already open.
         let laravel = self.is_laravel_project();
         let mut ids: Vec<&'static str> = Vec::new();
-        for b in self.buffers.get_untracked() {
+        for b in self.editor.buffers.get_untracked() {
             for spec in lsp_registry::server_specs(b.file.language, laravel) {
                 if !ids.contains(&spec.id) {
                     ids.push(spec.id);
@@ -4012,7 +3969,7 @@ impl AppState {
                 if !dirty.get_untracked() {
                     dirty.set(true);
                 }
-                app.last_edit.set(now_ms());
+                app.editor.last_edit.set(now_ms());
                 let text = doc2.text().to_string();
                 *highlights.borrow_mut() = highlight_lines(Language::PlainText, &text);
                 doc2.cache_rev().update(|r| *r += 1);
@@ -4025,7 +3982,7 @@ impl AppState {
                 let recorded =
                     !undo_nav.get() && undo.borrow_mut().record(&text, now_ms() as u64, 700);
                 if recorded {
-                    app.undo_rev.update(|r| *r += 1);
+                    app.editor.undo_rev.update(|r| *r += 1);
                 }
             });
         }
@@ -4071,7 +4028,7 @@ impl AppState {
             tab_width: self.settings.get_untracked().tab_width,
             editorconfig: e_core::editorconfig::EditorConfig::default(),
         };
-        self.buffers.update(|bs| bs.push(buf));
+        self.editor.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
     }
 
@@ -4359,25 +4316,26 @@ impl AppState {
     }
 
     pub fn buffer_by_id(&self, id: u64) -> Option<Buffer> {
-        self.buffers
+        self.editor
+            .buffers
             .with(|bs| bs.iter().find(|b| b.id == id).cloned())
     }
 
     /// The active-buffer signal of the focused pane.
     fn focused_active(&self) -> RwSignal<Option<u64>> {
-        if self.focused.get_untracked() == 1 {
-            self.active2
+        if self.editor.focused.get_untracked() == 1 {
+            self.editor.active2
         } else {
-            self.active
+            self.editor.active
         }
     }
 
     /// Buffer id active in the focused pane, tracked reactively.
     pub fn focused_active_id(&self) -> Option<u64> {
-        if self.focused.get() == 1 {
-            self.active2.get()
+        if self.editor.focused.get() == 1 {
+            self.editor.active2.get()
         } else {
-            self.active.get()
+            self.editor.active.get()
         }
     }
 
@@ -4400,7 +4358,7 @@ impl AppState {
 
     /// Close every tab except `keep` (skipping pinned tabs).
     pub fn close_others(&self, keep: u64) {
-        let ids: Vec<u64> = self.buffers.with_untracked(|bs| {
+        let ids: Vec<u64> = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .map(|b| b.id)
                 .filter(|id| *id != keep && !self.is_pinned(*id))
@@ -4416,7 +4374,7 @@ impl AppState {
         if src == target {
             return;
         }
-        self.buffers.update(|bs| {
+        self.editor.buffers.update(|bs| {
             let Some(from) = bs.iter().position(|b| b.id == src) else {
                 return;
             };
@@ -4428,7 +4386,7 @@ impl AppState {
 
     fn buffer_id_by_path(&self, path: &str) -> Option<u64> {
         let canon = std::path::Path::new(path).canonicalize().ok();
-        self.buffers.with(|bs| {
+        self.editor.buffers.with(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == canon.as_deref())
                 .map(|b| b.id)
@@ -4470,16 +4428,16 @@ impl AppState {
             .as_deref()
             .and_then(|a| self.buffer_id_by_path(a))
         {
-            self.active.set(Some(a));
+            self.editor.active.set(Some(a));
         }
         if data.split {
-            self.split.set(true);
+            self.editor.split.set(true);
             if let Some(a2) = data
                 .active2
                 .as_deref()
                 .and_then(|a| self.buffer_id_by_path(a))
             {
-                self.active2.set(Some(a2));
+                self.editor.active2.set(Some(a2));
             }
         }
         if !later.is_empty() {
@@ -4507,7 +4465,7 @@ impl AppState {
                     .and_then(|p| order.iter().position(|o| std::path::Path::new(o) == p))
                     .unwrap_or(usize::MAX)
             };
-            self.buffers.update(|bs| bs.sort_by_key(rank));
+            self.editor.buffers.update(|bs| bs.sort_by_key(rank));
             RESTORING.store(false, std::sync::atomic::Ordering::Relaxed);
             self.save_session();
             return;
@@ -4561,7 +4519,7 @@ impl AppState {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         let mut any = false;
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             for b in bs {
                 if b.file.path.is_none() || b.dirty.get_untracked() {
                     any = true;
@@ -4589,7 +4547,7 @@ impl AppState {
     }
 
     fn session_data(&self) -> SessionData {
-        let buffers = self.buffers.get_untracked();
+        let buffers = self.editor.buffers.get_untracked();
         let path_of = |id: Option<u64>| -> Option<String> {
             id.and_then(|i| buffers.iter().find(|b| b.id == i))
                 .and_then(|b| b.file.path.as_ref())
@@ -4630,9 +4588,9 @@ impl AppState {
             open,
             untitled,
             modified,
-            active: path_of(self.active.get_untracked()),
-            active2: path_of(self.active2.get_untracked()),
-            split: self.split.get_untracked(),
+            active: path_of(self.editor.active.get_untracked()),
+            active2: path_of(self.editor.active2.get_untracked()),
+            split: self.editor.split.get_untracked(),
         }
     }
 
@@ -4640,19 +4598,19 @@ impl AppState {
     /// The editor panes, for a buffer's per-pane state.
     pub(crate) fn panes(&self) -> crate::per_pane::Panes {
         crate::per_pane::Panes {
-            split: self.split,
-            focused: self.focused,
-            active: [self.active, self.active2],
+            split: self.editor.split,
+            focused: self.editor.focused,
+            active: [self.editor.active, self.editor.active2],
         }
     }
 
     /// Move the keyboard to the other editor pane.
     pub fn focus_other_pane(&self) {
-        if !self.split.get_untracked() {
+        if !self.editor.split.get_untracked() {
             return;
         }
-        let other = 1 - self.focused.get_untracked().min(1);
-        self.focused.set(other);
+        let other = 1 - self.editor.focused.get_untracked().min(1);
+        self.editor.focused.set(other);
         let view = self
             .active_buffer()
             .and_then(|b| b.editor.get_in(other))
@@ -4663,17 +4621,17 @@ impl AppState {
     }
 
     pub fn toggle_split(&self) {
-        let on = !self.split.get_untracked();
-        self.split.set(on);
+        let on = !self.editor.split.get_untracked();
+        self.editor.split.set(on);
         if on {
-            if self.active2.get_untracked().is_none() {
-                self.active2.set(self.active.get_untracked());
+            if self.editor.active2.get_untracked().is_none() {
+                self.editor.active2.set(self.editor.active.get_untracked());
             }
-            self.focused.set(1);
+            self.editor.focused.set(1);
         } else {
-            self.focused.set(0);
+            self.editor.focused.set(0);
             // The right pane's editors are gone with its view.
-            for b in self.buffers.get_untracked() {
+            for b in self.editor.buffers.get_untracked() {
                 b.editor.set_in(1, None);
             }
         }
@@ -4718,8 +4676,8 @@ impl AppState {
                     data.translations.len(),
                     rules.len()
                 );
-                app.laravel.set(Some(Arc::new(data)));
-                app.ide_rules.set(Arc::new(rules));
+                app.project.laravel.set(Some(Arc::new(data)));
+                app.project.ide_rules.set(Arc::new(rules));
                 app.laravel_fp.set(Some(fp));
                 app.laravel_loading.set(false);
                 // Squiggles for missing views/routes/keys reflect the new data.
@@ -4736,7 +4694,7 @@ impl AppState {
     /// anything `LaravelData` is scraped from changed on disk? If so, reload.
     /// The fingerprint is a few hundred `stat`s, done off the UI thread.
     pub fn check_laravel_freshness(&self) {
-        if self.laravel.get_untracked().is_none() || self.laravel_fp_busy.get_untracked() {
+        if self.project.laravel.get_untracked().is_none() || self.laravel_fp_busy.get_untracked() {
             return;
         }
         let tick = self.laravel_tick.get_untracked() + 1;
@@ -4767,7 +4725,7 @@ impl AppState {
     /// A file was saved in `e`: if it's one the Laravel data comes from, the
     /// data is stale right now — don't wait for the freshness tick.
     fn laravel_touch(&self, path: &std::path::Path) {
-        if self.laravel.get_untracked().is_none() {
+        if self.project.laravel.get_untracked().is_none() {
             return;
         }
         let root = self.root.get_untracked();
@@ -4789,6 +4747,7 @@ impl AppState {
     /// Re-run the lints for every open buffer (after project data changed).
     pub(crate) fn relint_all(&self) {
         let ids: Vec<u64> = self
+            .editor
             .buffers
             .with_untracked(|bs| bs.iter().map(|b| b.id).collect());
         for id in ids {
@@ -4801,7 +4760,7 @@ impl AppState {
     }
 
     pub fn toggle_laravel_map(&self) {
-        if !self.views.map_open.get_untracked() && self.laravel.get_untracked().is_none() {
+        if !self.views.map_open.get_untracked() && self.project.laravel.get_untracked().is_none() {
             self.load_laravel();
         }
         self.views.map_open.update(|o| *o = !*o);
@@ -4901,6 +4860,7 @@ impl AppState {
         reply: std::sync::mpsc::Sender<serde_json::Value>,
     ) {
         let old = self
+            .editor
             .buffers
             .with_untracked(|bs| {
                 bs.iter()
@@ -4952,7 +4912,7 @@ impl AppState {
             }
         }
         // Apply to the open buffer (so undo works) or write to disk.
-        let open = self.buffers.with_untracked(|bs| {
+        let open = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(edit.path.as_path()))
                 .map(|b| (b.doc.clone(), b.dirty))
@@ -4985,7 +4945,7 @@ impl AppState {
     // ---- Undo tree -----------------------------------------------------
 
     pub fn toggle_undo_tree(&self) {
-        self.undo_open.update(|o| *o = !*o);
+        self.editor.undo_open.update(|o| *o = !*o);
     }
 
     /// Replace the active buffer's whole text with `text` from the undo tree,
@@ -4997,7 +4957,7 @@ impl AppState {
         buf.doc.edit(&mut it, EditType::InsertChars);
         buf.undo_nav.set(false);
         buf.doc.cache_rev().update(|r| *r += 1);
-        self.undo_rev.update(|r| *r += 1);
+        self.editor.undo_rev.update(|r| *r += 1);
         if let Some(p) = &buf.file.path {
             buf.undo.borrow().save(&undo_store_path(p));
         }
@@ -5231,6 +5191,7 @@ impl AppState {
         let schema = self.db.schema_cache.get_untracked();
         let shared = crate::inertia::shared_props(&root);
         let routes: Vec<(String, String)> = self
+            .project
             .laravel
             .get_untracked()
             .map(|d| {
@@ -5479,7 +5440,7 @@ impl AppState {
             }
         }
 
-        let Some(data) = self.laravel.get() else {
+        let Some(data) = self.project.laravel.get() else {
             return false;
         };
 
@@ -5497,7 +5458,7 @@ impl AppState {
         // What packages declare in their `ide.json` (`new Axis('…')` takes one
         // of these strings, `->rule('…')` takes a validation rule, …). No
         // server reads those, so they apply either way.
-        let rules = self.ide_rules.get_untracked();
+        let rules = self.project.ide_rules.get_untracked();
         if rules.is_empty() {
             return false;
         }
@@ -5562,20 +5523,20 @@ impl AppState {
     /// same file without overwriting each other.
     pub fn publish_diagnostics(&self, server_id: &str, uri: &str, diags: Vec<Diagnostic>) {
         let key = (server_id.to_string(), uri.to_string());
-        self.diag_by_server.update(|m| {
+        self.problems.by_server.update(|m| {
             if diags.is_empty() {
                 m.remove(&key);
             } else {
                 m.insert(key, diags);
             }
         });
-        let merged: Vec<Diagnostic> = self.diag_by_server.with_untracked(|m| {
+        let merged: Vec<Diagnostic> = self.problems.by_server.with_untracked(|m| {
             m.iter()
                 .filter(|((_, u), _)| u == uri)
                 .flat_map(|(_, d)| d.iter().cloned())
                 .collect()
         });
-        self.diagnostics.update(|map| {
+        self.problems.by_file.update(|map| {
             if merged.is_empty() {
                 map.remove(uri);
             } else {
@@ -5590,7 +5551,8 @@ impl AppState {
     pub(crate) fn diagnostics_json_for(&self, uri: &str) -> Vec<serde_json::Value> {
         let path = uri_to_path(uri).to_string_lossy().into_owned();
         let mut diags = self
-            .diagnostics
+            .problems
+            .by_file
             .with_untracked(|map| map.get(uri).cloned().unwrap_or_default());
         diags.extend(self.own_diagnostics(uri));
         diags
@@ -5620,7 +5582,7 @@ impl AppState {
     /// pending migration's risks against the data, and exceptions the running
     /// app logged.
     pub(crate) fn own_diagnostics(&self, uri: &str) -> Vec<Diagnostic> {
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.uri.as_deref() == Some(uri))
                 .map(|b| {
@@ -5655,7 +5617,7 @@ impl AppState {
         let uri = path_to_uri(&abs);
         let language = e_core::language::Language::from_path(&abs);
 
-        let open = self.buffers.with_untracked(|bs| {
+        let open = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(abs.as_path()))
                 .cloned()
@@ -5703,7 +5665,7 @@ impl AppState {
         }
         let id = self.diag_waiter_seq.get_untracked() + 1;
         self.diag_waiter_seq.set(id);
-        self.diag_waiters.update(|w| {
+        self.problems.waiters.update(|w| {
             w.push(DiagWaiter {
                 id,
                 uri: uri.clone(),
@@ -5713,7 +5675,7 @@ impl AppState {
         });
         let app = *self;
         floem::action::exec_after(timeout, move |_| {
-            let waiter = app.diag_waiters.try_update(|w| {
+            let waiter = app.problems.waiters.try_update(|w| {
                 let pos = w.iter().position(|x| x.id == id)?;
                 Some(w.remove(pos))
             });
@@ -5732,11 +5694,12 @@ impl AppState {
     /// `server_id` published for `uri`: waiters on that file hear from it, and
     /// are answered once every server they were waiting for has spoken.
     fn resolve_diag_waiters(&self, server_id: &str, uri: &str) {
-        if self.diag_waiters.with_untracked(|w| w.is_empty()) {
+        if self.problems.waiters.with_untracked(|w| w.is_empty()) {
             return;
         }
         let done: Vec<DiagWaiter> = self
-            .diag_waiters
+            .problems
+            .waiters
             .try_update(|w| {
                 let mut done = Vec::new();
                 w.retain_mut(|x| {
@@ -5766,7 +5729,8 @@ impl AppState {
 
     /// The app's locale, for which `lang/<locale>/` a missing key belongs to.
     pub(crate) fn app_locale(&self) -> String {
-        self.laravel
+        self.project
+            .laravel
             .get_untracked()
             .and_then(|d| {
                 d.envs
@@ -5790,7 +5754,8 @@ impl AppState {
     fn lint_fix_actions(&self, uri: &str, line: u32, col: u32) -> Vec<e_lsp::CodeActionItem> {
         // The servers' and `e`'s own: those are kept on the buffer.
         let mut all: Vec<Diagnostic> = self
-            .diagnostics
+            .problems
+            .by_file
             .with_untracked(|m| m.get(uri).cloned().unwrap_or_default());
         all.extend(self.own_diagnostics(uri));
         let at: Vec<Diagnostic> = all
@@ -5839,6 +5804,7 @@ impl AppState {
             return Vec::new();
         }
         let Some(buf) = self
+            .editor
             .buffers
             .with_untracked(|bs| bs.iter().find(|b| b.uri.as_deref() == Some(uri)).cloned())
         else {
@@ -6169,7 +6135,7 @@ impl AppState {
     /// Returns whether it came up.
     fn restart_lsp(&self, id: &str, restarts: u32) -> bool {
         let laravel = self.is_laravel_project();
-        let buffers = self.buffers.get_untracked();
+        let buffers = self.editor.buffers.get_untracked();
         // Which spec? Any open buffer whose language wants this server says.
         // With none open there is nothing to serve; the next open starts it.
         let Some(spec) = buffers
@@ -6394,7 +6360,7 @@ impl AppState {
     /// editor stays in sync), everything else straight to disk. Returns the
     /// number of files changed.
     pub fn apply_workspace_edits(&self, edits: &[(String, Vec<TextEdit>)]) -> usize {
-        let buffers = self.buffers.get_untracked();
+        let buffers = self.editor.buffers.get_untracked();
         let mut changed = 0usize;
         for (uri, list) in edits {
             if list.is_empty() {
@@ -6494,7 +6460,7 @@ impl AppState {
         let canon = path.canonicalize().unwrap_or(path);
 
         // Already open? Focus the existing tab.
-        let existing = self.buffers.with(|bs| {
+        let existing = self.editor.buffers.with(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(canon.as_path()))
                 .map(|b| b.id)
@@ -6630,7 +6596,7 @@ impl AppState {
             let hl_gen: Rc<std::cell::Cell<u64>> = Rc::new(std::cell::Cell::new(0));
             let syntax = syntax.clone();
             doc.clone().add_on_update(move |update| {
-                app.last_edit.set(now_ms());
+                app.editor.last_edit.set(now_ms());
                 // A peek shows the hunk as it was; an edit may have moved it.
                 app.close_hunk_peek();
                 let text = doc.text().to_string();
@@ -6675,7 +6641,7 @@ impl AppState {
                         });
                     }
                     if recorded {
-                        app.undo_rev.update(|r| *r += 1);
+                        app.editor.undo_rev.update(|r| *r += 1);
                     }
                 }
                 let incremental =
@@ -6797,7 +6763,7 @@ impl AppState {
             tab_width: ec_tab,
             editorconfig: ec,
         };
-        self.buffers.update(|bs| bs.push(buf));
+        self.editor.buffers.update(|bs| bs.push(buf));
         self.focused_active().set(Some(id));
         self.sync_bp_marks(&canon.to_string_lossy());
         self.sync_caught_marks();
@@ -6811,6 +6777,7 @@ impl AppState {
     /// Close a tab, prompting first if it has unsaved changes.
     pub fn close(&self, id: u64) {
         let dirty = self
+            .editor
             .buffers
             .with_untracked(|bs| {
                 bs.iter()
@@ -6819,7 +6786,7 @@ impl AppState {
             })
             .unwrap_or(false);
         if dirty {
-            self.close_confirm.set(Some(id));
+            self.editor.close_confirm.set(Some(id));
         } else {
             self.force_close(id);
         }
@@ -6829,8 +6796,8 @@ impl AppState {
     /// Closing straight away lost the edits whenever saving finished later
     /// (format on save, the Save As sheet) or failed.
     pub fn confirm_close_save(&self) {
-        if let Some(id) = self.close_confirm.get_untracked() {
-            self.close_confirm.set(None);
+        if let Some(id) = self.editor.close_confirm.get_untracked() {
+            self.editor.close_confirm.set(None);
             let app = *self;
             self.save_buffer(id, false, move |saved| {
                 if saved {
@@ -6842,21 +6809,21 @@ impl AppState {
 
     /// Discard changes and close the pending buffer.
     pub fn confirm_close_discard(&self) {
-        if let Some(id) = self.close_confirm.get_untracked() {
-            self.close_confirm.set(None);
+        if let Some(id) = self.editor.close_confirm.get_untracked() {
+            self.editor.close_confirm.set(None);
             self.force_close(id);
         }
     }
 
     pub fn cancel_close(&self) {
-        self.close_confirm.set(None);
+        self.editor.close_confirm.set(None);
     }
 
     pub fn force_close(&self, id: u64) {
         let mut focus_next = None;
         let mut closed_uri = None;
         let mut closed_lang = None;
-        self.buffers.update(|bs| {
+        self.editor.buffers.update(|bs| {
             if let Some(pos) = bs.iter().position(|b| b.id == id) {
                 closed_uri = bs[pos].uri.clone();
                 closed_lang = Some(bs[pos].file.language);
@@ -6867,11 +6834,11 @@ impl AppState {
                 }
             }
         });
-        if self.active.get_untracked() == Some(id) {
-            self.active.set(focus_next);
+        if self.editor.active.get_untracked() == Some(id) {
+            self.editor.active.set(focus_next);
         }
-        if self.active2.get_untracked() == Some(id) {
-            self.active2.set(focus_next);
+        if self.editor.active2.get_untracked() == Some(id) {
+            self.editor.active2.set(focus_next);
         }
         if let (Some(uri), Some(lang)) = (closed_uri, closed_lang) {
             for client in self.lsp_clients_for(lang) {
@@ -6882,7 +6849,8 @@ impl AppState {
 
     pub fn active_buffer(&self) -> Option<Buffer> {
         let active = self.focused_active_id()?;
-        self.buffers
+        self.editor
+            .buffers
             .with(|bs| bs.iter().find(|b| b.id == active).cloned())
     }
 
@@ -7132,15 +7100,16 @@ impl AppState {
                 Self::notify("No code actions here");
                 return;
             }
-            self.code_actions.set(local);
-            self.code_actions_open.set(true);
+            self.problems.code_actions.set(local);
+            self.problems.code_actions_open.set(true);
             return;
         }
         let diags = self
-            .diagnostics
+            .problems
+            .by_file
             .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
-        let list_sig = self.code_actions;
-        let open_sig = self.code_actions_open;
+        let list_sig = self.problems.code_actions;
+        let open_sig = self.problems.code_actions_open;
         self.spawn_bg(
             move || {
                 // Offer every server's fixes together (intelephense quick fixes
@@ -7171,8 +7140,12 @@ impl AppState {
     /// Apply the chosen code action: its edits if it carries them, otherwise run
     /// its command and let the server send the edits back as `workspace/applyEdit`.
     pub fn apply_code_action(&self, index: usize) {
-        self.code_actions_open.set(false);
-        let Some(item) = self.code_actions.with_untracked(|l| l.get(index).cloned()) else {
+        self.problems.code_actions_open.set(false);
+        let Some(item) = self
+            .problems
+            .code_actions
+            .with_untracked(|l| l.get(index).cloned())
+        else {
             return;
         };
         if !item.edits.is_empty() {
@@ -7397,6 +7370,7 @@ impl AppState {
     /// Rebuild a buffer's inline diagnostic spans and repaint it.
     pub fn apply_diagnostics_to_buffer(&self, uri: &str, diags: &[Diagnostic]) {
         let Some(buf) = self
+            .editor
             .buffers
             .with(|bs| bs.iter().find(|b| b.uri.as_deref() == Some(uri)).cloned())
         else {
@@ -7442,22 +7416,23 @@ impl AppState {
         };
 
         let app = *self;
-        let send = create_ext_action(self.cx, move |diags: Vec<Diagnostic>| {
-            let Some(buf) = app
-                .buffers
-                .with_untracked(|bs| bs.iter().find(|b| b.uri.as_deref() == Some(&uri)).cloned())
-            else {
-                return;
-            };
-            if *buf.analysis.borrow() == diags {
-                return;
-            }
-            *buf.analysis.borrow_mut() = diags;
-            let lsp = app
-                .diagnostics
-                .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
-            app.apply_diagnostics_to_buffer(&uri, &lsp);
-        });
+        let send =
+            create_ext_action(self.cx, move |diags: Vec<Diagnostic>| {
+                let Some(buf) = app.editor.buffers.with_untracked(|bs| {
+                    bs.iter().find(|b| b.uri.as_deref() == Some(&uri)).cloned()
+                }) else {
+                    return;
+                };
+                if *buf.analysis.borrow() == diags {
+                    return;
+                }
+                *buf.analysis.borrow_mut() = diags;
+                let lsp = app
+                    .problems
+                    .by_file
+                    .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
+                app.apply_diagnostics_to_buffer(&uri, &lsp);
+            });
 
         std::thread::spawn(move || {
             let out = std::process::Command::new(&bin)
@@ -7507,12 +7482,12 @@ impl AppState {
         if buf.large || !(php_like || is_env || rules_rel.is_some() || rules_file) {
             return;
         }
-        let project_rules = self.project_rules.get_untracked();
+        let project_rules = self.project.rules.get_untracked();
         let schema = self.db.schema_cache.get_untracked();
         let laravel = if self.laravel_lsp_running() {
             None
         } else {
-            self.laravel.get_untracked()
+            self.project.laravel.get_untracked()
         };
         // Controllers get the unchecked-lookup check whether or not
         // laravel-lsp runs: it doesn't make it.
@@ -7522,7 +7497,7 @@ impl AppState {
             .path
             .as_ref()
             .filter(|p| p.starts_with(root_now.join("app/Http/Controllers")))
-            .and_then(|_| self.laravel.get_untracked());
+            .and_then(|_| self.project.laravel.get_untracked());
         // `env()` outside `config/`: in a Laravel project, whatever else runs.
         let env_rel = buf
             .file
@@ -7597,7 +7572,8 @@ impl AppState {
                     *buf.lint.borrow_mut() = diags;
                     if let Some(uri) = buf.uri.clone() {
                         let lsp = app
-                            .diagnostics
+                            .problems
+                            .by_file
                             .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
                         app.apply_diagnostics_to_buffer(&uri, &lsp);
                     }
@@ -7629,7 +7605,7 @@ impl AppState {
         let Some(uri) = buf.uri.as_ref() else {
             return (0, 0);
         };
-        self.diagnostics.with(|map| {
+        self.problems.by_file.with(|map| {
             let Some(diags) = map.get(uri) else {
                 return (0, 0);
             };
@@ -7648,7 +7624,7 @@ impl AppState {
 
     /// All non-empty diagnostics across open files, grouped and sorted.
     pub fn all_diagnostics(&self) -> Vec<(String, Vec<Diagnostic>)> {
-        self.diagnostics.with(|map| {
+        self.problems.by_file.with(|map| {
             let mut groups: Vec<(String, Vec<Diagnostic>)> = map
                 .iter()
                 .filter(|(_, d)| !d.is_empty())
@@ -7665,7 +7641,9 @@ impl AppState {
 
     /// Total number of diagnostics across all open files.
     pub fn total_diagnostic_count(&self) -> usize {
-        self.diagnostics.with(|m| m.values().map(|v| v.len()).sum())
+        self.problems
+            .by_file
+            .with(|m| m.values().map(|v| v.len()).sum())
     }
 
     /// A `file://` URI shown relative to the workspace root.
@@ -8453,4 +8431,24 @@ mod batch_edit_tests {
         assert_eq!(doc.text().to_string(), "a\nb\nc\n");
         assert_eq!(updates.get(), 1);
     }
+}
+
+/// The window's furniture: palettes, the sidebar, About and Settings, messages and the confirm dialog.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct Chrome {
+    /// Is the command palette open?
+    pub palette_open: floem::reactive::RwSignal<bool>,
+    /// Whether the left sidebar (file explorer) is visible.
+    pub sidebar_open: floem::reactive::RwSignal<bool>,
+    /// Whether the About dialog is open.
+    pub about_open: floem::reactive::RwSignal<bool>,
+    /// Draggable panel widths (pixels).
+    pub sidebar_width: floem::reactive::RwSignal<f64>,
+    /// Messages on screen (see [`crate::toast`]).
+    pub toasts: floem::reactive::RwSignal<Vec<crate::toast::Toast>>,
+    /// A pending "are you sure?" question (see [`crate::dialogs::Confirm`]).
+    pub confirm: floem::reactive::RwSignal<Option<crate::dialogs::Confirm>>,
+    pub settings_open: floem::reactive::RwSignal<bool>,
 }

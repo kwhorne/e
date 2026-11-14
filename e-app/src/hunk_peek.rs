@@ -41,7 +41,7 @@ pub struct HunkPeek {
 
 impl AppState {
     fn buffer_for(&self, path: &std::path::Path) -> Option<Buffer> {
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(path))
                 .cloned()
@@ -275,7 +275,7 @@ impl AppState {
     /// Read every open file's last commit again and redraw its change marks:
     /// after a commit or a checkout, HEAD is something else.
     pub(crate) fn refresh_head_texts(&self) {
-        let buffers = self.buffers.get_untracked();
+        let buffers = self.editor.buffers.get_untracked();
         for b in buffers {
             let Some(path) = b.file.path.clone() else {
                 continue;

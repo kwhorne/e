@@ -153,12 +153,13 @@ impl AppState {
         let selected = self.review.selected;
         let flags_sig = self.review.flags;
         let routes = self
+            .project
             .laravel
             .get_untracked()
             .map(|d| d.all_routes.clone())
             .unwrap_or_default();
         let project = self.root.get_untracked();
-        let rules = self.project_rules.get_untracked();
+        let rules = self.project.rules.get_untracked();
         let rules_root = self.agent_project_root();
         let send = create_ext_action(self.cx, move |res: Result<(String, Vec<Flag>), String>| {
             busy.set(false);
@@ -318,7 +319,8 @@ impl AppState {
 
     /// The project's route table, reduced to what attribution needs.
     fn review_route_table(&self) -> Vec<e_review::routes::Route> {
-        self.laravel
+        self.project
+            .laravel
             .get_untracked()
             .map(|d| {
                 d.all_routes

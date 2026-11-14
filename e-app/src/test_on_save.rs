@@ -108,6 +108,7 @@ impl AppState {
         }
         let root = self.root.get_untracked();
         let routes = self
+            .project
             .laravel
             .get_untracked()
             .map(|d| d.all_routes.clone())

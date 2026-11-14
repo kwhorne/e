@@ -337,7 +337,7 @@ impl AppState {
 
     /// `＋ → All open files`: every open, saved file as an `@path`.
     pub fn cascade_attach_open_files(&self) {
-        let refs: Vec<String> = self.buffers.with_untracked(|bs| {
+        let refs: Vec<String> = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .filter_map(|b| b.file.path.as_ref().map(|p| format!("@{}", self.rel_of(p))))
                 .collect()

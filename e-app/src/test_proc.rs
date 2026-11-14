@@ -7,6 +7,11 @@
 //! group alone isn't enough: an interactive shell with job control moves
 //! what it runs into groups of its own, and ignores SIGTERM itself. A run
 //! that was stopped says so, and isn't mistaken for a failing suite.
+//!
+//! Each run is a session of its own (`setsid`), with no controlling
+//! terminal. Put in a background group of `e`'s terminal instead, an
+//! interactive shell (`-ilc`, see `shell_env`) tries to take that terminal
+//! for job control, gets SIGTTIN, and stays stopped: the run never ends.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -64,15 +69,31 @@ pub fn run(command: &str, cwd: &std::path::Path) -> io::Result<Ended> {
     })
 }
 
-/// `command` through the user's shell, in a process group of its own.
+/// `command` through the user's shell, in a session — and so a process
+/// group — of its own, without a controlling terminal.
+///
+/// Not just a group of its own: when `e` was started from a terminal, an
+/// interactive shell in a background group of that terminal asks for it
+/// with SIGTTIN and is stopped. Without a terminal the shell still reads its
+/// rc files (where nvm and friends put PATH), it just has no job control —
+/// as when `e` is started from the Dock. The new session's group id is the
+/// shell's pid, which is what Stop signals.
 #[cfg(unix)]
 fn shell_command(command: &str) -> Command {
     use std::os::unix::process::CommandExt;
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     let mut cmd = Command::new(shell);
-    cmd.arg(crate::shell_env::command_flags())
-        .arg(command)
-        .process_group(0);
+    cmd.arg(crate::shell_env::command_flags()).arg(command);
+    // SAFETY: setsid(2) is async-signal-safe and touches no memory. The
+    // forked child isn't a group leader, so it doesn't fail with EPERM.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
     cmd
 }
 
@@ -144,8 +165,7 @@ pub fn stop_all() -> usize {
         }
         // Taken before anything dies: once the shell goes, its children
         // belong to init and can't be found from it any more.
-        let first = process_tree(pgid);
-        signal_all(pgid, &first, libc::SIGTERM);
+        signal_all(pgid, &process_tree(pgid), libc::SIGTERM);
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(2));
             let alive = RUNNING
@@ -153,9 +173,10 @@ pub fn stop_all() -> usize {
                 .map(|r| r.as_ref().is_some_and(|r| r.contains_key(&id)))
                 .unwrap_or(false);
             if alive {
-                let mut pids = first;
-                pids.extend(process_tree(pgid));
-                signal_all(pgid, &pids, libc::SIGKILL);
+                // Only the group and what descends from the shell now: a
+                // pid from the first look that has ended since may have been
+                // given to some other process.
+                signal_all(pgid, &process_tree(pgid), libc::SIGKILL);
             }
         });
     }
@@ -237,5 +258,19 @@ mod tests {
         let ended = run("echo hi", &std::env::temp_dir()).unwrap();
         assert!(!ended.stopped);
         assert_eq!(String::from_utf8_lossy(&ended.output.stdout).trim(), "hi");
+    }
+
+    /// A run has no controlling terminal to stop on, even when the tests
+    /// are run from one.
+    #[test]
+    fn a_run_has_no_terminal() {
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let ended = run(
+            "if (: < /dev/tty) 2>/dev/null; then echo tty; else echo none; fi",
+            &std::env::temp_dir(),
+        )
+        .unwrap();
+        let out = String::from_utf8_lossy(&ended.output.stdout);
+        assert_eq!(out.lines().last(), Some("none"), "{out}");
     }
 }

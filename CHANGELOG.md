@@ -60,9 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cancel didn't stop a PostgreSQL query.** It freed the console, but the
   query ran on to its end, and the connection stayed busy with it: the next
   query waited behind the one cancelled. Cancel now asks the server to stop
-  it, and the connection is free at once. SQLite statements are interrupted
-  the same way. MySQL and ClickHouse queries still finish in the background,
-  and the message says so.
+  it, and the connection is free at once. MySQL queries are stopped with
+  `KILL QUERY` and SQLite statements are interrupted. ClickHouse queries
+  still finish in the background, and the message says so.
 - **A large result was read whole before it was cut.** The SQL console shows
   the first 1000 rows, but PostgreSQL handed over every row the statement
   made and ClickHouse sent its whole answer, all held in memory first.

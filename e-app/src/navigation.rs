@@ -392,42 +392,55 @@ impl AppState {
     /// Record the current location as a back-navigation target.
     fn record_nav(&self) {
         if let Some(loc) = self.current_location() {
-            let dup = self.nav_back_stack.with_untracked(|v| {
+            let dup = self.nav.back.with_untracked(|v| {
                 v.last()
                     .map(|l| l.0 == loc.0 && l.1 == loc.1)
                     .unwrap_or(false)
             });
             if !dup {
-                self.nav_back_stack.update(|v| {
+                self.nav.back.update(|v| {
                     v.push(loc);
                     if v.len() > 100 {
                         v.remove(0);
                     }
                 });
-                self.nav_fwd_stack.update(|v| v.clear());
+                self.nav.forward.update(|v| v.clear());
             }
         }
     }
 
     /// Navigate to the previous location in the history.
     pub fn nav_back(&self) {
-        let Some(target) = self.nav_back_stack.try_update(|v| v.pop()).flatten() else {
+        let Some(target) = self.nav.back.try_update(|v| v.pop()).flatten() else {
             return;
         };
         if let Some(cur) = self.current_location() {
-            self.nav_fwd_stack.update(|v| v.push(cur));
+            self.nav.forward.update(|v| v.push(cur));
         }
         self.goto_location(target.0, target.1, target.2);
     }
 
     /// Navigate to the next location in the history.
     pub fn nav_forward(&self) {
-        let Some(target) = self.nav_fwd_stack.try_update(|v| v.pop()).flatten() else {
+        let Some(target) = self.nav.forward.try_update(|v| v.pop()).flatten() else {
             return;
         };
         if let Some(cur) = self.current_location() {
-            self.nav_back_stack.update(|v| v.push(cur));
+            self.nav.back.update(|v| v.push(cur));
         }
         self.goto_location(target.0, target.1, target.2);
     }
+}
+
+/// Getting around: back and forward, recent files, pinned tabs.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct Navigation {
+    /// Navigation history (locations jumped from / to).
+    pub back: floem::reactive::RwSignal<Vec<(std::path::PathBuf, usize, usize)>>,
+    pub forward: floem::reactive::RwSignal<Vec<(std::path::PathBuf, usize, usize)>>,
+    /// Most-recently-used files (newest first) and the ⌘E switcher state.
+    pub recent_files: floem::reactive::RwSignal<Vec<std::path::PathBuf>>,
+    pub pinned_tabs: floem::reactive::RwSignal<std::collections::HashSet<u64>>,
 }

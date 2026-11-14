@@ -236,7 +236,7 @@ pub fn schema_diff_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.schema_diff_open.set(false));
+        .on_click_stop(move |_| state.views.schema_diff_open.set(false));
     let header = stack((title, refresh, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -251,6 +251,7 @@ pub fn schema_diff_panel(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state
+                .views
                 .schema_diff
                 .get()
                 .into_iter()
@@ -294,7 +295,7 @@ pub fn schema_diff_panel(state: AppState) -> impl IntoView {
 
     let empty_hint = label(|| "In sync — no differences.".to_string()).style(move |s| {
         let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
-        if state.schema_diff.with(|d| d.is_empty()) {
+        if state.views.schema_diff.with(|d| d.is_empty()) {
             s
         } else {
             s.hide()
@@ -324,7 +325,7 @@ pub fn schema_diff_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.schema_diff_open.get() {
+        if state.views.schema_diff_open.get() {
             s
         } else {
             s.hide()

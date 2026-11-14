@@ -285,7 +285,7 @@ pub fn replace_confirm_dialog(state: AppState) -> impl IntoView {
 /// "Rename `total` to `amount` — 12 sites in 4 files?" with every line shown.
 pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
     let headline = move || {
-        state.rename_plan.with(|p| {
+        state.rename.plan.with(|p| {
             p.as_ref()
                 .map(|p| {
                     p.title
@@ -297,14 +297,15 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
     };
     let subtitle = move || {
         state
-            .rename_plan
+            .rename
+            .plan
             .with(|p| p.as_ref().map(|p| p.summary()).unwrap_or_default())
     };
 
     // Every site, as it reads now and as it will read. A count alone is not
     // something a reader can check.
     let sites = move || {
-        state.rename_plan.with(|plan| {
+        state.rename.plan.with(|plan| {
             let Some(plan) = plan.as_ref() else {
                 return String::new();
             };
@@ -382,7 +383,8 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
             button_dyn(
                 move || {
                     state
-                        .rename_plan
+                        .rename
+                        .plan
                         .with(|p| p.as_ref().and_then(|p| p.verb.clone()))
                         .unwrap_or_else(|| "Rename".into())
                 },
@@ -413,7 +415,7 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
                 .items_center()
                 .justify_center()
                 .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
-            if state.rename_plan.with(Option::is_some) {
+            if state.rename.plan.with(Option::is_some) {
                 s
             } else {
                 s.hide()
@@ -425,14 +427,14 @@ pub fn rename_preview_dialog(state: AppState) -> impl IntoView {
 /// "Move App\Models\Order to App\Domain\Order?" with every file it touches.
 pub fn move_class_dialog(state: AppState) -> impl IntoView {
     let headline = move || {
-        state.move_plan.with(|p| {
+        state.rename.move_plan.with(|p| {
             p.as_ref()
                 .map(|p| format!("Move “{}” to “{}”?", p.old_fqn, p.new_fqn))
                 .unwrap_or_default()
         })
     };
     let subtitle = move || {
-        state.move_plan.with(|p| {
+        state.rename.move_plan.with(|p| {
             p.as_ref()
                 .map(|p| {
                     format!(
@@ -446,7 +448,7 @@ pub fn move_class_dialog(state: AppState) -> impl IntoView {
         })
     };
     let files = move || {
-        state.move_plan.with(|plan| {
+        state.rename.move_plan.with(|plan| {
             let Some(plan) = plan.as_ref() else {
                 return String::new();
             };
@@ -509,7 +511,7 @@ pub fn move_class_dialog(state: AppState) -> impl IntoView {
                 .items_center()
                 .justify_center()
                 .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
-            if state.move_plan.with(Option::is_some) {
+            if state.rename.move_plan.with(Option::is_some) {
                 s
             } else {
                 s.hide()

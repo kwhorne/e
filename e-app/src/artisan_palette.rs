@@ -30,6 +30,10 @@ pub struct ArtisanState {
     pub args: RwSignal<String>,
     pub focus_pulse: RwSignal<u64>,
     pub args_pulse: RwSignal<u64>,
+    pub cmds: floem::reactive::RwSignal<std::sync::Arc<Vec<crate::artisan::ArtisanCmd>>>,
+    pub loading: floem::reactive::RwSignal<bool>,
+    /// Why the command list is empty, when `php artisan list` failed.
+    pub error: floem::reactive::RwSignal<String>,
 }
 
 impl ArtisanState {
@@ -43,6 +47,9 @@ impl ArtisanState {
             args: RwSignal::new(String::new()),
             focus_pulse: RwSignal::new(0),
             args_pulse: RwSignal::new(0),
+            cmds: RwSignal::new(Arc::new(Vec::new())),
+            loading: RwSignal::new(false),
+            error: RwSignal::new(String::new()),
         }
     }
 }
@@ -65,14 +72,14 @@ impl AppState {
         a.args.set(String::new());
         a.open.set(true);
         a.focus_pulse.update(|x| *x += 1);
-        if self.artisan_cmds.with_untracked(|c| c.is_empty())
-            && !self.artisan_loading.get_untracked()
+        if self.artisan.cmds.with_untracked(|c| c.is_empty())
+            && !self.artisan.loading.get_untracked()
         {
-            self.artisan_loading.set(true);
+            self.artisan.loading.set(true);
             let root = self.root.get_untracked();
-            let cmds = self.artisan_cmds;
-            let loading = self.artisan_loading;
-            let error = self.artisan_error;
+            let cmds = self.artisan.cmds;
+            let loading = self.artisan.loading;
+            let error = self.artisan.error;
             self.spawn_bg(
                 move || artisan::list(&root),
                 move |list: Result<Vec<ArtisanCmd>, String>| {
@@ -94,7 +101,7 @@ impl AppState {
 
     pub fn filtered_artisan(&self) -> Vec<ArtisanCmd> {
         let q = self.artisan.query.get();
-        self.artisan_cmds.with(|c| artisan::filter(c, &q))
+        self.artisan.cmds.with(|c| artisan::filter(c, &q))
     }
 
     /// Move from picking a command to giving it arguments.
@@ -348,10 +355,10 @@ pub fn artisan_palette(state: AppState) -> impl IntoView {
         .style(|s| s.max_height(400.0).width_full());
 
     let empty = label(move || {
-        if state.artisan_loading.get() {
+        if state.artisan.loading.get() {
             "Asking the app for its commands…".to_string()
         } else {
-            let error = state.artisan_error.get();
+            let error = state.artisan.error.get();
             if error.is_empty() {
                 "No Artisan commands (is `php` on PATH and this a Laravel project?)".to_string()
             } else {

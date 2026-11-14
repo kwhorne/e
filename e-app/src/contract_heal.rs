@@ -82,7 +82,7 @@ impl AppState {
                 .filter_map(|b| Some((b.file.path.clone()?, b.doc.text().to_string())))
                 .collect()
         });
-        let out = self.rename_plan;
+        let out = self.rename.plan;
         let name = field.field.clone();
         self.spawn_bg(
             move || {

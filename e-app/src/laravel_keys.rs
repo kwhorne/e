@@ -143,7 +143,7 @@ impl AppState {
                     Self::notify(&format!("Nothing refers to “{old}”"));
                     return;
                 }
-                app.rename_plan.set(Some(plan));
+                app.rename.plan.set(Some(plan));
             },
         );
     }

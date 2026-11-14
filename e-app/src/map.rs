@@ -84,7 +84,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.map_open.set(false));
+        .on_click_stop(move |_| state.views.map_open.set(false));
     let header = stack((title, warn_summary, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -95,7 +95,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
             .border_color(theme::border())
     });
 
-    let filter = text_input(state.map_query)
+    let filter = text_input(state.views.map_query)
         .placeholder("Filter routes…")
         .style(|s| {
             theme::input_colors(s)
@@ -111,7 +111,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
             let Some(data) = state.laravel.get() else {
                 return Vec::new();
             };
-            let q = state.map_query.get().to_lowercase();
+            let q = state.views.map_query.get().to_lowercase();
             data.all_routes
                 .iter()
                 .filter(|r| {
@@ -300,10 +300,29 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.map_open.get() {
+        if state.views.map_open.get() {
             s
         } else {
             s.hide()
         }
     })
+}
+
+/// The Laravel overlays: the map, relations, events, contracts, related files and the schema diff.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct LaravelViews {
+    pub map_open: floem::reactive::RwSignal<bool>,
+    pub map_query: floem::reactive::RwSignal<String>,
+    pub rel_open: floem::reactive::RwSignal<bool>,
+    pub rel_graph: floem::reactive::RwSignal<Vec<crate::relations::ModelNode>>,
+    pub event_open: floem::reactive::RwSignal<bool>,
+    pub event_graph: floem::reactive::RwSignal<Vec<crate::events::EventNode>>,
+    pub contract_open: floem::reactive::RwSignal<bool>,
+    pub contract: floem::reactive::RwSignal<Option<crate::contract::Contract>>,
+    pub related_open: floem::reactive::RwSignal<bool>,
+    pub related_items: floem::reactive::RwSignal<Vec<(String, std::path::PathBuf)>>,
+    pub schema_diff_open: floem::reactive::RwSignal<bool>,
+    pub schema_diff: floem::reactive::RwSignal<Vec<crate::schema_diff::DiffRow>>,
 }

@@ -35,7 +35,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
             .color(theme::fg())
     });
     let warn_summary = label(move || {
-        let n = state.rel_graph.with(|g| {
+        let n = state.views.rel_graph.with(|g| {
             g.iter()
                 .flat_map(|m| &m.relations)
                 .filter(|r| !r.ok)
@@ -49,7 +49,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let s = s.margin_right(8.0).font_size(12.0).color(warn());
-        let n = state.rel_graph.with(|g| {
+        let n = state.views.rel_graph.with(|g| {
             g.iter()
                 .flat_map(|m| &m.relations)
                 .filter(|r| !r.ok)
@@ -69,7 +69,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.rel_open.set(false));
+        .on_click_stop(move |_| state.views.rel_open.set(false));
     let header = stack((title, warn_summary, refresh, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -84,6 +84,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
     let nodes = dyn_stack(
         move || {
             state
+                .views
                 .rel_graph
                 .get()
                 .into_iter()
@@ -182,7 +183,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
     let empty_hint = label(|| "No model relationships found (open a Laravel project).".to_string())
         .style(move |s| {
             let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
-            if state.rel_graph.with(|g| g.is_empty()) {
+            if state.views.rel_graph.with(|g| g.is_empty()) {
                 s
             } else {
                 s.hide()
@@ -212,7 +213,7 @@ pub fn relation_graph_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.rel_open.get() {
+        if state.views.rel_open.get() {
             s
         } else {
             s.hide()

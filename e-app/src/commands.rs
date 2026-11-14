@@ -225,8 +225,8 @@ fn close_overlays(state: AppState) {
         state.close_request();
         return;
     }
-    if state.log_open.get() {
-        state.log_open.set(false);
+    if state.log.open.get() {
+        state.log.open.set(false);
         return;
     }
     if state.runtime.open.get() {
@@ -245,24 +245,24 @@ fn close_overlays(state: AppState) {
         state.artisan_back();
         return;
     }
-    if state.schema_diff_open.get() {
-        state.schema_diff_open.set(false);
+    if state.views.schema_diff_open.get() {
+        state.views.schema_diff_open.set(false);
         return;
     }
-    if state.rel_open.get() {
-        state.rel_open.set(false);
+    if state.views.rel_open.get() {
+        state.views.rel_open.set(false);
         return;
     }
-    if state.event_open.get() {
-        state.event_open.set(false);
+    if state.views.event_open.get() {
+        state.views.event_open.set(false);
         return;
     }
-    if state.contract_open.get() {
-        state.contract_open.set(false);
+    if state.views.contract_open.get() {
+        state.views.contract_open.set(false);
         return;
     }
-    if state.related_open.get() {
-        state.related_open.set(false);
+    if state.views.related_open.get() {
+        state.views.related_open.set(false);
         return;
     }
     if state.undo_open.get() {
@@ -289,8 +289,8 @@ fn close_overlays(state: AppState) {
         state.model_wizard.open.set(false);
         return;
     }
-    if state.map_open.get() {
-        state.map_open.set(false);
+    if state.views.map_open.get() {
+        state.views.map_open.set(false);
         return;
     }
     state.close_db_result();

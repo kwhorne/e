@@ -21,6 +21,7 @@ fn green() -> Color {
 pub fn contract_panel(state: AppState) -> impl IntoView {
     let title = label(move || {
         state
+            .views
             .contract
             .with(|c| c.as_ref().map(|c| format!("Props Contract — {}", c.page)))
             .unwrap_or_else(|| "Props Contract".to_string())
@@ -42,7 +43,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
                 .color(theme::accent())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()));
-            if state.contract.with(|c| c.is_some()) {
+            if state.views.contract.with(|c| c.is_some()) {
                 s
             } else {
                 s.hide()
@@ -57,7 +58,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.contract_open.set(false));
+        .on_click_stop(move |_| state.views.contract_open.set(false));
 
     let header = stack((title, gen, close)).style(|s| {
         s.flex_row()
@@ -72,6 +73,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
 
     let controller = label(move || {
         state
+            .views
             .contract
             .with(|c| {
                 c.as_ref().map(|c| {
@@ -94,6 +96,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
     let sent = dyn_stack(
         move || {
             state
+                .views
                 .contract
                 .with(|c| c.as_ref().map(|c| c.props.clone()).unwrap_or_default())
                 .into_iter()
@@ -130,6 +133,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
     let missing = dyn_stack(
         move || {
             state
+                .views
                 .contract
                 .with(|c| c.as_ref().map(|c| c.missing.clone()).unwrap_or_default())
                 .into_iter()
@@ -155,6 +159,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
     let forms = dyn_stack(
         move || {
             state
+                .views
                 .contract
                 .with(|c| c.as_ref().map(|c| c.forms.clone()).unwrap_or_default())
                 .into_iter()
@@ -222,7 +227,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
         .style(move |s| {
             let s = s.padding(16.0).font_size(12.0).color(theme::fg_dim());
             // Shown only once the search finished with no result.
-            if state.contract_open.get() && state.contract.with(|c| c.is_none()) {
+            if state.views.contract_open.get() && state.views.contract.with(|c| c.is_none()) {
                 s
             } else {
                 s.hide()
@@ -254,7 +259,7 @@ pub fn contract_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.contract_open.get() {
+        if state.views.contract_open.get() {
             s
         } else {
             s.hide()

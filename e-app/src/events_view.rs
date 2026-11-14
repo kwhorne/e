@@ -22,7 +22,7 @@ pub fn event_graph_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.event_open.set(false));
+        .on_click_stop(move |_| state.views.event_open.set(false));
     let header = stack((title, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -36,6 +36,7 @@ pub fn event_graph_panel(state: AppState) -> impl IntoView {
     let nodes = dyn_stack(
         move || {
             state
+                .views
                 .event_graph
                 .get()
                 .into_iter()
@@ -117,7 +118,7 @@ pub fn event_graph_panel(state: AppState) -> impl IntoView {
 
     let empty = label(|| "No events with listeners found.".to_string()).style(move |s| {
         let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
-        if state.event_graph.with(|g| g.is_empty()) {
+        if state.views.event_graph.with(|g| g.is_empty()) {
             s
         } else {
             s.hide()
@@ -147,7 +148,7 @@ pub fn event_graph_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.event_open.get() {
+        if state.views.event_open.get() {
             s
         } else {
             s.hide()

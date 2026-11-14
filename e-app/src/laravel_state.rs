@@ -138,8 +138,8 @@ impl AppState {
     // ---- Eloquent relationship graph -----------------------------------
 
     pub fn toggle_relations(&self) {
-        let open = !self.rel_open.get_untracked();
-        self.rel_open.set(open);
+        let open = !self.views.rel_open.get_untracked();
+        self.views.rel_open.set(open);
         if open {
             self.compute_relations();
         }
@@ -149,7 +149,7 @@ impl AppState {
     /// foreign keys, in the background.
     pub fn compute_relations(&self) {
         let root = self.root.get_untracked();
-        let sig = self.rel_graph;
+        let sig = self.views.rel_graph;
         let send = create_ext_action(self.cx, move |g: Vec<crate::relations::ModelNode>| {
             sig.set(g)
         });
@@ -167,8 +167,8 @@ impl AppState {
     /// Diff the project's migrations against the live database schema.
     pub fn compute_schema_diff(&self) {
         let root = self.root.get_untracked();
-        self.schema_diff_open.set(true);
-        let sig = self.schema_diff;
+        self.views.schema_diff_open.set(true);
+        let sig = self.views.schema_diff;
         let send = create_ext_action(self.cx, move |rows: Vec<crate::schema_diff::DiffRow>| {
             sig.set(rows)
         });
@@ -194,8 +194,8 @@ impl AppState {
     // ---- Laravel log tail ----------------------------------------------
 
     pub fn toggle_laravel_log(&self) {
-        let open = !self.log_open.get_untracked();
-        self.log_open.set(open);
+        let open = !self.log.open.get_untracked();
+        self.log.open.set(open);
         if open {
             self.refresh_laravel_log();
         }
@@ -209,7 +209,7 @@ impl AppState {
             return;
         }
         let root = self.root.get_untracked();
-        let sig = self.log_lines;
+        let sig = self.log.lines;
         let send = create_ext_action(self.cx, move |lines: Vec<String>| {
             BUSY.store(false, std::sync::atomic::Ordering::Release);
             sig.set(lines);
@@ -224,7 +224,7 @@ impl AppState {
 
     /// Send the recent log tail to the agent for diagnosis.
     pub fn log_fix_with_agent(&self) {
-        let tail: String = self.log_lines.with_untracked(|l| {
+        let tail: String = self.log.lines.with_untracked(|l| {
             l.iter()
                 .rev()
                 .take(60)

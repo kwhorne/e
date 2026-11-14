@@ -136,11 +136,12 @@ impl AppState {
     /// Fold a run's results into the ones kept, on disk too, and redraw the
     /// gutter's test marks.
     pub(crate) fn keep_test_results(&self, run: &crate::testrun::TestRun) {
-        self.test_outcomes
+        self.tests
+            .outcomes
             .update(|kept| crate::testrun::remember(kept, run));
         crate::testrun::save_kept(
             &self.root.get_untracked(),
-            self.test_outcomes.get_untracked(),
+            self.tests.outcomes.get_untracked(),
         );
         self.sync_test_marks();
     }
@@ -205,7 +206,7 @@ impl AppState {
         path: &Path,
         text: &str,
     ) -> HashMap<usize, crate::testrun::Outcome> {
-        self.test_outcomes.with_untracked(|cases| {
+        self.tests.outcomes.with_untracked(|cases| {
             if cases.is_empty() {
                 return HashMap::new();
             }
@@ -287,4 +288,12 @@ pub struct TestsPanel {
     pub iteration: floem::reactive::RwSignal<usize>,
     /// When true, a failing run asks the agent to fix and re-runs on apply.
     pub fix_loop: floem::reactive::RwSignal<bool>,
+    /// Files saved since the last run of their tests, waiting to settle.
+    pub save_run_queue: floem::reactive::RwSignal<Vec<std::path::PathBuf>>,
+    /// How the last run of the tests a save touched went.
+    pub save_run: floem::reactive::RwSignal<Option<crate::test_on_save::SaveRun>>,
+    /// Every test's latest result across runs, so running one test doesn't
+    /// forget how the others ended. Read for the gutter's test marks; kept on
+    /// disk so the marks are back on the next launch.
+    pub outcomes: floem::reactive::RwSignal<Vec<crate::testrun::TestCase>>,
 }

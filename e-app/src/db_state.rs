@@ -687,6 +687,7 @@ impl AppState {
             password: c.password.clone(),
             path: c.path.clone(),
             group: c.group.clone(),
+            label: c.label.clone(),
             use_ssh: c.use_ssh,
             ssh_host: c.ssh_host.clone(),
             ssh_port: if c.ssh_port == 0 {

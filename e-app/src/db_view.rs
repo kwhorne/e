@@ -342,29 +342,46 @@ fn form_field(
             .padding_horiz(6.0)
             .padding_vert(3.0)
     };
-    // The text input has no masked mode, so a stored secret is shown as dots
-    // until the user asks to see or change it — opening the form (say, on a
-    // shared screen) no longer prints the password in clear.
-    let revealed = create_rw_signal(!password || sig.with_untracked(|v| v.is_empty()));
+    // The text input has no masked mode, so a secret is shown as dots until
+    // the user asks to see or change it — opening the form (say, on a shared
+    // screen) doesn't print the password in clear. That holds for an empty
+    // one too: a new password would otherwise show as it is typed, before
+    // anyone thought to hide it.
+    let revealed = create_rw_signal(!password);
     let field = dyn_container(
         move || revealed.get(),
         move |shown| {
             if shown {
-                text_input(sig)
-                    .placeholder(placeholder)
-                    .style(field_style)
-                    .into_any()
+                let input = text_input(sig).placeholder(placeholder).style(field_style);
+                if password {
+                    // Shown after a click on Show/Enter: straight to typing.
+                    floem::View::id(&input).request_focus();
+                }
+                input.into_any()
             } else {
                 stack((
-                    label(move || "•".repeat(sig.with(|v| v.chars().count()).clamp(8, 16)))
-                        .style(move |s| field_style(s).flex_grow(1.0_f32)),
-                    label(|| "Show".to_string())
-                        .style(|s| {
-                            s.font_size(11.0)
-                                .color(theme::accent())
-                                .cursor(floem::style::CursorStyle::Pointer)
-                        })
-                        .on_click_stop(move |_| revealed.set(true)),
+                    label(move || {
+                        let n = sig.with(|v| v.chars().count());
+                        if n == 0 {
+                            "Not set".to_string()
+                        } else {
+                            "•".repeat(n.clamp(8, 16))
+                        }
+                    })
+                    .style(move |s| field_style(s).flex_grow(1.0_f32)),
+                    label(move || {
+                        if sig.with(|v| v.is_empty()) {
+                            "Enter".to_string()
+                        } else {
+                            "Show".to_string()
+                        }
+                    })
+                    .style(|s| {
+                        s.font_size(11.0)
+                            .color(theme::accent())
+                            .cursor(floem::style::CursorStyle::Pointer)
+                    })
+                    .on_click_stop(move |_| revealed.set(true)),
                 ))
                 .style(|s| s.items_center().gap(6.0).width_full())
                 .into_any()
@@ -405,6 +422,8 @@ fn add_form(state: AppState) -> impl IntoView {
     // or the connection would be re-keyed in the credential store on every save.
     let form_id = f.id.clone();
     let form_in_keychain = f.secrets_in_keychain;
+    // Nor is the label, which may be what marks the connection production.
+    let form_label = f.label.clone();
 
     let sync = std::rc::Rc::new(move || {
         state.db.form.set(DbForm {
@@ -418,6 +437,7 @@ fn add_form(state: AppState) -> impl IntoView {
             password: password.get_untracked(),
             path: path.get_untracked(),
             group: group.get_untracked(),
+            label: form_label.clone(),
             use_ssh: use_ssh.get_untracked(),
             ssh_host: ssh_host.get_untracked(),
             ssh_port: ssh_port.get_untracked(),
@@ -548,6 +568,12 @@ fn add_form(state: AppState) -> impl IntoView {
         }
         e_db::TlsMode::Disable => "Never encrypted".to_string(),
         e_db::TlsMode::Require => "Always encrypted; the certificate isn't checked".to_string(),
+        // The MySQL driver can't be told the real host name through a
+        // tunnel (where it connects to 127.0.0.1), so there it isn't checked.
+        e_db::TlsMode::Verify if engine.get() == "mysql" && use_ssh.get() => {
+            "Always encrypted; certificate checked, but not the host name (MySQL through SSH)"
+                .to_string()
+        }
         e_db::TlsMode::Verify => "Always encrypted; certificate and host name checked".to_string(),
     };
     let tls_fields = stack((
@@ -3136,6 +3162,28 @@ mod tests {
     fn pretty_value_formats_json_objects_and_arrays() {
         assert_eq!(pretty_value("{\"a\":1}"), "{\n  \"a\": 1\n}");
         assert_eq!(pretty_value("[1,2]"), "[\n  1,\n  2\n]");
+    }
+
+    #[test]
+    fn db_form_keeps_the_label_of_an_edited_connection() {
+        // The label is one of the hints that a connection is production;
+        // saving the edit form used to blank it.
+        let form = crate::state::DbForm {
+            label: "acme-production".into(),
+            database: "app".into(),
+            ..Default::default()
+        };
+        let cfg = form.to_config();
+        assert_eq!(cfg.label, "acme-production");
+        assert_eq!(cfg.environment(), e_db::Environment::Production);
+        let unlabelled = crate::state::DbForm {
+            label: String::new(),
+            ..form
+        };
+        assert_eq!(
+            unlabelled.to_config().environment(),
+            e_db::Environment::Local
+        );
     }
 
     #[test]

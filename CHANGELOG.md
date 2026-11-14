@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Each test run started an interactive login shell.** Every run of the
+  tests, after each save with tests on save, went through `$SHELL -ilc`,
+  which reads your profile and rc files again (oh-my-zsh, nvm, a prompt)
+  and turns on job control. `e` already takes the login shell's PATH when it
+  starts, so a test run now uses a plain `$SHELL -c`: 7 ms instead of 46 ms
+  here, and more with a heavier rc file. If the login shell couldn't be asked
+  at startup, test runs keep using the login shell.
 - **Connecting to a large database held it busy.** The Database panel
   counted every table's rows, one `SELECT COUNT(*)` after another, as soon as
   a connection opened. On a large PostgreSQL or MySQL database that scanned

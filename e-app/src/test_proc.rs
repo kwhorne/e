@@ -32,13 +32,17 @@ pub struct Ended {
     pub stopped: bool,
 }
 
-/// Run `command` through the login shell in `cwd`, in a process group of its
-/// own, and wait for it. Blocking: off the UI thread.
+/// Run `command` through the user's shell in `cwd`, in a process group of
+/// its own, and wait for it. Blocking: off the UI thread.
+///
+/// A plain `$SHELL -c` once e has the login shell's PATH (see `shell_env`):
+/// an interactive login shell read every rc file again on each run — on each
+/// save, with tests on save — and brought job control along.
 pub fn run(command: &str, cwd: &std::path::Path) -> io::Result<Ended> {
     use std::os::unix::process::CommandExt;
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     let child = Command::new(shell)
-        .arg("-ilc")
+        .arg(crate::shell_env::command_flags())
         .arg(command)
         .current_dir(cwd)
         .stdin(Stdio::null())

@@ -2387,9 +2387,11 @@ pub(crate) fn grep_workspace(
     query: &str,
     opts: crate::workspace_search::SearchOpts,
     max: usize,
+    open: &crate::workspace_search::OpenTexts,
+    cancelled: &dyn Fn() -> bool,
 ) -> Vec<PickerItem> {
     let display_root = roots.first().cloned().unwrap_or_default();
-    crate::workspace_search::search(roots, query, opts, max)
+    crate::workspace_search::search(roots, query, opts, max, open, cancelled)
         .into_iter()
         .map(|hit| {
             let uri = path_to_uri(&hit.path);

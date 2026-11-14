@@ -57,6 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Replace in workspace wrote over open files.** It rewrote every file on
+  disk, so a file open with unsaved edits ended up with a disk conflict, and
+  the unsaved text was neither searched nor replaced.
+  - **Open files:** search and replace now read the editor's own text.
+    Replace changes it in the editor, as one step undo takes back, and saves
+    the file again only if it had no unsaved edits.
+  - **Encodings:** files in UTF-16 or a legacy encoding were skipped; they
+    are now found and written back in their own encoding. A replacement that
+    encoding can't hold leaves the file as it was and says so.
+  - **Typing a search** runs it once the keys pause, and a search typed past
+    stops walking the project.
 - **Each test run started an interactive login shell.** Every run of the
   tests, after each save with tests on save, went through `$SHELL -ilc`,
   which reads your profile and rc files again (oh-my-zsh, nvm, a prompt)

@@ -109,11 +109,35 @@ pub fn splice(content: &str, ranges: &[(usize, usize)], replacement: &str) -> St
     out
 }
 
+/// The newest search asked for (the picker's generation): an older one still
+/// walking stops.
+pub static LATEST_SEARCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How long typing must pause before a search runs.
+pub const SEARCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// The text of files open in the editor, by canonical path: a search reads
+/// it instead of the disk, so it sees unsaved edits, and a replace leaves the
+/// file to the editor.
+pub type OpenTexts = std::collections::HashMap<PathBuf, String>;
+
+/// One text file under the roots.
+struct TextFile<'a> {
+    path: &'a Path,
+    content: &'a str,
+    /// What to write it back as (a label from `e_core::buffer::decode`).
+    encoding: &'a str,
+    /// Open in the editor: `content` is the editor's text.
+    open: bool,
+}
+
 /// Walk the text files under `roots`, honouring `.gitignore` (and the global
-/// and `.git/info/exclude` rules), calling `visit` with each file's contents.
+/// and `.git/info/exclude` rules), calling `visit` with each file's text:
+/// decoded from what it is on disk (UTF-8, with or without a BOM, UTF-16,
+/// or a legacy single-byte encoding), or the editor's when it is open.
 ///
 /// `visit` returns `false` to stop the walk early.
-fn walk_text_files(roots: &[PathBuf], mut visit: impl FnMut(&Path, &str) -> bool) {
+fn walk_text_files(roots: &[PathBuf], open: &OpenTexts, mut visit: impl FnMut(TextFile) -> bool) {
     let Some((first, rest)) = roots.split_first() else {
         return;
     };
@@ -144,14 +168,39 @@ fn walk_text_files(roots: &[PathBuf], mut visit: impl FnMut(&Path, &str) -> bool
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
-        // Binaries fail as invalid UTF-8; a stray NUL catches the rest.
-        let Ok(content) = std::fs::read_to_string(entry.path()) else {
+        let path = entry.path();
+        if !open.is_empty() {
+            let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            if let Some(text) = open.get(&key) {
+                let file = TextFile {
+                    path,
+                    content: text,
+                    encoding: "",
+                    open: true,
+                };
+                if !visit(file) {
+                    return;
+                }
+                continue;
+            }
+        }
+        let Ok(bytes) = std::fs::read(path) else {
             continue;
         };
+        if e_core::buffer::looks_binary(&bytes[..bytes.len().min(8192)]) {
+            continue;
+        }
+        let (content, encoding) = e_core::buffer::decode(&bytes);
         if content.contains('\0') {
             continue;
         }
-        if !visit(entry.path(), &content) {
+        let file = TextFile {
+            path,
+            content: &content,
+            encoding: &encoding,
+            open: false,
+        };
+        if !visit(file) {
             return;
         }
     }
@@ -169,13 +218,24 @@ fn line_starts(content: &str) -> Vec<usize> {
     starts
 }
 
-/// Collect every match under `roots`, up to `max` hits.
-pub fn search(roots: &[PathBuf], query: &str, opts: SearchOpts, max: usize) -> Vec<Hit> {
+/// Collect every match under `roots`, up to `max` hits, reading open files'
+/// text from `open`. Stops early, with what it has, once `cancelled` says so.
+pub fn search(
+    roots: &[PathBuf],
+    query: &str,
+    opts: SearchOpts,
+    max: usize,
+    open: &OpenTexts,
+    cancelled: &dyn Fn() -> bool,
+) -> Vec<Hit> {
     let Some(re) = matcher(query, opts) else {
         return Vec::new();
     };
     let mut hits = Vec::new();
-    walk_text_files(roots, |path, content| {
+    walk_text_files(roots, open, |TextFile { path, content, .. }| {
+        if cancelled() {
+            return false;
+        }
         let ranges = match_ranges(content, &re);
         if ranges.is_empty() {
             return true;
@@ -205,12 +265,18 @@ pub fn search(roots: &[PathBuf], query: &str, opts: SearchOpts, max: usize) -> V
 }
 
 /// Work out what a Replace All would rewrite — **without writing anything**.
-pub fn plan_replace(roots: &[PathBuf], query: &str, opts: SearchOpts) -> ReplacePlan {
+/// Open files are counted in the editor's text.
+pub fn plan_replace(
+    roots: &[PathBuf],
+    query: &str,
+    opts: SearchOpts,
+    open: &OpenTexts,
+) -> ReplacePlan {
     let Some(re) = matcher(query, opts) else {
         return ReplacePlan::default();
     };
     let mut plan = ReplacePlan::default();
-    walk_text_files(roots, |path, content| {
+    walk_text_files(roots, open, |TextFile { path, content, .. }| {
         let count = re.find_iter(content).count();
         if count > 0 {
             plan.files.push((path.to_path_buf(), count));
@@ -223,11 +289,17 @@ pub fn plan_replace(roots: &[PathBuf], query: &str, opts: SearchOpts) -> Replace
 
 /// Apply a Replace All. Files are re-matched as they are read, so a file that
 /// changed since the plan was built is handled as it is now, not as it was.
+///
+/// Files open in the editor (`open`) are left alone: the editor replaces in
+/// its own text, unsaved edits and all. The rest are written back in the
+/// encoding they were read in, atomically; one whose encoding can't hold the
+/// replacement is left as it was and reported.
 pub fn apply_replace(
     roots: &[PathBuf],
     query: &str,
     opts: SearchOpts,
     replacement: &str,
+    open: &OpenTexts,
 ) -> ReplaceOutcome {
     let mut outcome = ReplaceOutcome::default();
     let Some(re) = matcher(query, opts) else {
@@ -237,21 +309,26 @@ pub fn apply_replace(
     // rewrites the *contents* of files the walker has already handed us, so it
     // cannot make the walker visit its own output — and buffering every new
     // file body would put the whole changeset in memory at once.
-    walk_text_files(roots, |path, content| {
-        let ranges = match_ranges(content, &re);
+    walk_text_files(roots, open, |file| {
+        if file.open {
+            return true;
+        }
+        let ranges = match_ranges(file.content, &re);
         if ranges.is_empty() {
             return true;
         }
-        let updated = splice(content, &ranges, replacement);
-        if updated == content {
+        let updated = splice(file.content, &ranges, replacement);
+        if updated == file.content {
             return true;
         }
-        match std::fs::write(path, &updated) {
+        match e_core::buffer::write_with_encoding(file.path, &updated, file.encoding) {
             Ok(()) => {
                 outcome.files_changed += 1;
                 outcome.matches_replaced += ranges.len();
             }
-            Err(e) => outcome.failures.push((path.to_path_buf(), e.to_string())),
+            Err(e) => outcome
+                .failures
+                .push((file.path.to_path_buf(), format!("{e:#}"))),
         }
         true
     });
@@ -262,6 +339,10 @@ pub fn apply_replace(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn none() -> OpenTexts {
+        OpenTexts::new()
+    }
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -304,14 +385,14 @@ mod tests {
         let roots = vec![dir.clone()];
 
         // Case-insensitive: search finds three, replace rewrites three.
-        let hits = search(&roots, "user", insensitive(), 100);
-        let plan = plan_replace(&roots, "user", insensitive());
+        let hits = search(&roots, "user", insensitive(), 100, &none(), &|| false);
+        let plan = plan_replace(&roots, "user", insensitive(), &none());
         assert_eq!(hits.len(), 3);
         assert_eq!(plan.total_matches, hits.len());
 
         // Case-sensitive: both narrow to one.
-        let hits = search(&roots, "user", sensitive(), 100);
-        let plan = plan_replace(&roots, "user", sensitive());
+        let hits = search(&roots, "user", sensitive(), 100, &none(), &|| false);
+        let plan = plan_replace(&roots, "user", sensitive(), &none());
         assert_eq!(hits.len(), 1);
         assert_eq!(plan.total_matches, hits.len());
 
@@ -324,7 +405,7 @@ mod tests {
         // undersold what Replace All would do.
         let dir = scratch(&[("a.txt", "foo foo foo\n")]);
         let roots = vec![dir.clone()];
-        let hits = search(&roots, "foo", insensitive(), 100);
+        let hits = search(&roots, "foo", insensitive(), 100, &none(), &|| false);
         assert_eq!(hits.len(), 3);
         assert_eq!(hits.iter().map(|h| h.col).collect::<Vec<_>>(), [0, 4, 8]);
         let _ = std::fs::remove_dir_all(&dir);
@@ -334,8 +415,8 @@ mod tests {
     fn plan_matches_what_apply_does() {
         let dir = scratch(&[("a.txt", "x x\n"), ("b.txt", "x\n"), ("c.txt", "none\n")]);
         let roots = vec![dir.clone()];
-        let plan = plan_replace(&roots, "x", insensitive());
-        let out = apply_replace(&roots, "x", insensitive(), "y");
+        let plan = plan_replace(&roots, "x", insensitive(), &none());
+        let out = apply_replace(&roots, "x", insensitive(), "y", &none());
         assert_eq!(plan.file_count(), out.files_changed);
         assert_eq!(plan.total_matches, out.matches_replaced);
         assert_eq!(read(&dir, "c.txt"), "none\n");
@@ -354,11 +435,11 @@ mod tests {
         ]);
         let roots = vec![dir.clone()];
 
-        let hits = search(&roots, "secret", insensitive(), 100);
+        let hits = search(&roots, "secret", insensitive(), 100, &none(), &|| false);
         assert_eq!(hits.len(), 1, "only the tracked file should match");
         assert!(hits[0].path.ends_with("app/User.php"));
 
-        apply_replace(&roots, "secret", insensitive(), "redacted");
+        apply_replace(&roots, "secret", insensitive(), "redacted", &none());
         assert_eq!(read(&dir, "app/User.php"), "redacted\n");
         assert_eq!(
             read(&dir, "vendor/laravel/framework/src/App.php"),
@@ -393,11 +474,11 @@ mod tests {
         }
 
         let roots = vec![dir.clone()];
-        let hits = search(&roots, "secret", insensitive(), 100);
+        let hits = search(&roots, "secret", insensitive(), 100, &none(), &|| false);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].path.ends_with("app/User.php"));
 
-        apply_replace(&roots, "secret", insensitive(), "redacted");
+        apply_replace(&roots, "secret", insensitive(), "redacted", &none());
         assert_eq!(read(&dir, "app/User.php"), "redacted\n");
         assert_eq!(read(&dir, "vendor/pkg/File.php"), "secret\n");
 
@@ -413,7 +494,7 @@ mod tests {
             ("vendor/floem/src/lib.rs", "fn e() {}\n"),
         ]);
         let roots = vec![dir.clone()];
-        let hits = search(&roots, "fn e", insensitive(), 100);
+        let hits = search(&roots, "fn e", insensitive(), 100, &none(), &|| false);
         assert_eq!(hits.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -426,7 +507,7 @@ mod tests {
             ("node_modules/pkg/index.js", "needle\n"),
         ]);
         let roots = vec![dir.clone()];
-        let hits = search(&roots, "needle", insensitive(), 100);
+        let hits = search(&roots, "needle", insensitive(), 100, &none(), &|| false);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].path.ends_with("src/main.rs"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -441,7 +522,7 @@ mod tests {
         // length changes under case folding.
         let dir = scratch(&[("a.txt", "first\nblåbær MATCH here\n")]);
         let roots = vec![dir.clone()];
-        let hits = search(&roots, "match", insensitive(), 10);
+        let hits = search(&roots, "match", insensitive(), 10, &none(), &|| false);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[0].col, "blåbær ".len() as u32);
@@ -453,9 +534,15 @@ mod tests {
     fn the_query_is_a_literal_not_a_regex() {
         let dir = scratch(&[("a.php", "$user->name() . '.*'\n")]);
         let roots = vec![dir.clone()];
-        assert_eq!(search(&roots, "$user->name()", insensitive(), 10).len(), 1);
+        assert_eq!(
+            search(&roots, "$user->name()", insensitive(), 10, &none(), &|| {
+                false
+            })
+            .len(),
+            1
+        );
         // `.*` must match the two literal characters, not every character.
-        let hits = search(&roots, ".*", insensitive(), 10);
+        let hits = search(&roots, ".*", insensitive(), 10, &none(), &|| false);
         assert_eq!(hits.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -464,8 +551,119 @@ mod tests {
     fn case_insensitive_replace_writes_the_replacement_verbatim() {
         let dir = scratch(&[("a.txt", "User user USER\n")]);
         let roots = vec![dir.clone()];
-        apply_replace(&roots, "user", insensitive(), "member");
+        apply_replace(&roots, "user", insensitive(), "member", &none());
         assert_eq!(read(&dir, "a.txt"), "member member member\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A throwaway directory holding `files` (path → raw bytes).
+    fn scratch_bytes(files: &[(&str, &[u8])]) -> PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("e-ws-bytes-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (rel, body) in files {
+            std::fs::write(dir.join(rel), body).unwrap();
+        }
+        dir
+    }
+
+    fn utf16le(text: &str) -> Vec<u8> {
+        let mut out = vec![0xFF, 0xFE];
+        for u in text.encode_utf16() {
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn files_are_read_and_written_back_in_their_own_encoding() {
+        let latin1: &[u8] = b"Bl\xe5b\xe6r og \xf8l\n"; // "Blåbær og øl", windows-1252
+        let dir = scratch_bytes(&[
+            ("utf16.txt", &utf16le("hello world\n")),
+            ("latin1.txt", latin1),
+            ("bom.txt", b"\xEF\xBB\xBFhello bom\n"),
+        ]);
+        let roots = vec![dir.clone()];
+        let hits = search(&roots, "hello", insensitive(), 10, &none(), &|| false);
+        assert_eq!(hits.len(), 2, "UTF-16 and BOM files are searched: {hits:?}");
+        assert_eq!(
+            search(&roots, "øl", insensitive(), 10, &none(), &|| false).len(),
+            1
+        );
+
+        let out = apply_replace(&roots, "hello", insensitive(), "hei", &none());
+        assert_eq!(out.files_changed, 2, "{out:?}");
+        assert_eq!(
+            std::fs::read(dir.join("utf16.txt")).unwrap(),
+            utf16le("hei world\n")
+        );
+        assert_eq!(
+            std::fs::read(dir.join("bom.txt")).unwrap(),
+            b"\xEF\xBB\xBFhei bom\n"
+        );
+
+        let out = apply_replace(&roots, "øl", insensitive(), "øl!", &none());
+        assert_eq!(out.files_changed, 1);
+        assert_eq!(
+            std::fs::read(dir.join("latin1.txt")).unwrap(),
+            b"Bl\xe5b\xe6r og \xf8l!\n"
+        );
+        // A replacement the file's encoding can't hold leaves it as it was.
+        let out = apply_replace(&roots, "øl", insensitive(), "→", &none());
+        assert_eq!(out.files_changed, 0);
+        assert_eq!(out.failures.len(), 1, "{out:?}");
+        assert_eq!(
+            std::fs::read(dir.join("latin1.txt")).unwrap(),
+            b"Bl\xe5b\xe6r og \xf8l!\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_files_are_read_from_the_editor_and_left_to_it() {
+        let dir = scratch(&[("open.php", "saved\n"), ("closed.php", "needle\n")]);
+        let roots = vec![dir.clone()];
+        let mut open = OpenTexts::new();
+        open.insert(
+            dir.join("open.php").canonicalize().unwrap(),
+            "needle not saved\n".into(),
+        );
+
+        let hits = search(&roots, "needle", insensitive(), 10, &open, &|| false);
+        let mut files: Vec<_> = hits
+            .iter()
+            .map(|h| h.path.file_name().unwrap().to_owned())
+            .collect();
+        files.sort();
+        assert_eq!(files, ["closed.php", "open.php"]);
+        assert_eq!(
+            plan_replace(&roots, "needle", insensitive(), &open).total_matches,
+            2
+        );
+
+        let out = apply_replace(&roots, "needle", insensitive(), "pin", &open);
+        assert_eq!(out.files_changed, 1, "only the closed file is written");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("open.php")).unwrap(),
+            "saved\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("closed.php")).unwrap(),
+            "pin\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cancelled_search_stops() {
+        let dir = scratch(&[("a.txt", "needle\n"), ("b.txt", "needle\n")]);
+        let roots = vec![dir.clone()];
+        assert!(search(&roots, "needle", insensitive(), 10, &none(), &|| true).is_empty());
+        assert_eq!(
+            search(&roots, "needle", insensitive(), 10, &none(), &|| false).len(),
+            2
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -479,10 +677,10 @@ mod tests {
     fn an_empty_query_matches_nothing() {
         let dir = scratch(&[("a.txt", "anything\n")]);
         let roots = vec![dir.clone()];
-        assert!(search(&roots, "", insensitive(), 10).is_empty());
-        assert!(plan_replace(&roots, "", insensitive()).is_empty());
+        assert!(search(&roots, "", insensitive(), 10, &none(), &|| false).is_empty());
+        assert!(plan_replace(&roots, "", insensitive(), &none()).is_empty());
         assert_eq!(
-            apply_replace(&roots, "", insensitive(), "x"),
+            apply_replace(&roots, "", insensitive(), "x", &none()),
             ReplaceOutcome::default()
         );
         assert_eq!(read(&dir, "a.txt"), "anything\n");
@@ -494,7 +692,10 @@ mod tests {
         let body = "hit\n".repeat(50);
         let dir = scratch(&[("a.txt", body.as_str())]);
         let roots = vec![dir.clone()];
-        assert_eq!(search(&roots, "hit", insensitive(), 10).len(), 10);
+        assert_eq!(
+            search(&roots, "hit", insensitive(), 10, &none(), &|| false).len(),
+            10
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -502,7 +703,7 @@ mod tests {
     fn binaries_are_left_alone() {
         let dir = scratch(&[("a.bin", "needle\0needle\n"), ("b.txt", "needle\n")]);
         let roots = vec![dir.clone()];
-        let hits = search(&roots, "needle", insensitive(), 10);
+        let hits = search(&roots, "needle", insensitive(), 10, &none(), &|| false);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].path.ends_with("b.txt"));
         let _ = std::fs::remove_dir_all(&dir);

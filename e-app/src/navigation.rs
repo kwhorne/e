@@ -62,6 +62,7 @@ impl AppState {
         let roots = self.roots.get_untracked();
         let confirm = self.replace_confirm;
         let planned_query = query.clone();
+        let open = self.open_texts();
         let send = create_ext_action(self.cx, move |plan: workspace_search::ReplacePlan| {
             if plan.is_empty() {
                 eprintln!("e: nothing to replace");
@@ -75,30 +76,83 @@ impl AppState {
             }));
         });
         std::thread::spawn(move || {
-            send(workspace_search::plan_replace(&roots, &planned_query, opts));
+            send(workspace_search::plan_replace(
+                &roots,
+                &planned_query,
+                opts,
+                &open,
+            ));
         });
     }
 
     /// Carry out the staged replace after the user confirmed it.
+    ///
+    /// Files open in the editor are replaced in the editor's text — unsaved
+    /// edits included, as one change that undo takes back — and a file that
+    /// had no unsaved edits is saved again. The rest are rewritten on disk,
+    /// in the encoding each was read in.
     pub fn confirm_replace_in_workspace(&self) {
         let Some(pending) = self.replace_confirm.get_untracked() else {
             return;
         };
         self.replace_confirm.set(None);
         let roots = self.roots.get_untracked();
+        let open = self.open_texts();
+
+        let mut in_editor = (0usize, 0usize); // (files, matches)
+        let mut left_unsaved = 0usize;
+        if let Some(re) = workspace_search::matcher(&pending.query, pending.opts) {
+            for buf in self.editor.buffers.get_untracked() {
+                let Some(path) = buf.file.path.clone() else {
+                    continue;
+                };
+                if !roots.iter().any(|r| path.starts_with(r)) {
+                    continue;
+                }
+                let text = buf.doc.text().to_string();
+                let ranges = workspace_search::match_ranges(&text, &re);
+                if ranges.is_empty() {
+                    continue;
+                }
+                let was_dirty = buf.dirty.get_untracked();
+                let edits = ranges
+                    .iter()
+                    .map(|&(s, e)| (s, e, pending.replacement.clone()))
+                    .collect();
+                crate::state::apply_batch(
+                    &buf.doc,
+                    edits,
+                    floem::views::editor::core::editor::EditType::InsertChars,
+                );
+                in_editor.0 += 1;
+                in_editor.1 += ranges.len();
+                if was_dirty {
+                    left_unsaved += 1;
+                } else {
+                    self.write_buffer(buf.id);
+                }
+            }
+        }
+
         let state = *self;
         let query = pending.query.clone();
         let send = create_ext_action(self.cx, move |outcome: workspace_search::ReplaceOutcome| {
-            eprintln!(
-                "e: replaced {} match(es) in {} file(s)",
-                outcome.matches_replaced, outcome.files_changed
-            );
+            let files = outcome.files_changed + in_editor.0;
+            let matches = outcome.matches_replaced + in_editor.1;
+            let mut msg = format!("Replaced {matches} match(es) in {files} file(s)");
+            if left_unsaved > 0 {
+                msg.push_str(&format!(
+                    "; {left_unsaved} with unsaved edits are changed in the editor, not saved"
+                ));
+            }
             for (path, err) in &outcome.failures {
                 eprintln!("e: could not write {}: {err}", path.display());
             }
+            if !outcome.failures.is_empty() {
+                msg.push_str(&format!("; {} couldn't be written", outcome.failures.len()));
+            }
+            crate::toast::post(&msg);
             state.fs_rev.update(|r| *r += 1);
-            // Reload affected open buffers and refresh the result list.
-            state.check_external_changes();
             state.request_search(query.clone());
         });
         std::thread::spawn(move || {
@@ -107,8 +161,23 @@ impl AppState {
                 &pending.query,
                 pending.opts,
                 &pending.replacement,
+                &open,
             ));
         });
+    }
+
+    /// The text of every file open in the editor, by canonical path, for a
+    /// search to read instead of the disk.
+    pub(crate) fn open_texts(&self) -> workspace_search::OpenTexts {
+        self.editor.buffers.with_untracked(|bs| {
+            bs.iter()
+                .filter_map(|b| {
+                    let path = b.file.path.clone()?;
+                    let key = path.canonicalize().unwrap_or(path);
+                    Some((key, b.doc.text().to_string()))
+                })
+                .collect()
+        })
     }
 
     /// Discard the staged replace.
@@ -126,7 +195,12 @@ impl AppState {
     }
 
     /// Grep the workspace for `query` (called reactively from the picker).
+    ///
+    /// Typing runs it once the keys pause for a moment, not once per key, and
+    /// a search a newer one replaced stops where it is instead of walking
+    /// the whole tree for results nobody will see.
     pub fn request_search(&self, query: String) {
+        use std::sync::atomic::Ordering;
         let p = self.picker;
         if query.trim().len() < 2 {
             p.items.set(Vec::new());
@@ -134,16 +208,28 @@ impl AppState {
         }
         let gen = p.gen.get_untracked() + 1;
         p.gen.set(gen);
+        workspace_search::LATEST_SEARCH.store(gen, Ordering::Relaxed);
         let roots = self.roots.get();
         let opts = self.search_opts();
-        let send = create_ext_action(self.cx, move |(g, items): (u64, Vec<PickerItem>)| {
-            if g == p.gen.get_untracked() {
-                p.items.set(items);
-                p.selected.set(0);
+        let state = *self;
+        floem::action::exec_after(workspace_search::SEARCH_PAUSE, move |_| {
+            if p.gen.get_untracked() != gen {
+                return; // typed on
             }
-        });
-        std::thread::spawn(move || {
-            send((gen, grep_workspace(&roots, &query, opts, 300)));
+            let open = state.open_texts();
+            let send = create_ext_action(state.cx, move |(g, items): (u64, Vec<PickerItem>)| {
+                if g == p.gen.get_untracked() {
+                    p.items.set(items);
+                    p.selected.set(0);
+                }
+            });
+            std::thread::spawn(move || {
+                let cancelled = || workspace_search::LATEST_SEARCH.load(Ordering::Relaxed) != gen;
+                send((
+                    gen,
+                    grep_workspace(&roots, &query, opts, 300, &open, &cancelled),
+                ));
+            });
         });
     }
 

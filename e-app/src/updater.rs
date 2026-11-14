@@ -178,6 +178,31 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// The keys release archives are signed with (Ed25519, raw public keys). The
+/// private half lives in the release workflow's `E_UPDATE_SIGNING_KEY`
+/// secret, nowhere a release page could be changed from, so whoever can
+/// replace an archive and its `.sha256` on GitHub still can't get one
+/// installed. A new key is added here a release before the old one goes.
+const UPDATE_KEYS: &[[u8; 32]] = &[[
+    0xfc, 0x49, 0xe2, 0x2a, 0x4b, 0x09, 0xea, 0x86, 0xea, 0x9c, 0x83, 0xca, 0x9b, 0x96, 0xd1, 0xea,
+    0x22, 0x1e, 0xb9, 0xa5, 0xaa, 0xaa, 0xac, 0xaa, 0x64, 0x08, 0xbd, 0x02, 0xf8, 0x28, 0xb0, 0xe7,
+]];
+
+/// Check `signature` (raw, 64 bytes) over `data` against `keys`.
+fn verify_signature(data: &[u8], signature: &[u8], keys: &[[u8; 32]]) -> Result<()> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    let signature = Signature::from_slice(signature)
+        .map_err(|_| anyhow!("the signature isn't an Ed25519 signature"))?;
+    for key in keys {
+        if let Ok(key) = VerifyingKey::from_bytes(key) {
+            if key.verify(data, &signature).is_ok() {
+                return Ok(());
+            }
+        }
+    }
+    bail!("the signature doesn't match e's release key")
+}
+
 /// Download `{base}/{asset}` into `dir` and check it against the `.sha256`
 /// published beside it.
 fn download_verified(base: &str, asset: &str, dir: &Path) -> Result<PathBuf> {
@@ -233,6 +258,19 @@ fn install_binary(base: &str, version: &str) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let result = (|| {
         let archive = download_verified(base, &asset, &dir)?;
+        // The checksum only says the download is what the release page
+        // holds; the signature says e's release workflow made it.
+        use std::io::Read;
+        let mut signature = Vec::new();
+        ureq::get(&format!("{base}/{asset}.sig"))
+            .timeout(HTTP_TIMEOUT)
+            .call()
+            .with_context(|| format!("downloading {asset}.sig"))?
+            .into_reader()
+            .take(1024)
+            .read_to_end(&mut signature)?;
+        verify_signature(&std::fs::read(&archive)?, &signature, UPDATE_KEYS)
+            .with_context(|| format!("{asset} isn't signed by e's release key"))?;
         self_update::Extract::from_source(&archive)
             .archive(self_update::ArchiveKind::Tar(Some(
                 self_update::Compression::Gz,
@@ -387,6 +425,56 @@ mod tests {
         assert_eq!(changelog_section(log, "0.9.16").as_deref(), Some("- older"));
         assert_eq!(changelog_section(log, "0.1.0"), None);
         assert_eq!(changelog_section(log, "Unreleased"), None);
+    }
+
+    /// Made with OpenSSL 3, as the release workflow signs:
+    /// `openssl pkeyutl -sign -inkey key.pem -rawin -in msg -out msg.sig`.
+    const OPENSSL_KEY: [u8; 32] = [
+        0x87, 0x96, 0x30, 0x9f, 0x41, 0x8e, 0xf1, 0x63, 0x8a, 0x6c, 0x96, 0xcf, 0x32, 0x16, 0x3d,
+        0xfa, 0xc8, 0xdf, 0x65, 0xc5, 0x2a, 0x1f, 0x31, 0x3b, 0xaa, 0xfc, 0x1e, 0x3c, 0xd7, 0x4d,
+        0xe1, 0x34,
+    ];
+    const OPENSSL_SIG: [u8; 64] = [
+        0x08, 0x09, 0x8e, 0x2a, 0x03, 0xc6, 0x5a, 0xfc, 0x2f, 0x19, 0x05, 0xba, 0xd6, 0xea, 0xd2,
+        0x86, 0xb1, 0x5f, 0xe7, 0x50, 0x97, 0x30, 0xe3, 0x86, 0x4b, 0xcc, 0x10, 0x1a, 0x94, 0x56,
+        0xe3, 0x66, 0x7a, 0x71, 0x67, 0x63, 0x6a, 0x83, 0x12, 0x4f, 0xb9, 0x10, 0x59, 0x4f, 0x88,
+        0xe7, 0x70, 0xf1, 0xef, 0x3b, 0x71, 0xfb, 0x03, 0xab, 0x35, 0xb0, 0x49, 0xc5, 0xf7, 0xe2,
+        0x0d, 0x0a, 0x1f, 0x0c,
+    ];
+    const OPENSSL_MSG: &[u8] = b"e test archive\n";
+
+    #[test]
+    fn an_openssl_signature_verifies_and_anything_else_doesnt() {
+        assert!(verify_signature(OPENSSL_MSG, &OPENSSL_SIG, &[OPENSSL_KEY]).is_ok());
+        // Another key among several: still found.
+        assert!(
+            verify_signature(OPENSSL_MSG, &OPENSSL_SIG, &[UPDATE_KEYS[0], OPENSSL_KEY]).is_ok()
+        );
+        // A changed archive.
+        assert!(verify_signature(b"e test archive!\n", &OPENSSL_SIG, &[OPENSSL_KEY]).is_err());
+        // Signed by someone else.
+        assert!(verify_signature(OPENSSL_MSG, &OPENSSL_SIG, UPDATE_KEYS).is_err());
+        // Not a signature at all (an HTML error page, say).
+        assert!(verify_signature(OPENSSL_MSG, b"<html>", &[OPENSSL_KEY]).is_err());
+    }
+
+    /// A file and its `.sig` checked against the built-in release key —
+    /// `E_SIGNED_FILE=e-x86_64-unknown-linux-gnu.tar.gz cargo test -p e-app
+    /// a_signed_file -- --ignored`, for a release's archive, say.
+    #[test]
+    #[ignore]
+    fn a_signed_file_verifies_against_the_release_key() {
+        let file = std::env::var("E_SIGNED_FILE").expect("E_SIGNED_FILE");
+        let data = std::fs::read(&file).unwrap();
+        let sig = std::fs::read(format!("{file}.sig")).unwrap();
+        verify_signature(&data, &sig, UPDATE_KEYS).unwrap();
+    }
+
+    #[test]
+    fn the_release_key_is_a_real_key() {
+        for key in UPDATE_KEYS {
+            assert!(ed25519_dalek::VerifyingKey::from_bytes(key).is_ok());
+        }
     }
 
     #[test]

@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Updates on Linux are signed.** The updater checked a downloaded archive
+  only against the `.sha256` beside it on the same release page, so anyone
+  who could change one could change both. Archives are now signed by the
+  release workflow with a key whose public half is built into `e`, and an
+  archive without a valid signature isn't installed.
 - **Stop didn't stop a test run.** Tests ran without e keeping hold of
   them, so a run that hung went on, the Tests panel said “running” for
   good and tests on save waited behind it. Each run now has its own process

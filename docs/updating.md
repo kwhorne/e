@@ -33,8 +33,11 @@ the latest version, you'll see a confirmation.
 - The updater needs to write to the folder the app is in (usually
   `/Applications`). If it can't, it says so; download the DMG instead.
 - Elsewhere (Linux, or a bare `e` binary) it downloads the archive for your
-  platform (`e-<target>.tar.gz`), verifies it against its `.sha256`, and swaps
-  the binary atomically.
+  platform (`e-<target>.tar.gz`), verifies it against its `.sha256` and its
+  Ed25519 signature (`.sig`), and swaps the binary atomically. The key the
+  signature must match is built into `e`; its private half is known only to
+  the release workflow. Someone able to replace files on the release page
+  still can't get an archive installed.
 - If a download fails, the notice offers **Retry**.
 - Updates are opt-in: nothing is installed until you click **Update now**.
 
@@ -52,3 +55,11 @@ then builds and attaches the per-platform binaries to the release. The script
 itself builds, signs and notarizes the universal DMG on the Mac and attaches it
 along with `e-X.Y.Z-universal.app.zip`, the app the macOS updater installs. A
 release without that zip can't be installed by the updater on macOS.
+
+The workflow's last job signs every `e-*.tar.gz` with the
+`E_UPDATE_SIGNING_KEY` secret (an Ed25519 private key in PEM form) and
+attaches the `.sig` files. Without the secret that job fails, because the
+updater won't install unsigned archives. The matching public key is
+`UPDATE_KEYS` in `e-app/src/updater.rs`. To replace the key, add the new
+public key there and ship a release signed with the old key. Only after
+that switch the secret, and drop the old key a release later.

@@ -290,6 +290,14 @@ impl AppState {
 
     /// Install the `e` command-line launcher into `/usr/local/bin` so the
     /// editor can be opened from any directory with `e .`.
+    #[cfg(not(unix))]
+    pub fn install_cli(&self) {
+        Self::notify("Installing the `e` command isn't available on this platform yet.");
+    }
+
+    /// Install the `e` command-line launcher into `/usr/local/bin` so the
+    /// editor can be opened from any directory with `e .`.
+    #[cfg(unix)]
     pub fn install_cli(&self) {
         let Ok(exe) = crate::platform::current_exe() else {
             Self::notify("Could not locate the e executable.");

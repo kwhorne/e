@@ -404,9 +404,19 @@ mod tests {
             "{all:?}"
         );
         // A folder made at the top level is watched from then on.
+        // Wait until the watch has seen the folder appear (and so started
+        // watching it) before writing into it; a fixed pause raced that under
+        // load.
         std::fs::create_dir_all(root.join("modules")).unwrap();
-        std::thread::sleep(Duration::from_millis(400));
-        while rx.try_recv().is_ok() {}
+        let mut folder = false;
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until && !folder {
+            if let Ok(b) = rx.recv_timeout(Duration::from_millis(500)) {
+                folder = b.paths.iter().any(|p| p.ends_with("modules"));
+            }
+        }
+        assert!(folder, "the new folder");
+        std::thread::sleep(Duration::from_millis(100));
         std::fs::write(root.join("modules/a.php"), "<?php").unwrap();
         let mut seen = false;
         let until = Instant::now() + Duration::from_secs(5);

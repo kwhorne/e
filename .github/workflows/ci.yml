@@ -46,6 +46,21 @@ jobs:
       - name: Test the vendored fork
         run: cargo test --manifest-path vendor/floem/editor-core/Cargo.toml
 
+  check-windows:
+    name: Check (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # e isn't shipped for Windows yet. Compiling it there keeps the code
+      # from growing more Unix-only assumptions unnoticed: they show up when
+      # they're written, not when someone tries a port. Tests aren't run;
+      # many of them drive a Unix shell.
+      - name: Check
+        run: cargo check --workspace
+
   build-linux:
     name: Build & Test (Linux)
     runs-on: ubuntu-latest

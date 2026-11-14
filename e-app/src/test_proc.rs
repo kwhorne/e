@@ -39,16 +39,11 @@ pub struct Ended {
 /// an interactive login shell read every rc file again on each run — on each
 /// save, with tests on save — and brought job control along.
 pub fn run(command: &str, cwd: &std::path::Path) -> io::Result<Ended> {
-    use std::os::unix::process::CommandExt;
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let child = Command::new(shell)
-        .arg(crate::shell_env::command_flags())
-        .arg(command)
+    let child = shell_command(command)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .process_group(0)
         .spawn()?;
     let id = next_id();
     let pgid = child.id() as i32;
@@ -69,7 +64,28 @@ pub fn run(command: &str, cwd: &std::path::Path) -> io::Result<Ended> {
     })
 }
 
+/// `command` through the user's shell, in a process group of its own.
+#[cfg(unix)]
+fn shell_command(command: &str) -> Command {
+    use std::os::unix::process::CommandExt;
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let mut cmd = Command::new(shell);
+    cmd.arg(crate::shell_env::command_flags())
+        .arg(command)
+        .process_group(0);
+    cmd
+}
+
+/// `command` through `cmd.exe`.
+#[cfg(windows)]
+fn shell_command(command: &str) -> Command {
+    let mut cmd = Command::new("cmd");
+    cmd.args(["/C", command]);
+    cmd
+}
+
 /// `root` and every process descended from it, from `ps`.
+#[cfg(unix)]
 fn process_tree(root: i32) -> Vec<i32> {
     let Ok(out) = Command::new("ps").args(["-A", "-o", "pid=,ppid="]).output() else {
         return vec![root];
@@ -98,6 +114,7 @@ fn process_tree(root: i32) -> Vec<i32> {
 }
 
 /// Send `signal` to the group `pgid` and to each of `pids`.
+#[cfg(unix)]
 fn signal_all(pgid: i32, pids: &[i32], signal: i32) {
     // SAFETY: kill(2) on processes this run started; one that is already
     // gone just gets ESRCH.
@@ -110,6 +127,7 @@ fn signal_all(pgid: i32, pids: &[i32], signal: i32) {
 }
 
 /// Stop every test run in flight. Returns how many there were.
+#[cfg(unix)]
 pub fn stop_all() -> usize {
     let running: Vec<(u64, i32)> = RUNNING
         .lock()
@@ -144,8 +162,32 @@ pub fn stop_all() -> usize {
     running.len()
 }
 
+/// Stop every test run in flight: `taskkill /T` ends each run's whole
+/// process tree. Returns how many there were.
+#[cfg(windows)]
+pub fn stop_all() -> usize {
+    let running: Vec<(u64, i32)> = RUNNING
+        .lock()
+        .map(|r| {
+            r.as_ref()
+                .map(|r| r.iter().map(|(k, v)| (*k, *v)).collect())
+        })
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    for &(id, pid) in &running {
+        if let Ok(mut s) = STOPPED.lock() {
+            s.get_or_insert_with(HashSet::new).insert(id);
+        }
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .output();
+    }
+    running.len()
+}
+
 /// Whether a test run is in flight.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn any_running() -> bool {
     RUNNING
         .lock()
@@ -153,7 +195,7 @@ fn any_running() -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::time::Instant;

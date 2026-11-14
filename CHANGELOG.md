@@ -57,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A large result was read whole before it was cut.** The SQL console shows
+  the first 1000 rows, but PostgreSQL handed over every row the statement
+  made and ClickHouse sent its whole answer, all held in memory first.
+  - **PostgreSQL:** a read is now asked for one row past what's shown.
+  - **ClickHouse:** the server stops making rows there, and the answer is
+    read row by row.
+
+  Measured on queries of 50 and 500 million rows: 1.2 s and 3 ms.
+- **PostgreSQL errors said only “db error”.** The server's own message, with
+  its detail and hint, now shows.
 - **Replace in workspace wrote over open files.** It rewrote every file on
   disk, so a file open with unsaved edits ended up with a disk conflict, and
   the unsaved text was neither searched nor replaced.

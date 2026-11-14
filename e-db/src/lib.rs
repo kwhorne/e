@@ -496,7 +496,7 @@ impl Conn {
             } else {
                 "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE"
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(pg_err)?;
         self.session_ro.store(want, Ordering::SeqCst);
         Ok(())
     }
@@ -648,7 +648,7 @@ fn build_backend(eff: &DbConfig, config: &DbConfig) -> Result<Backend, String> {
                 pg.ssl_mode(postgres::config::SslMode::Disable);
                 pg.connect(postgres::NoTls)
             }
-            .map_err(|e| e.to_string())?;
+            .map_err(pg_err)?;
             Backend::Postgres(Mutex::new(client))
         }
         "clickhouse" | "ch" => {
@@ -1148,6 +1148,12 @@ fn ch_query_as(
     if read_only {
         params.push("readonly=1".into());
     }
+    // The server stops making rows past the ones shown (it may finish the
+    // block it is in; the reader below cuts there).
+    if select && max != usize::MAX {
+        params.push(format!("max_result_rows={}", max + 1));
+        params.push("result_overflow_mode=break".into());
+    }
     if !params.is_empty() {
         url.push('?');
         url.push_str(&params.join("&"));
@@ -1158,8 +1164,8 @@ fn ch_query_as(
         .set("X-ClickHouse-User", user)
         .set("X-ClickHouse-Key", password)
         .send_string(&body);
-    let text = match resp {
-        Ok(r) => r.into_string().map_err(|e| e.to_string())?,
+    let resp = match resp {
+        Ok(r) => r,
         Err(ureq::Error::Status(_, r)) => {
             return Err(r
                 .into_string()
@@ -1167,22 +1173,31 @@ fn ch_query_as(
         }
         Err(e) => return Err(e.to_string()),
     };
-    let elapsed_ms = start.elapsed().as_millis() as u64;
     if !select {
+        let _ = resp.into_string();
         return Ok(QueryResult {
             rows_affected: Some(0),
-            elapsed_ms,
+            elapsed_ms: start.elapsed().as_millis() as u64,
             ..Default::default()
         });
     }
-    let mut lines = text.lines();
-    let columns: Vec<String> = lines
-        .next()
-        .map(|l| l.split('\t').map(tsv_unescape).collect())
-        .unwrap_or_default();
+    // Read row by row and stop at the cut, rather than the whole answer into
+    // one string first. (TSV escapes newlines inside values, so a line is a
+    // row.)
+    use std::io::BufRead;
+    let mut lines = std::io::BufReader::new(resp.into_reader()).lines();
+    let columns: Vec<String> = match lines.next() {
+        Some(l) => l
+            .map_err(|e| e.to_string())?
+            .split('\t')
+            .map(tsv_unescape)
+            .collect(),
+        None => Vec::new(),
+    };
     let mut rows = Vec::new();
     let mut truncated = false;
     for line in lines {
+        let line = line.map_err(|e| e.to_string())?;
         if rows.len() >= max {
             truncated = true;
             break;
@@ -1202,7 +1217,7 @@ fn ch_query_as(
     Ok(QueryResult {
         columns,
         rows,
-        elapsed_ms,
+        elapsed_ms: start.elapsed().as_millis() as u64,
         is_select: true,
         truncated,
         ..Default::default()
@@ -1617,12 +1632,12 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
             conn.sync_pg_session(&mut client)?;
-            let mut tx = client.transaction().map_err(|e| e.to_string())?;
+            let mut tx = client.transaction().map_err(pg_err)?;
             let mut affected = 0u64;
             for s in statements {
-                affected += tx.execute(s.as_str(), &[]).map_err(|e| e.to_string())?;
+                affected += tx.execute(s.as_str(), &[]).map_err(pg_err)?;
             }
-            tx.commit().map_err(|e| e.to_string())?;
+            tx.commit().map_err(pg_err)?;
             Ok(affected)
         }
         Backend::Clickhouse { .. } => {
@@ -2446,7 +2461,22 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
             conn.sync_pg_session(&mut client)?;
-            let res = pg_query(&mut client, sql, max)?;
+            let res = match pg_limited(sql, max) {
+                Some(limited) => match pg_query(&mut client, &limited, max) {
+                    Ok(res) => res,
+                    // Whatever went wrong, the statement as written says it
+                    // best — unless the first failure aborted the user's own
+                    // transaction, which then refuses everything.
+                    Err(first) => pg_query(&mut client, sql, max).map_err(|second| {
+                        if second.contains("current transaction is aborted") {
+                            first
+                        } else {
+                            second
+                        }
+                    })?,
+                },
+                None => pg_query(&mut client, sql, max)?,
+            };
             if select || !res.columns.is_empty() {
                 Ok(QueryResult {
                     columns: res.columns,
@@ -2546,9 +2576,39 @@ struct PgRows {
     truncated: bool,
 }
 
+/// What PostgreSQL said. The error's own `Display` is just "db error"; the
+/// server's message (with its DETAIL and HINT) is in the `DbError` beneath.
+fn pg_err(e: postgres::Error) -> String {
+    match e.as_db_error() {
+        Some(db) => db.to_string(),
+        None => match std::error::Error::source(&e) {
+            Some(cause) => format!("{e}: {cause}"),
+            None => e.to_string(),
+        },
+    }
+}
+
+/// `sql` with the server told to stop after `max + 1` rows, when it is a read
+/// that can be wrapped (see [`classify::limitable`]). `simple_query` hands
+/// over every row the statement makes, held in memory before any is cut, so
+/// `SELECT * FROM events` on a large table read the whole table into `e`;
+/// with a limit the server stops where `e` would. One row past `max` says
+/// there was more.
+fn pg_limited(sql: &str, max: usize) -> Option<String> {
+    if max == usize::MAX || !classify::limitable(sql) {
+        return None;
+    }
+    let body = sql.trim().trim_end_matches(';').trim_end();
+    // On its own line, so a `--` comment at the end can't swallow the `)`.
+    Some(format!(
+        "SELECT * FROM (\n{body}\n) AS e_rows LIMIT {}",
+        max + 1
+    ))
+}
+
 fn pg_query(client: &mut postgres::Client, sql: &str, max: usize) -> Result<PgRows, String> {
     use postgres::SimpleQueryMessage::*;
-    let msgs = client.simple_query(sql).map_err(|e| e.to_string())?;
+    let msgs = client.simple_query(sql).map_err(pg_err)?;
     let mut columns: Vec<String> = Vec::new();
     let mut rows: Vec<Vec<Option<String>>> = Vec::new();
     let mut affected = None;
@@ -3041,6 +3101,115 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
 #[cfg(test)]
 mod pg_live_tests {
     use super::*;
+
+    #[test]
+    fn reads_are_limited_on_the_server_and_nothing_else_is() {
+        assert_eq!(
+            pg_limited("select * from events order by id;  ", 1000).as_deref(),
+            Some("SELECT * FROM (\nselect * from events order by id\n) AS e_rows LIMIT 1001")
+        );
+        // A trailing comment stays on its own line.
+        assert!(pg_limited("SELECT 1 -- one", 10)
+            .unwrap()
+            .contains("-- one\n)"));
+        assert!(pg_limited("WITH t AS (SELECT 1) SELECT * FROM t", 10).is_some());
+        assert!(pg_limited("VALUES (1), (2)", 10).is_some());
+        assert!(pg_limited("TABLE events", 10).is_some());
+        for sql in [
+            "SHOW search_path",
+            "EXPLAIN SELECT 1",
+            "UPDATE t SET a = 1",
+            "SELECT * INTO copy FROM t",
+            "WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d",
+        ] {
+            assert_eq!(pg_limited(sql, 10), None, "{sql}");
+        }
+        assert_eq!(
+            pg_limited("SELECT 1", usize::MAX),
+            None,
+            "metadata takes it all"
+        );
+    }
+
+    /// `--ignored`, with `E_PG_PORT` (+ `E_PG_PASSWORD`) and/or `E_CH_PORT`.
+    #[test]
+    #[ignore]
+    fn a_huge_result_stops_at_the_cut_on_the_server() {
+        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        if let Some(port) = env("E_PG_PORT") {
+            let conn = connect(&DbConfig {
+                engine: "postgres".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                username: "postgres".into(),
+                password: env("E_PG_PASSWORD").unwrap_or_default(),
+                database: "postgres".into(),
+                ..Default::default()
+            })
+            .unwrap();
+            let t = Instant::now();
+            let r = query(
+                &conn,
+                "SELECT g, md5(g::text) FROM generate_series(1, 50000000) g",
+                1000,
+            )
+            .unwrap();
+            let took = t.elapsed();
+            assert_eq!(r.rows.len(), 1000);
+            assert!(r.truncated);
+            assert!(
+                took < Duration::from_secs(5),
+                "the server stopped early: {took:?}"
+            );
+            eprintln!("postgres: 50M-row query cut at 1000 in {took:?}");
+            // The statement's own order is kept.
+            let r = query(
+                &conn,
+                "SELECT g FROM generate_series(1, 5000) g ORDER BY g DESC",
+                1000,
+            )
+            .unwrap();
+            assert_eq!(r.rows[0][0].as_deref(), Some("5000"));
+            assert_eq!(r.rows[999][0].as_deref(), Some("4001"));
+            // A few rows: all of them, not truncated.
+            let r = query(&conn, "SELECT 1 AS a UNION ALL SELECT 2", 1000).unwrap();
+            assert_eq!((r.rows.len(), r.truncated), (2, false));
+            // An error names the user's SQL, not the wrapper.
+            let err = query(&conn, "SELECT nope FROM generate_series(1, 3) g", 1000).unwrap_err();
+            assert!(err.contains("nope") && !err.contains("e_rows"), "{err}");
+            // Inside the user's own transaction, the first error is the one shown.
+            query(&conn, "BEGIN", 0).unwrap();
+            let err = query(&conn, "SELECT nope FROM generate_series(1, 3) g", 1000).unwrap_err();
+            assert!(err.contains("nope"), "{err}");
+            query(&conn, "ROLLBACK", 0).unwrap();
+        }
+        if let Some(port) = env("E_CH_PORT") {
+            let conn = connect(&DbConfig {
+                engine: "clickhouse".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                ..Default::default()
+            })
+            .unwrap();
+            let t = Instant::now();
+            let r = query(
+                &conn,
+                "SELECT number, toString(number) FROM numbers(500000000)",
+                1000,
+            )
+            .unwrap();
+            let took = t.elapsed();
+            assert_eq!(r.rows.len(), 1000);
+            assert!(r.truncated);
+            assert!(
+                took < Duration::from_secs(5),
+                "the server stopped early: {took:?}"
+            );
+            eprintln!("clickhouse: 500M-row query cut at 1000 in {took:?}");
+            let r = query(&conn, "SELECT 1 UNION ALL SELECT 2", 1000).unwrap();
+            assert_eq!((r.rows.len(), r.truncated), (2, false));
+        }
+    }
 
     #[test]
     fn row_counts_read_short_and_say_when_they_are_estimates() {

@@ -264,6 +264,24 @@ pub struct Conn {
     /// How to stop a PostgreSQL query that is running: taken when the
     /// connection opens, since the client itself is locked by the query.
     pg_cancel: Option<PgCancel>,
+    /// The SQLite statements running now (each query opens the file
+    /// afresh), by a number of their own, so Cancel can interrupt them.
+    sqlite_running: Mutex<Vec<(u64, rusqlite::InterruptHandle)>>,
+}
+
+/// While alive, the SQLite connection it was made for can be interrupted
+/// by [`cancel`].
+struct SqliteRunning<'a> {
+    conn: &'a Conn,
+    id: u64,
+}
+
+impl Drop for SqliteRunning<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut r) = self.conn.sqlite_running.lock() {
+            r.retain(|(id, _)| *id != self.id);
+        }
+    }
 }
 
 /// A PostgreSQL connection's cancel key, and the TLS it was opened with
@@ -441,6 +459,7 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
         session_ro: AtomicBool::new(false),
         _tunnel: tunnel.map(Mutex::new),
         pg_cancel,
+        sqlite_running: Mutex::new(Vec::new()),
     })
 }
 
@@ -450,6 +469,14 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
 /// with PostgreSQL's "canceling statement due to user request", and the
 /// connection is free again.
 pub fn cancel(conn: &Conn) -> Result<bool, String> {
+    if let Backend::Sqlite(_) = conn.backend {
+        // Interrupted, a statement ends with SQLite's "interrupted".
+        let running = conn.sqlite_running.lock().map_err(|e| e.to_string())?;
+        for (_, handle) in running.iter() {
+            handle.interrupt();
+        }
+        return Ok(true);
+    }
     let Some(c) = &conn.pg_cancel else {
         return Ok(false);
     };
@@ -494,6 +521,18 @@ impl Conn {
     /// Open the SQLite file, read-only while the connection is.
     fn sqlite(&self, path: &str) -> Result<rusqlite::Connection, String> {
         sqlite_open(path, self.is_read_only())
+    }
+
+    /// Note `c` as running a statement, until the returned guard is dropped,
+    /// so [`cancel`] can interrupt it.
+    fn sqlite_running(&self, c: &rusqlite::Connection) -> SqliteRunning<'_> {
+        use std::sync::atomic::AtomicU64;
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut r) = self.sqlite_running.lock() {
+            r.push((id, c.get_interrupt_handle()));
+        }
+        SqliteRunning { conn: self, id }
     }
 
     /// Bring a pooled MySQL session in line with the read-only flag.
@@ -1666,6 +1705,7 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
         }
         Backend::Sqlite(path) => {
             let mut c = conn.sqlite(path)?;
+            let _running = conn.sqlite_running(&c);
             let tx = c.transaction().map_err(|e| e.to_string())?;
             let mut affected = 0u64;
             for s in statements {
@@ -2459,6 +2499,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
         }
         Backend::Sqlite(path) => {
             let c = conn.sqlite(path)?;
+            let _running = conn.sqlite_running(&c);
             if select {
                 let mut stmt = c.prepare(sql).map_err(|e| e.to_string())?;
                 let columns: Vec<String> =
@@ -4302,8 +4343,28 @@ mod tests {
             release.join().unwrap();
         }
 
-        // Nothing to cancel on SQLite: said so, not pretended.
-        assert_eq!(cancel(&conn), Ok(false));
+        // A statement that would run for ever is interrupted by Cancel.
+        {
+            let conn = std::sync::Arc::new(connect(&cfg).unwrap());
+            let running = conn.clone();
+            let t = Instant::now();
+            let endless = std::thread::spawn(move || {
+                query(
+                    &running,
+                    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) \
+                     SELECT count(*) FROM c",
+                    10,
+                )
+            });
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(cancel(&conn), Ok(true));
+            let err = endless.join().unwrap().unwrap_err();
+            assert!(err.contains("interrupted"), "{err}");
+            assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+            // Nothing left to interrupt; the next query runs.
+            assert!(conn.sqlite_running.lock().unwrap().is_empty());
+            assert!(query(&conn, "SELECT 1", 10).is_ok());
+        }
 
         // row_counts (the table tree): SQLite counts.
         let counts = row_counts(&conn, &["users".into(), "posts".into()]).unwrap();

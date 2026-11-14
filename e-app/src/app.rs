@@ -730,9 +730,11 @@ fn app_view() -> impl IntoView {
         }
     });
 
-    // Re-run find-in-file whenever the query changes.
+    // Re-run find-in-file whenever the query changes, and when another tab
+    // or pane takes focus: the matches are offsets into one buffer's text.
     create_effect(move |_| {
         if state.find.open.get() {
+            state.focused_active_id();
             state.find.query.get();
             state.find.case_sensitive.get();
             state.find.whole_word.get();

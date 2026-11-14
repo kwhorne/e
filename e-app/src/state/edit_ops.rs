@@ -317,16 +317,68 @@ impl AppState {
     pub fn close_find(&self) {
         self.find.open.set(false);
         self.find.matches.set(Vec::new());
-        if let Some(buf) = self.active_buffer() {
-            *buf.find_marks.borrow_mut() = Vec::new();
-            buf.doc.cache_rev().update(|r| *r += 1);
+        self.clear_find_marks_except(None);
+    }
+
+    /// Take the find highlights off every buffer but `keep`: they belong to
+    /// the buffer the bar searches, and that moves with the focus.
+    fn clear_find_marks_except(&self, keep: Option<u64>) {
+        let marked: Vec<Buffer> = self.editor.buffers.with_untracked(|bs| {
+            bs.iter()
+                .filter(|b| Some(b.id) != keep && !b.find_marks.borrow().is_empty())
+                .cloned()
+                .collect()
+        });
+        for b in marked {
+            *b.find_marks.borrow_mut() = Vec::new();
+            b.doc.cache_rev().update(|r| *r += 1);
         }
     }
 
-    /// Recompute matches for the current query (called as the query changes).
+    /// Every match of the find bar's query in `buf`'s text as it is now.
+    fn find_in(&self, buf: &Buffer) -> Vec<(usize, usize)> {
+        let query = self.find.query.get_untracked();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        find_all_opts(
+            &buf.doc.text().to_string(),
+            &query,
+            self.find.case_sensitive.get_untracked(),
+            self.find.whole_word.get_untracked(),
+            self.find.use_regex.get_untracked(),
+        )
+    }
+
+    /// Find again in the focused buffer, as it is now, before acting on the
+    /// matches. They are byte offsets found in one buffer's text at one
+    /// moment: since then the text may have been edited, or another tab or
+    /// pane taken the focus, and stale offsets would replace the wrong text
+    /// (or land past the end, or inside a character). Returns the buffer, and
+    /// whether the matches had to change; when they did, the bar shows the
+    /// new ones (keeping the current index where it can).
+    fn refind(&self) -> Option<(Buffer, bool)> {
+        let buf = self.active_buffer()?;
+        let fresh = self.find_in(&buf);
+        let changed = self.find.matches.with_untracked(|m| *m != fresh);
+        if changed {
+            let n = fresh.len();
+            self.find.matches.set(fresh);
+            self.find
+                .current
+                .set(self.find.current.get_untracked().min(n.saturating_sub(1)));
+        }
+        Some((buf, changed))
+    }
+
+    /// Recompute matches for the current query (called as the query changes,
+    /// and as the focus moves to another buffer).
     pub fn run_find(&self) {
         let query = self.find.query.get_untracked();
-        let Some(buf) = self.active_buffer() else {
+        let buf = self.active_buffer();
+        self.clear_find_marks_except(buf.as_ref().map(|b| b.id));
+        let Some(buf) = buf else {
+            self.find.matches.set(Vec::new());
             return;
         };
         if query.is_empty() {
@@ -335,28 +387,29 @@ impl AppState {
             buf.doc.cache_rev().update(|r| *r += 1);
             return;
         }
-        let text = buf.doc.text().to_string();
-        let matches = find_all_opts(
-            &text,
-            &query,
-            self.find.case_sensitive.get_untracked(),
-            self.find.whole_word.get_untracked(),
-            self.find.use_regex.get_untracked(),
-        );
+        let matches = self.find_in(&buf);
         self.find.matches.set(matches);
         self.find.current.set(0);
         self.apply_find_marks();
     }
 
     /// Replace the current match with the replacement text, then re-search.
+    ///
+    /// If the text changed since the matches were shown, nothing is replaced:
+    /// the bar shows the matches as they are now, and the next Replace
+    /// replaces the one it highlights.
     pub fn replace_current(&self) {
+        let Some((buf, changed)) = self.refind() else {
+            return;
+        };
+        if changed {
+            self.apply_find_marks();
+            return;
+        }
         let matches = self.find.matches.get_untracked();
         if matches.is_empty() {
             return;
         }
-        let Some(buf) = self.active_buffer() else {
-            return;
-        };
         let cur = self.find.current.get_untracked().min(matches.len() - 1);
         let (s, e) = matches[cur];
         let rep = self.find.replace.get_untracked();
@@ -366,15 +419,19 @@ impl AppState {
         self.run_find();
     }
 
-    /// Replace every match with the replacement text in one edit.
+    /// Replace every match with the replacement text in one edit: every match
+    /// in the focused buffer's text as it is now.
     pub fn replace_all(&self) {
-        let matches = self.find.matches.get_untracked();
-        if matches.is_empty() {
-            return;
-        }
-        let Some(buf) = self.active_buffer() else {
+        let Some((buf, changed)) = self.refind() else {
             return;
         };
+        let matches = self.find.matches.get_untracked();
+        if matches.is_empty() {
+            if changed {
+                self.apply_find_marks();
+            }
+            return;
+        }
         let rep = self.find.replace.get_untracked();
         let edits: Vec<(Selection, String)> = matches
             .iter()
@@ -419,6 +476,7 @@ impl AppState {
     }
 
     pub fn find_next(&self) {
+        self.refind();
         let n = self.find.matches.with(|m| m.len());
         if n == 0 {
             return;
@@ -430,6 +488,7 @@ impl AppState {
     }
 
     pub fn find_prev(&self) {
+        self.refind();
         let n = self.find.matches.with(|m| m.len());
         if n == 0 {
             return;

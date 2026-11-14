@@ -128,13 +128,13 @@ impl AppState {
             ("grove", self.grove.panel_open.get_untracked()),
             ("migrations", self.migrations.open.get_untracked()),
             ("verify", self.verify.open.get_untracked()),
-            ("contract", self.contract_open.get_untracked()),
-            ("related", self.related_open.get_untracked()),
-            ("relations", self.rel_open.get_untracked()),
-            ("events", self.event_open.get_untracked()),
-            ("schema_diff", self.schema_diff_open.get_untracked()),
+            ("contract", self.views.contract_open.get_untracked()),
+            ("related", self.views.related_open.get_untracked()),
+            ("relations", self.views.rel_open.get_untracked()),
+            ("events", self.views.event_open.get_untracked()),
+            ("schema_diff", self.views.schema_diff_open.get_untracked()),
             ("undo", self.undo_open.get_untracked()),
-            ("map", self.map_open.get_untracked()),
+            ("map", self.views.map_open.get_untracked()),
             ("semantic", self.sem.open.get_untracked()),
             ("tinker", self.tinker.open.get_untracked()),
             ("terminal", self.term.open.get_untracked()),
@@ -150,7 +150,7 @@ impl AppState {
         // The dialog showing, if any: a plan (a rename, a field carried
         // through) or a yes/no question.
         let dialog = self
-            .rename_plan
+            .rename.plan
             .with_untracked(|p| {
                 p.as_ref().map(|p| {
                     json!({
@@ -168,7 +168,7 @@ impl AppState {
                 })
             })
             .or_else(|| {
-                self.run_consents.with_untracked(|q| {
+                self.agent.run_consents.with_untracked(|q| {
                     q.first().map(|c| {
                         let (kind, text) = match &c.run {
                             crate::run_consent::AgentRun::Shell { command, .. } => ("run", command.clone()),
@@ -244,7 +244,7 @@ impl AppState {
             })
         });
 
-        let tests_on_save = self.save_run.get_untracked().map(|r| match r {
+        let tests_on_save = self.tests.save_run.get_untracked().map(|r| match r {
             crate::test_on_save::SaveRun::Running { files } => json!({"running": files}),
             crate::test_on_save::SaveRun::Done { passed, failed } => {
                 json!({"passed": passed, "failed": failed})

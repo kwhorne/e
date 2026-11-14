@@ -36,7 +36,7 @@ impl RecentState {
 impl AppState {
     /// Move `path` to the front of the recent-files list (deduplicated, capped).
     pub fn push_recent(&self, path: PathBuf) {
-        self.recent_files.update(|list| {
+        self.nav.recent_files.update(|list| {
             list.retain(|p| p != &path);
             list.insert(0, path);
             list.truncate(MAX_RECENT);
@@ -46,7 +46,8 @@ impl AppState {
     /// The recent files to show, newest first, filtered by the query.
     pub fn recent_paths(&self) -> Vec<PathBuf> {
         let q = self.recent.query.get().to_lowercase();
-        self.recent_files
+        self.nav
+            .recent_files
             .get()
             .into_iter()
             .filter(|p| q.is_empty() || p.to_string_lossy().to_lowercase().contains(&q))
@@ -55,13 +56,13 @@ impl AppState {
     }
 
     pub fn open_recent(&self) {
-        if self.recent_files.with_untracked(|l| l.is_empty()) {
+        if self.nav.recent_files.with_untracked(|l| l.is_empty()) {
             return;
         }
         self.recent.query.set(String::new());
         // Preselect the previous file (index 1) when there is one, like a
         // most-recently-used switcher; otherwise the only/most-recent file.
-        let len = self.recent_files.with_untracked(|l| l.len());
+        let len = self.nav.recent_files.with_untracked(|l| l.len());
         self.recent.selected.set(if len > 1 { 1 } else { 0 });
         self.recent.focus_pulse.update(|x| *x += 1);
         self.recent.open.set(true);

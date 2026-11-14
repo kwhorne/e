@@ -23,7 +23,7 @@ pub fn related_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.related_open.set(false));
+        .on_click_stop(move |_| state.views.related_open.set(false));
     let header = stack((title, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -37,6 +37,7 @@ pub fn related_panel(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state
+                .views
                 .related_items
                 .get()
                 .into_iter()
@@ -100,7 +101,7 @@ pub fn related_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.related_open.get() {
+        if state.views.related_open.get() {
             s
         } else {
             s.hide()

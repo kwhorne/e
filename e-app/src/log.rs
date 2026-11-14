@@ -58,7 +58,7 @@ pub fn laravel_log_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.log_open.set(false));
+        .on_click_stop(move |_| state.log.open.set(false));
     let header = stack((title, refresh, fix, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -73,7 +73,8 @@ pub fn laravel_log_panel(state: AppState) -> impl IntoView {
     let lines = dyn_stack(
         move || {
             state
-                .log_lines
+                .log
+                .lines
                 .get()
                 .into_iter()
                 .enumerate()
@@ -112,7 +113,7 @@ pub fn laravel_log_panel(state: AppState) -> impl IntoView {
     let empty_hint =
         label(|| "No log entries (storage/logs/laravel.log).".to_string()).style(move |s| {
             let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
-            if state.log_lines.with(|l| l.is_empty()) {
+            if state.log.lines.with(|l| l.is_empty()) {
                 s
             } else {
                 s.hide()
@@ -142,7 +143,7 @@ pub fn laravel_log_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.log_open.get() {
+        if state.log.open.get() {
             s
         } else {
             s.hide()
@@ -162,4 +163,23 @@ fn pill(text: &'static str, on: impl Fn() + 'static) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
         })
         .on_click_stop(move |_| on())
+}
+
+/// The Laravel log, the exceptions caught in it and the failed jobs.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct LogPanel {
+    pub open: floem::reactive::RwSignal<bool>,
+    pub lines: floem::reactive::RwSignal<Vec<String>>,
+    /// The Laravel log followed for exceptions, and how far it has been read.
+    pub read: floem::reactive::RwSignal<Option<(std::path::PathBuf, u64)>>,
+    /// Exceptions the running app logged, placed in the project's code, and
+    /// failed queued jobs; newest last.
+    pub caught: floem::reactive::RwSignal<Vec<crate::caught::Caught>>,
+    /// The `failed_jobs` table as last read (its count and newest id), or
+    /// that it couldn't be: unchanged, there is nothing to read again.
+    pub failed_jobs_seen: floem::reactive::RwSignal<Option<String>>,
+    /// A look at `failed_jobs` is under way.
+    pub failed_jobs_busy: floem::reactive::RwSignal<bool>,
 }

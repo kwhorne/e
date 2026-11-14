@@ -139,21 +139,21 @@ impl AppState {
     /// that couldn't be reached last time.
     pub fn poll_failed_jobs(&self, slow: bool) {
         let root = self.root.get_untracked();
-        if !root.join("artisan").is_file() || self.failed_jobs_busy.get_untracked() {
+        if !root.join("artisan").is_file() || self.log.failed_jobs_busy.get_untracked() {
             return;
         }
-        let seen = self.failed_jobs_seen.get_untracked();
+        let seen = self.log.failed_jobs_seen.get_untracked();
         if seen.as_deref() == Some(UNREACHABLE) && !slow {
             return;
         }
-        self.failed_jobs_busy.set(true);
+        self.log.failed_jobs_busy.set(true);
         let psr4 = self.psr4();
         let state = *self;
         self.spawn_bg(
             move || read(&root, &psr4, seen.as_deref()),
             move |(fp, found): (String, Option<Vec<Caught>>)| {
-                state.failed_jobs_busy.set(false);
-                state.failed_jobs_seen.set(Some(fp));
+                state.log.failed_jobs_busy.set(false);
+                state.log.failed_jobs_seen.set(Some(fp));
                 if let Some(found) = found {
                     state.keep_failed_jobs(found);
                 }
@@ -164,14 +164,14 @@ impl AppState {
     /// The failed jobs are `found` now: those gone from the table go from the
     /// editor too.
     fn keep_failed_jobs(&self, found: Vec<Caught>) {
-        let same = self.caught.with_untracked(|kept| {
+        let same = self.log.caught.with_untracked(|kept| {
             let jobs: Vec<&Caught> = kept.iter().filter(|c| c.job.is_some()).collect();
             jobs.len() == found.len() && jobs.iter().all(|j| found.contains(j))
         });
         if same {
             return;
         }
-        self.caught.update(|kept| {
+        self.log.caught.update(|kept| {
             kept.retain(|c| c.job.is_none());
             // Older than the log's exceptions, so a new request's one is the
             // status bar's.
@@ -218,7 +218,7 @@ impl AppState {
                     Ok(()) => AppState::notify(&format!("{title}: pushed back onto the queue")),
                     Err(e) => AppState::notify(&format!("Couldn't retry {title}: {e}")),
                 }
-                state.failed_jobs_seen.set(None);
+                state.log.failed_jobs_seen.set(None);
                 state.poll_failed_jobs(true);
             },
         );

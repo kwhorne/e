@@ -94,18 +94,19 @@ impl AppState {
     pub(crate) fn agent_run(&self, run: AgentRun, reply: Sender<Value>) {
         if runs_unasked(
             self.settings.get_untracked().ask_before_agent_commands,
-            self.agent_runs_allowed.get_untracked(),
+            self.agent.runs_allowed.get_untracked(),
         ) {
             execute(self, run, reply);
             return;
         }
-        self.run_consents
+        self.agent
+            .run_consents
             .update(|q| q.push(RunConsent { run, reply }));
     }
 
     fn take_run_consent(&self) -> Option<RunConsent> {
         let mut first = None;
-        self.run_consents.update(|q| {
+        self.agent.run_consents.update(|q| {
             if !q.is_empty() {
                 first = Some(q.remove(0));
             }
@@ -123,7 +124,7 @@ impl AppState {
     /// Run it, and everything the agent asks to run until e restarts —
     /// including what is already queued.
     pub fn run_consent_session(&self) {
-        self.agent_runs_allowed.set(true);
+        self.agent.runs_allowed.set(true);
         while let Some(c) = self.take_run_consent() {
             execute(self, c.run, c.reply);
         }
@@ -144,13 +145,14 @@ impl AppState {
 pub fn run_consent_dialog(state: AppState) -> impl IntoView {
     let first = move || {
         state
+            .agent
             .run_consents
             .with(|q| q.first().map(|c| c.run.clone()))
     };
     let title = label(move || first().map(|r| r.title()).unwrap_or_default().to_string())
         .style(|s| s.font_size(14.0).font_bold().color(theme::fg()));
     let subtitle = label(move || {
-        let more = state.run_consents.with(Vec::len).saturating_sub(1);
+        let more = state.agent.run_consents.with(Vec::len).saturating_sub(1);
         let tail = if more > 0 {
             format!(" · {more} more waiting")
         } else {
@@ -215,7 +217,7 @@ pub fn run_consent_dialog(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 140));
-        if state.run_consents.with(|q| !q.is_empty()) {
+        if state.agent.run_consents.with(|q| !q.is_empty()) {
             s
         } else {
             s.hide()

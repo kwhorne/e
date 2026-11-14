@@ -774,14 +774,14 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
         "dialog" => {
             let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
             let confirm = action == "confirm";
-            if state.run_consents.with_untracked(|q| !q.is_empty()) {
+            if state.agent.run_consents.with_untracked(|q| !q.is_empty()) {
                 match action {
                     "confirm" => state.run_consent_once(),
                     "session" => state.run_consent_session(),
                     _ => state.run_consent_deny(),
                 }
                 json!({"ok": true})
-            } else if state.rename_plan.with_untracked(Option::is_some) {
+            } else if state.rename.plan.with_untracked(Option::is_some) {
                 if confirm {
                     state.confirm_rename();
                 } else {

@@ -75,8 +75,8 @@ impl AppState {
         {
             return;
         }
-        let first = self.save_run_queue.with_untracked(Vec::is_empty);
-        self.save_run_queue.update(|q| {
+        let first = self.tests.save_run_queue.with_untracked(Vec::is_empty);
+        self.tests.save_run_queue.update(|q| {
             if !q.iter().any(|p| p == path) {
                 q.push(path.to_path_buf());
             }
@@ -99,6 +99,7 @@ impl AppState {
             return;
         }
         let saved = self
+            .tests
             .save_run_queue
             .try_update(std::mem::take)
             .unwrap_or_default();
@@ -144,7 +145,8 @@ impl AppState {
             return;
         }
         if files.len() > MAX_FILES {
-            self.save_run
+            self.tests
+                .save_run
                 .set(Some(SaveRun::TooWide { files: files.len() }));
             return;
         }
@@ -152,20 +154,21 @@ impl AppState {
             return;
         };
         let cmd = format!("{cmd} {}", run_args(&files));
-        self.save_run
+        self.tests
+            .save_run
             .set(Some(SaveRun::Running { files: files.len() }));
         self.tests.status.set(TddStatus::Running);
         let state = *self;
         self.spawn_test_run(cmd, move |code, text, run, stopped| {
             state.keep_test_results(&run);
             if stopped {
-                state.save_run.set(None);
+                state.tests.save_run.set(None);
                 state.tests.status.set(TddStatus::Stopped);
                 state.tests.output.set(text);
                 state.tests.results.set(run);
                 return;
             }
-            state.save_run.set(Some(SaveRun::Done {
+            state.tests.save_run.set(Some(SaveRun::Done {
                 passed: run.passed(),
                 failed: run.failed(),
             }));
@@ -184,7 +187,7 @@ impl AppState {
 /// The status bar's word on the last run after a save. Click to open the
 /// Tests panel with its output.
 pub fn save_run_status(state: AppState) -> impl IntoView {
-    label(move || match state.save_run.get() {
+    label(move || match state.tests.save_run.get() {
         Some(SaveRun::Running { files }) => {
             format!("⟳ tests: {files} file{}", if files == 1 { "" } else { "s" })
         }
@@ -194,7 +197,7 @@ pub fn save_run_status(state: AppState) -> impl IntoView {
         None => String::new(),
     })
     .style(move |s| {
-        let color = match state.save_run.get() {
+        let color = match state.tests.save_run.get() {
             Some(SaveRun::Done { failed: 0, .. }) => theme::success(),
             Some(SaveRun::Done { .. }) => theme::error(),
             _ => theme::fg_dim(),

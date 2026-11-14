@@ -24,8 +24,11 @@ use floem::views::editor::Editor;
 
 pub use crate::debug::DebugPanel;
 pub use crate::grove_state::GrovePanel;
+pub use crate::log::LogPanel;
+pub use crate::map::LaravelViews;
 pub use crate::migrations::MigrationsPanel;
 pub use crate::model_wizard::ModelWizardPanel;
+pub use crate::navigation::Navigation;
 pub use crate::request::RequestPanel;
 pub use crate::review::ReviewPanel;
 pub use crate::runtime::RuntimePanel;
@@ -495,6 +498,10 @@ pub struct AgentPanel {
     pub turn_before: RwSignal<Option<String>>,
     /// The worktree (a Grove try) the agent works in, when not the project.
     pub worktree: RwSignal<Option<crate::grove::Try>>,
+    /// An agent's `run` / `tinker` requests waiting for the user's answer.
+    pub run_consents: RwSignal<Vec<crate::run_consent::RunConsent>>,
+    /// The user allowed the agent's commands for the rest of the session.
+    pub runs_allowed: RwSignal<bool>,
 }
 
 impl AgentPanel {
@@ -524,6 +531,8 @@ impl AgentPanel {
             mode: RwSignal::new(config::load_settings().cascade_mode),
             turn_before: RwSignal::new(None),
             worktree: RwSignal::new(None),
+            run_consents: RwSignal::new(Vec::new()),
+            runs_allowed: RwSignal::new(false),
         }
     }
 }
@@ -791,20 +800,6 @@ pub struct AppState {
     pub completion: Completion,
     /// Hover popup state.
     pub hover: HoverState,
-    /// The Laravel log followed for exceptions, and how far it has been read.
-    pub log_read: RwSignal<Option<(PathBuf, u64)>>,
-    /// Exceptions the running app logged, placed in the project's code, and
-    /// failed queued jobs; newest last.
-    pub caught: RwSignal<Vec<crate::caught::Caught>>,
-    /// The `failed_jobs` table as last read (its count and newest id), or
-    /// that it couldn't be: unchanged, there is nothing to read again.
-    pub failed_jobs_seen: RwSignal<Option<String>>,
-    /// A look at `failed_jobs` is under way.
-    pub failed_jobs_busy: RwSignal<bool>,
-    /// Files saved since the last run of their tests, waiting to settle.
-    pub save_run_queue: RwSignal<Vec<PathBuf>>,
-    /// How the last run of the tests a save touched went.
-    pub save_run: RwSignal<Option<crate::test_on_save::SaveRun>>,
     /// The peek at a hunk, opened from the gutter's change bar.
     pub hunk_peek: RwSignal<Option<crate::hunk_peek::HunkPeek>>,
     /// When `.git/logs/HEAD` last changed, as last seen: it moves on every
@@ -839,15 +834,6 @@ pub struct AppState {
     pub find: FindState,
     /// Local rename state.
     pub rename: RenameState,
-    /// A rename that has been planned but not yet written. `Some` shows the
-    /// preview; nothing touches a file until it is confirmed.
-    pub rename_plan: RwSignal<Option<crate::rename_preview::RenamePlan>>,
-    /// A planned class move awaiting confirmation.
-    pub move_plan: RwSignal<Option<crate::move_class::MovePlan>>,
-    /// Whether the rename prompt is currently asking for a new fully-qualified
-    /// class name rather than a symbol — it reuses the same input.
-    pub rename_is_move: RwSignal<bool>,
-    pub rename_busy: RwSignal<bool>,
     /// Timestamp (ms since epoch) of the last edit, for idle auto-save.
     pub last_edit: RwSignal<u128>,
     /// Markdown reading-mode preview toggle.
@@ -887,8 +873,6 @@ pub struct AppState {
     // ---- New Eloquent Model / pivot wizard ------------------------------
 
     // ---- Laravel architecture map --------------------------------------
-    pub map_open: RwSignal<bool>,
-    pub map_query: RwSignal<String>,
 
     // ---- Semantic search -----------------------------------------------
 
@@ -898,24 +882,14 @@ pub struct AppState {
     pub undo_rev: RwSignal<u64>,
 
     // ---- Schema diff (migrations vs live DB) ---------------------------
-    pub schema_diff_open: RwSignal<bool>,
-    pub schema_diff: RwSignal<Vec<crate::schema_diff::DiffRow>>,
 
     // ---- Eloquent relationship graph -----------------------------------
-    pub rel_open: RwSignal<bool>,
-    pub rel_graph: RwSignal<Vec<crate::relations::ModelNode>>,
 
     // ---- Event dispatch graph ------------------------------------------
-    pub event_open: RwSignal<bool>,
-    pub event_graph: RwSignal<Vec<crate::events::EventNode>>,
 
     // ---- Inertia props contract ----------------------------------------
-    pub contract_open: RwSignal<bool>,
-    pub contract: RwSignal<Option<crate::contract::Contract>>,
 
     // ---- Related files (model ↔ migration ↔ factory ↔ …) ---------------
-    pub related_open: RwSignal<bool>,
-    pub related_items: RwSignal<Vec<(String, PathBuf)>>,
 
     // ---- Runtime insight (continuous Clockwork capture) ----------------
     /// Agents waiting for fresh diagnostics on a file they just wrote.
@@ -924,25 +898,14 @@ pub struct AppState {
     // ---- Agent session review (see [`crate::review`]) ----
 
     // ---- Step-debugging (DAP session) ----------------------------------
-    /// An agent's `run` / `tinker` requests waiting for the user's answer.
-    pub run_consents: RwSignal<Vec<crate::run_consent::RunConsent>>,
-    /// The user allowed the agent's commands for the rest of the session.
-    pub agent_runs_allowed: RwSignal<bool>,
-
     /// Generation counter debouncing inline AI-completion requests.
     pub ghost_gen: RwSignal<u64>,
 
     // ---- Laravel log tail ----------------------------------------------
-    pub log_open: RwSignal<bool>,
-    pub log_lines: RwSignal<Vec<String>>,
 
     // ---- Request replay (from the architecture map) --------------------
 
     // ---- Autonomous TDD loop -------------------------------------------
-    /// Every test's latest result across runs, so running one test doesn't
-    /// forget how the others ended. Read for the gutter's test marks; kept on
-    /// disk so the marks are back on the next launch.
-    pub test_outcomes: RwSignal<Vec<crate::testrun::TestCase>>,
 
     // ---- Auto-update ----------------------------------------------------
     /// Messages on screen (see [`crate::toast`]).
@@ -955,31 +918,21 @@ pub struct AppState {
     pub task_list: RwSignal<Vec<crate::tasks::Task>>,
     /// The Artisan palette and the app's command list (loaded on first open).
     pub artisan: crate::artisan_palette::ArtisanState,
-    pub artisan_cmds: RwSignal<Arc<Vec<crate::artisan::ArtisanCmd>>>,
-    pub artisan_loading: RwSignal<bool>,
-    /// Why the command list is empty, when `php artisan list` failed.
-    pub artisan_error: RwSignal<String>,
     /// Buffer id awaiting a close confirmation (unsaved changes).
     pub close_confirm: RwSignal<Option<u64>>,
     /// A pending "are you sure?" question (see [`crate::dialogs::Confirm`]).
     pub confirm: RwSignal<Option<crate::dialogs::Confirm>>,
-    /// Most-recently-used files (newest first) and the ⌘E switcher state.
-    pub recent_files: RwSignal<Vec<PathBuf>>,
     pub recent: crate::recent::RecentState,
 
     // Whether the graphical settings page is open.
     pub settings_open: RwSignal<bool>,
     // Pinned tab ids.
-    pub pinned_tabs: RwSignal<HashSet<u64>>,
 
     // ---- Source control (git) ------------------------------------------
     /// Editor font size (reactive, for zoom).
     pub font_size: RwSignal<usize>,
     /// Whether soft word-wrap is enabled.
     pub word_wrap: RwSignal<bool>,
-    /// Navigation history (locations jumped from / to).
-    pub nav_back_stack: RwSignal<Vec<(PathBuf, usize, usize)>>,
-    pub nav_fwd_stack: RwSignal<Vec<(PathBuf, usize, usize)>>,
     /// Bumped when blame data finishes loading, to refresh the status bar.
     pub blame_rev: RwSignal<u64>,
     /// Everything behind the database panel (⌘3).
@@ -1016,6 +969,12 @@ pub struct AppState {
     pub verify: VerifyPanel,
     /// The in-app updater's notice.
     pub updater: UpdatePanel,
+    /// The Laravel log, the exceptions caught in it and the failed jobs.
+    pub log: LogPanel,
+    /// Getting around: back and forward, recent files, pinned tabs.
+    pub nav: Navigation,
+    /// The Laravel overlays: the map, relations, events, contracts, related files and the schema diff.
+    pub views: LaravelViews,
 }
 
 /// Extract the request path (`/foo/bar`) from a full replay URL.
@@ -1694,12 +1653,6 @@ impl AppState {
             completion: Completion::new(),
             hover: HoverState::new(),
             hunk_peek: RwSignal::new(None),
-            log_read: RwSignal::new(None),
-            failed_jobs_seen: RwSignal::new(None),
-            failed_jobs_busy: RwSignal::new(false),
-            caught: RwSignal::new(Vec::new()),
-            save_run_queue: RwSignal::new(Vec::new()),
-            save_run: RwSignal::new(None),
             head_moved: RwSignal::new(None),
             signature: SignatureState::new(),
             laravel: RwSignal::new(None),
@@ -1717,10 +1670,6 @@ impl AppState {
             outline: RwSignal::new(Vec::new()),
             find: FindState::new(),
             rename: RenameState::new(),
-            rename_plan: RwSignal::new(None),
-            move_plan: RwSignal::new(None),
-            rename_is_move: RwSignal::new(false),
-            rename_busy: RwSignal::new(false),
             last_edit: RwSignal::new(0),
             md_preview: RwSignal::new(false),
             cmd: CmdPalette::new(),
@@ -1735,46 +1684,22 @@ impl AppState {
             file_diff: RwSignal::new(None),
             code_actions: RwSignal::new(Vec::new()),
             code_actions_open: RwSignal::new(false),
-            map_open: RwSignal::new(false),
-            map_query: RwSignal::new(String::new()),
             undo_open: RwSignal::new(false),
             undo_rev: RwSignal::new(0),
-            schema_diff_open: RwSignal::new(false),
-            schema_diff: RwSignal::new(Vec::new()),
-            rel_open: RwSignal::new(false),
-            rel_graph: RwSignal::new(Vec::new()),
-            event_open: RwSignal::new(false),
-            event_graph: RwSignal::new(Vec::new()),
-            contract_open: RwSignal::new(false),
-            contract: RwSignal::new(None),
-            related_open: RwSignal::new(false),
-            related_items: RwSignal::new(Vec::new()),
             diag_waiters: RwSignal::new(Vec::new()),
             diag_waiter_seq: RwSignal::new(0),
-            run_consents: RwSignal::new(Vec::new()),
-            agent_runs_allowed: RwSignal::new(false),
             ghost_gen: RwSignal::new(0),
-            log_open: RwSignal::new(false),
-            log_lines: RwSignal::new(Vec::new()),
-            test_outcomes: RwSignal::new(kept_tests),
             toasts: RwSignal::new(Vec::new()),
             goto: crate::editing::GotoState::new(),
             task: crate::task_palette::TaskState::new(),
             task_list: RwSignal::new(Vec::new()),
             artisan: crate::artisan_palette::ArtisanState::new(),
-            artisan_cmds: RwSignal::new(Arc::new(Vec::new())),
-            artisan_loading: RwSignal::new(false),
-            artisan_error: RwSignal::new(String::new()),
             close_confirm: RwSignal::new(None),
             confirm: RwSignal::new(None),
-            recent_files: RwSignal::new(Vec::new()),
             recent: crate::recent::RecentState::new(),
             settings_open: RwSignal::new(false),
-            pinned_tabs: RwSignal::new(HashSet::new()),
             font_size: RwSignal::new(config::load_settings().font_size),
             word_wrap: RwSignal::new(false),
-            nav_back_stack: RwSignal::new(Vec::new()),
-            nav_fwd_stack: RwSignal::new(Vec::new()),
             blame_rev: RwSignal::new(0),
             db: DbPanel::new(),
             agent: AgentPanel::new(agent_wake_tx, agent_wake_rx),
@@ -1797,6 +1722,9 @@ impl AppState {
                 results: RwSignal::new(Default::default()),
                 iteration: RwSignal::new(0),
                 fix_loop: RwSignal::new(false),
+                save_run_queue: RwSignal::new(Vec::new()),
+                save_run: RwSignal::new(None),
+                outcomes: RwSignal::new(kept_tests),
             },
             grove: GrovePanel {
                 site: RwSignal::new(None),
@@ -1907,6 +1835,34 @@ impl AppState {
                 info: RwSignal::new(None),
                 status: RwSignal::new(crate::updater::UpdateStatus::Idle),
                 notes_open: RwSignal::new(false),
+            },
+            log: LogPanel {
+                open: RwSignal::new(false),
+                lines: RwSignal::new(Vec::new()),
+                read: RwSignal::new(None),
+                caught: RwSignal::new(Vec::new()),
+                failed_jobs_seen: RwSignal::new(None),
+                failed_jobs_busy: RwSignal::new(false),
+            },
+            nav: Navigation {
+                back: RwSignal::new(Vec::new()),
+                forward: RwSignal::new(Vec::new()),
+                recent_files: RwSignal::new(Vec::new()),
+                pinned_tabs: RwSignal::new(HashSet::new()),
+            },
+            views: LaravelViews {
+                map_open: RwSignal::new(false),
+                map_query: RwSignal::new(String::new()),
+                rel_open: RwSignal::new(false),
+                rel_graph: RwSignal::new(Vec::new()),
+                event_open: RwSignal::new(false),
+                event_graph: RwSignal::new(Vec::new()),
+                contract_open: RwSignal::new(false),
+                contract: RwSignal::new(None),
+                related_open: RwSignal::new(false),
+                related_items: RwSignal::new(Vec::new()),
+                schema_diff_open: RwSignal::new(false),
+                schema_diff: RwSignal::new(Vec::new()),
             },
         }
     }
@@ -2705,13 +2661,13 @@ impl AppState {
         let r = self.rename;
         r.word.set(fqn.clone());
         r.new_name.set(fqn);
-        self.rename_is_move.set(true);
+        self.rename.is_move.set(true);
         r.open.set(true);
     }
 
     /// Work out what moving the active class would do, and show it.
     pub fn plan_move_class(&self, new_fqn: &str) {
-        self.rename_is_move.set(false);
+        self.rename.is_move.set(false);
         let roots = self.psr4();
         let old_fqn = self.rename.word.get_untracked();
         if new_fqn.trim().is_empty() || new_fqn == old_fqn {
@@ -2745,17 +2701,17 @@ impl AppState {
                 .or_else(|| std::fs::read_to_string(&abs).ok())
         });
         match plan {
-            Some(p) => self.move_plan.set(Some(p)),
+            Some(p) => self.rename.move_plan.set(Some(p)),
             None => Self::notify("that move has no PSR-4 destination"),
         }
     }
 
     /// Carry out a planned move: rewrite the referrers, then move the file.
     pub fn confirm_move_class(&self) {
-        let Some(plan) = self.move_plan.get_untracked() else {
+        let Some(plan) = self.rename.move_plan.get_untracked() else {
             return;
         };
-        self.move_plan.set(None);
+        self.rename.move_plan.set(None);
         let project = self.root.get_untracked();
         let mut failed: Vec<String> = Vec::new();
 
@@ -2793,7 +2749,7 @@ impl AppState {
     }
 
     pub fn cancel_move_class(&self) {
-        self.move_plan.set(None);
+        self.rename.move_plan.set(None);
     }
 
     /// Ask the language server what this rename would change, and show it.
@@ -2817,9 +2773,9 @@ impl AppState {
         let name_for_request = new_name.clone();
         let app = *self;
 
-        self.rename_busy.set(true);
-        let busy = self.rename_busy;
-        let out = self.rename_plan;
+        self.rename.busy.set(true);
+        let busy = self.rename.busy;
+        let out = self.rename.plan;
         let send = create_ext_action(
             self.cx,
             move |edits: Option<Vec<(String, Vec<lsp_types::TextEdit>)>>| {
@@ -2861,10 +2817,10 @@ impl AppState {
 
     /// Write a planned rename to every file it touches.
     pub fn confirm_rename(&self) {
-        let Some(plan) = self.rename_plan.get_untracked() else {
+        let Some(plan) = self.rename.plan.get_untracked() else {
             return;
         };
-        self.rename_plan.set(None);
+        self.rename.plan.set(None);
         let mut written = 0usize;
         let mut failed: Vec<String> = Vec::new();
         for file in &plan.files {
@@ -2939,7 +2895,7 @@ impl AppState {
     }
 
     pub fn cancel_rename(&self) {
-        self.rename_plan.set(None);
+        self.rename.plan.set(None);
     }
 
     pub fn apply_rename(&self) {
@@ -2951,10 +2907,10 @@ impl AppState {
         let new_name = r.new_name.get_untracked();
         r.open.set(false);
         if new_name.is_empty() || new_name == word {
-            self.rename_is_move.set(false);
+            self.rename.is_move.set(false);
             return;
         }
-        if self.rename_is_move.get_untracked() {
+        if self.rename.is_move.get_untracked() {
             self.plan_move_class(&new_name);
             return;
         }
@@ -4431,11 +4387,11 @@ impl AppState {
     }
 
     pub fn is_pinned(&self, id: u64) -> bool {
-        self.pinned_tabs.with(|set| set.contains(&id))
+        self.nav.pinned_tabs.with(|set| set.contains(&id))
     }
 
     pub fn toggle_pin(&self, id: u64) {
-        self.pinned_tabs.update(|set| {
+        self.nav.pinned_tabs.update(|set| {
             if !set.remove(&id) {
                 set.insert(id);
             }
@@ -4845,10 +4801,10 @@ impl AppState {
     }
 
     pub fn toggle_laravel_map(&self) {
-        if !self.map_open.get_untracked() && self.laravel.get_untracked().is_none() {
+        if !self.views.map_open.get_untracked() && self.laravel.get_untracked().is_none() {
             self.load_laravel();
         }
-        self.map_open.update(|o| *o = !*o);
+        self.views.map_open.update(|o| *o = !*o);
     }
 
     /// Run the current editor selection in Tinker (or just open the panel).
@@ -5077,11 +5033,11 @@ impl AppState {
     // ---- Event dispatch graph ------------------------------------------
 
     pub fn toggle_event_graph(&self) {
-        let open = !self.event_open.get_untracked();
-        self.event_open.set(open);
+        let open = !self.views.event_open.get_untracked();
+        self.views.event_open.set(open);
         if open {
             let root = self.root.get_untracked();
-            let sig = self.event_graph;
+            let sig = self.views.event_graph;
             let send =
                 create_ext_action(self.cx, move |g: Vec<crate::events::EventNode>| sig.set(g));
             std::thread::spawn(move || send(crate::events::dispatch_map(&root)));
@@ -5247,12 +5203,12 @@ impl AppState {
             Self::notify("No related files found");
             return;
         }
-        self.related_items.set(items);
-        self.related_open.set(true);
+        self.views.related_items.set(items);
+        self.views.related_open.set(true);
     }
 
     pub fn open_related(&self, path: PathBuf) {
-        self.related_open.set(false);
+        self.views.related_open.set(false);
         self.open_path(path);
     }
 
@@ -5284,9 +5240,9 @@ impl AppState {
                     .collect()
             })
             .unwrap_or_default();
-        self.contract_open.set(true);
-        self.contract.set(None);
-        let sig = self.contract;
+        self.views.contract_open.set(true);
+        self.views.contract.set(None);
+        let sig = self.views.contract;
         let send = create_ext_action(self.cx, move |c: Option<crate::contract::Contract>| {
             sig.set(c)
         });
@@ -5299,7 +5255,7 @@ impl AppState {
 
     /// Write TypeScript interfaces for the current contract and open them.
     pub fn generate_contract_ts(&self) {
-        let Some(c) = self.contract.get_untracked() else {
+        let Some(c) = self.views.contract.get_untracked() else {
             return;
         };
         let schema = self.db.schema_cache.get_untracked();
@@ -5309,7 +5265,7 @@ impl AppState {
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join(format!("{}.d.ts", c.page.replace('/', "")));
         if std::fs::write(&file, ts).is_ok() {
-            self.contract_open.set(false);
+            self.views.contract_open.set(false);
             self.open_path(file);
         }
     }
@@ -6687,7 +6643,7 @@ impl AppState {
                 }
                 if let Some(path) = &test_path {
                     // A test's mark moves with its declaration.
-                    if app.test_outcomes.with_untracked(|o| !o.is_empty()) {
+                    if app.tests.outcomes.with_untracked(|o| !o.is_empty()) {
                         *test_marks.borrow_mut() = app.test_marks_for(path, &text);
                     }
                     // And a breakpoint, or a logged exception, with its line.

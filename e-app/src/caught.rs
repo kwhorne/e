@@ -129,10 +129,10 @@ impl AppState {
             return;
         };
         let len = std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0);
-        let from = match self.log_read.get_untracked() {
+        let from = match self.log.read.get_untracked() {
             // The first look: what is there already happened before `e`.
             None => {
-                self.log_read.set(Some((log, len)));
+                self.log.read.set(Some((log, len)));
                 return;
             }
             Some((seen, at)) if seen == log && at == len => return,
@@ -141,7 +141,7 @@ impl AppState {
             // Today's new daily file, or a cleared one.
             _ => 0,
         };
-        self.log_read.set(Some((log.clone(), len)));
+        self.log.read.set(Some((log.clone(), len)));
         let state = *self;
         self.spawn_bg(
             move || {
@@ -168,7 +168,7 @@ impl AppState {
 
     /// Keep `found`, newest last; one per line, the latest.
     fn catch(&self, found: Vec<Caught>) {
-        self.caught.update(|kept| {
+        self.log.caught.update(|kept| {
             for c in found {
                 kept.retain(|k| !(k.path == c.path && k.line == c.line));
                 kept.push(c);
@@ -183,15 +183,20 @@ impl AppState {
     /// A failed job stays until it is retried.
     pub(crate) fn clear_caught_in(&self, path: &Path) {
         let logged_here = |c: &Caught| c.path == path && c.job.is_none();
-        if self.caught.with_untracked(|c| c.iter().any(logged_here)) {
-            self.caught.update(|c| c.retain(|c| !logged_here(c)));
+        if self
+            .log
+            .caught
+            .with_untracked(|c| c.iter().any(logged_here))
+        {
+            self.log.caught.update(|c| c.retain(|c| !logged_here(c)));
             self.sync_caught_marks();
         }
     }
 
     /// Forget the exception on `line` of `path`.
     pub fn dismiss_caught(&self, path: &Path, line: usize) {
-        self.caught
+        self.log
+            .caught
             .update(|c| c.retain(|c| !(c.path == path && c.line == line)));
         self.sync_caught_marks();
     }
@@ -199,7 +204,7 @@ impl AppState {
     /// Move the exceptions in `path` along with an edit from `old` to `new`:
     /// lines added above push one down, and removing its line removes it.
     pub(crate) fn follow_caught(&self, path: &Path, old: &Rope, new: &str) {
-        let lines: Vec<usize> = self.caught.with_untracked(|c| {
+        let lines: Vec<usize> = self.log.caught.with_untracked(|c| {
             c.iter()
                 .filter(|c| c.path == path)
                 .map(|c| c.line)
@@ -223,7 +228,7 @@ impl AppState {
         if moved.iter().all(|(from, to)| Some(*from) == *to) {
             return;
         }
-        self.caught.update(|c| {
+        self.log.caught.update(|c| {
             c.retain_mut(|c| {
                 if c.path != path {
                     return true;
@@ -243,7 +248,7 @@ impl AppState {
 
     /// The exception on `line` (0-based) of `path`, if one is kept.
     pub fn caught_at(&self, path: &Path, line: usize) -> Option<Caught> {
-        self.caught.with_untracked(|c| {
+        self.log.caught.with_untracked(|c| {
             c.iter()
                 .rev()
                 .find(|c| c.path == path && c.line == line)
@@ -271,7 +276,7 @@ impl AppState {
 
     /// Bring every open file's exception marks up to date.
     pub(crate) fn sync_caught_marks(&self) {
-        let caught = self.caught.get_untracked();
+        let caught = self.log.caught.get_untracked();
         let buffers = self.buffers.get_untracked();
         for b in buffers {
             let Some(path) = &b.file.path else {
@@ -319,7 +324,7 @@ impl AppState {
 pub fn caught_status(state: AppState) -> impl IntoView {
     let root = state.root;
     label(move || {
-        state.caught.with(|c| match c.last() {
+        state.log.caught.with(|c| match c.last() {
             Some(c) => {
                 let name = c
                     .path
@@ -340,14 +345,14 @@ pub fn caught_status(state: AppState) -> impl IntoView {
             .max_width(320.0)
             .cursor(floem::style::CursorStyle::Pointer)
             .hover(|s| s.color(theme::fg()));
-        if state.caught.with(Vec::is_empty) {
+        if state.log.caught.with(Vec::is_empty) {
             s.hide()
         } else {
             s
         }
     })
     .on_click_stop(move |_| {
-        if let Some(c) = state.caught.with_untracked(|c| c.last().cloned()) {
+        if let Some(c) = state.log.caught.with_untracked(|c| c.last().cloned()) {
             state.goto_location(c.path, c.line, 0);
         }
     })

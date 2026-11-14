@@ -17,6 +17,15 @@ pub struct RenameState {
     /// Set when the name is a Laravel key (route, view, translation) rather
     /// than a PHP symbol: the rename then goes through `e_laravel::keys`.
     pub laravel: RwSignal<Option<crate::laravel::Helper>>,
+    /// A rename that has been planned but not yet written. `Some` shows the
+    /// preview; nothing touches a file until it is confirmed.
+    pub plan: floem::reactive::RwSignal<Option<crate::rename_preview::RenamePlan>>,
+    /// A planned class move awaiting confirmation.
+    pub move_plan: floem::reactive::RwSignal<Option<crate::move_class::MovePlan>>,
+    /// Whether the rename prompt is currently asking for a new fully-qualified
+    /// class name rather than a symbol — it reuses the same input.
+    pub is_move: floem::reactive::RwSignal<bool>,
+    pub busy: floem::reactive::RwSignal<bool>,
 }
 
 impl RenameState {
@@ -26,6 +35,10 @@ impl RenameState {
             word: RwSignal::new(String::new()),
             new_name: RwSignal::new(String::new()),
             laravel: RwSignal::new(None),
+            plan: RwSignal::new(None),
+            move_plan: RwSignal::new(None),
+            is_move: RwSignal::new(false),
+            busy: RwSignal::new(false),
         }
     }
 }

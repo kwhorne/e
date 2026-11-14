@@ -630,7 +630,7 @@ fn app_view() -> impl IntoView {
                 state.check_external_changes();
                 state.check_laravel_freshness();
                 state.check_db_schema_freshness();
-                if state.log_open.get_untracked() {
+                if state.log.open.get_untracked() {
                     state.refresh_laravel_log();
                 }
                 if state.runtime.open.get_untracked() {
@@ -897,23 +897,23 @@ fn app_view() -> impl IntoView {
                     crate::review_view::review_panel(state).into_any(),
                 ),
                 (
-                    state.schema_diff_open,
+                    state.views.schema_diff_open,
                     crate::schema_diff::schema_diff_panel(state).into_any(),
                 ),
                 (
-                    state.rel_open,
+                    state.views.rel_open,
                     crate::relations_view::relation_graph_panel(state).into_any(),
                 ),
                 (
-                    state.event_open,
+                    state.views.event_open,
                     crate::events_view::event_graph_panel(state).into_any(),
                 ),
                 (
-                    state.contract_open,
+                    state.views.contract_open,
                     crate::contract_view::contract_panel(state).into_any(),
                 ),
                 (
-                    state.related_open,
+                    state.views.related_open,
                     crate::related_view::related_panel(state).into_any(),
                 ),
                 (
@@ -995,8 +995,8 @@ fn app_view() -> impl IntoView {
                 || state.close_confirm.get().is_some()
                 || state.confirm.with(Option::is_some)
                 || state.replace_confirm.with(Option::is_some)
-                || state.rename_plan.with(Option::is_some)
-                || state.move_plan.with(Option::is_some)
+                || state.rename.plan.with(Option::is_some)
+                || state.rename.move_plan.with(Option::is_some)
                 || state.recent.open.get()
                 || state.task.open.get()
                 || state.artisan.open.get()

@@ -144,6 +144,9 @@ Two options keep the answer small on a large project:
 When the project has [rules](project-rules.md), the answer carries them in
 `rules`, whatever was asked for. `{"method":"rules","check":true}` gives
 them, and where the project breaks them, in any project, Laravel or not.
+Both leave the rules out until the project is
+[trusted](workspace-trust.md): they are instructions to an agent, written by
+whoever wrote the project.
 
 ## Measuring a route
 
@@ -220,11 +223,13 @@ An agent can use the editor's UI the way a person does — run a command, pick a
 code action, confirm a dialog, work Cascade, press keys — and read back what
 is on screen. That is how `e` is tested end to end.
 
-`key`, `click`, `dialog` and Cascade's `answer` act for the person at the
-keyboard — they could approve the very permission card or consent dialog the
-person is being asked about — so they are refused unless `e` was started with
-`E_UI_AUTOMATION=1`, as the end-to-end tests start it. The rest of this section
-works for any agent.
+`key`, `click`, `dialog`, `command`, `apply_code_action` and `cascade` act
+for the person at the keyboard — they could approve the very permission card
+or consent dialog the person is being asked about, trust the project, or run
+its tests and tasks without the card `run` asks on — so they are refused
+unless `e` was started with `E_UI_AUTOMATION=1`, as the end-to-end tests
+start it. `commands`, `code_actions`, `wait_idle` and `ui_state` only read,
+and work for any agent.
 
 ```sh
 q() { printf '%s\n' "$1" | nc -U "$E_EDITOR_SOCK"; }

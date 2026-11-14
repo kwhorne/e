@@ -96,3 +96,7 @@ printf '{"method":"rules","check":true}\n' | nc -U "$E_EDITOR_SOCK"
 
 Without `check`, the reply has only the rules. If the file doesn't read,
 `error` says where.
+
+Until the project is [trusted](workspace-trust.md), agents aren't given the
+rules: `rules` answers with an error, `laravel_map` leaves them out, and a
+Cascade session starts without them. They are still checked as you type.

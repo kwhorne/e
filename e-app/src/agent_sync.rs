@@ -25,12 +25,12 @@
 //!   with the test added, and notes. Writes nothing.
 //! - Driving the UI as a person would, for testing it (see `agent_drive`; the
 //!   ones marked † need `E_UI_AUTOMATION=1`):
-//!   `{"method":"commands"}`, `{"method":"command","id":"session-review"}`,
-//!   `{"method":"code_actions"}` then `{"method":"apply_code_action","index":0}`,
+//!   `{"method":"commands"}`, `{"method":"command","id":"session-review"}` †,
+//!   `{"method":"code_actions"}` then `{"method":"apply_code_action","index":0}` †,
 //!   `{"method":"dialog","action":"confirm|cancel"}` † (`session` too, on the
 //!   card for an agent's `run` / `tinker`),
-//!   `{"method":"cascade","action":"send","text":"…"}` (and steer, next, stop,
-//!   new_session, new_worktree, take_down, review_turn, undo_turn…; `answer` †),
+//!   `{"method":"cascade","action":"send","text":"…"}` † (and steer, next, stop,
+//!   new_session, new_worktree, take_down, review_turn, undo_turn, answer…),
 //!   `{"method":"wait_idle","timeout_ms":120000}` and `{"method":"ui_state"}`.
 //! - `{"method":"key","keys":["cmd+p","down","enter"]}` or
 //!   `{"method":"key","text":"orders"}` → presses keys in the editor's window
@@ -43,9 +43,11 @@
 //! The socket path is handed to agents and the integrated terminal (and to
 //! nothing else the editor spawns) as `$E_EDITOR_SOCK`, so an agent can e.g.
 //! `printf '{"method":"context"}\n' | nc -U "$E_EDITOR_SOCK"`. The methods that
-//! act for the person at the keyboard — `key`, `click`, `dialog` and Cascade's
-//! `answer` — are refused unless `e` was started with `E_UI_AUTOMATION=1`.
-//! `propose_edit` only edits files inside the workspace.
+//! act for the person at the keyboard — `key`, `click`, `dialog`, `command`,
+//! `apply_code_action` and `cascade` — are refused unless `e` was started with
+//! `E_UI_AUTOMATION=1`. `propose_edit` only edits files inside the workspace.
+//! The project's `.e/rules.toml` isn't handed out (`rules`, `laravel_map`)
+//! until the project is trusted.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
@@ -163,23 +165,29 @@ pub fn socket_env() -> Vec<(String, String)> {
 }
 
 /// Whether the socket may drive the UI as a person would — press keys, click,
-/// confirm dialogs, answer Cascade's permission cards. Those can approve what
-/// the person is being asked to approve, so an agent must not have them: they
-/// are on only when `e` is started with `E_UI_AUTOMATION=1`, as the end-to-end
-/// tests (`tests/ui_flows.rs`) start it.
+/// confirm dialogs, run commands and code actions, work Cascade. Those can
+/// approve what the person is being asked to approve, trust the project, or
+/// run its tests and tasks without the card `run` asks on, so an agent must
+/// not have them: they are on only when `e` is started with
+/// `E_UI_AUTOMATION=1`, as the end-to-end tests (`tests/ui_flows.rs`) start it.
 fn ui_automation() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("E_UI_AUTOMATION").is_ok_and(|v| v == "1" || v == "true"))
 }
 
-/// Is `method` (with its request) one that acts for the person in the UI, and
-/// so is refused unless [`ui_automation`] is on?
-fn drives_ui_as_person(method: &str, req: &Value) -> bool {
-    match method {
-        "key" | "click" | "dialog" => true,
-        "cascade" => req.get("action").and_then(Value::as_str) == Some("answer"),
-        _ => false,
-    }
+/// Is `method` one that acts for the person in the UI, and so is refused
+/// unless [`ui_automation`] is on?
+///
+/// A command is anything on the palette — Trust Project, Run Test, a task —
+/// and a code action can run the project's code too (a failed job's retry,
+/// an evaluation). Every Cascade action drives the person's own session:
+/// prompting it, answering its cards, undoing its turns, taking down its
+/// worktrees.
+fn drives_ui_as_person(method: &str) -> bool {
+    matches!(
+        method,
+        "key" | "click" | "dialog" | "command" | "apply_code_action" | "cascade"
+    )
 }
 
 /// Resolve the path a `propose_edit` names against the workspace, and refuse
@@ -466,7 +474,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
     // Audit everything the agent does.
     state.agent_log_push(method, log_summary(req));
 
-    if drives_ui_as_person(method, req) && !ui_automation() {
+    if drives_ui_as_person(method) && !ui_automation() {
         let _ = reply.send(json!({
             "ok": false,
             "error": format!(
@@ -675,12 +683,15 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             let data = state.project.laravel.get_untracked();
             let schema = state.db.schema_cache.get_untracked();
             let rules = state.project.rules.get_untracked();
+            // The rules are instructions to an agent, written by whoever
+            // wrote the project: not handed out until it is trusted.
+            let trusted = state.trusted.get_untracked();
             std::thread::spawn(move || {
                 let data = data.unwrap_or_else(|| Arc::new(e_laravel::laravel::load(&root)));
                 let mut map = e_laravel::project_map::build(&root, &data, &schema, &request);
                 // Whatever was asked for: an agent reading the map should
                 // know the rules it works under.
-                if !rules.is_empty() {
+                if trusted && !rules.is_empty() {
                     map["rules"] = crate::project_rules::rules_json(&rules);
                 }
                 map["ok"] = json!(true);
@@ -692,6 +703,15 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
 
         // ---- The project's own rules (async when checking) ----------------
         "rules" => {
+            // Instructions to an agent, written by whoever wrote the project.
+            if !state.trusted.get_untracked() {
+                let _ = reply.send(json!({
+                    "ok": false,
+                    "error": "this project isn't trusted yet, so e doesn't hand its rules to \
+                              an agent (Trust Project to allow it)",
+                }));
+                return;
+            }
             let root = state.root.get_untracked();
             let rules = state.project.rules.get_untracked();
             let check = req.get("check").and_then(|c| c.as_bool()).unwrap_or(false);
@@ -1392,19 +1412,28 @@ mod tests {
 
     #[test]
     fn only_acting_for_the_person_needs_automation() {
-        for m in ["key", "click", "dialog"] {
-            assert!(drives_ui_as_person(m, &json!({})));
+        // `command` reaches Trust Project and Run Test.
+        for m in [
+            "key",
+            "click",
+            "dialog",
+            "command",
+            "apply_code_action",
+            "cascade",
+        ] {
+            assert!(drives_ui_as_person(m), "{m}");
         }
-        assert!(drives_ui_as_person(
-            "cascade",
-            &json!({"action": "answer", "index": 3, "choice": "allow"})
-        ));
-        assert!(!drives_ui_as_person(
-            "cascade",
-            &json!({"action": "send", "text": "hi"})
-        ));
-        for m in ["context", "ui_state", "command", "propose_edit", "run"] {
-            assert!(!drives_ui_as_person(m, &json!({})));
+        // Reading, and what asks the person first (`run`, `tinker`).
+        for m in [
+            "context",
+            "ui_state",
+            "commands",
+            "code_actions",
+            "propose_edit",
+            "run",
+            "tinker",
+        ] {
+            assert!(!drives_ui_as_person(m), "{m}");
         }
     }
 }

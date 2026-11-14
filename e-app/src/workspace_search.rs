@@ -27,7 +27,12 @@ const MAX_FILE_BYTES: u64 = 2_000_000;
 /// both directions: a project's *tracked* `vendor/` (like this repo's vendored
 /// Floem) stays searchable, while a Laravel project's *ignored* `vendor/` does
 /// not — without either being hardcoded here.
-const ALWAYS_SKIP: &[&str] = &[".git", "target", "node_modules"];
+///
+/// Dot-files are walked too: a tracked `.github/workflows/ci.yml` or
+/// `.env.example` is part of the project. A `.env` stays out because it is
+/// gitignored, not because its name starts with a dot. Only the version
+/// control stores themselves are always skipped.
+const ALWAYS_SKIP: &[&str] = &[".git", ".hg", ".svn", ".jj", "target", "node_modules"];
 
 /// How a query is interpreted. Shared by search and replace so they cannot
 /// drift apart again.
@@ -61,6 +66,12 @@ impl ReplacePlan {
         self.files.len()
     }
 
+    /// The files the preview listed, by canonical path, to tell whether an
+    /// editor tab (whose path may be spelled differently) is one of them.
+    pub fn canonical_paths(&self) -> std::collections::HashSet<PathBuf> {
+        self.files.iter().map(|(p, _)| canonical(p)).collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.files.is_empty()
     }
@@ -73,6 +84,11 @@ pub struct ReplaceOutcome {
     pub matches_replaced: usize,
     /// Files that matched but could not be written, with the reason.
     pub failures: Vec<(PathBuf, String)>,
+}
+
+/// `path` resolved, or as it is when it can't be (it no longer exists).
+pub fn canonical(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Build the matcher used by *both* search and replace.
@@ -146,7 +162,7 @@ fn walk_text_files(roots: &[PathBuf], open: &OpenTexts, mut visit: impl FnMut(Te
         builder.add(root);
     }
     builder
-        .hidden(true)
+        .hidden(false)
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
@@ -287,7 +303,9 @@ pub fn plan_replace(
     plan
 }
 
-/// Apply a Replace All. Files are re-matched as they are read, so a file that
+/// Apply a Replace All to the files `plan` listed, and no others: a file
+/// that appeared or started matching after the preview was shown is left
+/// alone. Files are re-matched as they are read, so a listed file that
 /// changed since the plan was built is handled as it is now, not as it was.
 ///
 /// Files open in the editor (`open`) are left alone: the editor replaces in
@@ -300,17 +318,21 @@ pub fn apply_replace(
     opts: SearchOpts,
     replacement: &str,
     open: &OpenTexts,
+    plan: &ReplacePlan,
 ) -> ReplaceOutcome {
     let mut outcome = ReplaceOutcome::default();
     let Some(re) = matcher(query, opts) else {
         return outcome;
     };
+    // The walker hands back the same paths it gave the plan.
+    let listed: std::collections::HashSet<&Path> =
+        plan.files.iter().map(|(p, _)| p.as_path()).collect();
     // Written as the walk goes rather than buffered to the end: this only ever
     // rewrites the *contents* of files the walker has already handed us, so it
     // cannot make the walker visit its own output — and buffering every new
     // file body would put the whole changeset in memory at once.
     walk_text_files(roots, open, |file| {
-        if file.open {
+        if file.open || !listed.contains(file.path) {
             return true;
         }
         let ranges = match_ranges(file.content, &re);
@@ -342,6 +364,18 @@ mod tests {
 
     fn none() -> OpenTexts {
         OpenTexts::new()
+    }
+
+    /// Plan, then apply what the plan listed, as Replace All does.
+    fn replace(
+        roots: &[PathBuf],
+        query: &str,
+        opts: SearchOpts,
+        replacement: &str,
+        open: &OpenTexts,
+    ) -> ReplaceOutcome {
+        let plan = plan_replace(roots, query, opts, open);
+        apply_replace(roots, query, opts, replacement, open, &plan)
     }
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -416,7 +450,7 @@ mod tests {
         let dir = scratch(&[("a.txt", "x x\n"), ("b.txt", "x\n"), ("c.txt", "none\n")]);
         let roots = vec![dir.clone()];
         let plan = plan_replace(&roots, "x", insensitive(), &none());
-        let out = apply_replace(&roots, "x", insensitive(), "y", &none());
+        let out = apply_replace(&roots, "x", insensitive(), "y", &none(), &plan);
         assert_eq!(plan.file_count(), out.files_changed);
         assert_eq!(plan.total_matches, out.matches_replaced);
         assert_eq!(read(&dir, "c.txt"), "none\n");
@@ -439,7 +473,7 @@ mod tests {
         assert_eq!(hits.len(), 1, "only the tracked file should match");
         assert!(hits[0].path.ends_with("app/User.php"));
 
-        apply_replace(&roots, "secret", insensitive(), "redacted", &none());
+        replace(&roots, "secret", insensitive(), "redacted", &none());
         assert_eq!(read(&dir, "app/User.php"), "redacted\n");
         assert_eq!(
             read(&dir, "vendor/laravel/framework/src/App.php"),
@@ -478,7 +512,7 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert!(hits[0].path.ends_with("app/User.php"));
 
-        apply_replace(&roots, "secret", insensitive(), "redacted", &none());
+        replace(&roots, "secret", insensitive(), "redacted", &none());
         assert_eq!(read(&dir, "app/User.php"), "redacted\n");
         assert_eq!(read(&dir, "vendor/pkg/File.php"), "secret\n");
 
@@ -551,7 +585,7 @@ mod tests {
     fn case_insensitive_replace_writes_the_replacement_verbatim() {
         let dir = scratch(&[("a.txt", "User user USER\n")]);
         let roots = vec![dir.clone()];
-        apply_replace(&roots, "user", insensitive(), "member", &none());
+        replace(&roots, "user", insensitive(), "member", &none());
         assert_eq!(read(&dir, "a.txt"), "member member member\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -592,7 +626,7 @@ mod tests {
             1
         );
 
-        let out = apply_replace(&roots, "hello", insensitive(), "hei", &none());
+        let out = replace(&roots, "hello", insensitive(), "hei", &none());
         assert_eq!(out.files_changed, 2, "{out:?}");
         assert_eq!(
             std::fs::read(dir.join("utf16.txt")).unwrap(),
@@ -603,14 +637,14 @@ mod tests {
             b"\xEF\xBB\xBFhei bom\n"
         );
 
-        let out = apply_replace(&roots, "øl", insensitive(), "øl!", &none());
+        let out = replace(&roots, "øl", insensitive(), "øl!", &none());
         assert_eq!(out.files_changed, 1);
         assert_eq!(
             std::fs::read(dir.join("latin1.txt")).unwrap(),
             b"Bl\xe5b\xe6r og \xf8l!\n"
         );
         // A replacement the file's encoding can't hold leaves it as it was.
-        let out = apply_replace(&roots, "øl", insensitive(), "→", &none());
+        let out = replace(&roots, "øl", insensitive(), "→", &none());
         assert_eq!(out.files_changed, 0);
         assert_eq!(out.failures.len(), 1, "{out:?}");
         assert_eq!(
@@ -642,7 +676,7 @@ mod tests {
             2
         );
 
-        let out = apply_replace(&roots, "needle", insensitive(), "pin", &open);
+        let out = replace(&roots, "needle", insensitive(), "pin", &open);
         assert_eq!(out.files_changed, 1, "only the closed file is written");
         assert_eq!(
             std::fs::read_to_string(dir.join("open.php")).unwrap(),
@@ -668,6 +702,67 @@ mod tests {
     }
 
     #[test]
+    fn only_the_files_the_preview_listed_are_rewritten() {
+        // A file that starts matching after the preview was shown wasn't in
+        // it, so Replace All leaves it be.
+        let dir = scratch(&[("shown.txt", "needle\n"), ("later.txt", "nothing\n")]);
+        let roots = vec![dir.clone()];
+        let plan = plan_replace(&roots, "needle", insensitive(), &none());
+        assert_eq!(plan.file_count(), 1);
+        std::fs::write(dir.join("later.txt"), "needle\n").unwrap();
+        let out = apply_replace(&roots, "needle", insensitive(), "pin", &none(), &plan);
+        assert_eq!(out.files_changed, 1);
+        assert_eq!(read(&dir, "shown.txt"), "pin\n");
+        assert_eq!(read(&dir, "later.txt"), "needle\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn plan_paths_match_however_a_tab_spells_them() {
+        let dir = scratch(&[("a/b.txt", "needle\n"), ("c.txt", "needle\n")]);
+        let roots = vec![dir.clone()];
+        let plan = plan_replace(&roots, "needle", insensitive(), &none());
+        let listed = plan.canonical_paths();
+        assert!(listed.contains(&canonical(&dir.join("a/../a/b.txt"))));
+        assert!(listed.contains(&canonical(&dir.join("c.txt"))));
+        assert!(!listed.contains(&canonical(&dir.join("d.txt"))));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tracked_dotfiles_are_searched_and_ignored_ones_are_not() {
+        let dir = scratch(&[
+            (".gitignore", ".env\n"),
+            (".env", "APP_KEY=needle\n"),
+            (".env.example", "APP_KEY=needle\n"),
+            (".github/workflows/ci.yml", "run: needle\n"),
+            (".git/config", "needle\n"),
+        ]);
+        let roots = vec![dir.clone()];
+        let mut files: Vec<String> =
+            search(&roots, "needle", insensitive(), 10, &none(), &|| false)
+                .iter()
+                .map(|h| {
+                    h.path
+                        .strip_prefix(&dir)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+        files.sort();
+        assert_eq!(files, [".env.example", ".github/workflows/ci.yml"]);
+
+        let plan = plan_replace(&roots, "needle", insensitive(), &none());
+        assert_eq!(plan.file_count(), 2);
+        replace(&roots, "needle", insensitive(), "pin", &none());
+        assert_eq!(read(&dir, ".env"), "APP_KEY=needle\n");
+        assert_eq!(read(&dir, ".git/config"), "needle\n");
+        assert_eq!(read(&dir, ".env.example"), "APP_KEY=pin\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn splice_rewrites_every_range() {
         assert_eq!(splice("a b a", &[(0, 1), (4, 5)], "z"), "z b z");
         assert_eq!(splice("abc", &[], "z"), "abc");
@@ -680,7 +775,7 @@ mod tests {
         assert!(search(&roots, "", insensitive(), 10, &none(), &|| false).is_empty());
         assert!(plan_replace(&roots, "", insensitive(), &none()).is_empty());
         assert_eq!(
-            apply_replace(&roots, "", insensitive(), "x", &none()),
+            replace(&roots, "", insensitive(), "x", &none()),
             ReplaceOutcome::default()
         );
         assert_eq!(read(&dir, "a.txt"), "anything\n");

@@ -87,10 +87,12 @@ impl AppState {
 
     /// Carry out the staged replace after the user confirmed it.
     ///
-    /// Files open in the editor are replaced in the editor's text — unsaved
-    /// edits included, as one change that undo takes back — and a file that
-    /// had no unsaved edits is saved again. The rest are rewritten on disk,
-    /// in the encoding each was read in.
+    /// Only the files the preview listed are touched. Those open in the
+    /// editor are replaced in the editor's text — unsaved edits included, as
+    /// one change that undo takes back — and a file that had no unsaved edits
+    /// is saved again. The rest are rewritten on disk, in the encoding each
+    /// was read in. An open tab the walk never reached (a gitignored
+    /// `vendor/` file, say) wasn't in the preview, so it is left alone.
     pub fn confirm_replace_in_workspace(&self) {
         let Some(pending) = self.replace_confirm.get_untracked() else {
             return;
@@ -99,6 +101,7 @@ impl AppState {
         let roots = self.roots.get_untracked();
         let open = self.open_texts();
 
+        let listed = pending.plan.canonical_paths();
         let mut in_editor = (0usize, 0usize); // (files, matches)
         let mut left_unsaved = 0usize;
         if let Some(re) = workspace_search::matcher(&pending.query, pending.opts) {
@@ -106,7 +109,7 @@ impl AppState {
                 let Some(path) = buf.file.path.clone() else {
                     continue;
                 };
-                if !roots.iter().any(|r| path.starts_with(r)) {
+                if !listed.contains(&workspace_search::canonical(&path)) {
                     continue;
                 }
                 let text = buf.doc.text().to_string();
@@ -162,6 +165,7 @@ impl AppState {
                 pending.opts,
                 &pending.replacement,
                 &open,
+                &pending.plan,
             ));
         });
     }

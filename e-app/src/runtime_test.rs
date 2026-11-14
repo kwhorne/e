@@ -73,7 +73,8 @@ impl AppState {
     /// database and assert what it did — and open it.
     pub fn runtime_test(&self, id: &str) {
         let Some(r) = self
-            .runtime_reqs
+            .runtime
+            .reqs
             .with_untracked(|list| list.iter().find(|r| r.id == id).cloned())
         else {
             return;
@@ -152,7 +153,7 @@ impl AppState {
             return;
         }
         // What the panel has, for Clockwork (Grove is asked afresh below).
-        let panel: Vec<RuntimeReq> = self.runtime_reqs.get_untracked();
+        let panel: Vec<RuntimeReq> = self.runtime.reqs.get_untracked();
         let site = self.grove_site();
         std::thread::spawn(move || {
             let found: Result<Captured, String> = (|| {

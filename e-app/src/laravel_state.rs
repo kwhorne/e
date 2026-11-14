@@ -18,9 +18,9 @@ impl AppState {
     // ---- Semantic search -----------------------------------------------
 
     pub fn toggle_semantic_search(&self) {
-        let open = !self.sem_open.get_untracked();
-        self.sem_open.set(open);
-        if open && self.sem_index.get_untracked().borrow().is_empty() {
+        let open = !self.sem.open.get_untracked();
+        self.sem.open.set(open);
+        if open && self.sem.index.get_untracked().borrow().is_empty() {
             self.build_semantic_index();
         }
     }
@@ -29,8 +29,8 @@ impl AppState {
     /// is available, otherwise a lexical index).
     pub fn build_semantic_index(&self) {
         let roots = self.roots.get_untracked();
-        let status = self.sem_status;
-        let idx_sig = self.sem_index;
+        let status = self.sem.status;
+        let idx_sig = self.sem.index;
         status.set("Indexing project…".to_string());
         let cx = self.cx;
         let send = create_ext_action(
@@ -88,22 +88,23 @@ impl AppState {
 
     /// Run the current semantic query against the index.
     pub fn run_semantic_search(&self) {
-        let query = self.sem_query.get_untracked();
+        let query = self.sem.query.get_untracked();
         if query.trim().is_empty() {
             return;
         }
-        let index_rc = self.sem_index.get_untracked();
+        let index_rc = self.sem.index.get_untracked();
         if index_rc.borrow().is_empty() {
-            self.sem_status
+            self.sem
+                .status
                 .set("Building index — try again shortly…".to_string());
             self.build_semantic_index();
             return;
         }
-        let results = self.sem_results;
+        let results = self.sem.results;
         if index_rc.borrow().semantic() {
             // Embed the query off-thread, then rank on the UI thread.
             let model = index_rc.borrow().model.clone();
-            let idx_sig = self.sem_index;
+            let idx_sig = self.sem.index;
             let q = query.clone();
             let send = create_ext_action(self.cx, move |qvec: Option<Vec<f32>>| {
                 let Some(qvec) = qvec else {
@@ -131,7 +132,7 @@ impl AppState {
     pub fn open_semantic_hit(&self, hit: &crate::semantic::SemHit) {
         let uri = format!("file://{}", hit.path.display());
         self.jump_to(&uri, hit.line.saturating_sub(1), 0);
-        self.sem_open.set(false);
+        self.sem.open.set(false);
     }
 
     // ---- Eloquent relationship graph -----------------------------------

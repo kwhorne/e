@@ -332,22 +332,22 @@ impl AppState {
     }
 
     pub fn toggle_migrations(&self) {
-        let open = !self.migrations_open.get_untracked();
-        self.migrations_open.set(open);
+        let open = !self.migrations.open.get_untracked();
+        self.migrations.open.set(open);
         if open {
             self.refresh_migrations();
         }
     }
 
     pub fn refresh_migrations(&self) {
-        if self.migrations_loading.get_untracked() {
+        if self.migrations.loading.get_untracked() {
             return;
         }
-        self.migrations_loading.set(true);
+        self.migrations.loading.set(true);
         let root = self.root.get_untracked();
-        let list = self.migrations;
-        let err = self.migrations_error;
-        let loading = self.migrations_loading;
+        let list = self.migrations.list;
+        let err = self.migrations.error;
+        let loading = self.migrations.loading;
         self.spawn_bg(
             move || status(&root),
             move |res: Result<Vec<Migration>, String>| {
@@ -403,10 +403,10 @@ impl AppState {
             move |drift: Option<e_laravel::migration_drift::Drift>| {
                 let shown = drift.filter(|d| {
                     !d.is_empty()
-                        && state.migration_drift_dismissed.get_untracked().as_ref() != Some(d)
+                        && state.migrations.drift_dismissed.get_untracked().as_ref() != Some(d)
                 });
-                if state.migration_drift.get_untracked() != shown {
-                    state.migration_drift.set(shown);
+                if state.migrations.drift.get_untracked() != shown {
+                    state.migrations.drift.set(shown);
                 }
             },
         );
@@ -414,9 +414,10 @@ impl AppState {
 
     /// Wave the bar away until the drift changes.
     pub fn dismiss_migration_drift(&self) {
-        self.migration_drift_dismissed
-            .set(self.migration_drift.get_untracked());
-        self.migration_drift.set(None);
+        self.migrations
+            .drift_dismissed
+            .set(self.migrations.drift.get_untracked());
+        self.migrations.drift.set(None);
     }
 
     /// `php artisan migrate`, behind a `grove db snapshot` when Grove can take
@@ -451,7 +452,7 @@ impl AppState {
 /// The bar above the editor when the database and the checkout disagree on
 /// migrations.
 pub fn migration_drift_bar(state: AppState) -> impl IntoView {
-    let drift = state.migration_drift;
+    let drift = state.migrations.drift;
     let button = |text: &'static str| {
         label(move || text.to_string()).style(|s| {
             s.padding_horiz(10.0)
@@ -480,7 +481,7 @@ pub fn migration_drift_bar(state: AppState) -> impl IntoView {
             .on_click_stop(move |_| state.migrations_run())
             .style(move |s| s.apply_if(!pending(), |s| s.hide())),
         button("Show migrations").on_click_stop(move |_| {
-            if !state.migrations_open.get_untracked() {
+            if !state.migrations.open.get_untracked() {
                 state.toggle_migrations();
             }
         }),
@@ -522,11 +523,11 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
     let title = label(|| "Migrations".to_string())
         .style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
     let summary = label(move || {
-        let (ran, pending) = state.migrations.with(|m| {
+        let (ran, pending) = state.migrations.list.with(|m| {
             let p = m.iter().filter(|x| x.pending()).count();
             (m.len() - p, p)
         });
-        if state.migrations_loading.get() {
+        if state.migrations.loading.get() {
             "reading migrate:status…".to_string()
         } else if pending > 0 {
             format!("{ran} ran · {pending} pending")
@@ -552,7 +553,7 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.migrations_open.set(false));
+        .on_click_stop(move |_| state.migrations.open.set(false));
     let header = stack((title, summary, run, rollback, refresh, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -564,9 +565,9 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
             .border_color(theme::border())
     });
 
-    let error = label(move || state.migrations_error.get()).style(move |s| {
+    let error = label(move || state.migrations.error.get()).style(move |s| {
         let s = s.padding(14.0).color(amber()).font_size(12.0);
-        if state.migrations_error.with(|e| e.is_empty()) {
+        if state.migrations.error.with(|e| e.is_empty()) {
             s.hide()
         } else {
             s
@@ -574,7 +575,7 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
     });
 
     let rows = dyn_stack(
-        move || state.migrations.get(),
+        move || state.migrations.list.get(),
         |m| m.name.clone(),
         move |m| {
             let name = m.name.clone();
@@ -638,7 +639,7 @@ pub fn migrations_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 96));
-        if state.migrations_open.get() {
+        if state.migrations.open.get() {
             s
         } else {
             s.hide()
@@ -662,4 +663,21 @@ mod tests {
         // Nothing to migrate: the header alone parses to nothing.
         assert!(parse_status("  Migration name .... Batch / Status\n").is_empty());
     }
+}
+
+/// Migrations: their status, the panel and the drift bar.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct MigrationsPanel {
+    /// The Migrations panel.
+    pub open: floem::reactive::RwSignal<bool>,
+    pub list: floem::reactive::RwSignal<Vec<crate::migrations::Migration>>,
+    pub error: floem::reactive::RwSignal<String>,
+    pub loading: floem::reactive::RwSignal<bool>,
+    /// Where the database and the checkout disagree on migrations, shown in
+    /// a bar above the editor; `None` when they agree.
+    pub drift: floem::reactive::RwSignal<Option<e_laravel::migration_drift::Drift>>,
+    /// The drift last waved away, which doesn't come back until it changes.
+    pub drift_dismissed: floem::reactive::RwSignal<Option<e_laravel::migration_drift::Drift>>,
 }

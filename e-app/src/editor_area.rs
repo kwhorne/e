@@ -349,7 +349,7 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 b.doc.clone(),
                 b.inlay_hints,
                 b.ghost,
-                state.runtime_lenses,
+                state.runtime.lenses,
                 b.file.path.clone(),
                 b.annotations,
                 b.alerts,

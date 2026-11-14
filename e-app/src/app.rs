@@ -481,9 +481,9 @@ fn app_view() -> impl IntoView {
     }
 
     // Bridge terminal output ticks into a repaint signal.
-    if let Some(rx) = state.term_rx.try_update(|opt| opt.take()).flatten() {
+    if let Some(rx) = state.term.rx.try_update(|opt| opt.take()).flatten() {
         let ticks = create_signal_from_channel(rx);
-        let term_tick = state.term_tick;
+        let term_tick = state.term.tick;
         create_effect(move |_| {
             if ticks.get().is_some() {
                 term_tick.update(|t| *t += 1);
@@ -558,7 +558,7 @@ fn app_view() -> impl IntoView {
     state.load_db_schema_cache();
     // Runtime lenses follow the captured requests and the routes they match.
     create_effect(move |_| {
-        state.runtime_reqs.track();
+        state.runtime.reqs.track();
         state.laravel.track();
         state.grove.sql_capture.track();
         state.refresh_runtime_lenses();
@@ -633,7 +633,7 @@ fn app_view() -> impl IntoView {
                 if state.log_open.get_untracked() {
                     state.refresh_laravel_log();
                 }
-                if state.runtime_open.get_untracked() {
+                if state.runtime.open.get_untracked() {
                     state.poll_runtime();
                 }
                 let tick = lens_tick.get().wrapping_add(1);
@@ -649,7 +649,7 @@ fn app_view() -> impl IntoView {
                 // migrations; while the bar says it hasn't, every 10 s, so a
                 // `migrate` run in a terminal takes it down.
                 if tick == 4
-                    || (tick % 20 == 12 && state.migration_drift.with_untracked(Option::is_some))
+                    || (tick % 20 == 12 && state.migrations.drift.with_untracked(Option::is_some))
                 {
                     state.check_migration_drift();
                 }
@@ -665,7 +665,7 @@ fn app_view() -> impl IntoView {
                 if state.grove.panel_open.get_untracked() {
                     state.refresh_grove_panel();
                 }
-                if state.model_wizard_open.get_untracked() {
+                if state.model_wizard.open.get_untracked() {
                     state.refresh_model_wizard_preview();
                 }
             }
@@ -877,7 +877,7 @@ fn app_view() -> impl IntoView {
             // regressions). New modal panels go here.
             overlay_group(vec![
                 (
-                    state.runtime_open,
+                    state.runtime.open,
                     crate::runtime_view::runtime_panel(state).into_any(),
                 ),
                 (
@@ -885,11 +885,11 @@ fn app_view() -> impl IntoView {
                     crate::grove_view::grove_panel(state).into_any(),
                 ),
                 (
-                    state.migrations_open,
+                    state.migrations.open,
                     crate::migrations::migrations_panel(state).into_any(),
                 ),
                 (
-                    state.verify_open,
+                    state.verify.open,
                     crate::verify_view::verify_panel(state).into_any(),
                 ),
                 (
@@ -921,7 +921,7 @@ fn app_view() -> impl IntoView {
                     crate::undo_view::undo_tree_panel(state).into_any(),
                 ),
                 (
-                    state.sem_open,
+                    state.sem.open,
                     crate::semantic_view::semantic_panel(state).into_any(),
                 ),
                 (

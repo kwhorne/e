@@ -82,7 +82,7 @@ fn agent_header(state: AppState) -> impl IntoView {
 /// The scrollable agent screen + cursor + keyboard input.
 fn agent_body(state: AppState) -> impl IntoView {
     let content = rich_text(move || {
-        state.term_tick.get();
+        state.term.tick.get();
         let runs = state.agent_runs();
         let family: Vec<FamilyOwned> = FamilyOwned::parse_list(&theme::mono_family()).collect();
         let default = Attrs::new()
@@ -121,7 +121,7 @@ fn agent_body(state: AppState) -> impl IntoView {
     .style(|s| s.padding(8.0));
 
     let cursor_block = empty().style(move |s| {
-        state.term_tick.get();
+        state.term.tick.get();
         let (cw, lh) = char_size();
         match state.agent_cursor() {
             Some((row, col)) => s

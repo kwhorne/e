@@ -562,7 +562,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 .and_then(|t| t.as_str())
                 .unwrap_or("editor")
             {
-                "terminal" if !state.terminal_open.get_untracked() => state.toggle_terminal(),
+                "terminal" if !state.term.open.get_untracked() => state.toggle_terminal(),
                 "agent" if !state.agent.open.get_untracked() => state.toggle_agent(),
                 "editor" => {
                     if let Some(id) = state.focused_active_id() {

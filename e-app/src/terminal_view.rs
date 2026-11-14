@@ -24,7 +24,8 @@ fn terminal_tabs(state: AppState) -> impl IntoView {
     let tabs = dyn_stack(
         move || {
             state
-                .terminals
+                .term
+                .sessions
                 .get()
                 .into_iter()
                 .enumerate()
@@ -34,9 +35,8 @@ fn terminal_tabs(state: AppState) -> impl IntoView {
         move |(i, t)| {
             let id = t.id;
             let name = t.name;
-            let is_active = move || {
-                state.active_terminal.get() == Some(id) || state.active_terminal2.get() == Some(id)
-            };
+            let is_active =
+                move || state.term.active.get() == Some(id) || state.term.active2.get() == Some(id);
             stack((
                 label(move || {
                     let n = name.get();
@@ -150,13 +150,13 @@ pub(crate) fn key_to_bytes(ke: &floem::keyboard::KeyEvent) -> Option<Vec<u8>> {
 /// Render one terminal pane: a scrollable coloured screen + cursor + input.
 fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
     let id_sig = if pane_idx == 1 {
-        state.active_terminal2
+        state.term.active2
     } else {
-        state.active_terminal
+        state.term.active
     };
 
     let content = rich_text(move || {
-        state.term_tick.get();
+        state.term.tick.get();
         let runs = state.term_runs_of(id_sig.get());
         let family: Vec<FamilyOwned> = FamilyOwned::parse_list(&theme::mono_family()).collect();
         let default = Attrs::new()
@@ -198,7 +198,7 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
     // layout engine only supports foreground colour.
     let bg_layer = dyn_stack(
         move || {
-            state.term_tick.get();
+            state.term.tick.get();
             let runs = state.term_runs_of(id_sig.get());
             let mut rects: Vec<(usize, usize, usize, u8, u8, u8)> = Vec::new();
             for (li, line) in runs.iter().enumerate() {
@@ -229,7 +229,7 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
     .style(|s| s.absolute().inset(0.0));
 
     let cursor_block = empty().style(move |s| {
-        state.term_tick.get();
+        state.term.tick.get();
         let (cw, lh) = char_size();
         match state.term_cursor_of(id_sig.get()) {
             Some((row, col)) => s
@@ -269,15 +269,15 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
         })
         .keyboard_navigable()
         .request_focus(move || {
-            state.terminal_open.get();
-            state.term_split.get();
+            state.term.open.get();
+            state.term.split.get();
         })
         .on_event_cont(EventListener::FocusGained, move |_| {
-            state.terminal_focused.set(true);
-            state.term_focus_pane.set(pane_idx);
+            state.term.focused.set(true);
+            state.term.focus_pane.set(pane_idx);
         })
         .on_event_cont(EventListener::FocusLost, move |_| {
-            state.terminal_focused.set(false)
+            state.term.focused.set(false)
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
@@ -306,7 +306,7 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
 
 pub fn terminal_panel(state: AppState) -> impl IntoView {
     let panes = dyn_container(
-        move || state.term_split.get(),
+        move || state.term.split.get(),
         move |split| {
             if split {
                 stack((
@@ -331,10 +331,10 @@ pub fn terminal_panel(state: AppState) -> impl IntoView {
         let s = s
             .flex_col()
             .width_full()
-            .height(state.term_height.get())
+            .height(state.term.height.get())
             .border_top(1.0)
             .border_color(theme::border());
-        if state.terminal_open.get() {
+        if state.term.open.get() {
             s
         } else {
             s.hide()
@@ -358,9 +358,9 @@ fn term_resize_handle(state: AppState) -> impl IntoView {
         if let Event::PointerMove(pe) = e {
             if let Some(start) = drag_start.get_untracked() {
                 let delta = pe.pos.y - start;
-                let cur = state.term_height.get_untracked();
+                let cur = state.term.height.get_untracked();
                 // Dragging up (negative delta) makes the panel taller.
-                state.term_height.set((cur - delta).clamp(120.0, 900.0));
+                state.term.height.set((cur - delta).clamp(120.0, 900.0));
             }
         }
     })
@@ -375,7 +375,7 @@ fn term_resize_handle(state: AppState) -> impl IntoView {
 
 /// The terminal rename prompt overlay.
 pub fn term_rename_prompt(state: AppState) -> impl IntoView {
-    let input = text_input(state.term_rename_input)
+    let input = text_input(state.term.rename_input)
         .on_enter(move || state.confirm_term_rename())
         .style(|s| {
             theme::input_colors(s)
@@ -386,12 +386,12 @@ pub fn term_rename_prompt(state: AppState) -> impl IntoView {
                 .border_radius(4.0)
         })
         .request_focus(move || {
-            state.term_rename_id.get();
+            state.term.rename_id.get();
         })
         .on_key_down(
             Key::Named(NamedKey::Escape),
             |_| true,
-            move |_| state.term_rename_id.set(None),
+            move |_| state.term.rename_id.set(None),
         );
 
     let box_ = stack((
@@ -417,11 +417,11 @@ pub fn term_rename_prompt(state: AppState) -> impl IntoView {
                 .size_full()
                 .justify_center()
                 .padding_top(120.0);
-            if state.term_rename_id.get().is_some() {
+            if state.term.rename_id.get().is_some() {
                 s
             } else {
                 s.hide()
             }
         })
-        .on_click_stop(move |_| state.term_rename_id.set(None))
+        .on_click_stop(move |_| state.term.rename_id.set(None))
 }

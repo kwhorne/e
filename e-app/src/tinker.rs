@@ -30,7 +30,7 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .cursor(floem::style::CursorStyle::Pointer);
-            if state.tinker_running.get() {
+            if state.tinker.running.get() {
                 base.background(theme::bg_hover()).color(theme::fg_dim())
             } else {
                 base.background(theme::accent()).color(theme::on_accent())
@@ -44,7 +44,7 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.tinker_open.set(false));
+        .on_click_stop(move |_| state.tinker.open.set(false));
     let header = stack((title, run, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -70,7 +70,7 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
             move |_| state.run_tinker(doc_key.text().to_string()),
         );
 
-    let output = scroll(label(move || state.tinker_output.get()).style(|s| {
+    let output = scroll(label(move || state.tinker.output.get()).style(|s| {
         s.font_family(theme::mono_family())
             .font_size(12.0)
             .padding(10.0)
@@ -102,10 +102,20 @@ pub fn tinker_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.tinker_open.get() {
+        if state.tinker.open.get() {
             s
         } else {
             s.hide()
         }
     })
+}
+
+/// The Tinker panel.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct TinkerPanel {
+    pub open: floem::reactive::RwSignal<bool>,
+    pub output: floem::reactive::RwSignal<String>,
+    pub running: floem::reactive::RwSignal<bool>,
 }

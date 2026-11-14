@@ -24,8 +24,17 @@ use floem::views::editor::Editor;
 
 pub use crate::debug::DebugPanel;
 pub use crate::grove_state::GrovePanel;
+pub use crate::migrations::MigrationsPanel;
+pub use crate::model_wizard::ModelWizardPanel;
+pub use crate::request::RequestPanel;
 pub use crate::review::ReviewPanel;
+pub use crate::runtime::RuntimePanel;
+pub use crate::semantic::SemanticSearch;
 pub use crate::tdd_state::TestsPanel;
+pub use crate::terminal_state::TerminalPanel;
+pub use crate::tinker::TinkerPanel;
+pub use crate::updater::UpdatePanel;
+pub use crate::verify::VerifyPanel;
 use lsp_types::{Diagnostic, TextEdit};
 
 use e_agent::{AgentClient, ChatState, Streaming};
@@ -46,7 +55,6 @@ use crate::lsp_registry;
 use crate::outline::OutlineItem;
 use crate::picker::{Picker, PickerItem};
 use crate::rename::RenameState;
-use crate::runtime::RuntimeReq;
 use crate::session::{self, SessionData};
 use crate::styling::{
     build_diag_lines, BpMarks, BracketMarks, DiagLines, FindMarks, FindSpan, GitMarks, Highlights,
@@ -823,28 +831,8 @@ pub struct AppState {
     pub picker: Picker,
     /// A planned workspace replace awaiting confirmation (`Some` shows the dialog).
     pub replace_confirm: RwSignal<Option<ReplaceConfirm>>,
-    /// Integrated terminal session (lazily spawned).
-    /// All open terminal sessions, in tab order.
-    pub terminals: RwSignal<Vec<TermSession>>,
-    /// Pane 0's active terminal session id.
-    pub active_terminal: RwSignal<Option<u64>>,
-    /// Pane 1's active terminal (split view).
-    pub active_terminal2: RwSignal<Option<u64>>,
-    /// Is the terminal split into two panes?
-    pub term_split: RwSignal<bool>,
-    /// Which terminal pane has focus (0 or 1).
-    pub term_focus_pane: RwSignal<u8>,
     pub(crate) next_term_id: RwSignal<u64>,
-    /// Terminal-rename prompt: the session id being renamed, and its input.
-    pub term_rename_id: RwSignal<Option<u64>>,
-    pub term_rename_input: RwSignal<String>,
-    pub terminal_open: RwSignal<bool>,
-    /// Whether the terminal panel currently has keyboard focus.
-    pub terminal_focused: RwSignal<bool>,
-    /// Bumped whenever the terminal produces output, to trigger a repaint.
-    pub term_tick: RwSignal<u64>,
     pub(crate) term_tx: RwSignal<Sender<()>>,
-    pub term_rx: RwSignal<Option<Receiver<()>>>,
     /// Document outline of the active buffer.
     pub outline: RwSignal<Vec<OutlineItem>>,
     /// Find-in-file state.
@@ -886,8 +874,6 @@ pub struct AppState {
 
     /// Draggable panel widths (pixels).
     pub sidebar_width: RwSignal<f64>,
-    /// Height of the bottom terminal panel (drag-resizable).
-    pub term_height: RwSignal<f64>,
 
     /// File-comparison panel: `(left name, right name, diff lines)` when open.
     pub file_diff: RwSignal<Option<(String, String, Vec<e_core::git::DiffLine>)>>,
@@ -897,31 +883,14 @@ pub struct AppState {
     pub code_actions_open: RwSignal<bool>,
 
     // ---- Tinker scratchpad ---------------------------------------------
-    pub tinker_open: RwSignal<bool>,
-    pub tinker_output: RwSignal<String>,
-    pub tinker_running: RwSignal<bool>,
 
     // ---- New Eloquent Model / pivot wizard ------------------------------
-    pub model_wizard_open: RwSignal<bool>,
-    /// `true` when the panel was opened for a pivot table.
-    pub model_wizard_pivot: RwSignal<bool>,
-    /// Bumped on open so the panel swaps in the right template.
-    pub model_wizard_reset: RwSignal<u64>,
-    pub model_wizard_doc: RwSignal<Option<std::rc::Rc<dyn floem::views::editor::text::Document>>>,
-    /// Preview: the files the current spec would create, or its errors.
-    pub model_wizard_files: RwSignal<Vec<String>>,
-    pub model_wizard_errors: RwSignal<Vec<String>>,
 
     // ---- Laravel architecture map --------------------------------------
     pub map_open: RwSignal<bool>,
     pub map_query: RwSignal<String>,
 
     // ---- Semantic search -----------------------------------------------
-    pub sem_open: RwSignal<bool>,
-    pub sem_query: RwSignal<String>,
-    pub sem_status: RwSignal<String>,
-    pub sem_results: RwSignal<Vec<crate::semantic::SemHit>>,
-    pub sem_index: RwSignal<Rc<RefCell<crate::semantic::SemIndex>>>,
 
     // ---- Undo tree -----------------------------------------------------
     pub undo_open: RwSignal<bool>,
@@ -949,31 +918,9 @@ pub struct AppState {
     pub related_items: RwSignal<Vec<(String, PathBuf)>>,
 
     // ---- Runtime insight (continuous Clockwork capture) ----------------
-    pub runtime_open: RwSignal<bool>,
-    /// What the editor shows at controller methods; see [`crate::runtime_lens`].
-    pub runtime_lenses: RwSignal<Arc<Vec<crate::runtime_lens::Lens>>>,
-    pub runtime_reqs: RwSignal<Vec<RuntimeReq>>,
-    pub runtime_expanded: RwSignal<Option<String>>,
-    pub runtime_polling: RwSignal<bool>,
     /// Agents waiting for fresh diagnostics on a file they just wrote.
     pub diag_waiters: RwSignal<Vec<DiagWaiter>>,
     diag_waiter_seq: RwSignal<u64>,
-    /// The Migrations panel.
-    pub migrations_open: RwSignal<bool>,
-    pub migrations: RwSignal<Vec<crate::migrations::Migration>>,
-    pub migrations_error: RwSignal<String>,
-    pub migrations_loading: RwSignal<bool>,
-    /// Where the database and the checkout disagree on migrations, shown in
-    /// a bar above the editor; `None` when they agree.
-    pub migration_drift: RwSignal<Option<e_laravel::migration_drift::Drift>>,
-    /// The drift last waved away, which doesn't come back until it changes.
-    pub migration_drift_dismissed: RwSignal<Option<e_laravel::migration_drift::Drift>>,
-    /// The in-progress "verify the fix" session, if any (see [`crate::verify`]).
-    pub verify_session: RwSignal<Option<crate::verify::VerifySession>>,
-    /// A verify measurement (baseline or after) is in flight.
-    pub verify_busy: RwSignal<bool>,
-    /// Whether the verify panel is open (single source of truth for visibility).
-    pub verify_open: RwSignal<bool>,
     // ---- Agent session review (see [`crate::review`]) ----
 
     // ---- Step-debugging (DAP session) ----------------------------------
@@ -990,17 +937,6 @@ pub struct AppState {
     pub log_lines: RwSignal<Vec<String>>,
 
     // ---- Request replay (from the architecture map) --------------------
-    pub req_open: RwSignal<bool>,
-    pub req_url: RwSignal<String>,
-    pub req_status: RwSignal<Option<u16>>,
-    pub req_time: RwSignal<String>,
-    pub req_body: RwSignal<String>,
-    /// Captured SQL queries `(sql, duration)` (via Clockwork if available).
-    pub req_queries: RwSignal<Vec<(String, String)>>,
-    pub req_error: RwSignal<Option<String>>,
-    pub req_running: RwSignal<bool>,
-    /// For an Inertia response: `(component, props)` shown as a tree.
-    pub req_inertia: RwSignal<Option<(String, serde_json::Value)>>,
 
     // ---- Autonomous TDD loop -------------------------------------------
     /// Every test's latest result across runs, so running one test doesn't
@@ -1009,12 +945,6 @@ pub struct AppState {
     pub test_outcomes: RwSignal<Vec<crate::testrun::TestCase>>,
 
     // ---- Auto-update ----------------------------------------------------
-    /// The available update, if GitHub reports a newer release.
-    pub update_info: RwSignal<Option<crate::updater::UpdateInfo>>,
-    /// Progress of the current check/install.
-    pub update_status: RwSignal<crate::updater::UpdateStatus>,
-    /// Whether the changelog is expanded in the update notice.
-    pub update_notes_open: RwSignal<bool>,
     /// Messages on screen (see [`crate::toast`]).
     pub toasts: RwSignal<Vec<crate::toast::Toast>>,
 
@@ -1068,6 +998,24 @@ pub struct AppState {
     pub git: GitPanel,
     /// The language servers: their clients, health and incoming events.
     pub lsp: LspState,
+    /// The integrated terminal: its sessions, panes and panel.
+    pub term: TerminalPanel,
+    /// Runtime Insight: the requests the app served and the lenses they put in the code.
+    pub runtime: RuntimePanel,
+    /// The request runner: what was sent and what came back.
+    pub req: RequestPanel,
+    /// Migrations: their status, the panel and the drift bar.
+    pub migrations: MigrationsPanel,
+    /// The model wizard: its spec, its plan and the panel.
+    pub model_wizard: ModelWizardPanel,
+    /// Semantic search: the index, the query and its results.
+    pub sem: SemanticSearch,
+    /// The Tinker panel.
+    pub tinker: TinkerPanel,
+    /// Verify: a route measured before and after a change.
+    pub verify: VerifyPanel,
+    /// The in-app updater's notice.
+    pub updater: UpdatePanel,
 }
 
 /// Extract the request path (`/foo/bar`) from a full replay URL.
@@ -1764,19 +1712,8 @@ impl AppState {
             project_rules: RwSignal::new(Arc::new(e_review::rules::Rules::default())),
             picker: Picker::new(),
             replace_confirm: RwSignal::new(None),
-            terminals: RwSignal::new(Vec::new()),
-            active_terminal: RwSignal::new(None),
-            active_terminal2: RwSignal::new(None),
-            term_split: RwSignal::new(false),
-            term_focus_pane: RwSignal::new(0),
             next_term_id: RwSignal::new(1),
-            term_rename_id: RwSignal::new(None),
-            term_rename_input: RwSignal::new(String::new()),
-            terminal_open: RwSignal::new(false),
-            terminal_focused: RwSignal::new(false),
-            term_tick: RwSignal::new(0),
             term_tx: RwSignal::new(term_tx),
-            term_rx: RwSignal::new(Some(term_rx)),
             outline: RwSignal::new(Vec::new()),
             find: FindState::new(),
             rename: RenameState::new(),
@@ -1795,26 +1732,11 @@ impl AppState {
             about_open: RwSignal::new(false),
             agents: RwSignal::new(config::load_agents()),
             sidebar_width: RwSignal::new(240.0),
-            term_height: RwSignal::new(320.0),
             file_diff: RwSignal::new(None),
             code_actions: RwSignal::new(Vec::new()),
             code_actions_open: RwSignal::new(false),
-            tinker_open: RwSignal::new(false),
-            tinker_output: RwSignal::new(String::new()),
-            tinker_running: RwSignal::new(false),
-            model_wizard_open: RwSignal::new(false),
-            model_wizard_pivot: RwSignal::new(false),
-            model_wizard_reset: RwSignal::new(0),
-            model_wizard_doc: RwSignal::new(None),
-            model_wizard_files: RwSignal::new(Vec::new()),
-            model_wizard_errors: RwSignal::new(Vec::new()),
             map_open: RwSignal::new(false),
             map_query: RwSignal::new(String::new()),
-            sem_open: RwSignal::new(false),
-            sem_query: RwSignal::new(String::new()),
-            sem_status: RwSignal::new(String::new()),
-            sem_results: RwSignal::new(Vec::new()),
-            sem_index: RwSignal::new(Rc::new(RefCell::new(crate::semantic::SemIndex::default()))),
             undo_open: RwSignal::new(false),
             undo_rev: RwSignal::new(0),
             schema_diff_open: RwSignal::new(false),
@@ -1827,40 +1749,14 @@ impl AppState {
             contract: RwSignal::new(None),
             related_open: RwSignal::new(false),
             related_items: RwSignal::new(Vec::new()),
-            runtime_open: RwSignal::new(false),
-            runtime_lenses: RwSignal::new(Arc::new(Vec::new())),
-            runtime_reqs: RwSignal::new(Vec::new()),
-            runtime_expanded: RwSignal::new(None),
-            runtime_polling: RwSignal::new(false),
             diag_waiters: RwSignal::new(Vec::new()),
             diag_waiter_seq: RwSignal::new(0),
-            migrations_open: RwSignal::new(false),
-            migrations: RwSignal::new(Vec::new()),
-            migrations_error: RwSignal::new(String::new()),
-            migrations_loading: RwSignal::new(false),
-            migration_drift: RwSignal::new(None),
-            migration_drift_dismissed: RwSignal::new(None),
-            verify_session: RwSignal::new(None),
-            verify_busy: RwSignal::new(false),
-            verify_open: RwSignal::new(false),
             run_consents: RwSignal::new(Vec::new()),
             agent_runs_allowed: RwSignal::new(false),
             ghost_gen: RwSignal::new(0),
             log_open: RwSignal::new(false),
             log_lines: RwSignal::new(Vec::new()),
-            req_open: RwSignal::new(false),
-            req_url: RwSignal::new(String::new()),
-            req_status: RwSignal::new(None),
-            req_time: RwSignal::new(String::new()),
-            req_body: RwSignal::new(String::new()),
-            req_queries: RwSignal::new(Vec::new()),
-            req_error: RwSignal::new(None),
-            req_running: RwSignal::new(false),
-            req_inertia: RwSignal::new(None),
             test_outcomes: RwSignal::new(kept_tests),
-            update_info: RwSignal::new(None),
-            update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
-            update_notes_open: RwSignal::new(false),
             toasts: RwSignal::new(Vec::new()),
             goto: crate::editing::GotoState::new(),
             task: crate::task_palette::TaskState::new(),
@@ -1941,6 +1837,76 @@ impl AppState {
                 progress: RwSignal::new(HashMap::new()),
                 queue: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
                 rx: RwSignal::new(Some(rx)),
+            },
+            term: TerminalPanel {
+                sessions: RwSignal::new(Vec::new()),
+                active: RwSignal::new(None),
+                active2: RwSignal::new(None),
+                split: RwSignal::new(false),
+                focus_pane: RwSignal::new(0),
+                rename_id: RwSignal::new(None),
+                rename_input: RwSignal::new(String::new()),
+                open: RwSignal::new(false),
+                focused: RwSignal::new(false),
+                tick: RwSignal::new(0),
+                rx: RwSignal::new(Some(term_rx)),
+                height: RwSignal::new(320.0),
+            },
+            runtime: RuntimePanel {
+                open: RwSignal::new(false),
+                lenses: RwSignal::new(Arc::new(Vec::new())),
+                reqs: RwSignal::new(Vec::new()),
+                expanded: RwSignal::new(None),
+                polling: RwSignal::new(false),
+            },
+            req: RequestPanel {
+                open: RwSignal::new(false),
+                url: RwSignal::new(String::new()),
+                status: RwSignal::new(None),
+                time: RwSignal::new(String::new()),
+                body: RwSignal::new(String::new()),
+                queries: RwSignal::new(Vec::new()),
+                error: RwSignal::new(None),
+                running: RwSignal::new(false),
+                inertia: RwSignal::new(None),
+            },
+            migrations: MigrationsPanel {
+                open: RwSignal::new(false),
+                list: RwSignal::new(Vec::new()),
+                error: RwSignal::new(String::new()),
+                loading: RwSignal::new(false),
+                drift: RwSignal::new(None),
+                drift_dismissed: RwSignal::new(None),
+            },
+            model_wizard: ModelWizardPanel {
+                open: RwSignal::new(false),
+                pivot: RwSignal::new(false),
+                reset: RwSignal::new(0),
+                doc: RwSignal::new(None),
+                files: RwSignal::new(Vec::new()),
+                errors: RwSignal::new(Vec::new()),
+            },
+            sem: SemanticSearch {
+                open: RwSignal::new(false),
+                query: RwSignal::new(String::new()),
+                status: RwSignal::new(String::new()),
+                results: RwSignal::new(Vec::new()),
+                index: RwSignal::new(Rc::new(RefCell::new(crate::semantic::SemIndex::default()))),
+            },
+            tinker: TinkerPanel {
+                open: RwSignal::new(false),
+                output: RwSignal::new(String::new()),
+                running: RwSignal::new(false),
+            },
+            verify: VerifyPanel {
+                session: RwSignal::new(None),
+                busy: RwSignal::new(false),
+                open: RwSignal::new(false),
+            },
+            updater: UpdatePanel {
+                info: RwSignal::new(None),
+                status: RwSignal::new(crate::updater::UpdateStatus::Idle),
+                notes_open: RwSignal::new(false),
             },
         }
     }
@@ -2032,7 +1998,7 @@ impl AppState {
         config::set_str("theme", t.id);
         config::set_bool("dark", t.dark);
         self.repaint_all_buffers();
-        self.term_tick.update(|t| *t += 1);
+        self.term.tick.update(|t| *t += 1);
     }
 
     /// `F8`: between the current dark theme and light, and back.
@@ -2050,7 +2016,7 @@ impl AppState {
         crate::theme::set_mono_family(&name);
         self.repaint_all_buffers();
         // Terminal cells are measured from the font; redraw them too.
-        self.term_tick.update(|t| *t += 1);
+        self.term.tick.update(|t| *t += 1);
     }
 
     /// Whether any focus-grabbing overlay (palette, find, prompt, dialog) is
@@ -2066,7 +2032,7 @@ impl AppState {
             || self.about_open.get()
             || self.close_confirm.get().is_some()
             || self.confirm.with(Option::is_some)
-            || self.term_rename_id.get().is_some()
+            || self.term.rename_id.get().is_some()
     }
 
     /// Force a re-layout of every open buffer (e.g. after a font-size change).
@@ -3616,9 +3582,9 @@ impl AppState {
         let Some(id) = self.spawn_terminal() else {
             return;
         };
-        let pane = self.term_focus_pane.get_untracked();
+        let pane = self.term.focus_pane.get_untracked();
         self.pane_active(pane).set(Some(id));
-        self.terminal_open.set(true);
+        self.term.open.set(true);
         self.rename_terminal(id, name.to_string());
         // Give the shell a moment to start before sending the command.
         let app = *self;
@@ -4332,7 +4298,7 @@ impl AppState {
     /// controls whether an "already current" result is surfaced in the status.
     pub fn check_for_updates(&self, announce_up_to_date: bool) {
         use crate::updater::{self, UpdateStatus};
-        if self.update_status.get_untracked() == UpdateStatus::Downloading {
+        if self.updater.status.get_untracked() == UpdateStatus::Downloading {
             return;
         }
         // The silent startup check is throttled so frequent restarts don't burn
@@ -4344,9 +4310,9 @@ impl AppState {
         }
         config::set_last_update_check(now);
 
-        self.update_status.set(UpdateStatus::Checking);
-        let info_sig = self.update_info;
-        let status_sig = self.update_status;
+        self.updater.status.set(UpdateStatus::Checking);
+        let info_sig = self.updater.info;
+        let status_sig = self.updater.status;
         let send = create_ext_action(
             self.cx,
             move |result: Result<Option<updater::UpdateInfo>, String>| match result {
@@ -4381,17 +4347,18 @@ impl AppState {
     /// Download and install the available update in place (non-blocking).
     pub fn install_update(&self) {
         use crate::updater::{self, UpdateStatus};
-        if self.update_status.get_untracked() == UpdateStatus::Downloading {
+        if self.updater.status.get_untracked() == UpdateStatus::Downloading {
             return;
         }
-        self.update_status.set(UpdateStatus::Downloading);
-        let status_sig = self.update_status;
+        self.updater.status.set(UpdateStatus::Downloading);
+        let status_sig = self.updater.status;
         let send = create_ext_action(self.cx, move |result: Result<(), String>| match result {
             Ok(()) => status_sig.set(UpdateStatus::Installed),
             Err(e) => status_sig.set(UpdateStatus::Failed(e)),
         });
-        let Some(version) = self.update_info.get_untracked().map(|i| i.version) else {
-            self.update_status
+        let Some(version) = self.updater.info.get_untracked().map(|i| i.version) else {
+            self.updater
+                .status
                 .set(UpdateStatus::Failed("no update to install".into()));
             return;
         };
@@ -4403,9 +4370,9 @@ impl AppState {
 
     /// Dismiss the update notice (until the next check).
     pub fn dismiss_update(&self) {
-        self.update_info.set(None);
-        self.update_notes_open.set(false);
-        self.update_status.set(crate::updater::UpdateStatus::Idle);
+        self.updater.info.set(None);
+        self.updater.notes_open.set(false);
+        self.updater.status.set(crate::updater::UpdateStatus::Idle);
     }
 
     /// Relaunch the application (used after an update is installed).
@@ -4874,7 +4841,7 @@ impl AppState {
     }
 
     pub fn toggle_tinker(&self) {
-        self.tinker_open.update(|o| *o = !*o);
+        self.tinker.open.update(|o| *o = !*o);
     }
 
     pub fn toggle_laravel_map(&self) {
@@ -4900,22 +4867,23 @@ impl AppState {
                 }
             }
         }
-        self.tinker_open.set(true);
+        self.tinker.open.set(true);
     }
 
     /// Run PHP through `php artisan tinker` in the project root, capturing output.
     pub fn run_tinker(&self, code: String) {
         let root = self.root.get_untracked();
         if !root.join("artisan").is_file() {
-            self.tinker_output
+            self.tinker
+                .output
                 .set("Not a Laravel project (no artisan).".into());
             return;
         }
-        self.tinker_open.set(true);
-        self.tinker_running.set(true);
-        self.tinker_output.set("Running…".into());
-        let out_sig = self.tinker_output;
-        let running = self.tinker_running;
+        self.tinker.open.set(true);
+        self.tinker.running.set(true);
+        self.tinker.output.set("Running…".into());
+        let out_sig = self.tinker.output;
+        let running = self.tinker.running;
         let send = create_ext_action(self.cx, move |text: String| {
             out_sig.set(text);
             running.set(false);
@@ -5349,7 +5317,7 @@ impl AppState {
     // ---- Request replay ------------------------------------------------
 
     pub fn close_request(&self) {
-        self.req_open.set(false);
+        self.req.open.set(false);
     }
 
     /// The app's base URL: the `app_url` setting if set; else what Grove says
@@ -5376,9 +5344,9 @@ impl AppState {
     /// and key assertions derived from the actual response), open it, and hook
     /// it into the test-runner / TDD loop.
     pub fn generate_pest_test(&self) {
-        let url = self.req_url.get_untracked();
-        let status = self.req_status.get_untracked().unwrap_or(200);
-        let body = self.req_body.get_untracked();
+        let url = self.req.url.get_untracked();
+        let status = self.req.status.get_untracked().unwrap_or(200);
+        let body = self.req.body.get_untracked();
         let root = self.root.get_untracked();
         let path = url_path(&url);
         let name = pest_test_name(&path);
@@ -5415,24 +5383,24 @@ impl AppState {
         let path = substitute_route_params(uri);
         let url = format!("{}/{}", base, path.trim_start_matches('/'));
 
-        self.req_open.set(true);
-        self.req_running.set(true);
-        self.req_error.set(None);
-        self.req_url.set(url.clone());
-        self.req_status.set(None);
-        self.req_body.set(String::new());
-        self.req_queries.set(Vec::new());
-        self.req_inertia.set(None);
+        self.req.open.set(true);
+        self.req.running.set(true);
+        self.req.error.set(None);
+        self.req.url.set(url.clone());
+        self.req.status.set(None);
+        self.req.body.set(String::new());
+        self.req.queries.set(Vec::new());
+        self.req.inertia.set(None);
 
         let state = *self;
         let send = create_ext_action(self.cx, move |r: RequestResult| {
-            state.req_running.set(false);
-            state.req_status.set(r.status);
-            state.req_time.set(r.time);
-            state.req_body.set(r.body);
-            state.req_queries.set(r.queries);
-            state.req_error.set(r.error);
-            state.req_inertia.set(r.inertia);
+            state.req.running.set(false);
+            state.req.status.set(r.status);
+            state.req.time.set(r.time);
+            state.req.body.set(r.body);
+            state.req.queries.set(r.queries);
+            state.req.error.set(r.error);
+            state.req.inertia.set(r.inertia);
         });
         std::thread::spawn(move || {
             send(do_http_request(&base, &url));
@@ -7168,7 +7136,8 @@ impl AppState {
         }
         if let Some(lens) = lens {
             let (method, uri) = self
-                .runtime_reqs
+                .runtime
+                .reqs
                 .with_untracked(|l| {
                     l.iter()
                         .find(|r| r.id == lens.req_id)

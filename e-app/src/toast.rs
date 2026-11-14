@@ -192,9 +192,9 @@ pub fn toasts(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col().items_end().gap(8.0));
 
     stack((rows,)).style(move |s| {
-        let lifted = state.update_info.with(Option::is_some)
+        let lifted = state.updater.info.with(Option::is_some)
             || !matches!(
-                state.update_status.get(),
+                state.updater.status.get(),
                 crate::updater::UpdateStatus::Idle | crate::updater::UpdateStatus::Checking
             );
         let s = s

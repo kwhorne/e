@@ -242,7 +242,7 @@ impl AppState {
             let sql_capture = self.grove.sql_capture.get_untracked();
             let root = self.root.get_untracked();
             let psr4 = self.psr4();
-            self.runtime_reqs.with_untracked(|reqs| {
+            self.runtime.reqs.with_untracked(|reqs| {
                 lenses(
                     &root,
                     &psr4,
@@ -255,7 +255,7 @@ impl AppState {
         } else {
             Vec::new()
         };
-        let old = self.runtime_lenses.get_untracked();
+        let old = self.runtime.lenses.get_untracked();
         if *old == fresh {
             return;
         }
@@ -265,7 +265,7 @@ impl AppState {
             .chain(fresh.iter())
             .map(|l| l.file.clone())
             .collect();
-        self.runtime_lenses.set(Arc::new(fresh));
+        self.runtime.lenses.set(Arc::new(fresh));
         self.buffers.with_untracked(|bs| {
             for b in bs {
                 if b.file.path.as_ref().is_some_and(|p| touched.contains(p)) {
@@ -278,7 +278,7 @@ impl AppState {
     /// The lens on `line` of the active buffer, if there is one.
     pub fn runtime_lens_at(&self, path: &Path, line_text: &str) -> Option<Lens> {
         let anchor = LensAnchor::of_line(line_text)?;
-        self.runtime_lenses.with_untracked(|ls| {
+        self.runtime.lenses.with_untracked(|ls| {
             ls.iter()
                 .find(|l| l.file == path && l.anchor == anchor)
                 .cloned()
@@ -291,7 +291,7 @@ impl AppState {
     /// tick.
     pub fn poll_runtime_for_lenses(&self) {
         if !self.settings.get_untracked().runtime_lenses
-            || self.runtime_open.get_untracked()
+            || self.runtime.open.get_untracked()
             || self.grove_site().is_none()
         {
             return;
@@ -321,10 +321,10 @@ impl AppState {
 
     /// Open the lens's request in the Runtime panel, expanded.
     pub fn runtime_lens_open(&self, req_id: &str) {
-        if !self.runtime_open.get_untracked() {
+        if !self.runtime.open.get_untracked() {
             self.toggle_runtime();
         }
-        self.runtime_expanded.set(Some(req_id.to_string()));
+        self.runtime.expanded.set(Some(req_id.to_string()));
         self.runtime_load_chain(req_id);
     }
 }

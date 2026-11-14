@@ -420,11 +420,13 @@ fn resize_handle(
 
 fn app_view() -> impl IntoView {
     let (root, file) = resolve_args();
-    // Remember this project so the next bare launch reopens it.
-    crate::config::save_last_project(&root);
+    // Whether it may run its own code, decided before it is remembered (so a
+    // bare launch reopens it) as a recent project: on the first run the
+    // trusted list is made from the recent ones.
+    let trusted = crate::trust::open_project(&root);
     let state = AppState::new(Scope::current(), root);
     // Before anything that could run the project's code.
-    state.apply_trust(crate::trust::is_trusted(&state.root.get_untracked()));
+    state.apply_trust(trusted);
     floem::file_action::on_dialog_unavailable(|| {
         AppState::notify("The system file dialog didn't open: macOS couldn't start its panel")
     });

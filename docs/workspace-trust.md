@@ -42,4 +42,5 @@ repository is trusted too (agents and Grove make those), but only when the
 repository itself has registered the worktree.
 
 The first time a version of `e` with workspace trust runs, the projects in
-your recent list are trusted, since their code has already run.
+your recent list are trusted, since their code has already run. The folder it
+is opening isn't, unless it was already on that list.

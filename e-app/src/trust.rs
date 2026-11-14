@@ -123,12 +123,36 @@ fn set_trusted_in(path: &Path, root: &Path, trusted: bool) -> std::io::Result<()
     write_store(path, &list)
 }
 
-/// Whether the project at `root` may run its own code.
-pub fn is_trusted(root: &Path) -> bool {
+/// Open the project at `root`: whether it may run its own code, decided
+/// before it is recorded as a recent project (which also makes it the one a
+/// bare launch reopens).
+///
+/// The order matters. The first time trust is checked, the store is seeded
+/// from the recent list; a folder put on that list first would trust itself.
+pub fn open_project(root: &Path) -> bool {
     match store_path() {
-        Some(path) => is_trusted_in(&path, root, crate::config::recent_projects),
-        None => false,
+        Some(path) => open_project_in(
+            &path,
+            root,
+            crate::config::recent_projects,
+            crate::config::save_last_project,
+        ),
+        None => {
+            crate::config::save_last_project(root);
+            false
+        }
     }
+}
+
+fn open_project_in(
+    path: &Path,
+    root: &Path,
+    seed: impl FnOnce() -> Vec<PathBuf>,
+    record: impl FnOnce(&Path),
+) -> bool {
+    let trusted = is_trusted_in(path, root, seed);
+    record(root);
+    trusted
 }
 
 /// Trust (or stop trusting) the project at `root`.
@@ -266,6 +290,28 @@ mod tests {
         assert!(is_trusted_in(&store, &old, || vec![old.clone()]));
         // Seeded already: a later seed isn't consulted.
         assert!(!is_trusted_in(&store, &new, || vec![new.clone()]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_first_folder_on_a_fresh_install_is_not_trusted_by_opening_it() {
+        let dir = scratch("fresh");
+        let store = dir.join("trusted.json");
+        let old = dir.join("old");
+        let new = dir.join("new");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        // The recent list as config.json keeps it: opening a folder adds it.
+        let recent = std::cell::RefCell::new(vec![old.clone()]);
+        let seed = || recent.borrow().clone();
+        let record = |p: &Path| recent.borrow_mut().insert(0, p.to_path_buf());
+
+        // No trusted.json yet: what was recent before is trusted, the folder
+        // being opened isn't, though it is recent afterwards.
+        assert!(!open_project_in(&store, &new, seed, record));
+        assert_eq!(recent.borrow()[0], new);
+        assert!(!is_trusted_in(&store, &new, Vec::new));
+        assert!(is_trusted_in(&store, &old, Vec::new));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

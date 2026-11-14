@@ -262,6 +262,8 @@ pub fn relevant(root: &Path, path: &Path) -> bool {
         || name.ends_with('~')
         || name.ends_with(".swp")
         || name.starts_with(".e-pint-")
+        // An atomic save's staging file: `.<name>.e-save-<pid>-<n>`.
+        || (name.starts_with('.') && name.contains(".e-save-"))
         || name.ends_with(".tmp");
     let top = rel.split('/').next().unwrap_or("");
     !litter && !(rel.contains('/') && SKIPPED.contains(&top))
@@ -485,6 +487,9 @@ mod tests {
         assert!(!yes("node_modules/vue/index.js"));
         assert!(!yes("app/.DS_Store"));
         assert!(!yes("app/Models/.e-pint-1-0.php"));
+        // An atomic save's staging file, as `e_core::buffer` names it.
+        assert!(!yes("app/Models/.User.php.e-save-4242-7"));
+        assert!(yes("app/Models/User.php"));
         // A top-level file named like a skipped folder is still a file.
         assert!(yes("build"));
         assert!(!relevant(root, Path::new("/elsewhere/x.php")));
@@ -687,6 +692,42 @@ mod tests {
             }
         }
         assert!(seen, "a change in a new top-level folder");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A save writes a staging file beside the file and renames it over:
+    /// the file's change arrives, the staging file's doesn't.
+    #[test]
+    fn a_save_arrives_without_its_staging_file() {
+        let dir = std::env::temp_dir().join(format!("e-fs-watch-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("app")).unwrap();
+        let root = dir.canonicalize().unwrap();
+        let file = root.join("app/a.php");
+        std::fs::write(&file, "<?php").unwrap();
+        let rx = start(&dir).expect("watch");
+        std::thread::sleep(Duration::from_millis(300));
+        while rx.try_recv().is_ok() {}
+        e_core::buffer::write_atomic(&file, b"<?php // saved").unwrap();
+        let mut all = Changes::default();
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until && !all.paths.contains(&file) {
+            if let Ok(b) = rx.recv_timeout(Duration::from_millis(500)) {
+                all.structure |= b.structure;
+                all.paths.extend(b.paths);
+            }
+        }
+        // A little longer, for a staging file's event that comes late.
+        if let Ok(b) = rx.recv_timeout(Duration::from_millis(400)) {
+            all.paths.extend(b.paths);
+        }
+        assert!(all.paths.contains(&file), "{all:?}");
+        assert!(
+            !all.paths
+                .iter()
+                .any(|p| p.to_string_lossy().contains(".e-save-")),
+            "{all:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

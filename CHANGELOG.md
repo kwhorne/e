@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   right one. Each pane now has its own editor and caret. Splitting keeps
   your place and opens the new pane there, and **Focus Other Pane** (`⌘⇧P`)
   moves between them from the keyboard.
+- **A finished debug session could end the next one.** Each session left an
+  event handler behind for good, so a `terminated` that the previous
+  adapter sent late (after **Stop**, say) cleared the session just started.
+  Each session now owns its handlers and they go when it ends. A debug
+  adapter that fails to initialise or launch now says so in the Debug panel
+  instead of leaving it at “launching…”.
 - **Updating on macOS kept e's signature intact.** The updater used to swap
   the binary inside `e.app` for an unsigned build and rewrite its
   `Info.plist`, which broke the app's code signature, and with it

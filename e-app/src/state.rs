@@ -986,6 +986,10 @@ pub struct AppState {
     pub debug_breakpoints: RwSignal<std::collections::HashMap<String, Vec<u32>>>,
     /// The live adapter client, if a session is running.
     pub debug_client: RwSignal<Option<std::sync::Arc<e_dap::DapClient>>>,
+    /// What the running debug session owns (its event effect), disposed when
+    /// the session ends, so a finished session's events no longer reach the
+    /// next one.
+    pub debug_session: RwSignal<Option<Scope>>,
 
     /// Generation counter debouncing inline AI-completion requests.
     pub ghost_gen: RwSignal<u64>,
@@ -1895,6 +1899,7 @@ impl AppState {
             debug_output: RwSignal::new(Vec::new()),
             debug_breakpoints: RwSignal::new(std::collections::HashMap::new()),
             debug_client: RwSignal::new(None),
+            debug_session: RwSignal::new(None),
             ghost_gen: RwSignal::new(0),
             log_open: RwSignal::new(false),
             log_lines: RwSignal::new(Vec::new()),

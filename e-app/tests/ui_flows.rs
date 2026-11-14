@@ -34,6 +34,11 @@ impl App {
     /// Start `e` on a fresh copy of the fixture project, with `config` as its
     /// settings, and wait until its socket answers.
     fn launch(config: Value) -> App {
+        Self::launch_env(config, &[])
+    }
+
+    /// [`App::launch`], with `env` set for `e`.
+    fn launch_env(config: Value, env: &[(&str, &str)]) -> App {
         use std::sync::atomic::{AtomicU32, Ordering};
         static N: AtomicU32 = AtomicU32::new(0);
         // Short: the socket's path has to fit a Unix socket address.
@@ -54,6 +59,18 @@ impl App {
             serde_json::json!({ "trusted": [project] }).to_string(),
         )
         .unwrap();
+        // A version manager's `node` shim (Grove's, nvm's) finds its Node
+        // through HOME, which is ours here: put the real binary first.
+        let bin = home.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        if let Some(node) = real_node() {
+            let _ = std::os::unix::fs::symlink(node, bin.join("node"));
+        }
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
         let log = std::fs::File::create(home.join("e.log")).unwrap();
         let child = Command::new(env!("CARGO_BIN_EXE_e"))
             .arg(&project)
@@ -61,6 +78,8 @@ impl App {
             .env("E_DETACHED", "1")
             // Keys, clicks and dialogs over the socket are for tests only.
             .env("E_UI_AUTOMATION", "1")
+            .env("PATH", &path)
+            .envs(env.iter().copied())
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
             .stderr(log)
@@ -412,6 +431,157 @@ fn typing_marks_the_file_and_undo_unmarks_it() {
         s["editor"]["dirty"] == false
     });
     assert!(lines_of(&s, "changes").is_empty());
+}
+
+/// The Node binary behind whatever `node` is on PATH, asked with the real
+/// HOME so a version manager's shim can find it.
+fn real_node() -> Option<PathBuf> {
+    let out = Command::new("node")
+        .args(["-p", "process.execPath"])
+        .output()
+        .ok()?;
+    let path = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    path.is_file().then_some(path)
+}
+
+/// A debug adapter that does just enough of DAP: stops once after
+/// `configurationDone`, ends on `continue`, and — like a real one — says
+/// `terminated` a while after it is told to disconnect.
+/// `E_FAKE_DAP=fail-launch` makes `launch` fail.
+const FAKE_DAP: &str = r#"
+let buf = Buffer.alloc(0), seq = 1;
+const mode = process.env.E_FAKE_DAP || "ok";
+const send = (m) => {
+  m.seq = seq++;
+  const b = Buffer.from(JSON.stringify(m));
+  process.stdout.write(`Content-Length: ${b.length}\r\n\r\n`);
+  process.stdout.write(b);
+};
+const respond = (r, body = {}, success = true, message) =>
+  send({ type: "response", request_seq: r.seq, command: r.command, success, body, message });
+const event = (event, body = {}) => send({ type: "event", event, body });
+process.stdin.on("data", (d) => {
+  buf = Buffer.concat([buf, d]);
+  for (;;) {
+    const h = buf.indexOf("\r\n\r\n");
+    if (h < 0) return;
+    const len = +/Content-Length: (\d+)/.exec(buf.slice(0, h).toString())[1];
+    if (buf.length < h + 4 + len) return;
+    const r = JSON.parse(buf.slice(h + 4, h + 4 + len).toString());
+    buf = buf.slice(h + 4 + len);
+    if (r.type === "request") handle(r);
+  }
+});
+function handle(r) {
+  switch (r.command) {
+    case "initialize": return respond(r, { supportsConfigurationDoneRequest: true });
+    case "launch":
+      if (mode === "fail-launch") return respond(r, {}, false, "no Xdebug listening");
+      respond(r);
+      return event("initialized");
+    case "setBreakpoints":
+      return respond(r, { breakpoints: (r.arguments.breakpoints || []).map((b) => ({ verified: true, line: b.line })) });
+    case "configurationDone":
+      respond(r);
+      return event("stopped", { reason: "breakpoint", threadId: 1 });
+    case "threads": return respond(r, { threads: [{ id: 1, name: "main" }] });
+    case "stackTrace":
+      return respond(r, { stackFrames: [{ id: 1, name: "Order::total", line: 9, column: 1 }], totalFrames: 1 });
+    case "scopes": return respond(r, { scopes: [{ name: "Locals", variablesReference: 1 }] });
+    case "variables": return respond(r, { variables: [{ name: "$total", value: "42", variablesReference: 0 }] });
+    case "continue":
+      respond(r, { allThreadsContinued: true });
+      return event("terminated");
+    case "disconnect":
+      return setTimeout(() => { event("terminated"); respond(r); process.exit(0); }, 600);
+    default: return respond(r);
+  }
+}
+"#;
+
+fn fake_dap(app_home: &Path) -> String {
+    let path = app_home.join("fake-dap.js");
+    std::fs::write(&path, FAKE_DAP).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn a_debug_session_ends_cleanly_and_a_finished_one_leaves_the_next_alone() {
+    let dir = std::env::temp_dir().join(format!("e-fake-dap-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let adapter = fake_dap(&dir);
+    let app = App::launch_env(json!({}), &[("E_PHP_DEBUG_ADAPTER", &adapter)]);
+    app.open("Order.php");
+    let status = |s: &Value| s["debug"]["status"].as_str().unwrap_or("").to_string();
+
+    // Start, stop at the breakpoint, see the frame and its variables.
+    app.command("debug");
+    let s = app.wait_for("paused", |s| {
+        status(s) == "paused" && s["debug"]["vars"] != json!([])
+    });
+    assert_eq!(s["debug"]["frames"], json!(["Order::total"]));
+    assert_eq!(
+        s["debug"]["vars"],
+        json!([{"name": "$total", "value": "42"}])
+    );
+    // Continue runs to the end.
+    app.command("debug");
+    app.wait_for("terminated", |s| {
+        status(s) == "terminated" && s["debug"]["session"] == false
+    });
+
+    // A second session, stopped; its adapter says `terminated` 600 ms later.
+    app.command("debug");
+    app.wait_for("paused again", |s| status(s) == "paused");
+    app.command("debug-stop");
+    app.wait_for("stopped", |s| status(s) == "stopped");
+    // A third session starts at once. The second's late `terminated` must
+    // not end it.
+    app.command("debug");
+    app.wait_for("the third session paused", |s| status(s) == "paused");
+    std::thread::sleep(Duration::from_millis(1500));
+    let s = app.state();
+    assert_eq!(
+        status(&s),
+        "paused",
+        "a finished session ended the next: {}",
+        s["debug"]
+    );
+    assert_eq!(s["debug"]["session"], true);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn a_launch_that_fails_says_so_and_the_next_start_is_fresh() {
+    let dir = std::env::temp_dir().join(format!("e-fake-dap-fail-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let adapter = fake_dap(&dir);
+    let app = App::launch_env(
+        json!({}),
+        &[
+            ("E_PHP_DEBUG_ADAPTER", &adapter),
+            ("E_FAKE_DAP", "fail-launch"),
+        ],
+    );
+    app.open("Order.php");
+    app.command("debug");
+    let s = app.wait_for("the failure", |s| {
+        s["debug"]["status"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("launch failed"))
+    });
+    assert!(
+        s["debug"]["status"]
+            .as_str()
+            .unwrap()
+            .contains("no Xdebug listening"),
+        "{}",
+        s["debug"]
+    );
+    assert_eq!(s["debug"]["session"], false, "nothing left half-started");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

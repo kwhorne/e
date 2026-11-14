@@ -306,10 +306,18 @@ impl AppState {
                 .collect::<Vec<_>>()
         });
 
+        let debug = json!({
+            "status": self.debug_status.get_untracked(),
+            "session": self.debug_client.with_untracked(Option::is_some),
+            "frames": self.debug_frames.with_untracked(|f| f.iter().map(|f| f.name.clone()).collect::<Vec<_>>()),
+            "vars": self.debug_vars.with_untracked(|v| v.iter().map(|v| json!({"name": v.name, "value": v.value})).collect::<Vec<_>>()),
+        });
+
         json!({
             "ok": true,
             "open": open,
             "dialog": dialog,
+            "debug": debug,
             "code_actions": code_actions,
             "editor": editor,
             "panes": panes,

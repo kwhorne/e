@@ -2,9 +2,10 @@
 
 | | |
 | --- | --- |
-| **Status** | Utkast |
+| **Status** | Under arbeid — alle fem faser er påbegynt, mange krav er delvis levert |
 | **Eier** | Knut W. Horne |
 | **Baseline** | `e` v0.7.5 (juli 2026) |
+| **Status oppdatert** | `e` v0.20.0 (november 2026), etter gjennomgang av koden |
 | **Referansenivå** | PhpStorm 2026.x database tools (DataGrip-motoren) |
 
 ## 1. Bakgrunn og mål
@@ -56,128 +57,179 @@ Kjernescenarier som skal være friksjonsfrie:
 5. **Flytte data**: Få en CSV fra kunde inn i en tabell; få et resultatsett ut
    som CSV/JSON/inserts til en kollega.
 
-## 3. Nåsituasjon (v0.7.5)
+## 3. Nåsituasjon (v0.20.0)
 
-Finnes og fungerer:
+Ved v0.7.5 hadde panelet tilkoblinger, enkel datagrid, struktur-fane,
+skrivevern, en ren tekstboks som query-editor, CSV-eksport, EXPLAIN med agent
+og Laravel-laget. Siden da er alle fem faser påbegynt (CHANGELOG 0.8.0 sier
+«the full PRD, phases 1–5»), men mange krav er levert i en tynnere form enn
+beskrevet her. Status per krav står i §4; dette er hovedbildet:
 
-- Tilkoblinger: MySQL, PostgreSQL, SQLite, ClickHouse; auto fra `.env`, manuell
-  med SSH-tunnel (passord/nøkkel); lagrede tilkoblinger per prosjekt
-- Datagrid: browsing med sortering, kolonnefiltre, celle-redigering, ny
-  rad-dialog, slett rad, FK-hopping, rad-cap med «truncated»-markering
-- Struktur-fane: kolonner + indeksvisning
-- Skrivevern: read-only per tilkobling, produksjon detekteres og beskyttes som
-  standard, agent-queries krever consent-dialog
-- Query-editor: ren tekstboks + lagrede queries per prosjekt, CSV-eksport
-- EXPLAIN med agent-indeksforslag; «Explain with agent» på feilede queries
-- Laravel-lag: skjema-diff, modellgenerering, Eloquent-completion,
-  validation-rules fra skjema, inline SQL i PHP-strenger (highlighting,
-  completion, kjør under markøren)
-- Agent-socket: `db_schema` (fritt), `db_query` (consent)
+**Levert:** highlighting og multi-statement i konsollen, query-historikk
+(SQLite), paginering, NULL-håndtering, destruktiv-vern på alle miljøer,
+`:param`-placeholdere, kansellering på serveren for alle fire motorer,
+Keychain-lagring av passord, tre-filter, EXPLAIN fra runtime-panelet,
+angre-logg for celleendringer.
 
-Kjente mangler (dagens gap mot PhpStorm): SQL-konsollens redigeringsopplevelse,
-query-historikk, import, flere eksportformater, transaksjonell redigering,
-views/triggere/prosedyrer, søk i data, flere resultat-faner, ERD-visning.
+**Delvis:** miljøetiketter (gjettes, kan ikke overstyres), transaksjonell
+redigering (ikke for nye rader), verdi-visning (ikke redigering), completion
+(uten alias, nøkkelord og funksjoner), resultat-faner, views, DDL, ERD (tekst,
+ikke graf), eksportformater, CSV-import (uten mapping-dialog), snapshots (uten
+gjenoppretting i UI), søk i data.
+
+**Mangler:** triggere/prosedyrer, kopier celle/rad, dupliser rad,
+Laravel-cellerendering, feilposisjonering, SQL-formatering, eksport av hel
+tabell, `db_explain`/`db_snapshot` på agent-socketen.
+
+### Kjente feil og hull (bør tas før nye krav)
+
+1. **Ventende endringer forsvinner stille.** Enhver ny innlasting — bla side,
+   sortere, filtrere, bytte tabell — tømmer dem (`db_apply_result` i
+   `db_state.rs`). Endringslinjen skal nettopp hindre at endringer «glemmes»
+   (§5.1).
+2. **«+ Row» går utenom trygghetsrekkverket.** Innsetting skrives straks, uten
+   bekreftelsesdialog på staging/produksjon og uten innslag i angre-loggen
+   (`db_commit_insert`). Bryter DB-303 og DB-703.
+3. **Å åpne en tabell sletter alle resultat-faner**, også pinnede (DB-404).
+4. **Søk i data og EXPLAIN fra runtime-panelet bruker første tilkoblede
+   database**, ikke den aktive.
+5. **Konsoll-completion henter skjema fra `.env`-tilkoblingen**, ikke fra
+   tilkoblingen konsollen kjører mot.
+
+### Dokumentasjon som lover mer enn koden
+
+- `docs/database.md` og CHANGELOG nevner nøkkelord-completion i konsollen;
+  den finnes ikke.
+- `docs/database.md` sier at resultater kappes ved 1000 rader; det gjelder nå
+  bare konsollen (grid pagineres).
+- CHANGELOG 0.8.0 nevner «agent-suggested index migrations» for SQL; fra
+  konsollen er det bare en prompt til agenten, og «Suggest Index»-hintet i
+  EXPLAIN-banneret er ikke klikkbart.
+
+### Levert utenfor PRD-en
+
+- **TLS per tilkobling**: Auto / Off / Require / Verify med valgfri CA-fil,
+  lest fra `.env` (`DB_SSLMODE`, `MYSQL_ATTR_SSL_CA`); Verify gjennom tunnel
+  sjekker det ekte vertsnavnet.
+- **Skrivevern på serveren**, ikke bare i UI: read-only-sesjon i MySQL og
+  PostgreSQL, SQLite åpnet read-only, ClickHouse `readonly=1`, og en
+  token-klassifiserer foran konsoll, import, agent-queries og transaksjoner.
+- **Radgrense på serveren**: PostgreSQL stopper ved grensen, ClickHouse
+  strømmes; store resultater leses ikke hele før de kappes.
+- **PostgreSQL-feil** vises med serverens egen melding, DETAIL og HINT.
+- **Skjema-cachen følger migrasjoner**: lokal `migrations`-tabell sjekkes
+  jevnlig, og `.env`-databasen kobles til ved oppstart for completion.
+- **Workspace trust**: panelet virker i begrenset modus; «Seed» (Tinker)
+  holdes tilbake til prosjektet er klarert.
+- **Tilkoblingsskjema** med gruppe, maskerte passord og validering av
+  SSH-mål (avviser opsjons-injeksjon).
+- Eloquent-EXPLAIN (⌥⌘⏎) med deterministisk indeks-migrasjon, Grove
+  «migrate (snapshot first)», og agent-worktrees med egen kopi av databasen.
 
 ## 4. Funksjonelle krav
 
 Prioritet: **P0** = kreves for paritet, **P1** = paritet for kraftbrukere,
-**P2** = forbi paritet (differensiator). Krav merket ✅ er levert i ≤ v0.7.5 og
-står her for helhet.
+**P2** = forbi paritet (differensiator). Krav merket ✅ i kravteksten var
+levert allerede i v0.7.5.
+
+Status per v0.20.0: **✅** levert, **◐** delvis (det som mangler står i
+kolonnen), **✗** mangler. Statusen bygger på en gjennomlesing av koden, ikke
+på manuell testing.
 
 ### 4.1 Tilkoblinger og miljøer
 
-| ID | Krav | Prioritet |
-| --- | --- | --- |
-| DB-101 | ✅ Auto-tilkobling fra `.env`, manuelle tilkoblinger, SSH-tunnel | — |
-| DB-102 | Miljø-etikett per tilkobling: `local` / `staging` / `production`, med farge (grønn/gul/rød) synlig i panel-header, datagrid og konsoll. Auto-gjettes (hostname, `.env` vs manuell) men kan overstyres | P0 |
-| DB-103 | ✅ Read-only-flagg per tilkobling; produksjon read-only som standard | — |
-| DB-104 | Flere samtidige tilkoblinger åpne, med rask bytte (dropdown i panel-header); aktiv tilkobling alltid synlig med miljøfarge | P0 |
-| DB-105 | Tilkoblingstest med tydelig feilmelding (DNS, auth, tunnel, driver) | P1 |
-| DB-106 | Keychain-lagring av passord (macOS Keychain / Secret Service på Linux) i stedet for klartekst i prosjektfil | P1 |
+| ID | Krav | Prioritet | Status v0.20.0 |
+| --- | --- | --- | --- |
+| DB-101 | ✅ Auto-tilkobling fra `.env`, manuelle tilkoblinger, SSH-tunnel | — | ✅ |
+| DB-102 | Miljø-etikett per tilkobling: `local` / `staging` / `production`, med farge (grønn/gul/rød) synlig i panel-header, datagrid og konsoll. Auto-gjettes (hostname, `.env` vs manuell) men kan overstyres | P0 | ◐ Gjettes fra navn og vert; prikk + badge i tilkoblingslisten, prikk i resultat-header, farget tittel i bekreftelsen. Mangler: manuell overstyring, badge i grid/konsoll, farget grid-ramme, miljø i agent-consent |
+| DB-103 | ✅ Read-only-flagg per tilkobling; produksjon read-only som standard | — | ✅ Alle ikke-lokale verter og SSH starter read-only. Bryteren lagres ikke |
+| DB-104 | Flere samtidige tilkoblinger åpne, med rask bytte (dropdown i panel-header); aktiv tilkobling alltid synlig med miljøfarge | P0 | ◐ Flere tilkoblinger kan være åpne samtidig. Mangler: dropdown i header for å bytte aktiv tilkobling |
+| DB-105 | Tilkoblingstest med tydelig feilmelding (DNS, auth, tunnel, driver) | P1 | ◐ Test-knapp viser driverens rå feil. Mangler: kategorier (DNS, auth, tunnel, driver) |
+| DB-106 | Keychain-lagring av passord (macOS Keychain / Secret Service på Linux) i stedet for klartekst i prosjektfil | P1 | ✅ Faller tilbake til `databases.json` (0600) uten keyring |
 
 ### 4.2 Skjema-utforsker (objekttre)
 
-| ID | Krav | Prioritet |
-| --- | --- | --- |
-| DB-201 | ✅ Tabelliste med kolonner og indekser | — |
-| DB-202 | Views i objekttreet: liste, åpne definisjon (SQL), browse som tabell | P0 |
-| DB-203 | Triggere og prosedyrer/funksjoner: liste + vis definisjon (read-only) | P1 |
-| DB-204 | «Generate DDL» på tabell/view/indeks: vis `CREATE …`-setningen, kopier til utklippstavle | P1 |
-| DB-205 | Søk/filter i objekttreet (skriv for å filtrere tabellnavn) | P0 |
-| DB-206 | Radantall per tabell (lazy, ca-verdi) og tabellstørrelse i treet | P2 |
-| DB-207 | ERD-visning: FK-graf over valgte tabeller (gjenbruk relasjonsgraf-motoren fra ⌘⌥R, men på DB-nivå — også for tabeller uten Eloquent-modell) | P2 |
+| ID | Krav | Prioritet | Status v0.20.0 |
+| --- | --- | --- | --- |
+| DB-201 | ✅ Tabelliste med kolonner og indekser | — | ✅ |
+| DB-202 | Views i objekttreet: liste, åpne definisjon (SQL), browse som tabell | P0 | ◐ Views listes, filtreres og kan browses. Mangler: vis definisjon (`e_db::view_definition` finnes, men brukes ikke); ClickHouse-views vises ikke |
+| DB-203 | Triggere og prosedyrer/funksjoner: liste + vis definisjon (read-only) | P1 | ✗ |
+| DB-204 | «Generate DDL» på tabell/view/indeks: vis `CREATE …`-setningen, kopier til utklippstavle | P1 | ◐ «Copy DDL» for tabeller til utklippstavlen; PostgreSQL uten indekser og FK-er. Mangler: views og indekser, visning i skuff |
+| DB-205 | Søk/filter i objekttreet (skriv for å filtrere tabellnavn) | P0 | ✅ |
+| DB-206 | Radantall per tabell (lazy, ca-verdi) og tabellstørrelse i treet | P2 | ◐ Radantall (≈ fra katalogen). Mangler: tabellstørrelse |
+| DB-207 | ERD-visning: FK-graf over valgte tabeller (gjenbruk relasjonsgraf-motoren fra ⌘⌥R, men på DB-nivå — også for tabeller uten Eloquent-modell) | P2 | ◐ «⇄» lister alle FK-er som tekst. Mangler: graf og valg av tabeller |
 
 ### 4.3 Datagrid
 
-| ID | Krav | Prioritet |
-| --- | --- | --- |
-| DB-301 | ✅ Sortering, kolonnefiltre, celle-redigering, ny rad, slett rad, FK-hopping | — |
-| DB-302 | Paginering: «neste/forrige side» + hopp til side, med totalantall; rad-cap erstattes av ekte sider | P0 |
-| DB-303 | Transaksjonell redigering: endringer (celler, nye rader, slettinger) samles lokalt og markeres visuelt; egen **Submit**-knapp kjører alt i én transaksjon, **Revert** forkaster. Direkte-skriv beholdes som opt-in for lokal utvikling | P0 |
-| DB-304 | Verdi-editor: åpne celleverdi i eget felt/modal for lange tekster; JSON-kolonner vises formatert (pretty-print) med fold, og valideres før lagring | P0 |
-| DB-305 | NULL håndteres eksplisitt: vis `NULL` distinkt fra tom streng; sett-til-NULL-handling | P0 |
-| DB-306 | Kopier celle / rad (som CSV, JSON eller `INSERT`-setning) fra kontekstmeny | P1 |
-| DB-307 | Dupliser rad som utgangspunkt for ny | P1 |
-| DB-308 | «Relaterte rader»-oppslag: fra en rad, vis rader i andre tabeller som peker hit (reverse FK) | P1 |
-| DB-309 | Binær-/blob-kolonner: vis størrelse + hex-preview i stedet for rå bytes | P2 |
-| DB-310 | Cell-rendering av vanlige Laravel-typer: timestamps med relativ tid på hover, boolske kolonner som ✓/✗ | P2 |
+| ID | Krav | Prioritet | Status v0.20.0 |
+| --- | --- | --- | --- |
+| DB-301 | ✅ Sortering, kolonnefiltre, celle-redigering, ny rad, slett rad, FK-hopping | — | ✅ Kolonnefilter er ett likhetsfilter fra en celle (chip), ikke en filterrad |
+| DB-302 | Paginering: «neste/forrige side» + hopp til side, med totalantall; rad-cap erstattes av ekte sider | P0 | ✅ 200 rader per side, hopp til side, totalantall. Sidestørrelsen er ikke en innstilling; konsollen kappes fortsatt ved 1000 |
+| DB-303 | Transaksjonell redigering: endringer (celler, nye rader, slettinger) samles lokalt og markeres visuelt; egen **Submit**-knapp kjører alt i én transaksjon, **Revert** forkaster. Direkte-skriv beholdes som opt-in for lokal utvikling | P0 | ◐ Celleendringer og slettinger samles, Submit/Revert i én transaksjon. Mangler: nye rader (skrives direkte), gjennomstreking, opt-in direkte-skriv. Ventende endringer tømmes ved innlasting (§3) |
+| DB-304 | Verdi-editor: åpne celleverdi i eget felt/modal for lange tekster; JSON-kolonner vises formatert (pretty-print) med fold, og valideres før lagring | P0 | ◐ Skrivebeskyttet verdivisning med JSON pretty-print. Mangler: flerlinjers editor, fold, valider-før-lagre, ⌘Enter |
+| DB-305 | NULL håndteres eksplisitt: vis `NULL` distinkt fra tom streng; sett-til-NULL-handling | P0 | ✅ Dim `NULL` (ikke kursiv), NULL-avkrysning i rediger- og ny rad-dialog |
+| DB-306 | Kopier celle / rad (som CSV, JSON eller `INSERT`-setning) fra kontekstmeny | P1 | ✗ |
+| DB-307 | Dupliser rad som utgangspunkt for ny | P1 | ✗ |
+| DB-308 | «Relaterte rader»-oppslag: fra en rad, vis rader i andre tabeller som peker hit (reverse FK) | P1 | ◐ «Related →» åpner første tabell som peker hit; flere vises bare som antall |
+| DB-309 | Binær-/blob-kolonner: vis størrelse + hex-preview i stedet for rå bytes | P2 | ◐ SQLite viser `<N bytes>`; MySQL viser bytes som UTF-8, PostgreSQL serverens tekstform. Mangler: hex-preview |
+| DB-310 | Cell-rendering av vanlige Laravel-typer: timestamps med relativ tid på hover, boolske kolonner som ✓/✗ | P2 | ✗ |
 
 ### 4.4 SQL-konsollen
 
 Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 
-| ID | Krav | Prioritet |
-| --- | --- | --- |
-| DB-401 | Syntax-highlighting i konsollen (gjenbruk tree-sitter-SQL fra inline-SQL-arbeidet) | P0 |
-| DB-402 | Skjema-bevisst completion: tabellnavn, kolonnenavn (alias-bevisst: `o.` foreslår `orders`-kolonner), nøkkelord, funksjoner (gjenbruk completion-motoren fra inline SQL) | P0 |
-| DB-403 | Multi-statement: kjør hele konsollen, kjør valgt tekst, eller kjør setningen under markøren (⌘⏎); hver setning får eget resultat | P0 |
-| DB-404 | Flere resultat-faner: hver kjøring får en fane (med queryen som tooltip); faner kan pinnes; ikke-pinnede gjenbrukes | P0 |
-| DB-405 | Query-historikk: alle kjørte queries logges per prosjekt (tid, tilkobling, radantall, varighet); søkbar liste, klikk for å gjenåpne i konsollen | P0 |
-| DB-406 | ✅ Lagrede queries per prosjekt | — |
-| DB-407 | Feilposisjonering: syntaksfeil fra serveren markerer riktig posisjon i konsollen der driveren oppgir den; «✨ Explain with agent» beholdes | P1 |
-| DB-408 | Parametere: `:navn`-placeholdere prompter for verdi ved kjøring (med husk-siste) | P1 |
-| DB-409 | Kansellerbar kjøring: lange queries kan avbrytes uten å fryse panelet | P0 |
-| DB-410 | Format SQL-kommando i konsollen | P2 |
+| ID | Krav | Prioritet | Status v0.20.0 |
+| --- | --- | --- | --- |
+| DB-401 | Syntax-highlighting i konsollen (gjenbruk tree-sitter-SQL fra inline-SQL-arbeidet) | P0 | ✅ |
+| DB-402 | Skjema-bevisst completion: tabellnavn, kolonnenavn (alias-bevisst: `o.` foreslår `orders`-kolonner), nøkkelord, funksjoner (gjenbruk completion-motoren fra inline SQL) | P0 | ◐ Tabeller etter FROM/JOIN/…, kolonner med type. Mangler: alias, nøkkelord, funksjoner, kolonner avgrenset til setningens tabeller; skjema fra konsollens tilkobling |
+| DB-403 | Multi-statement: kjør hele konsollen, kjør valgt tekst, eller kjør setningen under markøren (⌘⏎); hver setning får eget resultat | P0 | ✅ |
+| DB-404 | Flere resultat-faner: hver kjøring får en fane (med queryen som tooltip); faner kan pinnes; ikke-pinnede gjenbrukes | P0 | ◐ Pin (★) og gjenbruk. Mangler: query som tooltip; åpne tabell sletter alle faner |
+| DB-405 | Query-historikk: alle kjørte queries logges per prosjekt (tid, tilkobling, radantall, varighet); søkbar liste, klikk for å gjenåpne i konsollen | P0 | ✅ Bare konsoll-kjøringer logges |
+| DB-406 | ✅ Lagrede queries per prosjekt | — | ✅ Ingen UI for å slette en lagret query |
+| DB-407 | Feilposisjonering: syntaksfeil fra serveren markerer riktig posisjon i konsollen der driveren oppgir den; «✨ Explain with agent» beholdes | P1 | ✗ Feilen vises som tekst; «Explain with agent» finnes |
+| DB-408 | Parametere: `:navn`-placeholdere prompter for verdi ved kjøring (med husk-siste) | P1 | ✅ Siste verdier huskes bare i økten |
+| DB-409 | Kansellerbar kjøring: lange queries kan avbrytes uten å fryse panelet | P0 | ✅ PostgreSQL cancel-token, MySQL/ClickHouse `KILL QUERY`, SQLite interrupt |
+| DB-410 | Format SQL-kommando i konsollen | P2 | ✗ |
 
 ### 4.5 Import og eksport
 
-| ID | Krav | Prioritet |
-| --- | --- | --- |
-| DB-501 | ✅ CSV-eksport av resultatsett | — |
-| DB-502 | Eksportformater: JSON, `INSERT`-setninger, Markdown-tabell, TSV — fra både grid og konsollresultat | P0 |
-| DB-503 | CSV-import til eksisterende tabell: kolonnemapping-dialog med forhåndsvisning av de første radene, typevalidering, og alt-eller-ingenting-transaksjon | P0 |
-| DB-504 | Eksporter hel tabell (ikke bare synlig resultat), med progresjon og avbrudd | P1 |
-| DB-505 | Kopier resultat til utklippstavle i valgt format uten å gå via fil | P1 |
+| ID | Krav | Prioritet | Status v0.20.0 |
+| --- | --- | --- | --- |
+| DB-501 | ✅ CSV-eksport av resultatsett | — | ✅ |
+| DB-502 | Eksportformater: JSON, `INSERT`-setninger, Markdown-tabell, TSV — fra både grid og konsollresultat | P0 | ◐ Fil: CSV, JSON, INSERT. TSV og Markdown bare til utklippstavlen |
+| DB-503 | CSV-import til eksisterende tabell: kolonnemapping-dialog med forhåndsvisning av de første radene, typevalidering, og alt-eller-ingenting-transaksjon | P0 | ◐ Kolonner mappes automatisk på navn, én transaksjon via bekreftelsen. Mangler: mapping-dialog, forhåndsvisning, typevalidering, oppsummering, progresjon |
+| DB-504 | Eksporter hel tabell (ikke bare synlig resultat), med progresjon og avbrudd | P1 | ✗ |
+| DB-505 | Kopier resultat til utklippstavle i valgt format uten å gå via fil | P1 | ◐ TSV og Markdown. Mangler: CSV, JSON, INSERT |
 
 ### 4.6 Ytelse og diagnose
 
-| ID | Krav | Prioritet |
-| --- | --- | --- |
-| DB-601 | ✅ EXPLAIN med agent-indeksforslag; indeksvisning i Structure | — |
-| DB-602 | Strukturert EXPLAIN-visning: plan som tre/tabell med markering av full table scans og manglende indekser (ikke bare råtekst) | P1 |
-| DB-603 | «Foreslå indeks → generer migrasjon»: agent-indeksforslaget skrives som ferdig Laravel-migrasjonsfil (gjenbruk kodegen) | P1 |
-| DB-604 | Kobling fra runtime-panelet (⌘⌥I): «EXPLAIN denne queryen» på enhver observert query, med hopp til DB-panelet | P1 |
-| DB-605 | Varighet og radantall vises for hver kjøring i konsoll og historikk | P0 |
+| ID | Krav | Prioritet | Status v0.20.0 |
+| --- | --- | --- | --- |
+| DB-601 | ✅ EXPLAIN med agent-indeksforslag; indeksvisning i Structure | — | ✅ |
+| DB-602 | Strukturert EXPLAIN-visning: plan som tre/tabell med markering av full table scans og manglende indekser (ikke bare råtekst) | P1 | ◐ Rå plan i grid + banner som lister full scans. Mangler: tre, kostnad per node |
+| DB-603 | «Foreslå indeks → generer migrasjon»: agent-indeksforslaget skrives som ferdig Laravel-migrasjonsfil (gjenbruk kodegen) | P1 | ◐ Fra SQL bare en prompt til agenten; banner-hintet er ikke klikkbart. Deterministisk migrasjon finnes for Eloquent (⌥⌘⏎) |
+| DB-604 | Kobling fra runtime-panelet (⌘⌥I): «EXPLAIN denne queryen» på enhver observert query, med hopp til DB-panelet | P1 | ✅ Bruker første tilkoblede database |
+| DB-605 | Varighet og radantall vises for hver kjøring i konsoll og historikk | P0 | ✅ |
 
 ### 4.7 Trygghet (forsterker DB-102/103/303)
 
-| ID | Krav | Prioritet |
-| --- | --- | --- |
-| DB-701 | ✅ Prod-deteksjon med read-only som standard; consent-dialog for agent-queries | — |
-| DB-702 | Destruktive setninger (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` uten `WHERE`) krever eksplisitt bekreftelse med setningen gjengitt — på *alle* miljøer, ikke bare prod | P0 |
-| DB-703 | Ved skriv mot ikke-lokal tilkobling: bekreftelsesdialog viser miljøetikett i farge + antall rader som påvirkes | P0 |
-| DB-704 | Databasesnapshots: ta snapshot (mysqldump/pg_dump/SQLite-kopi) og tilbakestill, én knapp per tilkobling (kun lokale miljøer). Integreres med agent-flyter («ta snapshot før migrasjon») | P2 |
-| DB-705 | Angre-logg for datagrid-endringer i økten: liste over utførte skriv med generert motsatt setning der det er mulig | P2 |
+| ID | Krav | Prioritet | Status v0.20.0 |
+| --- | --- | --- | --- |
+| DB-701 | ✅ Prod-deteksjon med read-only som standard; consent-dialog for agent-queries | — | ✅ |
+| DB-702 | Destruktive setninger (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` uten `WHERE`) krever eksplisitt bekreftelse med setningen gjengitt — på *alle* miljøer, ikke bare prod | P0 | ✅ |
+| DB-703 | Ved skriv mot ikke-lokal tilkobling: bekreftelsesdialog viser miljøetikett i farge + antall rader som påvirkes | P0 | ◐ Miljøfarget tittel, setningene, avkrysning når ikke-lokal. Mangler: antall rader som påvirkes; «+ Row» går utenom |
+| DB-704 | Databasesnapshots: ta snapshot (mysqldump/pg_dump/SQLite-kopi) og tilbakestill, én knapp per tilkobling (kun lokale miljøer). Integreres med agent-flyter («ta snapshot før migrasjon») | P2 | ◐ Snapshot lokalt (SQLite, MySQL, PostgreSQL). Mangler: gjenoppretting i UI (`restore_snapshot` finnes), agent-flyt, ClickHouse |
+| DB-705 | Angre-logg for datagrid-endringer i økten: liste over utførte skriv med generert motsatt setning der det er mulig | P2 | ◐ Angre-logg for celleendringer i økten. Mangler: slettinger og innsettinger |
 
 ### 4.8 Laravel- og agent-lag (forbi paritet — skal bevares og utvides)
 
-| ID | Krav | Prioritet |
-| --- | --- | --- |
-| DB-801 | ✅ Skjema-diff, modellgenerering, Eloquent-/query-completion, validation-rules fra skjema, inline SQL i PHP | — |
-| DB-802 | Factory-integrasjon: «Seed N rader» på tabell (kjører factory via Tinker); «Generer factory fra skjema» der factory mangler | P1 |
-| DB-803 | Migrasjonsgenerering fra strukturendringer: endrer man kolonner/indekser i Structure-fanen, tilbys en generert migrasjon i stedet for direkte DDL (direkte DDL kun på lokale miljøer) | P2 |
-| DB-804 | Agent-socket utvides: `db_explain` (fritt, read-only) og `db_snapshot` (consent) | P2 |
-| DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 |
+| ID | Krav | Prioritet | Status v0.20.0 |
+| --- | --- | --- | --- |
+| DB-801 | ✅ Skjema-diff, modellgenerering, Eloquent-/query-completion, validation-rules fra skjema, inline SQL i PHP | — | ✅ |
+| DB-802 | Factory-integrasjon: «Seed N rader» på tabell (kjører factory via Tinker); «Generer factory fra skjema» der factory mangler | P1 | ◐ «Seed 10» via factory (fast antall, lokalt, krever trust). Mangler: valgt N, factory fra skjema |
+| DB-803 | Migrasjonsgenerering fra strukturendringer: endrer man kolonner/indekser i Structure-fanen, tilbys en generert migrasjon i stedet for direkte DDL (direkte DDL kun på lokale miljøer) | P2 | ◐ «+ Migration» lager tomt `Schema::table`-skjelett. Structure kan ikke redigeres |
+| DB-804 | Agent-socket utvides: `db_explain` (fritt, read-only) og `db_snapshot` (consent) | P2 | ✗ Socketen har `db_schema` og `db_query` |
+| DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 | ◐ LIKE over tekstkolonner, 200 rader per tabell. Mangler: velger første database, avbrudd stopper ikke løkken, skiller store/små bokstaver på PostgreSQL |
 
 ## 5. Design
 
@@ -298,17 +350,21 @@ agent-queries. En skrivbar prod-tilkobling skal være visuelt umulig å overse.
 Alle flyter er tilgjengelige fra kommandopaletten (⌘⇧P) med prefiks
 «Database: …». Direkte snarveier i panelet:
 
-| Snarvei | Handling |
-| --- | --- |
-| ⌘3 | Åpne/lukk databasepanelet |
-| ⌘⏎ | Kjør setning under markøren / markering |
-| ⌘⇧⏎ | Kjør hele konsollen |
-| ⌘T (i panel) | Ny resultat-fane / pin gjeldende |
-| ⌘S (i grid) | Submit ventende endringer |
-| ⌘Z (i grid) | Angre lokal (usendt) endring |
-| Esc | Lukk skuff/modal; deretter Revert-fokus |
-| ⌘F (i grid) | Fokus kolonnefilter |
-| ⌥⌘H | Åpne query-historikk |
+| Snarvei | Handling | Status v0.20.0 |
+| --- | --- | --- |
+| ⌘3 | Åpne/lukk databasepanelet | ✅ |
+| ⌘⏎ | Kjør setning under markøren / markering | ✅ i konsollen |
+| ⌘⇧⏎ | Kjør hele konsollen | ✅ |
+| ⌘T (i panel) | Ny resultat-fane / pin gjeldende | ✗ ⌘T er global terminal; pin er klikk på ★ |
+| ⌘S (i grid) | Submit ventende endringer | ✗ ⌘S er global lagring; Submit er en knapp |
+| ⌘Z (i grid) | Angre lokal (usendt) endring | ✗ bare Revert av alt |
+| Esc | Lukk skuff/modal; deretter Revert-fokus | ◐ lukker rediger-dialogen og completion; historikk, logg, bekreftelse, parametere, ny rad og ERD har bare ✕/Cancel |
+| ⌘F (i grid) | Fokus kolonnefilter | ✗ global søk |
+| ⌥⌘H | Åpne query-historikk | ✗ bare knappen |
+| ⌥⌘⏎ | Explain SQL under markøren | ✅ (ikke i opprinnelig plan) |
+
+Kommandopaletten har i dag bare Run SQL, Explain SQL, Suggest Index Under
+Cursor og Toggle Database Panel — ikke «alle flyter».
 
 ### 5.7 Tilstander
 
@@ -347,6 +403,26 @@ fremmed verktøy.
 - ClickHouse er analytisk og har ikke transaksjoner — DB-303/503 degraderer
   til direkte-skriv med ekstra bekreftelse der.
 
+**Slik er det bygget i v0.20.0** (avvik fra føringene over):
+
+- Konsollen er en floem `TextDocument` med editorens tastebindinger, ikke en
+  `e-core`-buffer. Highlighting deles via `e_core::syntax`, completion via
+  `sql_completion_items`.
+- Historikken ligger som planlagt i `~/.config/e/history.db`, nøklet på
+  prosjektets rotsti, med en global grense på 10 000 innslag. Tømming skjer
+  fra historikk-skuffen, ikke fra settings.
+- Tilkoblinger lagres i `~/.config/e/databases.json` (0600, hemmeligheter i
+  keychain), lagrede queries i `~/.config/e/queries.json` — ikke i prosjektet.
+- Kansellering: hver kjøring er en egen tråd + `create_ext_action`, ikke en
+  dedikert tråd per tilkobling. PostgreSQL bruker driverens `CancelToken`,
+  MySQL `KILL QUERY <id>` fra en annen tilkobling, ClickHouse
+  `KILL QUERY WHERE query_id …`, SQLite `InterruptHandle`. Resultatet
+  forkastes uansett om serveren rekker å stoppe.
+- Submit bygger literal SQL med `quote_literal`, ikke parametriserte
+  setninger.
+- ClickHouse kjører et endringssett setning for setning (best-effort), uten
+  ekstra bekreftelse.
+
 ## 7. Faseplan
 
 | Fase | Innhold | Kravdekning |
@@ -360,6 +436,33 @@ fremmed verktøy.
 Fase 1 og 2 utgjør til sammen «paritet i praksis» — etter dem skal en
 PhpStorm-bruker ikke savne noe daglig. Fase 3 lukker de ukentlige behovene,
 fase 4–5 er forspranget.
+
+### Status per fase (v0.20.0)
+
+| Fase | Levert | Delvis | Mangler |
+| --- | --- | --- | --- |
+| 1 — Konsollen | 401, 403, 405, 409, 605 | 402, 404 | — |
+| 2 — Trygg redigering | 302, 305, 702 | 102, 104, 303, 304, 703 | — |
+| 3 — Data inn/ut | 205 | 202, 502, 503, 505 | — |
+| 4 — Kraftbruker | 408, 604 | 204, 308, 602, 603, 802 | — |
+| 5 — Forbi | — | 206, 207, 704, 705, 803, 805 | — |
+
+Ingen fase er helt ferdig. Krav utenfor faseplanen som mangler helt: 203,
+306, 307, 310, 407, 410, 504, 804.
+
+### Neste steg
+
+1. **Rette feilene i §3** — særlig at ventende endringer forsvinner og at
+   «+ Row» går utenom bekreftelsen. Dette er trygghetsløfter PRD-en gir, og
+   koden bryter dem.
+2. **Fullføre fase 1 og 2** («paritet i praksis»): completion med alias,
+   nøkkelord og riktig tilkobling (402); faner som overlever tabellbytte og
+   viser queryen (404); nye rader i endringssettet og radantall i
+   bekreftelsen (303, 703); verdi-editor (304); manuell miljøetikett og
+   tilkoblingsbytte i header (102, 104).
+3. **Rydde dokumentasjonen** som lover mer enn koden (§3).
+4. Deretter fase 3: CSV-import med mapping-dialog (503), views med definisjon
+   (202), kopier-som i alle formater (505).
 
 ## 8. Suksessmetrikker
 
@@ -376,17 +479,24 @@ fase 4–5 er forspranget.
 
 | Risiko | Avbøtning |
 | --- | --- |
-| Driver-forskjeller (fire motorer × alle features) gir kombinatorisk kompleksitet | Kapabilitets-flagg per driver i `e-db` (`supports_transactions`, `supports_kill`, …); UI degraderer eksplisitt i stedet for å feile |
-| Transaksjonell redigering med samtidige eksterne endringer (optimistic locking) | Submit matcher på de opprinnelige verdiene i `WHERE`-klausulen; ved 0 raders treff varsles konflikt og grid refreshes |
-| Query-kansellering er driver-spesifikk og skjør | Fallback: la queryen løpe ut i bakgrunnen, men frigjør UI og marker resultatet som forkastet |
-| Historikk-DB vokser | Rullerende grense (f.eks. 10 000 innslag) + manuell tømming i settings |
+| Driver-forskjeller (fire motorer × alle features) gir kombinatorisk kompleksitet | Kapabilitets-flagg per driver i `e-db` (`supports_transactions`, `supports_kill`, …); UI degraderer eksplisitt i stedet for å feile. **v0.20.0: ikke gjort** — alt er `match Backend`, og degradering er stille (ClickHouse-views blir tomme) |
+| Transaksjonell redigering med samtidige eksterne endringer (optimistic locking) | Submit matcher på de opprinnelige verdiene i `WHERE`-klausulen; ved 0 raders treff varsles konflikt og grid refreshes. **v0.20.0: ikke gjort** — `WHERE` matcher bare på primærnøkkel, og 0 rader varsles ikke |
+| Query-kansellering er driver-spesifikk og skjør | Fallback: la queryen løpe ut i bakgrunnen, men frigjør UI og marker resultatet som forkastet. **v0.20.0: gjort**, og queryen stoppes nå også på serveren for alle fire motorer |
+| Historikk-DB vokser | Rullerende grense (f.eks. 10 000 innslag) + manuell tømming i settings. **v0.20.0: gjort** (global grense 10 000; tømming fra historikk-skuffen) |
 | Scope-kryp mot DataGrip | Ikke-målene i §1 håndheves; nye motorer/DBA-features krever egen PRD |
 
 ## 10. Åpne spørsmål
 
 1. Skal konsoll-faner persisteres på tvers av økter (som editor-tabs) eller er
    historikken nok?
+   *v0.20.0: ikke persistert — verken faner eller konsolltekst. Fanene
+   overlever ikke engang et tabellbytte (§3), som bør rettes uansett svar.*
 2. Miljøetikett: skal `staging` også være read-only som standard, eller kun prod?
+   *v0.20.0: i praksis ja for fjerne verter — alle ikke-lokale verter og SSH
+   starter read-only. En staging som bare gjenkjennes på navn, på lokal vert,
+   er skrivbar. Valget lagres ikke.*
 3. CSV-import: trenger fase 3 også Excel (`.xlsx`), eller er CSV nok for målgruppen?
+   *v0.20.0: bare CSV.*
 4. Snapshots (DB-704): begrenses til SQLite/MySQL lokalt i første omgang, eller
    må PostgreSQL med fra start?
+   *v0.20.0: besvart — SQLite, MySQL og PostgreSQL, lokalt. Ikke ClickHouse.*

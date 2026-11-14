@@ -571,7 +571,7 @@ impl Conn {
     /// [`query`] and [`execute_transaction`] refuse any statement that
     /// [`is_read_only`] can't vouch for, and the server is asked to enforce it
     /// too where that's cheap: a read-only session on PostgreSQL and MySQL, a
-    /// read-only open on SQLite and `readonly=1` on ClickHouse — so a write the
+    /// read-only open on SQLite and `readonly=2` on ClickHouse — so a write the
     /// classifier misses (a side-effecting function, say) still fails.
     pub fn set_read_only(&self, on: bool) {
         self.read_only.store(on, Ordering::SeqCst);
@@ -1314,6 +1314,38 @@ fn ch_query(backend: &Backend, sql: &str, max: usize) -> Result<QueryResult, Str
     ch_query_as(backend, sql, max, false, None)
 }
 
+/// The URL parameters of a ClickHouse query: its database, read-only mode,
+/// `query_id`, and for a read shown up to `max` rows a limit.
+fn ch_params(
+    database: &str,
+    read_only: bool,
+    query_id: Option<&str>,
+    select: bool,
+    max: usize,
+) -> Vec<String> {
+    let mut params: Vec<String> = Vec::new();
+    if !database.is_empty() {
+        params.push(format!("database={}", url_encode(database)));
+    }
+    if read_only {
+        // 2, not 1: reads only, as with 1, but settings may change. With 1
+        // ClickHouse refuses the `max_result_rows` below (Code 164), and so
+        // every limited SELECT. Writes and DDL on tables are still refused,
+        // and so is changing `readonly` itself.
+        params.push("readonly=2".into());
+    }
+    if let Some(id) = query_id {
+        params.push(format!("query_id={}", url_encode(id)));
+    }
+    // The server stops making rows past the ones shown (it may finish the
+    // block it is in; the reader cuts there).
+    if select && max != usize::MAX {
+        params.push(format!("max_result_rows={}", max + 1));
+        params.push("result_overflow_mode=break".into());
+    }
+    params
+}
+
 /// [`ch_query`], with ClickHouse itself refusing writes when `read_only`,
 /// and sent with `query_id` when given (so it can be killed).
 fn ch_query_as(
@@ -1340,22 +1372,7 @@ fn ch_query_as(
         sql.to_string()
     };
     let mut url = base_url.clone();
-    let mut params: Vec<String> = Vec::new();
-    if !database.is_empty() {
-        params.push(format!("database={}", url_encode(database)));
-    }
-    if read_only {
-        params.push("readonly=1".into());
-    }
-    if let Some(id) = query_id {
-        params.push(format!("query_id={}", url_encode(id)));
-    }
-    // The server stops making rows past the ones shown (it may finish the
-    // block it is in; the reader below cuts there).
-    if select && max != usize::MAX {
-        params.push(format!("max_result_rows={}", max + 1));
-        params.push("result_overflow_mode=break".into());
-    }
+    let params = ch_params(database, read_only, query_id, select, max);
     if !params.is_empty() {
         url.push('?');
         url.push_str(&params.join("&"));
@@ -3471,6 +3488,29 @@ mod pg_live_tests {
             None,
             "metadata takes it all"
         );
+    }
+
+    #[test]
+    fn clickhouse_read_only_still_lets_a_read_be_limited() {
+        // `readonly=1` refuses any setting in the query, the row limit
+        // included (Code 164); 2 allows settings and still refuses writes.
+        let p = ch_params("app db", true, Some("e-1"), true, 100);
+        assert_eq!(
+            p,
+            [
+                "database=app%20db",
+                "readonly=2",
+                "query_id=e-1",
+                "max_result_rows=101",
+                "result_overflow_mode=break",
+            ]
+        );
+        assert!(!p.iter().any(|s| s == "readonly=1"));
+        assert_eq!(
+            ch_params("", false, None, true, usize::MAX),
+            Vec::<String>::new()
+        );
+        assert_eq!(ch_params("", true, None, false, 100), ["readonly=2"]);
     }
 
     /// `--ignored`, with `E_PG_PORT` (+ `E_PG_PASSWORD`) and/or `E_CH_PORT`.

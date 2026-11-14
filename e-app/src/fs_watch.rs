@@ -382,18 +382,26 @@ mod tests {
             std::fs::write(root.join(format!("app/f{i}.php")), "<?php").unwrap();
         }
         std::fs::write(root.join("vendor/pkg/x.php"), "<?php").unwrap();
-        let batch = rx.recv_timeout(Duration::from_secs(5)).expect("a batch");
-        assert!(batch.structure, "{batch:?}");
+        // FSEvents may first hand over the folders this test made just before
+        // the watch began: gather batches until the files show up.
+        let mut all = Changes::default();
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until && !all.paths.iter().any(|p| p.ends_with("app/f4.php")) {
+            if let Ok(b) = rx.recv_timeout(Duration::from_millis(500)) {
+                all.structure |= b.structure;
+                all.paths.extend(b.paths);
+            }
+        }
+        assert!(all.structure, "{all:?}");
         assert!(
-            batch.paths.iter().any(|p| p.ends_with("app/f0.php")),
-            "{batch:?}"
+            all.paths.iter().any(|p| p.ends_with("app/f0.php")),
+            "{all:?}"
         );
         assert!(
-            !batch
-                .paths
+            !all.paths
                 .iter()
-                .any(|p| p.starts_with(root.join("vendor"))),
-            "{batch:?}"
+                .any(|p| p.starts_with(root.join("vendor/pkg"))),
+            "{all:?}"
         );
         // A folder made at the top level is watched from then on.
         std::fs::create_dir_all(root.join("modules")).unwrap();

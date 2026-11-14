@@ -71,13 +71,14 @@ impl AppState {
         };
         let root = self.root.get_untracked();
         let routes = self
+            .project
             .laravel
             .get_untracked()
             .map(|d| d.all_routes.clone())
             .unwrap_or_default();
         let schema = self.db.schema_cache.get_untracked();
         // Open files are planned from what they say now, not from disk.
-        let open: HashMap<PathBuf, String> = self.buffers.with_untracked(|bs| {
+        let open: HashMap<PathBuf, String> = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .filter_map(|b| Some((b.file.path.clone()?, b.doc.text().to_string())))
                 .collect()

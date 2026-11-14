@@ -168,7 +168,7 @@ impl AppState {
     /// Run the test declared on `line` (0-based) of the open file at `path` —
     /// a click on its mark in the gutter. `false` when none is declared there.
     pub(crate) fn run_test_at_line(&self, path: &Path, line: usize) -> bool {
-        let text = self.buffers.with_untracked(|bs| {
+        let text = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(path))
                 .map(|b| b.doc.text().to_string())
@@ -218,7 +218,7 @@ impl AppState {
 
     /// Bring every open file's test marks up to date with the results kept.
     fn sync_test_marks(&self) {
-        self.buffers.with_untracked(|bs| {
+        self.editor.buffers.with_untracked(|bs| {
             for b in bs {
                 let Some(path) = &b.file.path else { continue };
                 let marks = self.test_marks_for(path, &b.doc.text().to_string());

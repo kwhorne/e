@@ -306,7 +306,7 @@ impl AppState {
                 | Language::Svelte
         ) {
             if let Some(partial) = crate::inertia::route_partial(line_before) {
-                if let Some(data) = self.laravel.get_untracked() {
+                if let Some(data) = self.project.laravel.get_untracked() {
                     let lower = partial.to_lowercase();
                     let items: Vec<lsp_types::CompletionItem> = data
                         .routes
@@ -879,7 +879,7 @@ impl AppState {
 
     /// Resolve the Laravel helper token under the cursor, if any.
     pub(crate) fn laravel_token(&self) -> Option<(laravel::Helper, String, Arc<LaravelData>)> {
-        let data = self.laravel.get()?;
+        let data = self.project.laravel.get()?;
         let buf = self.active_buffer()?;
         let editor = buf.editor.get_untracked()?;
         let offset = editor.cursor.get_untracked().offset();
@@ -956,7 +956,7 @@ impl AppState {
         let text = buf.doc.text().to_string();
         let offset = editor.cursor.get_untracked().offset();
         let name = crate::inertia::route_at(&text, offset)?;
-        let data = self.laravel.get()?;
+        let data = self.project.laravel.get()?;
         Some((name, data))
     }
 

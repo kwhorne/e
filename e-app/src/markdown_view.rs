@@ -415,7 +415,7 @@ impl AppState {
 /// The preview pane: beside the editor when `⌘⇧M` is on and the active file
 /// is Markdown, re-rendered as the text changes, scrolled with the editor.
 pub fn markdown_preview(state: AppState) -> impl IntoView {
-    let visible = move || state.md_preview.get() && is_markdown(state);
+    let visible = move || state.editor.md_preview.get() && is_markdown(state);
 
     // Re-render when the text has changed and typing has paused — not on
     // every keystroke, and not on caret moves, which bump `cache_rev` too.

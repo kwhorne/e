@@ -166,3 +166,25 @@ pub fn problems_panel(state: AppState) -> impl IntoView {
         }
     })
 }
+
+/// What the language servers and linters report, and the code actions on it.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct Problems {
+    /// Diagnostics keyed by `file://` URI.
+    /// Merged view: uri -> diagnostics from every server. Readers use this.
+    pub by_file:
+        floem::reactive::RwSignal<std::collections::HashMap<String, Vec<lsp_types::Diagnostic>>>,
+    /// Per-server storage behind [`Self::diagnostics`], keyed `(server id, uri)`,
+    /// so two servers publishing for the same file don't clobber each other.
+    pub by_server: floem::reactive::RwSignal<
+        std::collections::HashMap<(String, String), Vec<lsp_types::Diagnostic>>,
+    >,
+    /// LSP code actions (quick fixes / refactors) offered at the cursor, and
+    /// whether the picker is open.
+    pub code_actions: floem::reactive::RwSignal<Vec<e_lsp::CodeActionItem>>,
+    pub code_actions_open: floem::reactive::RwSignal<bool>,
+    /// Agents waiting for fresh diagnostics on a file they just wrote.
+    pub waiters: floem::reactive::RwSignal<Vec<crate::state::DiagWaiter>>,
+}

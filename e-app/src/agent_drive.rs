@@ -133,16 +133,16 @@ impl AppState {
             ("relations", self.views.rel_open.get_untracked()),
             ("events", self.views.event_open.get_untracked()),
             ("schema_diff", self.views.schema_diff_open.get_untracked()),
-            ("undo", self.undo_open.get_untracked()),
+            ("undo", self.editor.undo_open.get_untracked()),
             ("map", self.views.map_open.get_untracked()),
             ("semantic", self.sem.open.get_untracked()),
             ("tinker", self.tinker.open.get_untracked()),
             ("terminal", self.term.open.get_untracked()),
             ("tdd", self.tests.open.get_untracked()),
             ("debug", self.debug.open.get_untracked()),
-            ("settings", self.settings_open.get_untracked()),
+            ("settings", self.ui.settings_open.get_untracked()),
             ("git", self.git.panel_open.get_untracked()),
-            ("goto_file", self.palette_open.get_untracked()),
+            ("goto_file", self.ui.palette_open.get_untracked()),
             ("command_palette", self.cmd.open.get_untracked()),
         ];
         let open: Vec<&str> = panels.iter().filter(|(_, o)| *o).map(|(n, _)| *n).collect();
@@ -179,15 +179,15 @@ impl AppState {
                 })
             })
             .or_else(|| {
-                self.confirm.with_untracked(|c| {
+                self.ui.confirm.with_untracked(|c| {
                     c.as_ref().map(|c| {
                         json!({"kind": "confirm", "title": c.title, "detail": c.detail, "button": c.action})
                     })
                 })
             });
 
-        let code_actions = self.code_actions_open.get_untracked().then(|| {
-            self.code_actions.with_untracked(|l| {
+        let code_actions = self.problems.code_actions_open.get_untracked().then(|| {
+            self.problems.code_actions.with_untracked(|l| {
                 l.iter()
                     .enumerate()
                     .map(|(i, a)| json!({"index": i, "title": a.title, "from": a.server}))
@@ -294,13 +294,13 @@ impl AppState {
 
         // With the editor split: each pane's file and caret, and which has
         // the keyboard.
-        let panes = self.split.get_untracked().then(|| {
-            [self.active, self.active2]
+        let panes = self.editor.split.get_untracked().then(|| {
+            [self.editor.active, self.editor.active2]
                 .iter()
                 .enumerate()
                 .map(|(pane, active)| {
                     let buf = active.get_untracked().and_then(|id| {
-                        self.buffers
+                        self.editor.buffers
                             .with_untracked(|bs| bs.iter().find(|b| b.id == id).cloned())
                     });
                     let caret = buf.as_ref().and_then(|b| b.editor.get_in(pane as u8)).map(|ed| {
@@ -311,7 +311,7 @@ impl AppState {
                         "path": buf.and_then(|b| b.file.path).map(|p| p.to_string_lossy().into_owned()),
                         "line": caret.map(|c| c.0),
                         "col": caret.map(|c| c.1),
-                        "focused": self.focused.get_untracked() as usize == pane,
+                        "focused": self.editor.focused.get_untracked() as usize == pane,
                     })
                 })
                 .collect::<Vec<_>>()
@@ -349,7 +349,7 @@ impl AppState {
             "transcript": transcript(*self),
             "notifications": notices(),
             "window_focused": crate::toast::window_focused(),
-            "toasts": self.toasts.with_untracked(|v| {
+            "toasts": self.ui.toasts.with_untracked(|v| {
                 v.iter()
                     .map(|t| json!({"text": t.text, "count": t.count}))
                     .collect::<Vec<_>>()
@@ -360,12 +360,12 @@ impl AppState {
     /// `code_actions`: open the `⌘.` menu at the caret and answer with what it
     /// offers, once the language servers have had their say.
     pub(crate) fn agent_code_actions(&self, reply: Sender<Value>) {
-        self.code_actions_open.set(false);
-        self.code_actions.set(Vec::new());
+        self.problems.code_actions_open.set(false);
+        self.problems.code_actions.set(Vec::new());
         let before = notices().len();
         self.request_code_actions();
-        let open = self.code_actions_open;
-        let list = self.code_actions;
+        let open = self.problems.code_actions_open;
+        let list = self.problems.code_actions;
         when(
             move || open.get_untracked(),
             Duration::from_secs(8),

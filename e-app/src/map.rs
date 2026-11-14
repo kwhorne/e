@@ -54,6 +54,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
     });
     let warn_summary = label(move || {
         let n = state
+            .project
             .laravel
             .get()
             .map(|d| d.all_routes.iter().filter(|r| r.is_unprotected()).count())
@@ -67,6 +68,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
     .style(move |s| {
         let s = s.margin_right(10.0).font_size(12.0).color(warn());
         let n = state
+            .project
             .laravel
             .get()
             .map(|d| d.all_routes.iter().filter(|r| r.is_unprotected()).count())
@@ -108,7 +110,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
 
     let rows = dyn_stack(
         move || -> Vec<MapRow> {
-            let Some(data) = state.laravel.get() else {
+            let Some(data) = state.project.laravel.get() else {
                 return Vec::new();
             };
             let q = state.views.map_query.get().to_lowercase();
@@ -211,7 +213,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
             let ctrl_label = action.rsplit('\\').next().unwrap_or(&action).to_string();
             let route_name = name.clone();
             let ctrl = card(ctrl_label, true, true).on_click_stop(move |_| {
-                if let Some(data) = state.laravel.get_untracked() {
+                if let Some(data) = state.project.laravel.get_untracked() {
                     if let Some((p, l, c)) = laravel::navigate(&data, Helper::Route, &route_name) {
                         state.jump_to(&format!("file://{}", p.display()), l, c);
                     }
@@ -264,6 +266,7 @@ pub fn laravel_map(state: AppState) -> impl IntoView {
     let empty_hint = label(|| "No routes (open a Laravel project).".to_string()).style(move |s| {
         let s = s.padding(16.0).color(theme::fg_dim()).font_size(12.0);
         let has = state
+            .project
             .laravel
             .get()
             .map(|d| !d.routes.is_empty())

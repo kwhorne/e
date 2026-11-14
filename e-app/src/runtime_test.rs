@@ -81,6 +81,7 @@ impl AppState {
         };
         let root = self.root.get_untracked();
         let routes = self
+            .project
             .laravel
             .get_untracked()
             .map(|d| d.all_routes.clone())
@@ -105,7 +106,7 @@ impl AppState {
             .unwrap_or(&w.path)
             .display()
             .to_string();
-        let open = self.buffers.with_untracked(|bs| {
+        let open = self.editor.buffers.with_untracked(|bs| {
             bs.iter()
                 .find(|b| b.file.path.as_deref() == Some(w.path.as_path()))
                 .cloned()
@@ -138,6 +139,7 @@ impl AppState {
     pub fn agent_request_test(&self, req: &Value, reply: Sender<Value>) {
         let root = self.root.get_untracked();
         let routes = self
+            .project
             .laravel
             .get_untracked()
             .map(|d| d.all_routes.clone())

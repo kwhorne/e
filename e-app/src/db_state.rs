@@ -63,7 +63,7 @@ impl AppState {
                 state.maybe_regenerate_eloquent_helper();
                 // The column lint ran against the old schema: a column just
                 // migrated in is no longer unknown.
-                let php: Vec<u64> = state.buffers.with_untracked(|bs| {
+                let php: Vec<u64> = state.editor.buffers.with_untracked(|bs| {
                     bs.iter()
                         .filter(|b| b.file.language == e_core::language::Language::Php)
                         .map(|b| b.id)

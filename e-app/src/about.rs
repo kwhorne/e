@@ -67,7 +67,7 @@ pub fn about_dialog(state: AppState) -> impl IntoView {
                     .cursor(floem::style::CursorStyle::Pointer)
                     .hover(|s| s.background(theme::bg_hover()))
             })
-            .on_click_stop(move |_| state.about_open.set(false)),
+            .on_click_stop(move |_| state.ui.about_open.set(false)),
     ))
     .style(|s| {
         s.flex_col()
@@ -91,11 +91,11 @@ pub fn about_dialog(state: AppState) -> impl IntoView {
                 .items_center()
                 .justify_center()
                 .background(floem::peniko::Color::from_rgba8(0, 0, 0, 0x99));
-            if state.about_open.get() {
+            if state.ui.about_open.get() {
                 s
             } else {
                 s.hide()
             }
         })
-        .on_click_stop(move |_| state.about_open.set(false))
+        .on_click_stop(move |_| state.ui.about_open.set(false))
 }

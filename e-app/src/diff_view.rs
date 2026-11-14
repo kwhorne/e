@@ -14,7 +14,7 @@ use crate::theme;
 pub fn diff_view(state: AppState) -> impl IntoView {
     floem::views::dyn_container(
         move || {
-            let visible = state.diff_open.get();
+            let visible = state.editor.diff_open.get();
             let rev = state
                 .active_buffer()
                 .map(|b| b.doc.cache_rev().get())
@@ -75,7 +75,7 @@ pub fn diff_view(state: AppState) -> impl IntoView {
     )
     .style(move |s| {
         let s = s.absolute().inset(0.0).size_full();
-        if state.diff_open.get() {
+        if state.editor.diff_open.get() {
             s
         } else {
             s.hide()
@@ -96,7 +96,7 @@ pub fn file_diff_view(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.close_file_diff());
-    let title = label(move || match state.file_diff.get() {
+    let title = label(move || match state.editor.file_diff.get() {
         Some((l, r, _)) => format!("{l}  ↔  {r}"),
         None => String::new(),
     })
@@ -118,6 +118,7 @@ pub fn file_diff_view(state: AppState) -> impl IntoView {
     let rows = dyn_stack(
         move || {
             state
+                .editor
                 .file_diff
                 .get()
                 .map(|(_, _, lines)| lines)
@@ -175,7 +176,7 @@ pub fn file_diff_view(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 130));
-        if state.file_diff.with(|d| d.is_some()) {
+        if state.editor.file_diff.with(|d| d.is_some()) {
             s
         } else {
             s.hide()

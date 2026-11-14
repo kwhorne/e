@@ -94,14 +94,14 @@ impl AppState {
             self.clear_ghost();
             return;
         }
-        let gen = self.ghost_gen.get_untracked().wrapping_add(1);
-        self.ghost_gen.set(gen);
+        let gen = self.editor.ghost_gen.get_untracked().wrapping_add(1);
+        self.editor.ghost_gen.set(gen);
         self.clear_ghost();
 
         let state = *self;
         floem::action::exec_after(Duration::from_millis(350), move |_| {
             // Superseded by a newer keystroke? Skip.
-            if state.ghost_gen.get_untracked() == gen {
+            if state.editor.ghost_gen.get_untracked() == gen {
                 state.fire_ghost(buffer_id, gen);
             }
         });
@@ -130,7 +130,7 @@ impl AppState {
         let state = *self;
         let store = create_ext_action(self.cx, move |line: Option<String>| {
             // Only apply if nothing newer happened and the cursor hasn't moved.
-            if state.ghost_gen.get_untracked() != gen {
+            if state.editor.ghost_gen.get_untracked() != gen {
                 return;
             }
             let Some(line) = line else {
@@ -188,7 +188,8 @@ impl AppState {
     }
 
     fn buffer(&self, id: u64) -> Option<Buffer> {
-        self.buffers
+        self.editor
+            .buffers
             .with_untracked(|bs| bs.iter().find(|b| b.id == id).cloned())
     }
 }

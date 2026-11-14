@@ -283,3 +283,16 @@ fn tail_lines(path: &std::path::Path, bytes: u64, max: usize) -> Vec<String> {
     let from = all.len().saturating_sub(max);
     all[from..].iter().map(|s| s.to_string()).collect()
 }
+
+/// What e knows about the project: the Laravel data, ide.json's rules and the project's own rules.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct ProjectData {
+    /// Laravel project data (routes/views/config/env), if applicable.
+    pub laravel: floem::reactive::RwSignal<Option<std::sync::Arc<crate::laravel::LaravelData>>>,
+    /// Completion rules the project and its packages declare in `ide.json`.
+    pub ide_rules: floem::reactive::RwSignal<std::sync::Arc<Vec<crate::ide_json::Rule>>>,
+    /// The project's own rules, from `.e/rules.toml`.
+    pub rules: floem::reactive::RwSignal<std::sync::Arc<e_review::rules::Rules>>,
+}

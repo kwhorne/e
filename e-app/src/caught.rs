@@ -277,7 +277,7 @@ impl AppState {
     /// Bring every open file's exception marks up to date.
     pub(crate) fn sync_caught_marks(&self) {
         let caught = self.log.caught.get_untracked();
-        let buffers = self.buffers.get_untracked();
+        let buffers = self.editor.buffers.get_untracked();
         for b in buffers {
             let Some(path) = &b.file.path else {
                 continue;
@@ -311,7 +311,8 @@ impl AppState {
                 .collect();
             if let Some(uri) = b.uri.clone() {
                 let lsp = self
-                    .diagnostics
+                    .problems
+                    .by_file
                     .with_untracked(|m| m.get(&uri).cloned().unwrap_or_default());
                 self.apply_diagnostics_to_buffer(&uri, &lsp);
             }

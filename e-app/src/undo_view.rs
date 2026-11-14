@@ -99,7 +99,7 @@ pub fn undo_tree_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.undo_open.set(false));
+        .on_click_stop(move |_| state.editor.undo_open.set(false));
     let header = stack((title, undo, redo, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -113,8 +113,8 @@ pub fn undo_tree_panel(state: AppState) -> impl IntoView {
 
     let list = dyn_stack(
         move || {
-            let _ = state.undo_rev.get();
-            let _ = state.active.get();
+            let _ = state.editor.undo_rev.get();
+            let _ = state.editor.active.get();
             rows(state)
                 .into_iter()
                 .map(|r| (r.id, r))
@@ -171,7 +171,7 @@ pub fn undo_tree_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.undo_open.get() {
+        if state.editor.undo_open.get() {
             s
         } else {
             s.hide()

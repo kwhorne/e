@@ -559,7 +559,7 @@ fn app_view() -> impl IntoView {
     // Runtime lenses follow the captured requests and the routes they match.
     create_effect(move |_| {
         state.runtime.reqs.track();
-        state.laravel.track();
+        state.project.laravel.track();
         state.grove.sql_capture.track();
         state.refresh_runtime_lenses();
     });
@@ -584,7 +584,7 @@ fn app_view() -> impl IntoView {
     // Track recently-used files (newest first) for the ⌘E switcher.
     create_effect(move |_| {
         if let Some(id) = state.focused_active_id() {
-            if let Some(path) = state.buffers.with(|bs| {
+            if let Some(path) = state.editor.buffers.with(|bs| {
                 bs.iter()
                     .find(|b| b.id == id)
                     .and_then(|b| b.file.path.clone())
@@ -596,10 +596,10 @@ fn app_view() -> impl IntoView {
 
     // Persist the session whenever the open files / panes change.
     create_effect(move |_| {
-        state.buffers.with(|_| ());
-        state.active.get();
-        state.active2.get();
-        state.split.get();
+        state.editor.buffers.with(|_| ());
+        state.editor.active.get();
+        state.editor.active2.get();
+        state.editor.split.get();
         state.save_session();
     });
 
@@ -694,7 +694,7 @@ fn app_view() -> impl IntoView {
 
     // Keep the document outline in sync with the active buffer.
     create_effect(move |_| {
-        state.active.get();
+        state.editor.active.get();
         state.request_outline();
         state.request_inlay_hints_active();
     });
@@ -737,11 +737,11 @@ fn app_view() -> impl IntoView {
     let sidebar = sidebar_content.style(move |s| {
         let s = s
             .flex_col()
-            .width(state.sidebar_width.get())
+            .width(state.ui.sidebar_width.get())
             .height_full()
             .border_right(1.0)
             .border_color(theme::border());
-        if state.sidebar_open.get() {
+        if state.ui.sidebar_open.get() {
             s
         } else {
             s.hide()
@@ -822,8 +822,8 @@ fn app_view() -> impl IntoView {
         resize_handle(
             state,
             sidebar_handle_side,
-            state.sidebar_width,
-            state.sidebar_open,
+            state.ui.sidebar_width,
+            state.ui.sidebar_open,
             150.0,
             600.0,
         )
@@ -917,7 +917,7 @@ fn app_view() -> impl IntoView {
                     crate::related_view::related_panel(state).into_any(),
                 ),
                 (
-                    state.undo_open,
+                    state.editor.undo_open,
                     crate::undo_view::undo_tree_panel(state).into_any(),
                 ),
                 (
@@ -935,7 +935,7 @@ fn app_view() -> impl IntoView {
         // top-level stack within floem's tuple arity).
         stack((diff_view(state), crate::diff_view::file_diff_view(state))).style(move |s| {
             let s = s.absolute().inset(0.0).size_full();
-            if state.diff_open.get() || state.file_diff.with(|d| d.is_some()) {
+            if state.editor.diff_open.get() || state.editor.file_diff.with(|d| d.is_some()) {
                 s
             } else {
                 s.hide()
@@ -963,7 +963,9 @@ fn app_view() -> impl IntoView {
             // Two dialogs share one slot so the tuple stays within floem's arity.
             stack((close_confirm_dialog(state), confirm_dialog(state))).style(move |s| {
                 let s = s.absolute().inset(0.0).size_full();
-                if state.close_confirm.get().is_some() || state.confirm.with(Option::is_some) {
+                if state.editor.close_confirm.get().is_some()
+                    || state.ui.confirm.with(Option::is_some)
+                {
                     s
                 } else {
                     s.hide()
@@ -992,16 +994,16 @@ fn app_view() -> impl IntoView {
         .style(move |s| {
             let s = s.absolute().inset(0.0).size_full();
             if state.goto.open.get()
-                || state.close_confirm.get().is_some()
-                || state.confirm.with(Option::is_some)
+                || state.editor.close_confirm.get().is_some()
+                || state.ui.confirm.with(Option::is_some)
                 || state.replace_confirm.with(Option::is_some)
                 || state.rename.plan.with(Option::is_some)
                 || state.rename.move_plan.with(Option::is_some)
                 || state.recent.open.get()
                 || state.task.open.get()
                 || state.artisan.open.get()
-                || state.settings_open.get()
-                || state.code_actions_open.get()
+                || state.ui.settings_open.get()
+                || state.problems.code_actions_open.get()
             {
                 s
             } else {

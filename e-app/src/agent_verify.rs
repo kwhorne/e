@@ -177,6 +177,7 @@ impl AppState {
     pub fn agent_verify_route(&self, req: &Value, reply: std::sync::mpsc::Sender<Value>) {
         let base = self.app_base();
         let routes = self
+            .project
             .laravel
             .get_untracked()
             .map(|d| d.all_routes.clone())

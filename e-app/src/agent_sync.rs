@@ -672,9 +672,9 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                     .unwrap_or("")
                     .to_string(),
             };
-            let data = state.laravel.get_untracked();
+            let data = state.project.laravel.get_untracked();
             let schema = state.db.schema_cache.get_untracked();
-            let rules = state.project_rules.get_untracked();
+            let rules = state.project.rules.get_untracked();
             std::thread::spawn(move || {
                 let data = data.unwrap_or_else(|| Arc::new(e_laravel::laravel::load(&root)));
                 let mut map = e_laravel::project_map::build(&root, &data, &schema, &request);
@@ -693,7 +693,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
         // ---- The project's own rules (async when checking) ----------------
         "rules" => {
             let root = state.root.get_untracked();
-            let rules = state.project_rules.get_untracked();
+            let rules = state.project.rules.get_untracked();
             let check = req.get("check").and_then(|c| c.as_bool()).unwrap_or(false);
             std::thread::spawn(move || {
                 let mut resp = json!({
@@ -750,7 +750,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
         "apply_code_action" => {
-            let list = state.code_actions.get_untracked();
+            let list = state.problems.code_actions.get_untracked();
             let by_title = req
                 .get("title")
                 .and_then(|v| v.as_str())
@@ -788,7 +788,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                     state.cancel_rename();
                 }
                 json!({"ok": true})
-            } else if state.confirm.with_untracked(Option::is_some) {
+            } else if state.ui.confirm.with_untracked(Option::is_some) {
                 if confirm {
                     state.confirm_accept();
                 } else {
@@ -1000,7 +1000,7 @@ fn log_summary(req: &Value) -> String {
 /// Resolve the language server + document URI for a path.
 fn resolve_lsp(state: AppState, path: &str) -> (Option<std::sync::Arc<e_lsp::LspClient>>, String) {
     let pb = std::path::PathBuf::from(path);
-    let open = state.buffers.with_untracked(|bs| {
+    let open = state.editor.buffers.with_untracked(|bs| {
         bs.iter()
             .find(|b| b.file.path.as_deref() == Some(pb.as_path()))
             .map(|b| (b.file.language, b.uri.clone()))
@@ -1053,7 +1053,7 @@ pub(crate) fn run_command(command: &str, cwd: &str) -> Value {
 }
 fn context(state: AppState) -> Value {
     let root = state.root.get_untracked().to_string_lossy().into_owned();
-    let open_files: Vec<String> = state.buffers.with_untracked(|bs| {
+    let open_files: Vec<String> = state.editor.buffers.with_untracked(|bs| {
         bs.iter()
             .filter_map(|b| {
                 b.file
@@ -1114,9 +1114,10 @@ fn context(state: AppState) -> Value {
 fn diagnostics(state: AppState) -> Vec<Value> {
     // The language servers' files, and the open files `e` found something in.
     let mut uris: Vec<String> = state
-        .diagnostics
+        .problems
+        .by_file
         .with_untracked(|map| map.keys().cloned().collect());
-    state.buffers.with_untracked(|bs| {
+    state.editor.buffers.with_untracked(|bs| {
         for b in bs {
             if let Some(uri) = &b.uri {
                 if !uris.contains(uri) {

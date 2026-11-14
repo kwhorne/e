@@ -632,17 +632,29 @@ which puts the whole value and every query in the Tinker panel, and
 it changes, and goes when its own line changes.
 
 **Nothing you evaluate sticks:**
-- What it writes is rolled back. It runs in a transaction on the default
-  connection, so `$order->update(…)` changes nothing.
-- Mail, notifications and queued jobs are faked.
-- `e` won't run it when the app boots as production, or when its default
-  database isn't on this machine or has `prod` or `live` in its name. The
-  check reads the configuration the app actually loaded, so a cached
-  config counts as well as `.env`.
+- **Database writes are rolled back.** It runs in a transaction on every
+  connection it reaches, so `$order->update(…)` changes nothing, on the
+  default connection or a model's own. A connection that isn't on this
+  machine, or looks like production, can't be queried at all.
+- **Mail, notifications and queued jobs are faked.** Outgoing HTTP fails
+  instead of reaching Stripe or a webhook.
+- **Files written through `Storage` go to a scratch copy**, on every disk:
+  - The expression reads its own writes back, and deletes and directories
+    behave as they would.
+  - Your real files are read but never changed.
+  - The scratch copy is removed when the run ends.
+- **Production is off limits.** `e` won't run it when the app boots as
+  production, or when its default database isn't on this machine or has
+  `prod` or `live` in its name. The check runs before the app's service
+  providers start. It reads the configuration the app actually loaded, so a
+  cached config counts as well as `.env`.
 
-Some things can't be rolled back or faked: DDL on MySQL (it commits as it
-runs), HTTP calls, files written, and other connections. Evaluate those
-expressions with that in mind.
+Some things are beyond it:
+- DDL on MySQL commits as it runs.
+- Files written with plain PHP (`file_put_contents`, `fopen`) rather than
+  through `Storage` go to disk.
+
+Evaluate those expressions with that in mind.
 
 ### Explain the query
 

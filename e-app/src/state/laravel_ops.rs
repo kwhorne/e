@@ -91,7 +91,8 @@ impl AppState {
     /// A file was saved in `e`: if it's one the Laravel data comes from, the
     /// data is stale right now — don't wait for the freshness tick.
     pub(crate) fn laravel_touch(&self, path: &std::path::Path) {
-        if self.project.laravel.get_untracked().is_none() {
+        // The watch on the project sees the save too, and reloads then.
+        if self.project.laravel.get_untracked().is_none() || crate::fs_watch::active() {
             return;
         }
         let root = self.root.get_untracked();

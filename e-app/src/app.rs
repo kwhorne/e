@@ -603,7 +603,19 @@ fn app_view() -> impl IntoView {
         state.save_session();
     });
 
-    // Idle auto-save: a ticker drives a UI-thread check every 500ms.
+    // Changes on disk, as they happen.
+    if let Some(rx) = crate::fs_watch::start(&state.root.get_untracked()) {
+        let changes = create_signal_from_channel(rx);
+        create_effect(move |_| {
+            if let Some(c) = changes.get() {
+                state.on_disk_changes(c);
+            }
+        });
+    }
+
+    // Idle auto-save: a ticker drives a UI-thread check every 500ms. What a
+    // watch on the project sees as it happens isn't looked for here, unless
+    // the watch couldn't be set up.
     {
         let (auto_tx, auto_rx) = std::sync::mpsc::channel::<()>();
         std::thread::spawn(move || loop {
@@ -627,12 +639,15 @@ fn app_view() -> impl IntoView {
                     state.save_session_in_background();
                     backed_up = now;
                 }
-                state.check_external_changes();
-                state.check_laravel_freshness();
-                state.check_db_schema_freshness();
-                if state.log.open.get_untracked() {
-                    state.refresh_laravel_log();
+                let watched = crate::fs_watch::active();
+                if !watched {
+                    state.check_external_changes();
+                    state.check_laravel_freshness();
+                    if state.log.open.get_untracked() {
+                        state.refresh_laravel_log();
+                    }
                 }
+                state.check_db_schema_freshness();
                 if state.runtime.open.get_untracked() {
                     state.poll_runtime();
                 }
@@ -642,8 +657,12 @@ fn app_view() -> impl IntoView {
                 // and whether HEAD moved under the change marks.
                 if tick.is_multiple_of(4) {
                     state.poll_runtime_for_lenses();
-                    state.check_head_moved();
-                    state.poll_laravel_log();
+                    if !state.head_is_watched() {
+                        state.check_head_moved();
+                    }
+                    if !state.log_is_watched() {
+                        state.poll_laravel_log();
+                    }
                 }
                 // Two seconds in, whether the database has the checkout's
                 // migrations; while the bar says it hasn't, every 10 s, so a

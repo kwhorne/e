@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Changes on disk show up as they happen.** `e` used to look for them every
+  half second, and every two seconds for the Laravel data and the git
+  history. It now watches the project:
+  - A file changed in a terminal or by an agent shows at once.
+  - A file created or deleted outside `e` appears in or leaves the file tree.
+  - A commit or checkout updates the change marks.
+  - A new entry in the Laravel log reaches the editor.
+
+  `vendor`, `node_modules`, build output and Laravel's `storage` aren't
+  watched, except its logs. Where the watch can't be set up (a full inotify
+  limit on Linux, say), `e` keeps looking every half second.
 - **An agent's commands wait for your OK.** `run` (a shell command) and
   `tinker` (PHP in your app) over the editor socket used to execute as soon
   as an agent sent them. A card now shows what is about to run:

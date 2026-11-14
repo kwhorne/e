@@ -55,6 +55,7 @@ mod file_tree;
 mod find;
 mod fonts;
 mod framework_completion;
+mod fs_watch;
 mod fuzzy;
 mod ghost;
 mod git_view;

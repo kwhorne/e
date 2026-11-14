@@ -261,6 +261,16 @@ pub struct Conn {
     session_ro: AtomicBool,
     /// Dropped (killing the `ssh` child) when the connection is dropped.
     _tunnel: Option<Mutex<SshTunnel>>,
+    /// How to stop a PostgreSQL query that is running: taken when the
+    /// connection opens, since the client itself is locked by the query.
+    pg_cancel: Option<PgCancel>,
+}
+
+/// A PostgreSQL connection's cancel key, and the TLS it was opened with
+/// (the cancel request is a connection of its own).
+struct PgCancel {
+    token: postgres::CancelToken,
+    tls: Option<postgres_native_tls::MakeTlsConnector>,
 }
 
 /// An SSH local port-forward run via the system `ssh` binary.
@@ -424,13 +434,31 @@ pub fn from_env(project: &Path) -> Option<DbConfig> {
 
 pub fn connect(config: &DbConfig) -> Result<Conn, String> {
     let (eff, tunnel) = prepare(config)?;
-    let backend = build_backend(&eff, config)?;
+    let (backend, pg_cancel) = build_backend(&eff, config)?;
     Ok(Conn {
         backend,
         read_only: AtomicBool::new(false),
         session_ro: AtomicBool::new(false),
         _tunnel: tunnel.map(Mutex::new),
+        pg_cancel,
     })
+}
+
+/// Stop the query running on `conn`, on the server. `Ok(true)` when the
+/// server was asked; `Ok(false)` for an engine `e` can't cancel yet (the
+/// query then runs to its end in the background). The cancelled query fails
+/// with PostgreSQL's "canceling statement due to user request", and the
+/// connection is free again.
+pub fn cancel(conn: &Conn) -> Result<bool, String> {
+    let Some(c) = &conn.pg_cancel else {
+        return Ok(false);
+    };
+    match &c.tls {
+        Some(tls) => c.token.cancel_query(tls.clone()),
+        None => c.token.cancel_query(postgres::NoTls),
+    }
+    .map_err(pg_err)?;
+    Ok(true)
 }
 
 impl Conn {
@@ -561,10 +589,12 @@ fn mysql_ssl(config: &DbConfig) -> Option<mysql::SslOpts> {
 /// `eff` is what to connect to (through an SSH tunnel, the local end of
 /// it); `config` is the connection as saved, whose host the server's
 /// certificate names.
-fn build_backend(eff: &DbConfig, config: &DbConfig) -> Result<Backend, String> {
+fn build_backend(eff: &DbConfig, config: &DbConfig) -> Result<(Backend, Option<PgCancel>), String> {
+    let mut pg_cancel: Option<PgCancel> = None;
+    let mut cancel_tls: Option<postgres_native_tls::MakeTlsConnector> = None;
     let tunnelled = eff.host != config.host || eff.port != config.port;
     let mode = config.tls_mode();
-    Ok(match eff.engine.as_str() {
+    let backend = match eff.engine.as_str() {
         "mysql" => {
             let config = eff;
             let opts = mysql::OptsBuilder::new()
@@ -643,12 +673,17 @@ fn build_backend(eff: &DbConfig, config: &DbConfig) -> Result<Backend, String> {
                 });
                 let tls =
                     postgres_native_tls::MakeTlsConnector::new(tls_connector(mode, &eff.tls_ca)?);
+                cancel_tls = Some(tls.clone());
                 pg.connect(tls)
             } else {
                 pg.ssl_mode(postgres::config::SslMode::Disable);
                 pg.connect(postgres::NoTls)
             }
             .map_err(pg_err)?;
+            pg_cancel = Some(PgCancel {
+                token: client.cancel_token(),
+                tls: cancel_tls,
+            });
             Backend::Postgres(Mutex::new(client))
         }
         "clickhouse" | "ch" => {
@@ -692,7 +727,8 @@ fn build_backend(eff: &DbConfig, config: &DbConfig) -> Result<Backend, String> {
             conn
         }
         other => return Err(format!("Unsupported engine: {other}")),
-    })
+    };
+    Ok((backend, pg_cancel))
 }
 
 /// Try a connection without keeping it (the "Test connection" button).
@@ -3120,6 +3156,43 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
 mod pg_live_tests {
     use super::*;
 
+    /// `--ignored`, with `E_PG_PORT` (+ `E_PG_PASSWORD`).
+    #[test]
+    #[ignore]
+    fn cancel_stops_a_running_query_and_frees_the_connection() {
+        let Some(port) = std::env::var("E_PG_PORT").ok() else {
+            return;
+        };
+        let conn = std::sync::Arc::new(
+            connect(&DbConfig {
+                engine: "postgres".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                username: "postgres".into(),
+                password: std::env::var("E_PG_PASSWORD").unwrap_or_default(),
+                database: "postgres".into(),
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        let running = conn.clone();
+        let t = Instant::now();
+        let handle = std::thread::spawn(move || query(&running, "SELECT pg_sleep(30)", 10));
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(cancel(&conn), Ok(true));
+        let err = handle.join().unwrap().unwrap_err();
+        assert!(
+            err.contains("canceling statement due to user request"),
+            "{err}"
+        );
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+        // The connection is free for the next query at once.
+        let t = Instant::now();
+        let r = query(&conn, "SELECT 1", 10).unwrap();
+        assert_eq!(r.rows[0][0].as_deref(), Some("1"));
+        assert!(t.elapsed() < Duration::from_secs(1));
+    }
+
     #[test]
     fn reads_are_limited_on_the_server_and_nothing_else_is() {
         assert_eq!(
@@ -4200,6 +4273,9 @@ mod tests {
         assert!(search_all(&conn, "sqlite", "nonexistent-zzz", 50)
             .unwrap()
             .is_empty());
+
+        // Nothing to cancel on SQLite: said so, not pretended.
+        assert_eq!(cancel(&conn), Ok(false));
 
         // row_counts (the table tree): SQLite counts.
         let counts = row_counts(&conn, &["users".into(), "posts".into()]).unwrap();

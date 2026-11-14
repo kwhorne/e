@@ -1336,13 +1336,34 @@ impl AppState {
         self.db_activate_tab(first_new);
     }
 
-    /// Cancel the in-flight query: free the UI and discard the pending result
-    /// when it eventually returns. (The query itself runs to completion in the
-    /// background — server-side KILL is a future refinement.)
+    /// Cancel the in-flight query: free the UI, discard the pending result
+    /// when it returns, and ask the server to stop it. On PostgreSQL the
+    /// query then ends at once and its connection is free for the next one;
+    /// elsewhere it runs to its end in the background.
     pub fn db_cancel_query(&self) {
         self.db.run_gen.update(|g| *g += 1);
         self.db.result_loading.set(false);
-        Self::notify("Query cancelled");
+        let conn = self.db.result_key.get_untracked().and_then(|key| {
+            self.db.conns.with_untracked(|c| {
+                c.iter()
+                    .find(|e| e.key() == key)
+                    .and_then(|e| e.conn.get_untracked())
+            })
+        });
+        let Some(conn) = conn else {
+            Self::notify("Query cancelled");
+            return;
+        };
+        let send = create_ext_action(self.cx, |res: Result<bool, String>| {
+            Self::notify(&match res {
+                Ok(true) => "Query cancelled".to_string(),
+                Ok(false) => {
+                    "Query cancelled here; the database finishes it in the background".to_string()
+                }
+                Err(e) => format!("Query cancelled here, but the database didn't stop it: {e}"),
+            });
+        });
+        std::thread::spawn(move || send(e_db::cancel(&conn)));
     }
 
     /// Show the result stored in tab `i` in the grid.

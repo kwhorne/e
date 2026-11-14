@@ -631,6 +631,42 @@ fn each_pane_of_a_split_keeps_its_own_caret() {
 
 #[test]
 #[ignore = "opens a window; run with --ignored"]
+fn an_agents_command_waits_for_the_users_answer() {
+    let app = App::launch(json!({}));
+    let run = |command: &str| json!({"method": "run", "command": command});
+    let card = |text: &'static str| {
+        move |s: &Value| s["dialog"]["kind"] == "run" && s["dialog"]["text"] == text
+    };
+    std::thread::scope(|scope| {
+        // Run once: it runs, and the next command asks again.
+        let once = scope.spawn(|| app.call(run("echo once")));
+        app.wait_for("the card", card("echo once"));
+        app.call(json!({"method": "dialog", "action": "confirm"}));
+        let r = once.join().unwrap();
+        assert_eq!(r["stdout"].as_str().map(str::trim), Some("once"), "{r}");
+
+        // Deny: nothing runs, and the agent is told.
+        let denied = scope.spawn(|| app.call(run("echo denied > denied.txt")));
+        app.wait_for("the card again", card("echo denied > denied.txt"));
+        app.call(json!({"method": "dialog", "action": "cancel"}));
+        let r = denied.join().unwrap();
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r["error"].as_str().unwrap().contains("denied"), "{r}");
+        assert!(!app.file("denied.txt").exists(), "a denied command ran");
+
+        // For the session: this one and later ones run without a card.
+        let session = scope.spawn(|| app.call(run("echo first")));
+        app.wait_for("the card once more", card("echo first"));
+        app.call(json!({"method": "dialog", "action": "session"}));
+        assert_eq!(session.join().unwrap()["ok"], true);
+    });
+    let r = app.call(run("echo later"));
+    assert_eq!(r["stdout"].as_str().map(str::trim), Some("later"), "{r}");
+    assert_eq!(app.state()["dialog"], Value::Null);
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
 fn saving_writes_the_file() {
     let app = App::launch(json!({"format_on_save": false}));
     app.open("Order.php");

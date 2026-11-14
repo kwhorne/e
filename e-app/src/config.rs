@@ -27,6 +27,8 @@ pub struct Settings {
     pub runtime_lenses: bool,
     /// Run the tests a saved PHP file touches, in the background.
     pub test_on_save: bool,
+    /// Ask before an agent's `run` / `tinker` over the editor socket.
+    pub ask_before_agent_commands: bool,
     pub sticky_scroll: bool,
     /// Inline AI completion ("ghost text") via a local Ollama code model.
     pub ai_completion: bool,
@@ -84,6 +86,7 @@ impl Default for Settings {
             inlay_hints: true,
             runtime_lenses: true,
             test_on_save: false,
+            ask_before_agent_commands: true,
             sticky_scroll: true,
             ai_completion: false,
             cascade: false,
@@ -158,6 +161,10 @@ pub fn load_settings() -> Settings {
         inlay_hints: bool_of("inlay_hints", d.inlay_hints),
         runtime_lenses: bool_of("runtime_lenses", d.runtime_lenses),
         test_on_save: bool_of("test_on_save", d.test_on_save),
+        ask_before_agent_commands: bool_of(
+            "ask_before_agent_commands",
+            d.ask_before_agent_commands,
+        ),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
         ai_completion: bool_of("ai_completion", d.ai_completion),
         cascade: v

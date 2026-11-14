@@ -990,6 +990,10 @@ pub struct AppState {
     /// the session ends, so a finished session's events no longer reach the
     /// next one.
     pub debug_session: RwSignal<Option<Scope>>,
+    /// An agent's `run` / `tinker` requests waiting for the user's answer.
+    pub run_consents: RwSignal<Vec<crate::run_consent::RunConsent>>,
+    /// The user allowed the agent's commands for the rest of the session.
+    pub agent_runs_allowed: RwSignal<bool>,
 
     /// Generation counter debouncing inline AI-completion requests.
     pub ghost_gen: RwSignal<u64>,
@@ -1900,6 +1904,8 @@ impl AppState {
             debug_breakpoints: RwSignal::new(std::collections::HashMap::new()),
             debug_client: RwSignal::new(None),
             debug_session: RwSignal::new(None),
+            run_consents: RwSignal::new(Vec::new()),
+            agent_runs_allowed: RwSignal::new(false),
             ghost_gen: RwSignal::new(0),
             log_open: RwSignal::new(false),
             log_lines: RwSignal::new(Vec::new()),

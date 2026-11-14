@@ -955,6 +955,21 @@ fn all_rows(s: AppState) -> Vec<RowItem> {
     push(5, "Default agent", "", default_agent_row(s).into_any());
     push(
         5,
+        "Ask before agent commands",
+        "An agent's shell commands and Tinker code over the editor socket wait for your OK (once, or for the session)",
+        toggle_row(
+            "Ask before agent commands",
+            "An agent's shell commands and Tinker code over the editor socket wait for your OK (once, or for the session)",
+            move || s.settings.get().ask_before_agent_commands,
+            move |v| {
+                s.settings.update(|st| st.ask_before_agent_commands = v);
+                config::set_bool("ask_before_agent_commands", v);
+            },
+        )
+        .into_any(),
+    );
+    push(
+        5,
         "Elyra Cascade",
         "Elyra as a chat panel — session tabs, model picker, Code/Ask — instead of the terminal. Other agents keep the terminal.",
         toggle_row(

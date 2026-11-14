@@ -859,6 +859,7 @@ fn app_view() -> impl IntoView {
             main_row,
             crate::db_view::db_result_overlay(state),
             crate::db_view::db_consent_dialog(state),
+            crate::run_consent::run_consent_dialog(state),
             crate::db_view::db_confirm_dialog(state),
             crate::db_view::db_params_dialog(state),
             crate::db_view::db_erd_panel(state),

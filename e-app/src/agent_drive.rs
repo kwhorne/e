@@ -168,6 +168,17 @@ impl AppState {
                 })
             })
             .or_else(|| {
+                self.run_consents.with_untracked(|q| {
+                    q.first().map(|c| {
+                        let (kind, text) = match &c.run {
+                            crate::run_consent::AgentRun::Shell { command, .. } => ("run", command.clone()),
+                            crate::run_consent::AgentRun::Tinker { code } => ("tinker", code.clone()),
+                        };
+                        json!({"kind": kind, "text": text, "waiting": q.len()})
+                    })
+                })
+            })
+            .or_else(|| {
                 self.confirm.with_untracked(|c| {
                     c.as_ref().map(|c| {
                         json!({"kind": "confirm", "title": c.title, "detail": c.detail, "button": c.action})

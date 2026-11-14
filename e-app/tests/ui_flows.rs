@@ -662,6 +662,69 @@ fn each_pane_of_a_split_keeps_its_own_caret() {
 
 #[test]
 #[ignore = "opens a window; run with --ignored"]
+fn find_and_replace_works_on_the_focused_panes_file() {
+    let app = App::launch(json!({}));
+    app.open("Order.php");
+    let order_len = app.state()["editor"]["length"].as_u64().unwrap();
+    // Order.php on the left, Pay.php (no "total" in it) on the right.
+    app.command("split");
+    app.wait_for("two panes", |s| {
+        s["panes"].as_array().is_some_and(|p| p.len() == 2)
+    });
+    // The new pane's editor takes the keyboard a moment after it's built.
+    std::thread::sleep(Duration::from_millis(500));
+    app.open("Pay.php");
+    let pay_len = app.state()["editor"]["length"].as_u64().unwrap();
+    // Find "total" on the left, to be replaced with "sum".
+    app.command("focus-other-pane");
+    app.wait_for("the left pane focused", |s| {
+        s["panes"][0]["focused"] == true
+    });
+    app.command("replace");
+    app.type_text("total");
+    app.keys(&["tab"]);
+    app.type_text("sum");
+    // Over on the right, Replace has nothing to replace: the matches found
+    // on the left are offsets into Order.php, not Pay.php.
+    app.command("focus-other-pane");
+    app.wait_for("the right pane focused", |s| {
+        s["panes"][1]["focused"] == true
+    });
+    app.command("replace");
+    app.keys(&["tab", "enter"]);
+    std::thread::sleep(Duration::from_millis(300));
+    let s = app.state();
+    assert!(
+        s["editor"]["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("Pay.php")),
+        "{}",
+        s["editor"]
+    );
+    assert_eq!(
+        s["editor"]["dirty"], false,
+        "Pay.php was edited: {}",
+        s["editor"]
+    );
+    assert_eq!(s["editor"]["length"], pay_len);
+    // Back on the left, it replaces there.
+    app.command("focus-other-pane");
+    app.wait_for("the left pane focused", |s| {
+        s["panes"][0]["focused"] == true
+    });
+    app.command("replace");
+    app.keys(&["tab", "enter"]);
+    let s = app.wait_for("Order.php edited", |s| s["editor"]["dirty"] == true);
+    assert_eq!(
+        s["editor"]["length"],
+        order_len - 2,
+        "\"total\" became \"sum\": {}",
+        s["editor"]
+    );
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
 fn an_agents_command_waits_for_the_users_answer() {
     let app = App::launch(json!({}));
     let run = |command: &str| json!({"method": "run", "command": command});

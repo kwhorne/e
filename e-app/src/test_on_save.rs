@@ -45,15 +45,16 @@ pub enum SaveRun {
 /// The extra arguments that run just `files` (relative to the project): the
 /// file itself when there is one, else a filter on the test classes' names.
 pub fn run_args(files: &[PathBuf]) -> String {
+    use crate::cascade::shell_quote;
     if let [one] = files {
-        return one.to_string_lossy().into_owned();
+        return shell_quote(&one.to_string_lossy());
     }
     let names: Vec<String> = files
         .iter()
         .filter_map(|f| f.file_stem().and_then(|s| s.to_str()))
         .map(crate::tasks::filter_pattern)
         .collect();
-    format!("--filter=\"{}\"", names.join("|"))
+    format!("--filter={}", shell_quote(&names.join("|")))
 }
 
 impl AppState {
@@ -225,7 +226,12 @@ mod tests {
                 PathBuf::from("tests/Feature/CheckoutTest.php"),
                 PathBuf::from("tests/Unit/OrderTest.php"),
             ]),
-            "--filter=\"CheckoutTest|OrderTest\""
+            "--filter='CheckoutTest|OrderTest'"
+        );
+        // Quoted for the shell, which mustn't run anything in a file name.
+        assert_eq!(
+            run_args(&[PathBuf::from("tests/Feature/$(rm x)Test.php")]),
+            "'tests/Feature/$(rm x)Test.php'"
         );
     }
 }

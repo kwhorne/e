@@ -143,7 +143,8 @@ handle below it to resize.
 - **`:param`** placeholders prompt for values before running (remembered).
 - **○ History** opens a searchable log of every query you've run in this project;
   click one to load it back into the console.
-- Long queries show a **✕ Cancel** while running.
+- Long queries show a **✕ Cancel** while running. In a run of several
+  statements, Cancel stops the one running and runs none of the rest.
 - Export the result as **CSV / JSON / SQL**, or copy it as **TSV / Markdown**.
 
 ## Environments & safety
@@ -180,7 +181,8 @@ label is guessed from the host and name and drives the safety rails:
 - **Seed 10** (local tables) creates rows via the Eloquent factory through
   Tinker; **⬆ CSV** imports a CSV into the table.
 - **Search all data…** in the panel header scans every table's text columns for
-  a value and shows one result tab per matching table.
+  a value and shows one result tab per matching table. **✕ Cancel** stops it
+  before the next table.
 - Row counts appear next to each table in the tree. They come from the
   server's catalog in one query rather than a count of every table:
   - **PostgreSQL** shows the planner's estimate, as `≈12.3k`. A table is

@@ -21,6 +21,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   made in a new private folder (0700) and removed afterwards, even when ssh
   fails to start.
 
+- **Opening a folder for the first time could trust it.** On a fresh
+  install the trust list is seeded from your recent projects, and the folder
+  being opened was added to that list just before. Trust is now decided
+  before the folder is recorded as recent.
+- **An agent could trust a project by itself.** The agent socket ran palette
+  commands (`trust-project`, `run-test`, …), code actions and Cascade's
+  controls for any process holding it. These now need UI automation
+  (`E_UI_AUTOMATION=1`), like the socket's keys and clicks. The project's
+  rules are no longer handed out over the socket (`rules`, `laravel_map`)
+  before the project is trusted.
+- **Inline evaluation could write outside its scratch copy.** A Storage path
+  with `..` (`Storage::delete('../../…')`) reached real files. It is now
+  refused. A connection whose remote host is given only in `url` (`DB_URL`)
+  is refused like one given in `host`. The run's script and scratch copy
+  live in a new private folder that is removed afterwards, even after a
+  timeout.
+- **Updates name their version and target.** Each release archive also gets
+  a signature over a manifest of its version, name and SHA-256, and the
+  updater requires it. An older signed archive can no longer be offered as
+  a newer one, nor one platform's archive as another's. The signature over
+  the bytes alone is still published for clients up to 0.20.0. On macOS the
+  code-signing check now names e's bundle identifier, not only the team.
+- **Predictable temporary files.** The updater's download folder, a
+  replayed request's headers and a test run's JUnit report were written
+  under names anyone could guess in the temp dir. In a shared `/tmp`
+  another user could put a link there first. Each now gets a new private
+  folder (0700) of its own.
+- **Test names reached the shell unquoted.** A test name or path with
+  `$(…)` or backquotes in it ran as a command when the test was run. They
+  are now quoted.
+
 ### Fixed
 
 - **Read-only ClickHouse connections couldn't read.** Every limited read
@@ -48,6 +79,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over SSH, the TLS hint now says that Verify can't check the host name
   there.
 
+- **Replace All changed files the preview didn't list.** An open tab under
+  the project, such as a file in `vendor/` or a `.env`, was replaced and
+  saved even though gitignored and hidden files were left out of the
+  preview. Only the files the preview listed are changed now, open or not.
+  ⌘⇧F also searches tracked dotfiles such as `.github/workflows/*.yml`
+  and `.env.example`.
+- **Replace in the find bar could use old matches.** After the file had been
+  edited, Replace and Replace All acted on where the matches had been,
+  which could change the wrong text. They now find again first.
+- **A caret could be left past the end of the text.** An edit from
+  formatting, the other split pane or outside the editor didn't move the
+  carets, and a caret past the end or inside a character could crash e.
+  Both panes' carets now follow the edit. The sticky header follows its own
+  pane.
+- **A test run could hang.** Without a login PATH (in `cargo test`, or after
+  a slow shell at startup) the interactive shell a test runs in stopped on
+  the terminal and never finished. Runs now start in a session of their
+  own. Stop no longer sends SIGKILL to process ids it saw two seconds
+  earlier, which may belong to another process by then.
+- **Commits went unnoticed in a git worktree.** In a worktree, `.git` is a
+  file. Neither the watch nor the fallback polling found the reflog, so a
+  commit or checkout made outside e didn't refresh anything. The real git
+  folder is now followed. A `.git/logs` or `storage/logs` that doesn't
+  exist yet is watched once it appears.
+
+
 - **Staged changes in the data grid were lost.** Cell edits and row deletes
   waiting for **Submit** were dropped without a word when you went to another
   page, sorted, filtered or opened another table. A console result could even
@@ -64,6 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whatever statements an earlier, cancelled Submit had prepared as if they
   had run, and it cleared the staged changes. The confirmed statements now
   carry their own log entries.
+
 
 ## [0.20.0] - 2026-11-14
 

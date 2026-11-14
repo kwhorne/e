@@ -104,6 +104,14 @@ jobs:
   # them. The in-app updater refuses an archive without a valid signature
   # from the key in e-app/src/updater.rs, so a missing secret fails the
   # release here rather than leaving it uninstallable for everyone.
+  #
+  # Two signatures per archive:
+  #   <asset>.manifest.sig  over "e-release-v1\n<version>\n<asset>\n<sha256>\n"
+  #                         (release_manifest in updater.rs), which binds the
+  #                         archive to its version and target. Required by
+  #                         clients after 0.20.0.
+  #   <asset>.sig           over the archive bytes alone, for clients up to
+  #                         0.20.0, which only know this one. Keep it.
   sign:
     name: Sign the archives
     needs: [build, linux]
@@ -122,13 +130,21 @@ jobs:
             echo "::error::The E_UPDATE_SIGNING_KEY secret is not set: the archives stay unsigned and the updater won't install them."
             exit 1
           fi
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag $TAG isn't vMAJOR.MINOR.PATCH; the manifest would name a version no client asks for."
+            exit 1
+          fi
           mkdir signing && cd signing
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'e-*.tar.gz'
           umask 077
           printf '%s\n' "$SIGNING_KEY" > key.pem
           for archive in e-*.tar.gz; do
             openssl pkeyutl -sign -inkey key.pem -rawin -in "$archive" -out "$archive.sig"
+            sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
+            printf 'e-release-v1\n%s\n%s\n%s\n' "$VERSION" "$archive" "$sha256" > "$archive.manifest"
+            openssl pkeyutl -sign -inkey key.pem -rawin -in "$archive.manifest" -out "$archive.manifest.sig"
           done
           rm -f key.pem
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber e-*.tar.gz.sig
-          ls -l e-*.tar.gz.sig
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber e-*.tar.gz.sig e-*.tar.gz.manifest.sig
+          ls -l e-*.tar.gz.sig e-*.tar.gz.manifest.sig

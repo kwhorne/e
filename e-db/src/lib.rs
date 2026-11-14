@@ -1887,6 +1887,93 @@ pub fn count_rows(
     Ok(n)
 }
 
+/// How many rows a table has, for the table tree: what the database already
+/// knows, not a count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowCount {
+    pub rows: i64,
+    /// Counted (SQLite, ClickHouse's MergeTree), rather than the server's
+    /// estimate (MySQL's `TABLE_ROWS`, PostgreSQL's planner statistics).
+    pub exact: bool,
+}
+
+/// Row counts for every table, cheaply: one catalog query where the server
+/// keeps an estimate. `SELECT COUNT(*)` per table on connect scanned each
+/// one in turn and held the connection for minutes on a large database.
+/// SQLite keeps no estimate, but its file is local and its connections
+/// aren't shared, so its tables are counted. A table the server has no
+/// figure for (PostgreSQL before its first ANALYZE) is left out.
+pub fn row_counts(conn: &Conn, tables: &[String]) -> Result<HashMap<String, RowCount>, String> {
+    let figures = |sql: &str, exact: bool| -> Result<HashMap<String, RowCount>, String> {
+        let res = query(conn, sql, usize::MAX)?;
+        Ok(res
+            .rows
+            .into_iter()
+            .filter_map(|r| {
+                let name = r.first().cloned().flatten()?;
+                let rows = r.get(1).cloned().flatten()?.parse::<f64>().ok()? as i64;
+                (rows >= 0).then_some((name, RowCount { rows, exact }))
+            })
+            .collect())
+    };
+    match &conn.backend {
+        Backend::Mysql(_) => figures(
+            "SELECT TABLE_NAME, TABLE_ROWS FROM information_schema.TABLES \
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'",
+            false,
+        ),
+        // The same table a bare name means in the panel (see
+        // `pg_table_schema`); `reltuples` is -1 until the table is analyzed.
+        Backend::Postgres(_) => figures(
+            "SELECT relname, reltuples::bigint FROM ( \
+               SELECT c.relname, c.reltuples, row_number() OVER ( \
+                        PARTITION BY c.relname \
+                        ORDER BY pg_table_is_visible(c.oid) DESC, n.nspname) AS pick \
+                 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                WHERE c.relkind IN ('r', 'p') \
+                  AND n.nspname NOT IN ('pg_catalog', 'information_schema') \
+                  AND n.nspname NOT LIKE 'pg_toast%' \
+             ) t WHERE pick = 1 AND reltuples >= 0",
+            false,
+        ),
+        Backend::Clickhouse { .. } => figures(
+            "SELECT name, total_rows FROM system.tables \
+             WHERE database = currentDatabase() AND total_rows IS NOT NULL",
+            true,
+        ),
+        Backend::Sqlite(_) => Ok(tables
+            .iter()
+            .filter_map(|t| {
+                let rows = count_rows(conn, "sqlite", t, None).ok()?;
+                Some((t.clone(), RowCount { rows, exact: true }))
+            })
+            .collect()),
+    }
+}
+
+/// `n` for the table tree: `987`, `12.3k`, `4.1M`; an estimate with `≈`.
+pub fn row_count_label(count: RowCount) -> String {
+    let n = count.rows as f64;
+    let short = if n < 1_000.0 {
+        format!("{}", count.rows)
+    } else if n < 1_000_000.0 {
+        format!("{:.1}k", n / 1_000.0)
+    } else if n < 1_000_000_000.0 {
+        format!("{:.1}M", n / 1_000_000.0)
+    } else {
+        format!("{:.1}B", n / 1_000_000_000.0)
+    };
+    let short = short
+        .replace(".0k", "k")
+        .replace(".0M", "M")
+        .replace(".0B", "B");
+    if count.exact {
+        short
+    } else {
+        format!("≈{short}")
+    }
+}
+
 /// Browse rows of `table` where `column` equals `value` (or IS NULL). Used for
 /// FK-hopping and column filters.
 pub fn rows_where(
@@ -2956,6 +3043,96 @@ mod pg_live_tests {
     use super::*;
 
     #[test]
+    fn row_counts_read_short_and_say_when_they_are_estimates() {
+        let c = |rows, exact| row_count_label(RowCount { rows, exact });
+        assert_eq!(c(0, true), "0");
+        assert_eq!(c(987, true), "987");
+        assert_eq!(c(1_000, true), "1k");
+        assert_eq!(c(12_345, false), "≈12.3k");
+        assert_eq!(c(4_100_000, false), "≈4.1M");
+        assert_eq!(c(2_000_000_000, true), "2B");
+    }
+
+    /// Row counts from each server's catalog — `--ignored`, with whichever
+    /// of `E_PG_PORT` (+ `E_PG_PASSWORD`), `E_CH_PORT` (HTTP) and
+    /// `E_MYSQL_PORT` (user root, no password; reads the `mysql` schema
+    /// only) are set.
+    #[test]
+    #[ignore]
+    fn row_counts_come_from_the_catalog() {
+        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        if let Some(port) = env("E_PG_PORT") {
+            let conn = connect(&DbConfig {
+                engine: "postgres".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                username: "postgres".into(),
+                password: env("E_PG_PASSWORD").unwrap_or_default(),
+                database: "postgres".into(),
+                ..Default::default()
+            })
+            .unwrap();
+            for sql in [
+                "DROP TABLE IF EXISTS counted, unanalyzed",
+                "CREATE TABLE counted AS SELECT g AS id FROM generate_series(1, 5000) g",
+                "CREATE TABLE unanalyzed (id int)",
+                "ANALYZE counted",
+            ] {
+                query(&conn, sql, 0).unwrap_or_else(|e| panic!("{sql}: {e}"));
+            }
+            let counts = row_counts(&conn, &[]).unwrap();
+            assert_eq!(
+                counts["counted"],
+                RowCount {
+                    rows: 5000,
+                    exact: false
+                }
+            );
+            assert!(!counts.contains_key("unanalyzed"), "{counts:?}");
+            let _ = query(&conn, "DROP TABLE counted, unanalyzed", 0);
+        }
+        if let Some(port) = env("E_CH_PORT") {
+            let conn = connect(&DbConfig {
+                engine: "clickhouse".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                ..Default::default()
+            })
+            .unwrap();
+            for sql in [
+                "DROP TABLE IF EXISTS counted",
+                "CREATE TABLE counted (id UInt32) ENGINE = MergeTree ORDER BY id",
+                "INSERT INTO counted SELECT number FROM numbers(1234)",
+            ] {
+                query(&conn, sql, 0).unwrap_or_else(|e| panic!("{sql}: {e}"));
+            }
+            let counts = row_counts(&conn, &[]).unwrap();
+            assert_eq!(
+                counts["counted"],
+                RowCount {
+                    rows: 1234,
+                    exact: true
+                }
+            );
+            let _ = query(&conn, "DROP TABLE counted", 0);
+        }
+        if let Some(port) = env("E_MYSQL_PORT") {
+            let conn = connect(&DbConfig {
+                engine: "mysql".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                username: "root".into(),
+                database: "mysql".into(),
+                ..Default::default()
+            })
+            .unwrap();
+            let counts = row_counts(&conn, &[]).unwrap();
+            let user = counts.get("user").expect("mysql.user");
+            assert!(!user.exact && user.rows >= 0, "{user:?}");
+        }
+    }
+
+    #[test]
     #[ignore]
     fn foreign_keys_follow_the_tables_the_panel_shows() {
         let Some(port) = std::env::var("E_PG_PORT").ok() else {
@@ -3836,6 +4013,23 @@ mod tests {
         assert!(search_all(&conn, "sqlite", "nonexistent-zzz", 50)
             .unwrap()
             .is_empty());
+
+        // row_counts (the table tree): SQLite counts.
+        let counts = row_counts(&conn, &["users".into(), "posts".into()]).unwrap();
+        assert_eq!(
+            counts["users"],
+            RowCount {
+                rows: 1,
+                exact: true
+            }
+        );
+        assert_eq!(
+            counts["posts"],
+            RowCount {
+                rows: 1,
+                exact: true
+            }
+        );
 
         // count_rows (pagination totals)
         assert_eq!(count_rows(&conn, "sqlite", "posts", None).unwrap(), 1);

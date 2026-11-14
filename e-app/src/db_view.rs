@@ -237,7 +237,7 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
             let count = label(move || {
                 e_count
                     .table_counts
-                    .with(|m| m.get(&t_count).map(|n| n.to_string()))
+                    .with(|m| m.get(&t_count).map(|n| e_db::row_count_label(*n)))
                     .unwrap_or_default()
             })
             .style(|s| {

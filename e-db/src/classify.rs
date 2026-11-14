@@ -131,6 +131,16 @@ pub(crate) fn returns_rows(sql: &str) -> bool {
     )
 }
 
+/// Whether the statement is a read the server can be told to stop early: it
+/// starts with SELECT, WITH, VALUES or TABLE and only reads, so it can be
+/// wrapped as `SELECT * FROM (…) LIMIT n`.
+pub(crate) fn limitable(sql: &str) -> bool {
+    matches!(
+        first_word(&tokens(sql, MYSQLISH)),
+        Some("select" | "with" | "values" | "table")
+    ) && is_read_only(sql)
+}
+
 /// Keywords that make a statement write, wherever they appear.
 const WRITE_WORDS: &[&str] = &[
     "insert",

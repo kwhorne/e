@@ -9,8 +9,31 @@
 //! adopt it, the way VS Code and the JetBrains IDEs do.
 
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
+
+/// Whether this process has the login shell's PATH: adopted at startup, or
+/// inherited from a terminal (`E_NO_SHELL_PATH` says the caller has it).
+static HAS_LOGIN_PATH: AtomicBool = AtomicBool::new(false);
+
+/// Whether a command can run through a plain `$SHELL -c` and still find
+/// what the user's shell finds. When the login shell couldn't be asked at
+/// startup (a slow rc file, say), commands need `-ilc` to set it up again.
+pub fn has_login_path() -> bool {
+    HAS_LOGIN_PATH.load(Ordering::Relaxed)
+}
+
+/// The flags to run a command through `$SHELL` with: plain `-c` once the
+/// login PATH is in place — no rc files read, no job control, a few
+/// milliseconds — else the interactive login shell.
+pub fn command_flags() -> &'static str {
+    if has_login_path() {
+        "-c"
+    } else {
+        "-ilc"
+    }
+}
 
 const MARKER: &str = "__E_PATH__";
 
@@ -19,11 +42,13 @@ const MARKER: &str = "__E_PATH__";
 /// skips it.
 pub fn adopt_login_path() {
     if std::env::var_os("E_NO_SHELL_PATH").is_some() {
+        HAS_LOGIN_PATH.store(true, Ordering::Relaxed);
         return;
     }
     let Some(login) = login_shell_path(Duration::from_secs(4)) else {
         return;
     };
+    HAS_LOGIN_PATH.store(true, Ordering::Relaxed);
     let current = std::env::var("PATH").unwrap_or_default();
     let merged = merge_paths(&login, &current);
     if merged != current {

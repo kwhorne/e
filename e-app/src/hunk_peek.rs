@@ -255,7 +255,11 @@ impl AppState {
         let Some(repo) = self.git.root.get_untracked() else {
             return;
         };
-        let reflog = repo.join(".git/logs/HEAD");
+        // In a linked worktree `.git` is a file; its reflog is elsewhere.
+        let Some(git_dir) = git::git_dir(&repo) else {
+            return;
+        };
+        let reflog = git_dir.join("logs/HEAD");
         let modified = std::fs::metadata(&reflog).and_then(|m| m.modified()).ok();
         let seen = self.head_moved.get_untracked();
         if seen != modified {

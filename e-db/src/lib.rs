@@ -2712,11 +2712,12 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
             let res = match pg_limited(sql, max) {
                 Some(limited) => match pg_run(&mut client, &limited, max) {
                     Ok(res) => res,
-                    // An error the wrapping may have caused (a syntax or name
-                    // error) is better told by the statement as written —
-                    // unless the first failure aborted the user's own
-                    // transaction, which then refuses everything. Anything
-                    // else (a cancel, a runtime error) is the answer.
+                    // An error the wrapping may have caused (a syntax error,
+                    // a feature refused in a subquery) is better told by the
+                    // statement as written — unless the first failure
+                    // aborted the user's own transaction, which then refuses
+                    // everything. Anything else (a cancel, a missing table,
+                    // a runtime error) is the answer.
                     Err(first) if pg_wrapping_may_cause(&first) => pg_run(&mut client, sql, max)
                         .map_err(|second| {
                             if second.code()
@@ -2875,11 +2876,24 @@ fn pg_limited(sql: &str, max: usize) -> Option<String> {
 }
 
 /// Whether `e` from a statement wrapped by [`pg_limited`] could be the
-/// wrapping's doing: a syntax or name error (SQLSTATE class 42) or a
-/// feature PostgreSQL won't do in a subquery (0A).
+/// wrapping's doing (see [`wrapping_may_cause`]).
 fn pg_wrapping_may_cause(e: &postgres::Error) -> bool {
-    e.code()
-        .is_some_and(|c| c.code().starts_with("42") || c.code().starts_with("0A"))
+    e.as_db_error()
+        .is_some_and(|db| wrapping_may_cause(db.code().code(), db.where_().is_some()))
+}
+
+/// Whether an error with SQLSTATE `code` could come from wrapping a read in
+/// `SELECT * FROM (…) LIMIT n`, so the statement is worth running again as
+/// written: a syntax error (42601: a second statement, or a comment after
+/// the `;`, breaks the wrapper) or a feature PostgreSQL won't do in a
+/// subquery (0A000). Nothing else: the rest of class 42 (a missing table, a
+/// privilege the user lacks — 42501 can come half-way through a scan) is the
+/// statement's own, and running it again would run its functions twice.
+/// Neither counts when raised inside a function (`in_function`: the error
+/// carries a context), from dynamic SQL say, since the statement was
+/// already running then.
+fn wrapping_may_cause(code: &str, in_function: bool) -> bool {
+    !in_function && matches!(code, "42601" | "0A000")
 }
 
 fn pg_query(client: &mut postgres::Client, sql: &str, max: usize) -> Result<PgRows, String> {
@@ -3511,6 +3525,23 @@ mod pg_live_tests {
             None,
             "metadata takes it all"
         );
+    }
+
+    #[test]
+    fn only_errors_the_wrapping_can_cause_rerun_a_read() {
+        // A second statement, or a comment after the `;`, breaks the wrapper.
+        assert!(wrapping_may_cause("42601", false));
+        assert!(wrapping_may_cause("0A000", false));
+        // The statement's own errors: a missing table or column, a privilege
+        // refused half-way through a scan, a cancel, a division by zero.
+        for code in [
+            "42P01", "42703", "42501", "42883", "57014", "22012", "0A001",
+        ] {
+            assert!(!wrapping_may_cause(code, false), "{code}");
+        }
+        // Raised inside a function (dynamic SQL), the statement was running.
+        assert!(!wrapping_may_cause("42601", true));
+        assert!(!wrapping_may_cause("0A000", true));
     }
 
     #[test]

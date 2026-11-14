@@ -139,6 +139,7 @@ impl AppState {
         let dirty = RwSignal::new(!initial.is_empty());
         let undo = Rc::new(RefCell::new(e_core::undotree::UndoTree::new(&initial)));
         let undo_nav = Rc::new(std::cell::Cell::new(false));
+        let editors = crate::per_pane::PerPane::new(id, self.panes(), None);
 
         {
             let app = *self;
@@ -146,7 +147,8 @@ impl AppState {
             let highlights = highlights.clone();
             let undo = undo.clone();
             let undo_nav = undo_nav.clone();
-            doc.clone().add_on_update(move |_| {
+            doc.clone().add_on_update(move |update| {
+                crate::state::settle_carets(editors, &update, &doc2.text());
                 // Only on the change: every subscriber (title, tab, status)
                 // re-renders on a set, even to the same value.
                 if !dirty.get_untracked() {
@@ -188,7 +190,7 @@ impl AppState {
             uri: None,
             lsp_version: RwSignal::new(1),
             lint_gen: Rc::new(std::cell::Cell::new(0)),
-            editor: crate::per_pane::PerPane::new(id, self.panes(), None),
+            editor: editors,
             win_origin: crate::per_pane::PerPane::new(id, self.panes(), Point::ZERO),
             caret: crate::per_pane::PerPane::new(id, self.panes(), None),
             pending_goto: RwSignal::new(None),
@@ -728,8 +730,10 @@ impl AppState {
             }
         }
 
-        // On every edit: mark dirty, re-highlight, invalidate the layout cache,
-        // and notify the language server.
+        // On every edit: keep both panes' carets on the text, mark dirty,
+        // re-highlight, invalidate the layout cache, and notify the language
+        // server.
+        let editors = crate::per_pane::PerPane::new(id, self.panes(), None);
         {
             let doc = doc.clone();
             let saved = saved.clone();
@@ -749,6 +753,7 @@ impl AppState {
             let hl_gen: Rc<std::cell::Cell<u64>> = Rc::new(std::cell::Cell::new(0));
             let syntax = syntax.clone();
             doc.clone().add_on_update(move |update| {
+                crate::state::settle_carets(editors, &update, &doc.text());
                 app.editor.last_edit.set(now_ms());
                 // A peek shows the hunk as it was; an edit may have moved it.
                 app.close_hunk_peek();
@@ -896,7 +901,7 @@ impl AppState {
             uri,
             lsp_version: version,
             lint_gen: Rc::new(std::cell::Cell::new(0)),
-            editor: crate::per_pane::PerPane::new(id, self.panes(), None),
+            editor: editors,
             win_origin: crate::per_pane::PerPane::new(id, self.panes(), Point::ZERO),
             caret: crate::per_pane::PerPane::new(id, self.panes(), None),
             pending_goto: RwSignal::new(None),

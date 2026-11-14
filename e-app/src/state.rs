@@ -2169,6 +2169,85 @@ pub(crate) fn apply_batch(
     doc.edit(&mut iter, edit_type);
 }
 
+/// `cursor` with every offset put back on `text`: at its end at most, and at
+/// the start of a character it would sit inside. `None` when it is on the
+/// text already.
+pub(crate) fn clamp_cursor(cursor: &Cursor, text: &Rope) -> Option<Cursor> {
+    let fit = |offset: usize| {
+        let mut o = offset.min(text.len());
+        while !text.is_codepoint_boundary(o) {
+            o -= 1;
+        }
+        o
+    };
+    let mode = match &cursor.mode {
+        CursorMode::Normal(o) => CursorMode::Normal(fit(*o)),
+        CursorMode::Visual { start, end, mode } => CursorMode::Visual {
+            start: fit(*start),
+            end: fit(*end),
+            mode: *mode,
+        },
+        CursorMode::Insert(selection) => {
+            if selection
+                .regions()
+                .iter()
+                .all(|r| fit(r.start) == r.start && fit(r.end) == r.end)
+            {
+                return None;
+            }
+            let mut fitted = Selection::new();
+            for r in selection.regions() {
+                fitted.add_region(SelRegion::new(fit(r.start), fit(r.end), r.horiz));
+            }
+            CursorMode::Insert(fitted)
+        }
+    };
+    if mode == cursor.mode {
+        return None;
+    }
+    let mut fitted = cursor.clone();
+    fitted.mode = mode;
+    Some(fitted)
+}
+
+/// Keep each pane's caret on its buffer's text after an edit (`update`) left
+/// it as `text`.
+///
+/// Floem moves only the caret of the editor that made an edit. The other
+/// pane's caret on the same file, and every caret when the edit came from
+/// outside an editor (a format, a trim, a replace, the undo history), kept
+/// its old offset — past the end where the text shrank, or inside a
+/// character, where the next read of the text around the caret panics. The
+/// other pane's caret now moves with an edit made in this one, and every
+/// caret is then put back on the text.
+pub(crate) fn settle_carets(
+    editors: crate::per_pane::PerPane<Option<Editor>>,
+    update: &floem::views::editor::text_document::OnUpdate<'_>,
+    text: &Rope,
+) {
+    let by = update.editor.map(|ed| ed.id());
+    for pane in 0..2u8 {
+        let Some(ed) = editors.get_in(pane) else {
+            continue;
+        };
+        let Some(mut cursor) = ed.cursor.try_get_untracked() else {
+            continue; // its view is gone
+        };
+        let before = cursor.mode.clone();
+        if by.is_some_and(|by| by != ed.id()) {
+            for delta in update.deltas() {
+                cursor.apply_delta(delta);
+            }
+        }
+        if let Some(fitted) = clamp_cursor(&cursor, text) {
+            cursor = fitted;
+        }
+        if cursor.mode != before {
+            ed.cursor.set(cursor);
+        }
+    }
+}
+
 /// Edits in the order one batch takes them: by position, and inserts at the
 /// same place joined in the order they came (the language server protocol
 /// says that order is the order of the text; the batch would keep only one).
@@ -2796,6 +2875,118 @@ mod batch_edit_tests {
         apply_batch(&doc, batch, EditType::Delete);
         assert_eq!(doc.text().to_string(), "a\nb\nc\n");
         assert_eq!(updates.get(), 1);
+    }
+}
+
+#[cfg(test)]
+mod caret_tests {
+    use super::{apply_batch, clamp_cursor, settle_carets};
+    use crate::per_pane::{Panes, PerPane};
+    use floem::reactive::{RwSignal, Scope, SignalGet, SignalUpdate};
+    use floem::views::editor::core::cursor::{Cursor, CursorMode};
+    use floem::views::editor::core::editor::EditType;
+    use floem::views::editor::core::selection::{SelRegion, Selection};
+    use floem::views::editor::core::xi_rope::Rope;
+    use floem::views::editor::text::{Document, SimpleStyling};
+    use floem::views::editor::text_document::TextDocument;
+    use floem::views::editor::Editor;
+    use std::rc::Rc;
+
+    fn caret(offset: usize) -> Cursor {
+        Cursor::new(CursorMode::Insert(Selection::caret(offset)), None, None)
+    }
+
+    #[test]
+    fn a_caret_on_the_text_is_left_be() {
+        let text = Rope::from("blåbær\n");
+        assert_eq!(clamp_cursor(&caret(0), &text), None);
+        assert_eq!(clamp_cursor(&caret(4), &text), None);
+        assert_eq!(clamp_cursor(&caret(text.len()), &text), None);
+    }
+
+    #[test]
+    fn a_caret_past_the_end_or_inside_a_character_is_put_back() {
+        let text = Rope::from("blåbær\n"); // "å" is bytes 2..4
+        let past = clamp_cursor(&caret(40), &text).unwrap();
+        assert_eq!(past.offset(), text.len());
+        let inside = clamp_cursor(&caret(3), &text).unwrap();
+        assert_eq!(inside.offset(), 2);
+
+        let mut sel = Selection::new();
+        sel.add_region(SelRegion::new(1, 3, None));
+        sel.add_region(SelRegion::new(5, 99, None));
+        let fitted =
+            clamp_cursor(&Cursor::new(CursorMode::Insert(sel), None, None), &text).unwrap();
+        let CursorMode::Insert(sel) = fitted.mode else {
+            panic!("still an insert cursor");
+        };
+        let regions: Vec<_> = sel.regions().iter().map(|r| (r.start, r.end)).collect();
+        assert_eq!(regions, [(1, 2), (5, text.len())]);
+
+        let normal = Cursor::new(CursorMode::Normal(99), None, None);
+        assert_eq!(clamp_cursor(&normal, &text).unwrap().offset(), text.len());
+    }
+
+    /// One document in both panes of a split, each with its editor.
+    fn split(text: &str) -> (Rc<TextDocument>, Editor, Editor) {
+        let cx = Scope::new();
+        let doc = Rc::new(TextDocument::new(cx, text));
+        let panes = Panes {
+            split: RwSignal::new(true),
+            focused: RwSignal::new(0),
+            active: [RwSignal::new(Some(1)), RwSignal::new(Some(1))],
+        };
+        let editors: PerPane<Option<Editor>> = PerPane::new(1, panes, None);
+        let left = Editor::new(cx, doc.clone(), Rc::new(SimpleStyling::new()), false);
+        let right = Editor::new(cx, doc.clone(), Rc::new(SimpleStyling::new()), false);
+        editors.set_in(0, Some(left.clone()));
+        editors.set_in(1, Some(right.clone()));
+        let text_of = doc.clone();
+        doc.add_on_update(move |update| settle_carets(editors, &update, &text_of.text()));
+        (doc, left, right)
+    }
+
+    #[test]
+    fn an_edit_from_outside_an_editor_keeps_both_carets_on_the_text() {
+        // A format or trim that shortens the file, with a caret at its end in
+        // each pane.
+        let (doc, left, right) = split("let x = 1;      \nlet y = 2;      \n");
+        let end = doc.text().len();
+        left.cursor.set(caret(end));
+        right.cursor.set(caret(end));
+        apply_batch(
+            &doc,
+            vec![(10, 16, String::new()), (27, 33, String::new())],
+            EditType::Delete,
+        );
+        assert_eq!(doc.text().to_string(), "let x = 1;\nlet y = 2;\n");
+        let len = doc.text().len();
+        assert_eq!(left.cursor.get_untracked().offset(), len);
+        assert_eq!(right.cursor.get_untracked().offset(), len);
+    }
+
+    #[test]
+    fn typing_in_one_pane_moves_the_other_panes_caret_with_its_text() {
+        let (doc, left, right) = split("ab\ncd\n");
+        left.cursor.set(caret(0));
+        right.cursor.set(caret(4)); // before "d"
+        doc.receive_char(&left, "X");
+        assert_eq!(doc.text().to_string(), "Xab\ncd\n");
+        assert_eq!(left.cursor.get_untracked().offset(), 1);
+        assert_eq!(
+            right.cursor.get_untracked().offset(),
+            5,
+            "still before \"d\""
+        );
+
+        // Deleting in the right pane past where the left caret is.
+        right.cursor.set(caret(doc.text().len()));
+        left.cursor.set(caret(doc.text().len()));
+        let len = doc.text().len();
+        doc.edit_single(Selection::region(1, len), "", EditType::Delete);
+        assert_eq!(doc.text().to_string(), "X");
+        assert_eq!(left.cursor.get_untracked().offset(), 1);
+        assert_eq!(right.cursor.get_untracked().offset(), 1);
     }
 }
 

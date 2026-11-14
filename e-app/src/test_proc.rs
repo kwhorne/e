@@ -1,9 +1,11 @@
 //! Test runs as processes that can be stopped.
 //!
 //! A test command runs through the login shell, which starts PHP, which may
-//! start more (Pest's parallel workers, a browser for Dusk). Each run gets a
-//! process group of its own, so **Stop** can end all of it: SIGTERM to the
-//! group, then SIGKILL to whatever is still there two seconds later. A run
+//! start more (Pest's parallel workers, a browser for Dusk). **Stop** ends all
+//! of it: SIGTERM to the run's process group and to every process descended
+//! from it, then SIGKILL to whatever is still there two seconds later. The
+//! group alone isn't enough: an interactive shell with job control moves
+//! what it runs into groups of its own, and ignores SIGTERM itself. A run
 //! that was stopped says so, and isn't mistaken for a failing suite.
 
 use std::collections::{HashMap, HashSet};
@@ -63,6 +65,46 @@ pub fn run(command: &str, cwd: &std::path::Path) -> io::Result<Ended> {
     })
 }
 
+/// `root` and every process descended from it, from `ps`.
+fn process_tree(root: i32) -> Vec<i32> {
+    let Ok(out) = Command::new("ps").args(["-A", "-o", "pid=,ppid="]).output() else {
+        return vec![root];
+    };
+    let pairs: Vec<(i32, i32)> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+        })
+        .collect();
+    let mut tree = vec![root];
+    let mut i = 0;
+    while i < tree.len() {
+        let parent = tree[i];
+        tree.extend(
+            pairs
+                .iter()
+                .filter(|(pid, ppid)| *ppid == parent && !tree.contains(pid))
+                .map(|(pid, _)| *pid)
+                .collect::<Vec<_>>(),
+        );
+        i += 1;
+    }
+    tree
+}
+
+/// Send `signal` to the group `pgid` and to each of `pids`.
+fn signal_all(pgid: i32, pids: &[i32], signal: i32) {
+    // SAFETY: kill(2) on processes this run started; one that is already
+    // gone just gets ESRCH.
+    unsafe {
+        libc::kill(-pgid, signal);
+        for &pid in pids {
+            libc::kill(pid, signal);
+        }
+    }
+}
+
 /// Stop every test run in flight. Returns how many there were.
 pub fn stop_all() -> usize {
     let running: Vec<(u64, i32)> = RUNNING
@@ -78,11 +120,10 @@ pub fn stop_all() -> usize {
         if let Ok(mut s) = STOPPED.lock() {
             s.get_or_insert_with(HashSet::new).insert(id);
         }
-        // SAFETY: kill(2) on a process group we started; a group that is
-        // already gone just gets ESRCH.
-        unsafe {
-            libc::kill(-pgid, libc::SIGTERM);
-        }
+        // Taken before anything dies: once the shell goes, its children
+        // belong to init and can't be found from it any more.
+        let first = process_tree(pgid);
+        signal_all(pgid, &first, libc::SIGTERM);
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(2));
             let alive = RUNNING
@@ -90,10 +131,9 @@ pub fn stop_all() -> usize {
                 .map(|r| r.as_ref().is_some_and(|r| r.contains_key(&id)))
                 .unwrap_or(false);
             if alive {
-                // SAFETY: as above.
-                unsafe {
-                    libc::kill(-pgid, libc::SIGKILL);
-                }
+                let mut pids = first;
+                pids.extend(process_tree(pgid));
+                signal_all(pgid, &pids, libc::SIGKILL);
             }
         });
     }

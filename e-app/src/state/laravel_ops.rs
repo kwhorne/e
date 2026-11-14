@@ -198,6 +198,12 @@ impl AppState {
     /// Replace the active buffer's whole text with `text` from the undo tree,
     /// suppressing re-recording of our own edit.
     pub(crate) fn undo_apply(&self, buf: &Buffer, text: &str) {
+        // A very large file keeps no history tree (see the buffer's setup):
+        // its empty root would replace the file with nothing.
+        if buf.large {
+            Self::notify("Undo history isn't kept for files over 1 MB; ⌘Z still undoes");
+            return;
+        }
         buf.undo_nav.set(true);
         let len = buf.doc.text().len();
         let mut it = std::iter::once((Selection::region(0, len), text));

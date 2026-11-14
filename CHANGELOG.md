@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Deny:** runs nothing.
 
   **Ask before agent commands** in Settings → Agents turns the card off.
+- **Fewer copies of an open file in memory.** Every language server for a
+  file kept its own copy of the text, and so did each edit sent to them. They
+  now share one. A file over 1 MB no longer keeps an undo-history tree either:
+  it held another full copy and compared the whole file on every keystroke.
+  ⌘Z still undoes in such a file; only the history panel is off.
 
 ### Fixed
 

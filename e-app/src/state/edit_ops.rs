@@ -158,7 +158,10 @@ impl AppState {
         if target < 0 {
             return;
         }
-        let line_count = buf.doc.text().to_string().lines().count();
+        let line_count = {
+            let text = buf.doc.text();
+            text.line_of_offset(text.len()) + 1
+        };
         if target as usize >= line_count {
             return;
         }

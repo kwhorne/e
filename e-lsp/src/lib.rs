@@ -263,9 +263,11 @@ fn widen_past_crlf<'n>(
     (start, end, std::borrow::Cow::Owned(text))
 }
 
-/// One document as the server currently knows it.
+/// One document as the server currently knows it. The text is shared:
+/// every server for a file holds the same copy the editor handed over,
+/// rather than one each.
 struct Doc {
-    text: String,
+    text: std::sync::Arc<String>,
     /// Byte offset of the start of each line (including one past a final `\n`,
     /// which the protocol counts as an empty last line).
     line_starts: Vec<usize>,
@@ -280,19 +282,18 @@ fn line_starts(text: &str) -> Vec<usize> {
 }
 
 impl Doc {
-    fn new(text: &str, language_id: &str, version: i64) -> Self {
+    fn new(text: std::sync::Arc<String>, language_id: &str, version: i64) -> Self {
         Self {
-            line_starts: line_starts(text),
-            text: text.to_string(),
+            line_starts: line_starts(&text),
+            text,
             language_id: language_id.to_string(),
             version,
         }
     }
 
-    fn replace(&mut self, text: &str, version: i64) {
-        self.text.clear();
-        self.text.push_str(text);
-        self.line_starts = line_starts(text);
+    fn replace(&mut self, text: std::sync::Arc<String>, version: i64) {
+        self.line_starts = line_starts(&text);
+        self.text = text;
         self.version = version;
     }
 
@@ -414,7 +415,7 @@ impl<'a> Positions<'a> {
         let d = self.disk.entry(uri.to_string()).or_insert_with(|| {
             std::fs::read_to_string(uri_to_path(uri))
                 .ok()
-                .map(|t| Doc::new(&t, "", 0))
+                .map(|t| Doc::new(std::sync::Arc::new(t), "", 0))
         });
         d.as_ref().and_then(|d| d.line(line as usize)).map(f)
     }
@@ -905,19 +906,35 @@ impl LspClient {
     }
 
     pub fn did_open(&self, uri: &str, language_id: &str, version: i64, text: &str) {
+        self.did_open_shared(
+            uri,
+            language_id,
+            version,
+            std::sync::Arc::new(text.to_string()),
+        );
+    }
+
+    /// [`Self::did_open`] with text the caller shares with the other servers
+    /// for the same file, so it is held once.
+    pub fn did_open_shared(
+        &self,
+        uri: &str,
+        language_id: &str,
+        version: i64,
+        text: std::sync::Arc<String>,
+    ) {
         let q = self.inner.queued.lock().unwrap();
-        self.inner
-            .docs
-            .lock()
-            .unwrap()
-            .insert(uri.to_string(), Doc::new(text, language_id, version));
+        self.inner.docs.lock().unwrap().insert(
+            uri.to_string(),
+            Doc::new(text.clone(), language_id, version),
+        );
         if self.inner.ready_state() != READY {
             return; // opened from the mirror once the handshake completes
         }
         drop(q);
         let _ = self
             .inner
-            .send_value(&did_open_msg(uri, language_id, version, text));
+            .send_value(&did_open_msg(uri, language_id, version, &text));
     }
 
     /// The document changed to `text`. Sends only the changed bytes when the
@@ -925,18 +942,24 @@ impl LspClient {
     /// the server is still starting, only updates the mirror (it will be opened
     /// with the latest text).
     pub fn did_change(&self, uri: &str, version: i64, text: &str) {
+        self.did_change_shared(uri, version, std::sync::Arc::new(text.to_string()));
+    }
+
+    /// [`Self::did_change`] with text the caller shares with the other
+    /// servers for the same file, so it is held once.
+    pub fn did_change_shared(&self, uri: &str, version: i64, text: std::sync::Arc<String>) {
         let q = self.inner.queued.lock().unwrap();
         let ready = self.inner.ready_state() == READY;
         let mut docs = self.inner.docs.lock().unwrap();
         let doc = docs
             .entry(uri.to_string())
-            .or_insert_with(|| Doc::new("", "", 0));
+            .or_insert_with(|| Doc::new(std::sync::Arc::new(String::new()), "", 0));
         if !ready {
             doc.replace(text, version);
             return;
         }
         let changes = if self.incremental_sync() {
-            match minimal_change(&doc.text, text) {
+            match minimal_change(&doc.text, &text) {
                 None => {
                     doc.version = version;
                     return;
@@ -949,7 +972,7 @@ impl LspClient {
                 }
             }
         } else {
-            json!([{ "text": text }])
+            json!([{ "text": text.as_str() }])
         };
         doc.replace(text, version);
         drop(docs);
@@ -1904,7 +1927,7 @@ mod tests {
         let apply = |old: &str, new: &str| {
             let (s, e, t) = minimal_change(old, new).unwrap();
             let (s, e, t) = widen_past_crlf(old, s, e, t);
-            let d = Doc::new(old, "php", 1);
+            let d = Doc::new(std::sync::Arc::new(old.to_string()), "php", 1);
             let enc = PositionEncoding::Utf16;
             // Neither end may sit between `\r` and `\n`.
             assert!(!(s > 0 && &old[s - 1..s] == "\r" && old[s..].starts_with('\n')));
@@ -1933,7 +1956,7 @@ mod tests {
 
     #[test]
     fn doc_lines_follow_the_protocol() {
-        let d = Doc::new("a\r\nbø\n", "php", 1);
+        let d = Doc::new(std::sync::Arc::new("a\r\nbø\n".to_string()), "php", 1);
         assert_eq!(d.line(0), Some("a"));
         assert_eq!(d.line(1), Some("bø"));
         // A trailing newline means one more, empty line.
@@ -1943,7 +1966,7 @@ mod tests {
 
     #[test]
     fn doc_positions_are_in_the_servers_units() {
-        let d = Doc::new("// Håndter\nx\n", "php", 1);
+        let d = Doc::new(std::sync::Arc::new("// Håndter\nx\n".to_string()), "php", 1);
         let enc = PositionEncoding::Utf16;
         // Byte 11 is the `\n` ending line 0: after `// Håndter` = 10 chars, 11 bytes.
         assert_eq!(d.position(11, enc), Position::new(0, 10));
@@ -1994,7 +2017,11 @@ mod tests {
         let uri = "file:///p/a.php";
         inner.docs.lock().unwrap().insert(
             uri.into(),
-            Doc::new("// Håndter feil\n$x = fungerer();", "php", 1),
+            Doc::new(
+                std::sync::Arc::new("// Håndter feil\n$x = fungerer();".to_string()),
+                "php",
+                1,
+            ),
         );
         // The server flags `fungerer` on line 1: UTF-16 columns 5..13 (ASCII
         // line, so unchanged), and something at UTF-16 column 10 on line 0,
@@ -2052,6 +2079,25 @@ mod tests {
         let body = &frame[frame.iter().position(|&b| b == b'{').unwrap()..];
         let v: Value = serde_json::from_slice(body).unwrap();
         v["method"].as_str().unwrap_or("").to_string()
+    }
+
+    #[test]
+    fn servers_for_one_file_share_its_text() {
+        let (a, _fa) = offline_client(READY);
+        let (b, _fb) = offline_client(READY);
+        let uri = "file:///p/a.php";
+        let held = |c: &LspClient| c.inner.docs.lock().unwrap()[uri].text.clone();
+
+        let text = Arc::new("<?php\n".to_string());
+        a.did_open_shared(uri, "php", 1, text.clone());
+        b.did_open_shared(uri, "php", 1, text.clone());
+        assert!(Arc::ptr_eq(&held(&a), &held(&b)), "one copy at open");
+
+        let text = Arc::new("<?php\n$a".to_string());
+        a.did_change_shared(uri, 2, text.clone());
+        b.did_change_shared(uri, 2, text.clone());
+        assert!(Arc::ptr_eq(&held(&a), &held(&b)), "one copy after an edit");
+        assert_eq!(held(&a).as_str(), "<?php\n$a");
     }
 
     #[test]

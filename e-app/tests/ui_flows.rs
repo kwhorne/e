@@ -59,12 +59,16 @@ impl App {
             serde_json::json!({ "trusted": [project] }).to_string(),
         )
         .unwrap();
-        // A version manager's `node` shim (Grove's, nvm's) finds its Node
-        // through HOME, which is ours here: put the real binary first.
+        // A version manager's `node` and `php` shims (Grove's, nvm's) find
+        // the real binary through HOME, which is ours here: put the real
+        // binaries first.
         let bin = home.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        if let Some(node) = real_node() {
+        if let Some(node) = real_binary("node", &["-p", "process.execPath"]) {
             let _ = std::os::unix::fs::symlink(node, bin.join("node"));
+        }
+        if let Some(php) = real_binary("php", &["-r", "echo PHP_BINARY;"]) {
+            let _ = std::os::unix::fs::symlink(php, bin.join("php"));
         }
         let path = format!(
             "{}:{}",
@@ -433,13 +437,11 @@ fn typing_marks_the_file_and_undo_unmarks_it() {
     assert!(lines_of(&s, "changes").is_empty());
 }
 
-/// The Node binary behind whatever `node` is on PATH, asked with the real
-/// HOME so a version manager's shim can find it.
-fn real_node() -> Option<PathBuf> {
-    let out = Command::new("node")
-        .args(["-p", "process.execPath"])
-        .output()
-        .ok()?;
+/// The binary behind whatever `program` is on PATH, which prints its own path
+/// when run with `args` — asked with the real HOME, so a version manager's
+/// shim can find it.
+fn real_binary(program: &str, args: &[&str]) -> Option<PathBuf> {
+    let out = Command::new(program).args(args).output().ok()?;
     let path = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
     path.is_file().then_some(path)
 }
@@ -667,6 +669,42 @@ fn an_agents_command_waits_for_the_users_answer() {
 
 #[test]
 #[ignore = "opens a window; run with --ignored"]
+fn stop_ends_a_test_run_that_hangs() {
+    let app = App::launch(json!({}));
+    // `php artisan test` that never finishes, and says who it is.
+    std::fs::write(
+        app.file("artisan"),
+        "<?php if (($argv[1] ?? '') === 'test') { \
+           file_put_contents(__DIR__.'/test.pid', getmypid()); sleep(120); }\n",
+    )
+    .unwrap();
+    let status = |s: &Value| s["tests"]["status"].as_str().unwrap_or("").to_string();
+    app.command("tdd-run");
+    app.wait_for("the run", |s| status(s) == "running");
+    let pid_file = app.file("test.pid");
+    let start = Instant::now();
+    while !pid_file.exists() && start.elapsed() < PATIENCE {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let pid = std::fs::read_to_string(&pid_file).expect("the test run started");
+    let alive = |pid: &str| {
+        Command::new("kill")
+            .args(["-0", pid.trim()])
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    assert!(alive(&pid));
+    app.command("stop-tests");
+    app.wait_for("stopped", |s| status(s) == "stopped");
+    let start = Instant::now();
+    while alive(&pid) && start.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(!alive(&pid), "the test process outlived Stop");
+}
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
 fn saving_writes_the_file() {
     let app = App::launch(json!({"format_on_save": false}));
     app.open("Order.php");
@@ -684,13 +722,23 @@ fn saving_writes_the_file() {
 #[ignore = "opens a window; run with --ignored"]
 fn a_message_shows_in_the_window_counts_repeats_and_goes() {
     let app = App::launch(json!({}));
-    let toasts = |s: &Value| s["toasts"].as_array().cloned().unwrap_or_default();
+    // Ours only: e may have its own to say at launch (a language server
+    // that isn't installed on this machine, say).
+    let ours = |s: &Value| {
+        s["toasts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|t| t["text"] == "Tests passed")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     for _ in 0..2 {
         app.call(json!({"method": "notify", "message": "Tests passed"}));
     }
-    let s = app.wait_for("the message", |s| !toasts(s).is_empty());
-    assert_eq!(s["toasts"], json!([{"text": "Tests passed", "count": 2}]));
-    app.wait_for("the message to go by itself", |s| toasts(s).is_empty());
+    let s = app.wait_for("the message", |s| !ours(s).is_empty());
+    assert_eq!(ours(&s), [json!({"text": "Tests passed", "count": 2})]);
+    app.wait_for("the message to go by itself", |s| ours(s).is_empty());
 }
 
 #[test]

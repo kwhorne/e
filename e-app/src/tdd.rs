@@ -40,6 +40,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
         TddStatus::Running => "● running…".to_string(),
         TddStatus::Passed => "✓ passing".to_string(),
         TddStatus::Failed => "✗ failing".to_string(),
+        TddStatus::Stopped => "■ stopped".to_string(),
     })
     .style(move |s| {
         let s = s
@@ -51,7 +52,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             TddStatus::Passed => s.color(theme::success()),
             TddStatus::Failed => s.color(theme::error()),
             TddStatus::Running => s.color(theme::accent()),
-            TddStatus::Idle => s.color(theme::fg_dim()),
+            TddStatus::Idle | TddStatus::Stopped => s.color(theme::fg_dim()),
         }
     });
 
@@ -93,9 +94,11 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
     });
 
     let run = pill("▶ Run", false, move || state.run_tests());
-    // "Fix to green" toggles into / out of the autonomous loop.
+    // "Fix to green" starts the autonomous loop; while it, or any run, goes
+    // on, the same button stops it.
+    let busy = move || state.tdd_loop.get() || state.tdd_status.get() == TddStatus::Running;
     let fix = label(move || {
-        if state.tdd_loop.get() {
+        if busy() {
             "■ Stop".to_string()
         } else {
             "✨ Fix to green".to_string()
@@ -109,7 +112,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .border_radius(5.0)
             .font_size(12.0)
             .cursor(floem::style::CursorStyle::Pointer);
-        if state.tdd_loop.get() {
+        if busy() {
             base.border(1.0)
                 .border_color(theme::error())
                 .color(theme::error())
@@ -118,7 +121,8 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
         }
     })
     .on_click_stop(move |_| {
-        if state.tdd_loop.get_untracked() {
+        if state.tdd_loop.get_untracked() || state.tdd_status.get_untracked() == TddStatus::Running
+        {
             state.tdd_stop();
         } else {
             state.tdd_fix_to_green();

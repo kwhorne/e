@@ -203,6 +203,41 @@ fn verify_signature(data: &[u8], signature: &[u8], keys: &[[u8; 32]]) -> Result<
     bail!("the signature doesn't match e's release key")
 }
 
+/// What the release workflow signs into `<asset>.manifest.sig`: the version,
+/// the asset's name and its SHA-256. A signature over the archive alone (the
+/// older `<asset>.sig`, still published for clients up to 0.20.0) would let
+/// whoever controls the release page serve an older signed archive as a new
+/// version, or one target's archive as another's; this one can't be reused
+/// for either. The workflow's sign job prints the same bytes.
+pub fn release_manifest(version: &str, asset: &str, sha256: &str) -> String {
+    format!("e-release-v1\n{version}\n{asset}\n{sha256}\n")
+}
+
+/// Check `signature` over the manifest of `asset` at `version` with the
+/// SHA-256 `sha256` against `keys`.
+fn verify_release(
+    version: &str,
+    asset: &str,
+    sha256: &str,
+    signature: &[u8],
+    keys: &[[u8; 32]],
+) -> Result<()> {
+    verify_signature(
+        release_manifest(version, asset, sha256).as_bytes(),
+        signature,
+        keys,
+    )
+}
+
+/// Refuse to install `version` unless it is newer than the running build.
+fn require_newer(current: &str, version: &str) -> Result<()> {
+    if self_update::version::bump_is_greater(current, version).unwrap_or(false) {
+        Ok(())
+    } else {
+        bail!("{version} is not newer than the running {current}")
+    }
+}
+
 /// Download `{base}/{asset}` into `dir` and check it against the `.sha256`
 /// published beside it.
 fn download_verified(base: &str, asset: &str, dir: &Path) -> Result<PathBuf> {
@@ -242,6 +277,7 @@ pub fn running_bundle() -> Option<PathBuf> {
 /// Install `version`. Blocking — run on a background thread. After this
 /// succeeds the app must be restarted to load the new version.
 pub fn install(version: &str) -> Result<()> {
+    require_newer(current_version(), version)?;
     let base = format!("{}/releases/download/v{version}", repo_url());
     #[cfg(target_os = "macos")]
     if let Some(bundle) = running_bundle() {
@@ -254,28 +290,31 @@ pub fn install(version: &str) -> Result<()> {
 fn install_binary(base: &str, version: &str) -> Result<()> {
     let target = self_update::get_target();
     let asset = format!("{REPO_NAME}-{target}.tar.gz");
-    let dir = std::env::temp_dir().join(format!("e-update-{}-{version}", std::process::id()));
-    std::fs::create_dir_all(&dir)?;
+    let temp = private_temp_dir()?;
+    let dir = temp.path();
     let result = (|| {
-        let archive = download_verified(base, &asset, &dir)?;
+        let archive = download_verified(base, &asset, dir)?;
         // The checksum only says the download is what the release page
-        // holds; the signature says e's release workflow made it.
+        // holds; the signature says e's release workflow made it, as this
+        // version of this target's archive.
         use std::io::Read;
+        let sig_asset = format!("{asset}.manifest.sig");
         let mut signature = Vec::new();
-        ureq::get(&format!("{base}/{asset}.sig"))
+        ureq::get(&format!("{base}/{sig_asset}"))
             .timeout(HTTP_TIMEOUT)
             .call()
-            .with_context(|| format!("downloading {asset}.sig"))?
+            .with_context(|| format!("downloading {sig_asset}"))?
             .into_reader()
             .take(1024)
             .read_to_end(&mut signature)?;
-        verify_signature(&std::fs::read(&archive)?, &signature, UPDATE_KEYS)
-            .with_context(|| format!("{asset} isn't signed by e's release key"))?;
+        let sha256 = sha256_hex(&std::fs::read(&archive)?);
+        verify_release(version, &asset, &sha256, &signature, UPDATE_KEYS)
+            .with_context(|| format!("{asset} isn't signed by e's release key as {version}"))?;
         self_update::Extract::from_source(&archive)
             .archive(self_update::ArchiveKind::Tar(Some(
                 self_update::Compression::Gz,
             )))
-            .extract_file(&dir, REPO_NAME)
+            .extract_file(dir, REPO_NAME)
             .with_context(|| format!("extracting {REPO_NAME} from {asset}"))?;
         let new_exe = dir.join(REPO_NAME);
         #[cfg(unix)]
@@ -286,8 +325,24 @@ fn install_binary(base: &str, version: &str) -> Result<()> {
         self_update::self_replace::self_replace(&new_exe)
             .context("replacing the running executable")
     })();
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = temp.close();
     result
+}
+
+/// A new folder under the temp dir, randomly named and created only if no
+/// such name exists (so nothing another user put in a shared /tmp ahead of
+/// time is used), readable by this user alone. Removed when dropped.
+fn private_temp_dir() -> Result<tempfile::TempDir> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("e-update-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    builder
+        .tempdir()
+        .context("making a folder to download the update into")
 }
 
 /// The release asset holding the signed, notarized app bundle.
@@ -296,11 +351,14 @@ pub fn bundle_asset(version: &str) -> String {
     format!("{REPO_NAME}-{version}-universal.app.zip")
 }
 
-/// The designated requirement of a Developer ID application signed by e's
-/// team: Apple's anchor, the Developer ID intermediate and leaf, team
-/// 52AT44QFCM. Anyone can sign a bundle; only that team can satisfy this.
+/// The designated requirement of e's app signed by e's team: identifier
+/// `dev.e.editor` (CFBundleIdentifier in scripts/bundle-dmg.sh), Apple's
+/// anchor, the Developer ID intermediate and leaf, team 52AT44QFCM. Anyone
+/// can sign a bundle; only that team can satisfy this, and the identifier
+/// keeps the team's other apps (eterm) from passing for e.
 #[cfg(target_os = "macos")]
-const SIGNED_BY_E: &str = "anchor apple generic \
+const SIGNED_BY_E: &str = "identifier \"dev.e.editor\" \
+    and anchor apple generic \
     and certificate 1[field.1.2.840.113635.100.6.2.6] exists \
     and certificate leaf[field.1.2.840.113635.100.6.1.13] exists \
     and certificate leaf[subject.OU] = \"52AT44QFCM\"";
@@ -460,7 +518,8 @@ mod tests {
 
     /// A file and its `.sig` checked against the built-in release key —
     /// `E_SIGNED_FILE=e-x86_64-unknown-linux-gnu.tar.gz cargo test -p e-app
-    /// a_signed_file -- --ignored`, for a release's archive, say.
+    /// a_signed_file -- --ignored`, for a release's archive, say. With
+    /// `E_SIGNED_VERSION=0.21.0` its `.manifest.sig` is checked too.
     #[test]
     #[ignore]
     fn a_signed_file_verifies_against_the_release_key() {
@@ -468,6 +527,68 @@ mod tests {
         let data = std::fs::read(&file).unwrap();
         let sig = std::fs::read(format!("{file}.sig")).unwrap();
         verify_signature(&data, &sig, UPDATE_KEYS).unwrap();
+        if let Ok(version) = std::env::var("E_SIGNED_VERSION") {
+            let asset = Path::new(&file).file_name().unwrap().to_str().unwrap();
+            let sig = std::fs::read(format!("{file}.manifest.sig")).unwrap();
+            verify_release(&version, asset, &sha256_hex(&data), &sig, UPDATE_KEYS).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_manifest_names_the_version_the_asset_and_its_hash() {
+        assert_eq!(
+            release_manifest("0.21.0", "e-x86_64-unknown-linux-gnu.tar.gz", "ab12"),
+            "e-release-v1\n0.21.0\ne-x86_64-unknown-linux-gnu.tar.gz\nab12\n"
+        );
+    }
+
+    #[test]
+    fn a_signed_manifest_verifies_only_for_its_version_asset_and_hash() {
+        use ed25519_dalek::{Signer, SigningKey};
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let keys = [key.verifying_key().to_bytes()];
+        let asset = "e-x86_64-unknown-linux-gnu.tar.gz";
+        let sha = sha256_hex(OPENSSL_MSG);
+        let sig = key
+            .sign(release_manifest("0.21.0", asset, &sha).as_bytes())
+            .to_bytes();
+        assert!(verify_release("0.21.0", asset, &sha, &sig, &keys).is_ok());
+        // An older signed archive offered as a newer version.
+        assert!(verify_release("0.22.0", asset, &sha, &sig, &keys).is_err());
+        // Another target's archive.
+        let arm = "e-aarch64-unknown-linux-gnu.tar.gz";
+        assert!(verify_release("0.21.0", arm, &sha, &sig, &keys).is_err());
+        // Other bytes.
+        let other = sha256_hex(b"e test archive!\n");
+        assert!(verify_release("0.21.0", asset, &other, &sig, &keys).is_err());
+        // Signed by someone else.
+        assert!(verify_release("0.21.0", asset, &sha, &sig, UPDATE_KEYS).is_err());
+        // The older signature, over the archive alone, doesn't stand in.
+        let archive_sig = key.sign(OPENSSL_MSG).to_bytes();
+        assert!(verify_release("0.21.0", asset, &sha, &archive_sig, &keys).is_err());
+    }
+
+    #[test]
+    fn only_a_newer_version_is_installed() {
+        assert!(require_newer("0.20.0", "0.20.1").is_ok());
+        assert!(require_newer("0.20.0", "1.0.0").is_ok());
+        assert!(require_newer("0.20.0", "0.20.0").is_err());
+        assert!(require_newer("0.20.0", "0.19.3").is_err());
+        assert!(require_newer("0.20.0", "latest").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_download_folder_is_new_private_and_removed() {
+        use std::os::unix::fs::PermissionsExt;
+        let a = private_temp_dir().unwrap();
+        let b = private_temp_dir().unwrap();
+        assert_ne!(a.path(), b.path());
+        let mode = std::fs::metadata(a.path()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        let path = a.path().to_path_buf();
+        a.close().unwrap();
+        assert!(!path.exists());
     }
 
     #[test]
@@ -581,17 +702,21 @@ mod tests {
     }
 
     /// Against an installed release — run with `--ignored` on a Mac with e
-    /// in /Applications: our own signature must satisfy the requirement.
+    /// in /Applications (or at `E_APP`): our own signature must satisfy the
+    /// requirement, and another team's or another app's must not.
     #[cfg(target_os = "macos")]
     #[test]
     #[ignore]
     fn an_installed_release_satisfies_the_requirement() {
-        let app = Path::new("/Applications/e.app");
+        let app = std::env::var("E_APP").unwrap_or_else(|_| "/Applications/e.app".into());
+        let app = Path::new(&app);
         let plist = std::fs::read_to_string(app.join("Contents/Info.plist")).unwrap();
         let version = plist_string(&plist, "CFBundleShortVersionString").unwrap();
         verify_bundle(app, version, SIGNED_BY_E).unwrap();
         let other_team = SIGNED_BY_E.replace("52AT44QFCM", "AAAAAAAAAA");
         assert!(verify_bundle(app, version, &other_team).is_err());
+        let other_app = SIGNED_BY_E.replace("dev.e.editor", "dev.e.term");
+        assert!(verify_bundle(app, version, &other_app).is_err());
     }
 
     #[cfg(target_os = "macos")]

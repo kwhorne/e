@@ -1322,6 +1322,7 @@ dependencies = [
  "e-review",
  "e-term",
  "e-verify",
+ "ed25519-dalek",
  "floem",
  "floem-editor-core",
  "ignore",

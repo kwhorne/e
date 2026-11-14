@@ -99,3 +99,36 @@ jobs:
           files: |
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz
             target/${{ matrix.target }}/release/e-${{ matrix.target }}.tar.gz.sha256
+
+  # Sign every archive the release carries, once the builds have attached
+  # them. The in-app updater refuses an archive without a valid signature
+  # from the key in e-app/src/updater.rs, so a missing secret fails the
+  # release here rather than leaving it uninstallable for everyone.
+  sign:
+    name: Sign the archives
+    needs: [build, linux]
+    # Sign what was built even if one target failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sign and attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING_KEY: ${{ secrets.E_UPDATE_SIGNING_KEY }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::The E_UPDATE_SIGNING_KEY secret is not set: the archives stay unsigned and the updater won't install them."
+            exit 1
+          fi
+          mkdir signing && cd signing
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'e-*.tar.gz'
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > key.pem
+          for archive in e-*.tar.gz; do
+            openssl pkeyutl -sign -inkey key.pem -rawin -in "$archive" -out "$archive.sig"
+          done
+          rm -f key.pem
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber e-*.tar.gz.sig
+          ls -l e-*.tar.gz.sig

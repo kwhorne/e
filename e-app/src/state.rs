@@ -21,6 +21,11 @@ use floem::views::editor::core::xi_rope::Rope;
 use floem::views::editor::text::Document;
 use floem::views::editor::text_document::TextDocument;
 use floem::views::editor::Editor;
+
+pub use crate::debug::DebugPanel;
+pub use crate::grove_state::GrovePanel;
+pub use crate::review::ReviewPanel;
+pub use crate::tdd_state::TestsPanel;
 use lsp_types::{Diagnostic, TextEdit};
 
 use e_agent::{AgentClient, ChatState, Streaming};
@@ -693,6 +698,45 @@ impl DbPanel {
     }
 }
 
+/// Source control: the repository, its status and the panel.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct GitPanel {
+    /// Whether the left sidebar shows the Source Control panel (⌘2).
+    pub panel_open: RwSignal<bool>,
+    /// The repository root, if the workspace is inside a git repo.
+    pub root: RwSignal<Option<PathBuf>>,
+    /// Current branch name.
+    pub branch: RwSignal<Option<String>>,
+    /// Working-tree status entries.
+    pub status: RwSignal<Vec<git::StatusEntry>>,
+    /// The commit-message input.
+    pub commit_msg: RwSignal<String>,
+    /// Recent commits: `(hash, author, rel time, summary)`.
+    pub log: RwSignal<Vec<(String, String, String, String)>>,
+    /// Number of stash entries.
+    pub stash_count: RwSignal<usize>,
+}
+
+/// The language servers: their clients, health and incoming events.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct LspState {
+    /// The PHP language server, started lazily on first PHP file.
+    /// Running language servers, keyed by server id.
+    pub clients: RwSignal<HashMap<String, Arc<LspClient>>>,
+    /// Per-server health: drives the status bar and the restart policy.
+    pub health: RwSignal<HashMap<String, ServerHealth>>,
+    /// What each server says it is busy with (`Indexing 42%`), while it is.
+    pub progress: RwSignal<HashMap<String, String>>,
+    /// Pending `(server id, event)` from the LSP reader threads.
+    pub queue: RwSignal<LspQueue>,
+    /// Receiver, taken once by the UI to build a reactive signal.
+    pub rx: RwSignal<Option<Receiver<()>>>,
+}
+
 /// Global editor state.
 #[derive(Clone, Copy)]
 pub struct AppState {
@@ -720,13 +764,6 @@ pub struct AppState {
     next_id: RwSignal<u64>,
     /// Is the command palette open?
     pub palette_open: RwSignal<bool>,
-    /// The PHP language server, started lazily on first PHP file.
-    /// Running language servers, keyed by server id.
-    pub lsp_clients: RwSignal<HashMap<String, Arc<LspClient>>>,
-    /// Per-server health: drives the status bar and the restart policy.
-    pub lsp_health: RwSignal<HashMap<String, ServerHealth>>,
-    /// What each server says it is busy with (`Indexing 42%`), while it is.
-    pub lsp_progress: RwSignal<HashMap<String, String>>,
     /// Servers whose install command is running in a terminal tab.
     lsp_installing: RwSignal<HashSet<String>>,
     /// Diagnostics keyed by `file://` URI.
@@ -742,10 +779,6 @@ pub struct AppState {
     /// signal-per-message coalesces (only the last value survives a frame) and
     /// two servers publishing for the same file would drop one of them.
     lsp_tx: RwSignal<Sender<()>>,
-    /// Pending `(server id, event)` from the LSP reader threads.
-    pub lsp_queue: RwSignal<LspQueue>,
-    /// Receiver, taken once by the UI to build a reactive signal.
-    pub lsp_rx: RwSignal<Option<Receiver<()>>>,
     /// Completion popup state.
     pub completion: Completion,
     /// Hover popup state.
@@ -922,11 +955,6 @@ pub struct AppState {
     pub runtime_reqs: RwSignal<Vec<RuntimeReq>>,
     pub runtime_expanded: RwSignal<Option<String>>,
     pub runtime_polling: RwSignal<bool>,
-    /// The Grove site serving this project: `None` = not resolved yet,
-    /// `Some(None)` = Grove isn't around or doesn't serve it.
-    pub grove_site: RwSignal<Option<Option<crate::grove::Site>>>,
-    /// Whether Grove correlates SQL with its request timeline (`None` = unknown).
-    pub grove_sql_capture: RwSignal<Option<bool>>,
     /// Agents waiting for fresh diagnostics on a file they just wrote.
     pub diag_waiters: RwSignal<Vec<DiagWaiter>>,
     diag_waiter_seq: RwSignal<u64>,
@@ -940,15 +968,6 @@ pub struct AppState {
     pub migration_drift: RwSignal<Option<e_laravel::migration_drift::Drift>>,
     /// The drift last waved away, which doesn't come back until it changes.
     pub migration_drift_dismissed: RwSignal<Option<e_laravel::migration_drift::Drift>>,
-    /// The Grove panel (mail-catcher + webhooks).
-    pub grove_panel_open: RwSignal<bool>,
-    pub grove_tab: RwSignal<crate::grove_state::GroveTab>,
-    pub grove_mail: RwSignal<Vec<crate::grove::Email>>,
-    pub grove_hooks: RwSignal<Vec<crate::grove::Request>>,
-    /// The selected entry `(tab, id)`, and the text shown for it.
-    pub grove_selected: RwSignal<Option<(crate::grove_state::GroveTab, u64)>>,
-    pub grove_detail: RwSignal<String>,
-    pub grove_refreshing: RwSignal<bool>,
     /// The in-progress "verify the fix" session, if any (see [`crate::verify`]).
     pub verify_session: RwSignal<Option<crate::verify::VerifySession>>,
     /// A verify measurement (baseline or after) is in flight.
@@ -956,42 +975,8 @@ pub struct AppState {
     /// Whether the verify panel is open (single source of truth for visibility).
     pub verify_open: RwSignal<bool>,
     // ---- Agent session review (see [`crate::review`]) ----
-    pub review_open: RwSignal<bool>,
-    pub review_changeset: RwSignal<e_review::Changeset>,
-    /// Commit the session started at; `None` = review everything uncommitted.
-    pub review_base: RwSignal<Option<String>>,
-    /// Review just one agent turn: its before and after trees. `None` reviews
-    /// the session.
-    pub review_turn: RwSignal<Option<(String, String)>>,
-    pub review_selected: RwSignal<Option<String>>,
-    pub review_busy: RwSignal<bool>,
-    /// Automated diff inspections over the changeset.
-    pub review_flags: RwSignal<Vec<e_review::flags::Flag>>,
-    /// A branch/commit/PR is being created.
-    pub review_shipping: RwSignal<bool>,
-    /// The agent's written summary of the session (used as the PR description);
-    /// set over the sync socket by `{"method":"review_summary"}`.
-    pub review_summary: RwSignal<Option<String>>,
-    /// Measured evidence for the routes this changeset touches, once replayed.
-    /// `None` until someone asks for it — replaying hits the running app.
-    pub review_evidence: RwSignal<Option<Vec<e_verify::RouteEvidence>>>,
-    pub review_evidence_busy: RwSignal<bool>,
 
     // ---- Step-debugging (DAP session) ----------------------------------
-    pub debug_open: RwSignal<bool>,
-    pub debug_status: RwSignal<String>,
-    pub debug_thread: RwSignal<i64>,
-    pub debug_frames: RwSignal<Vec<crate::debug::DebugFrame>>,
-    pub debug_vars: RwSignal<Vec<crate::debug::DebugVar>>,
-    pub debug_output: RwSignal<Vec<String>>,
-    /// Breakpoints keyed by file path → 1-based line numbers.
-    pub debug_breakpoints: RwSignal<std::collections::HashMap<String, Vec<u32>>>,
-    /// The live adapter client, if a session is running.
-    pub debug_client: RwSignal<Option<std::sync::Arc<e_dap::DapClient>>>,
-    /// What the running debug session owns (its event effect), disposed when
-    /// the session ends, so a finished session's events no longer reach the
-    /// next one.
-    pub debug_session: RwSignal<Option<Scope>>,
     /// An agent's `run` / `tinker` requests waiting for the user's answer.
     pub run_consents: RwSignal<Vec<crate::run_consent::RunConsent>>,
     /// The user allowed the agent's commands for the rest of the session.
@@ -1018,21 +1003,10 @@ pub struct AppState {
     pub req_inertia: RwSignal<Option<(String, serde_json::Value)>>,
 
     // ---- Autonomous TDD loop -------------------------------------------
-    pub tdd_open: RwSignal<bool>,
-    /// Extra arguments for the next test run only (`tests/X.php --filter=…`).
-    pub tdd_filter: RwSignal<Option<String>>,
-    pub tdd_status: RwSignal<TddStatus>,
-    pub tdd_output: RwSignal<String>,
-    /// Parsed per-test results from the last run, when the runner could produce
-    /// them. Empty for runners that can't write JUnit XML.
-    pub tdd_results: RwSignal<crate::testrun::TestRun>,
     /// Every test's latest result across runs, so running one test doesn't
     /// forget how the others ended. Read for the gutter's test marks; kept on
     /// disk so the marks are back on the next launch.
     pub test_outcomes: RwSignal<Vec<crate::testrun::TestCase>>,
-    pub tdd_iteration: RwSignal<usize>,
-    /// When true, a failing run asks the agent to fix and re-runs on apply.
-    pub tdd_loop: RwSignal<bool>,
 
     // ---- Auto-update ----------------------------------------------------
     /// The available update, if GitHub reports a newer release.
@@ -1069,21 +1043,6 @@ pub struct AppState {
     pub pinned_tabs: RwSignal<HashSet<u64>>,
 
     // ---- Source control (git) ------------------------------------------
-    /// Whether the left sidebar shows the Source Control panel (⌘2).
-    pub git_panel_open: RwSignal<bool>,
-    /// The repository root, if the workspace is inside a git repo.
-    pub git_root: RwSignal<Option<PathBuf>>,
-    /// Current branch name.
-    pub git_branch: RwSignal<Option<String>>,
-    /// Working-tree status entries.
-    pub git_status: RwSignal<Vec<git::StatusEntry>>,
-    /// The commit-message input.
-    pub git_commit_msg: RwSignal<String>,
-    /// Recent commits: `(hash, author, rel time, summary)`.
-    pub git_log: RwSignal<Vec<(String, String, String, String)>>,
-    /// Number of stash entries.
-    pub git_stash_count: RwSignal<usize>,
-
     /// Editor font size (reactive, for zoom).
     pub font_size: RwSignal<usize>,
     /// Whether soft word-wrap is enabled.
@@ -1097,6 +1056,18 @@ pub struct AppState {
     pub db: DbPanel,
     /// Everything behind the AI agent panel (⌘L).
     pub agent: AgentPanel,
+    /// The debugger (F5): its session, where it stopped, its panel.
+    pub debug: DebugPanel,
+    /// The Tests panel and the fix-to-green loop.
+    pub tests: TestsPanel,
+    /// Grove: the project's site, its mail and hooks, and the panel.
+    pub grove: GrovePanel,
+    /// Session review (⌘⌥V): the changeset, its flags and the ship gate.
+    pub review: ReviewPanel,
+    /// Source control: the repository, its status and the panel.
+    pub git: GitPanel,
+    /// The language servers: their clients, health and incoming events.
+    pub lsp: LspState,
 }
 
 /// Extract the request path (`/foo/bar`) from a full replay URL.
@@ -1767,14 +1738,9 @@ impl AppState {
             focused: RwSignal::new(0),
             next_id: RwSignal::new(1),
             palette_open: RwSignal::new(false),
-            lsp_clients: RwSignal::new(HashMap::new()),
-            lsp_health: RwSignal::new(HashMap::new()),
-            lsp_progress: RwSignal::new(HashMap::new()),
             lsp_installing: RwSignal::new(HashSet::new()),
             diagnostics: RwSignal::new(HashMap::new()),
             lsp_tx: RwSignal::new(tx),
-            lsp_rx: RwSignal::new(Some(rx)),
-            lsp_queue: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
             diag_by_server: RwSignal::new(HashMap::new()),
             laravel_project: RwSignal::new(None),
             completion: Completion::new(),
@@ -1866,8 +1832,6 @@ impl AppState {
             runtime_reqs: RwSignal::new(Vec::new()),
             runtime_expanded: RwSignal::new(None),
             runtime_polling: RwSignal::new(false),
-            grove_site: RwSignal::new(None),
-            grove_sql_capture: RwSignal::new(None),
             diag_waiters: RwSignal::new(Vec::new()),
             diag_waiter_seq: RwSignal::new(0),
             migrations_open: RwSignal::new(false),
@@ -1876,36 +1840,9 @@ impl AppState {
             migrations_loading: RwSignal::new(false),
             migration_drift: RwSignal::new(None),
             migration_drift_dismissed: RwSignal::new(None),
-            grove_panel_open: RwSignal::new(false),
-            grove_tab: RwSignal::new(crate::grove_state::GroveTab::Mail),
-            grove_mail: RwSignal::new(Vec::new()),
-            grove_hooks: RwSignal::new(Vec::new()),
-            grove_selected: RwSignal::new(None),
-            grove_detail: RwSignal::new(String::new()),
-            grove_refreshing: RwSignal::new(false),
             verify_session: RwSignal::new(None),
             verify_busy: RwSignal::new(false),
             verify_open: RwSignal::new(false),
-            review_open: RwSignal::new(false),
-            review_changeset: RwSignal::new(e_review::Changeset::default()),
-            review_base: RwSignal::new(None),
-            review_turn: RwSignal::new(None),
-            review_selected: RwSignal::new(None),
-            review_busy: RwSignal::new(false),
-            review_flags: RwSignal::new(Vec::new()),
-            review_shipping: RwSignal::new(false),
-            review_summary: RwSignal::new(None),
-            review_evidence: RwSignal::new(None),
-            review_evidence_busy: RwSignal::new(false),
-            debug_open: RwSignal::new(false),
-            debug_status: RwSignal::new("idle".to_string()),
-            debug_thread: RwSignal::new(1),
-            debug_frames: RwSignal::new(Vec::new()),
-            debug_vars: RwSignal::new(Vec::new()),
-            debug_output: RwSignal::new(Vec::new()),
-            debug_breakpoints: RwSignal::new(std::collections::HashMap::new()),
-            debug_client: RwSignal::new(None),
-            debug_session: RwSignal::new(None),
             run_consents: RwSignal::new(Vec::new()),
             agent_runs_allowed: RwSignal::new(false),
             ghost_gen: RwSignal::new(0),
@@ -1920,14 +1857,7 @@ impl AppState {
             req_error: RwSignal::new(None),
             req_running: RwSignal::new(false),
             req_inertia: RwSignal::new(None),
-            tdd_open: RwSignal::new(false),
-            tdd_filter: RwSignal::new(None),
-            tdd_status: RwSignal::new(TddStatus::Idle),
-            tdd_output: RwSignal::new(String::new()),
-            tdd_results: RwSignal::new(Default::default()),
             test_outcomes: RwSignal::new(kept_tests),
-            tdd_iteration: RwSignal::new(0),
-            tdd_loop: RwSignal::new(false),
             update_info: RwSignal::new(None),
             update_status: RwSignal::new(crate::updater::UpdateStatus::Idle),
             update_notes_open: RwSignal::new(false),
@@ -1945,13 +1875,6 @@ impl AppState {
             recent: crate::recent::RecentState::new(),
             settings_open: RwSignal::new(false),
             pinned_tabs: RwSignal::new(HashSet::new()),
-            git_panel_open: RwSignal::new(false),
-            git_root: RwSignal::new(None),
-            git_branch: RwSignal::new(None),
-            git_status: RwSignal::new(Vec::new()),
-            git_commit_msg: RwSignal::new(String::new()),
-            git_log: RwSignal::new(Vec::new()),
-            git_stash_count: RwSignal::new(0),
             font_size: RwSignal::new(config::load_settings().font_size),
             word_wrap: RwSignal::new(false),
             nav_back_stack: RwSignal::new(Vec::new()),
@@ -1959,6 +1882,66 @@ impl AppState {
             blame_rev: RwSignal::new(0),
             db: DbPanel::new(),
             agent: AgentPanel::new(agent_wake_tx, agent_wake_rx),
+            debug: DebugPanel {
+                open: RwSignal::new(false),
+                status: RwSignal::new("idle".to_string()),
+                thread: RwSignal::new(1),
+                frames: RwSignal::new(Vec::new()),
+                vars: RwSignal::new(Vec::new()),
+                output: RwSignal::new(Vec::new()),
+                breakpoints: RwSignal::new(std::collections::HashMap::new()),
+                client: RwSignal::new(None),
+                session: RwSignal::new(None),
+            },
+            tests: TestsPanel {
+                open: RwSignal::new(false),
+                filter: RwSignal::new(None),
+                status: RwSignal::new(TddStatus::Idle),
+                output: RwSignal::new(String::new()),
+                results: RwSignal::new(Default::default()),
+                iteration: RwSignal::new(0),
+                fix_loop: RwSignal::new(false),
+            },
+            grove: GrovePanel {
+                site: RwSignal::new(None),
+                sql_capture: RwSignal::new(None),
+                panel_open: RwSignal::new(false),
+                tab: RwSignal::new(crate::grove_state::GroveTab::Mail),
+                mail: RwSignal::new(Vec::new()),
+                hooks: RwSignal::new(Vec::new()),
+                selected: RwSignal::new(None),
+                detail: RwSignal::new(String::new()),
+                refreshing: RwSignal::new(false),
+            },
+            review: ReviewPanel {
+                open: RwSignal::new(false),
+                changeset: RwSignal::new(e_review::Changeset::default()),
+                base: RwSignal::new(None),
+                turn: RwSignal::new(None),
+                selected: RwSignal::new(None),
+                busy: RwSignal::new(false),
+                flags: RwSignal::new(Vec::new()),
+                shipping: RwSignal::new(false),
+                summary: RwSignal::new(None),
+                evidence: RwSignal::new(None),
+                evidence_busy: RwSignal::new(false),
+            },
+            git: GitPanel {
+                panel_open: RwSignal::new(false),
+                root: RwSignal::new(None),
+                branch: RwSignal::new(None),
+                status: RwSignal::new(Vec::new()),
+                commit_msg: RwSignal::new(String::new()),
+                log: RwSignal::new(Vec::new()),
+                stash_count: RwSignal::new(0),
+            },
+            lsp: LspState {
+                clients: RwSignal::new(HashMap::new()),
+                health: RwSignal::new(HashMap::new()),
+                progress: RwSignal::new(HashMap::new()),
+                queue: RwSignal::new(Arc::new(Mutex::new(VecDeque::new()))),
+                rx: RwSignal::new(Some(rx)),
+            },
         }
     }
 
@@ -3603,7 +3586,7 @@ impl AppState {
             }
         }
         for id in ids {
-            if self.lsp_clients.with_untracked(|m| !m.contains_key(id)) {
+            if self.lsp.clients.with_untracked(|m| !m.contains_key(id)) {
                 self.restart_lsp(id, 0);
             }
         }
@@ -5070,7 +5053,7 @@ impl AppState {
             format!("applied {applied} hunk(s) to {}", edit.path.display()),
         );
         // In the autonomous TDD loop, a fix triggers another test run.
-        if self.tdd_loop.get_untracked() && applied > 0 {
+        if self.tests.fix_loop.get_untracked() && applied > 0 {
             self.run_tests();
         }
     }
@@ -5639,7 +5622,8 @@ impl AppState {
     /// Look up a running language server for `language` (does not start one).
     pub fn lsp_for_language(&self, language: Language) -> Option<Arc<LspClient>> {
         let spec = lsp_registry::primary_spec(language, self.is_laravel_project())?;
-        self.lsp_clients
+        self.lsp
+            .clients
             .with(|m| m.get(spec.id).cloned())
             .filter(|c| c.is_alive())
     }
@@ -5783,7 +5767,8 @@ impl AppState {
             lsp_registry::server_specs(language, self.is_laravel_project())
                 .iter()
                 .filter(|s| {
-                    self.lsp_clients
+                    self.lsp
+                        .clients
                         .with_untracked(|m| m.get(s.id).map(|c| c.is_alive()).unwrap_or(false))
                 })
                 .map(|s| s.id.to_string())
@@ -5989,7 +5974,8 @@ impl AppState {
 
     /// Is the official Laravel language server up?
     pub(crate) fn laravel_lsp_running(&self) -> bool {
-        self.lsp_clients
+        self.lsp
+            .clients
             .with(|m| m.get("laravel-lsp").map(|c| c.is_alive()))
             .unwrap_or(false)
     }
@@ -6003,7 +5989,7 @@ impl AppState {
     /// code actions, document sync) go to all of them.
     pub fn lsp_clients_for(&self, language: Language) -> Vec<Arc<LspClient>> {
         let specs = lsp_registry::server_specs(language, self.is_laravel_project());
-        self.lsp_clients.with(|m| {
+        self.lsp.clients.with(|m| {
             specs
                 .iter()
                 .filter_map(|s| m.get(s.id).cloned())
@@ -6030,24 +6016,24 @@ impl AppState {
         }
         specs
             .first()
-            .and_then(|s| self.lsp_clients.with(|m| m.get(s.id).cloned()))
+            .and_then(|s| self.lsp.clients.with(|m| m.get(s.id).cloned()))
     }
 
     /// Start one server if it isn't already running, subject to the health
     /// policy: a missing binary is retried only once it shows up on `PATH`, and a
     /// server that gave up or failed to initialise stays down until the user asks.
     fn ensure_one_lsp(&self, spec: &lsp_registry::ServerSpec) -> Option<Arc<LspClient>> {
-        if let Some(client) = self.lsp_clients.with(|m| m.get(spec.id).cloned()) {
+        if let Some(client) = self.lsp.clients.with(|m| m.get(spec.id).cloned()) {
             if client.is_alive() {
                 return Some(client);
             }
             // A corpse whose exit event hasn't been handled yet; the restart
             // policy below decides what happens to it.
-            self.lsp_clients.update(|m| {
+            self.lsp.clients.update(|m| {
                 m.remove(spec.id);
             });
         }
-        let restarts = match self.lsp_health.with(|h| h.get(spec.id).cloned()) {
+        let restarts = match self.lsp.health.with(|h| h.get(spec.id).cloned()) {
             // Retried only when the binary has appeared, so installing it while
             // `e` runs is picked up on the next file open — and nobody is nagged
             // on every open until then.
@@ -6069,7 +6055,7 @@ impl AppState {
             return None;
         }
         let tx = self.lsp_tx.get();
-        let queue = self.lsp_queue.get_untracked();
+        let queue = self.lsp.queue.get_untracked();
         // Tag events with the server that produced them so two servers on the
         // same file don't overwrite each other's diagnostics.
         let server_id = spec.id.to_string();
@@ -6086,10 +6072,10 @@ impl AppState {
         match LspClient::start_with_settings(spec.program, spec.args, &root, settings, handler) {
             Ok(client) => {
                 eprintln!("e: starting {} for {}", spec.id, root.display());
-                self.lsp_clients.update(|m| {
+                self.lsp.clients.update(|m| {
                     m.insert(spec.id.to_string(), client.clone());
                 });
-                self.lsp_health.update(|h| {
+                self.lsp.health.update(|h| {
                     h.insert(spec.id.to_string(), ServerHealth::Starting { restarts });
                 });
                 Some(client)
@@ -6111,7 +6097,7 @@ impl AppState {
                     Self::notify(&msg);
                     ServerHealth::Failed(format!("{e:#}"))
                 };
-                self.lsp_health.update(|h| {
+                self.lsp.health.update(|h| {
                     h.insert(spec.id.to_string(), health);
                 });
                 None
@@ -6124,18 +6110,20 @@ impl AppState {
         match event {
             ServerEvent::Ready => {
                 let restarts = match self
-                    .lsp_health
+                    .lsp
+                    .health
                     .with_untracked(|h| h.get(server_id).cloned())
                 {
                     Some(ServerHealth::Starting { restarts }) => restarts,
                     Some(ServerHealth::Running { restarts }) => restarts,
                     _ => 0,
                 };
-                self.lsp_health.update(|h| {
+                self.lsp.health.update(|h| {
                     h.insert(server_id.to_string(), ServerHealth::Running { restarts });
                 });
                 if let Some(c) = self
-                    .lsp_clients
+                    .lsp
+                    .clients
                     .with_untracked(|m| m.get(server_id).cloned())
                 {
                     eprintln!(
@@ -6150,10 +6138,10 @@ impl AppState {
                 }
             }
             ServerEvent::InitFailed(reason) => {
-                self.lsp_clients.update(|m| {
+                self.lsp.clients.update(|m| {
                     m.remove(server_id);
                 });
-                self.lsp_health.update(|h| {
+                self.lsp.health.update(|h| {
                     h.insert(server_id.to_string(), ServerHealth::Failed(reason.clone()));
                 });
                 let msg = format!("{server_id} failed to initialise: {reason}");
@@ -6194,7 +6182,7 @@ impl AppState {
                     self.request_outline();
                     self.request_inlay_hints_active();
                 }
-                self.lsp_progress.update(|p| {
+                self.lsp.progress.update(|p| {
                     if done {
                         p.remove(server_id);
                     } else {
@@ -6220,24 +6208,24 @@ impl AppState {
         // A client we shut down ourselves never reports this (see `closing` in
         // e-lsp), so an exit is always the live one dying — unless a newer
         // client has already taken the slot, in which case the event is stale.
-        match self.lsp_clients.with_untracked(|m| m.get(id).cloned()) {
+        match self.lsp.clients.with_untracked(|m| m.get(id).cloned()) {
             Some(c) if c.is_alive() => return,
             Some(_) => {}
             None => return,
         }
-        self.lsp_clients.update(|m| {
+        self.lsp.clients.update(|m| {
             m.remove(id);
         });
-        self.lsp_progress.update(|p| {
+        self.lsp.progress.update(|p| {
             p.remove(id);
         });
-        let restarts = match self.lsp_health.with_untracked(|h| h.get(id).cloned()) {
+        let restarts = match self.lsp.health.with_untracked(|h| h.get(id).cloned()) {
             Some(ServerHealth::Running { restarts })
             | Some(ServerHealth::Starting { restarts }) => restarts + 1,
             _ => 1,
         };
         if restarts > MAX_LSP_RESTARTS {
-            self.lsp_health.update(|h| {
+            self.lsp.health.update(|h| {
                 h.insert(id.to_string(), ServerHealth::GaveUp { crashes: restarts });
             });
             let msg = format!(
@@ -6264,7 +6252,7 @@ impl AppState {
             .iter()
             .find_map(|b| lsp_registry::spec_for(b.file.language, laravel, id))
         else {
-            self.lsp_health.update(|h| {
+            self.lsp.health.update(|h| {
                 h.remove(id);
             });
             return false;
@@ -6304,21 +6292,22 @@ impl AppState {
         }
         for spec in specs {
             let running = self
-                .lsp_clients
+                .lsp
+                .clients
                 .with_untracked(|m| m.get(spec.id).map(|c| c.is_alive()))
                 .unwrap_or(false);
             if running {
                 continue;
             }
             let missing = matches!(
-                self.lsp_health.with_untracked(|h| h.get(spec.id).cloned()),
+                self.lsp.health.with_untracked(|h| h.get(spec.id).cloned()),
                 Some(ServerHealth::NotInstalled)
             ) && !program_on_path(spec.program);
             if missing {
                 self.install_lsp(&spec);
                 continue;
             }
-            self.lsp_health.update(|h| {
+            self.lsp.health.update(|h| {
                 h.remove(spec.id);
             });
             self.restart_lsp(spec.id, 0);
@@ -6337,7 +6326,8 @@ impl AppState {
             return;
         };
         let running = self
-            .lsp_clients
+            .lsp
+            .clients
             .with_untracked(|m| m.get(spec.id).map(|c| c.is_alive()))
             .unwrap_or(false);
         if running {
@@ -6345,7 +6335,7 @@ impl AppState {
             return;
         }
         if program_on_path(spec.program) {
-            self.lsp_health.update(|h| {
+            self.lsp.health.update(|h| {
                 h.remove(spec.id);
             });
             if self.restart_lsp(spec.id, 0) {
@@ -6389,7 +6379,7 @@ impl AppState {
                 app.lsp_installing.update(|s| {
                     s.remove(spec.id);
                 });
-                app.lsp_health.update(|h| {
+                app.lsp.health.update(|h| {
                     h.remove(spec.id);
                 });
                 eprintln!("e: {} installed — starting it", spec.id);
@@ -6431,9 +6421,9 @@ impl AppState {
         if specs.is_empty() {
             return None;
         }
-        let health = self.lsp_health.get();
-        let progress = self.lsp_progress.get();
-        let alive = self.lsp_clients.with(|m| {
+        let health = self.lsp.health.get();
+        let progress = self.lsp.progress.get();
+        let alive = self.lsp.clients.with(|m| {
             m.iter()
                 .map(|(k, c)| (k.clone(), c.is_alive()))
                 .collect::<HashMap<_, _>>()
@@ -7310,7 +7300,8 @@ impl AppState {
             return;
         }
         let client = self
-            .lsp_clients
+            .lsp
+            .clients
             .with_untracked(|m| m.values().find(|c| c.name() == item.server).cloned());
         let Some(client) = client else {
             Self::notify("That code action's language server is no longer running");

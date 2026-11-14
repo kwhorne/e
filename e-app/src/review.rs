@@ -111,7 +111,7 @@ impl AppState {
             return;
         };
         if let Ok(cp) = e_core::git::checkpoint(&root) {
-            self.review_base.set(Some(cp.head));
+            self.review.base.set(Some(cp.head));
         }
     }
 
@@ -121,10 +121,10 @@ impl AppState {
     }
 
     pub fn toggle_review(&self) {
-        let open = !self.review_open.get_untracked();
-        self.review_open.set(open);
+        let open = !self.review.open.get_untracked();
+        self.review.open.set(open);
         // Opened by hand, it reviews the session, not a turn.
-        self.review_turn.set(None);
+        self.review.turn.set(None);
         if open {
             self.refresh_review();
         }
@@ -132,7 +132,7 @@ impl AppState {
 
     /// Re-read the session diff and rebuild the changeset (keeping sign-offs).
     pub fn refresh_review(&self) {
-        if self.review_busy.get_untracked() {
+        if self.review.busy.get_untracked() {
             return;
         }
         let Some(root) = self.agent_repo_root() else {
@@ -142,15 +142,16 @@ impl AppState {
         // Without a session checkpoint, review everything uncommitted — which is
         // also what you want when the agent ran outside the editor.
         let base = self
-            .review_base
+            .review
+            .base
             .get_untracked()
             .unwrap_or_else(|| "HEAD".to_string());
 
-        self.review_busy.set(true);
-        let cs_sig = self.review_changeset;
-        let busy = self.review_busy;
-        let selected = self.review_selected;
-        let flags_sig = self.review_flags;
+        self.review.busy.set(true);
+        let cs_sig = self.review.changeset;
+        let busy = self.review.busy;
+        let selected = self.review.selected;
+        let flags_sig = self.review.flags;
         let routes = self
             .laravel
             .get_untracked()
@@ -185,7 +186,7 @@ impl AppState {
                 Err(e) => Self::notify(&format!("Review failed: {e}")),
             }
         });
-        let turn = self.review_turn.get_untracked();
+        let turn = self.review.turn.get_untracked();
         std::thread::spawn(move || {
             let diff = match &turn {
                 Some((before, after)) => e_core::git::tree_diff(&root, before, after),
@@ -203,26 +204,28 @@ impl AppState {
     }
 
     pub fn review_select(&self, path: String) {
-        self.review_selected.set(Some(path));
+        self.review.selected.set(Some(path));
     }
 
     /// Sign a file off (or un-sign it).
     pub fn review_mark(&self, path: &str, reviewed: bool) {
-        self.review_changeset
+        self.review
+            .changeset
             .update(|cs| cs.mark_reviewed(path, reviewed));
     }
 
     /// Mark the selected file reviewed and jump to the next one needing review.
     pub fn review_mark_and_next(&self) {
-        let Some(path) = self.review_selected.get_untracked() else {
+        let Some(path) = self.review.selected.get_untracked() else {
             return;
         };
         self.review_mark(&path, true);
         let next = self
-            .review_changeset
+            .review
+            .changeset
             .with_untracked(|cs| cs.next_unreviewed(Some(&path)).map(|f| f.path.clone()));
         if let Some(next) = next {
-            self.review_selected.set(Some(next));
+            self.review.selected.set(Some(next));
         }
     }
 
@@ -231,7 +234,7 @@ impl AppState {
         let Some(root) = self.agent_repo_root() else {
             return;
         };
-        let line = self.review_changeset.with_untracked(|cs| {
+        let line = self.review.changeset.with_untracked(|cs| {
             cs.get(path)
                 .and_then(|f| f.hunks.first().map(|h| h.new_start))
                 .unwrap_or(1)
@@ -249,7 +252,8 @@ impl AppState {
             return;
         };
         let kind = self
-            .review_changeset
+            .review
+            .changeset
             .with_untracked(|cs| cs.get(path).map(|f| f.kind));
         let res = match kind {
             Some(ChangeKind::Added) => {
@@ -259,7 +263,7 @@ impl AppState {
         };
         match res {
             Ok(()) => {
-                self.review_changeset.update(|cs| cs.remove(path));
+                self.review.changeset.update(|cs| cs.remove(path));
                 self.check_external_changes();
                 self.refresh_git_status();
                 Self::notify(&format!("Reverted {path}"));
@@ -273,7 +277,8 @@ impl AppState {
 
     /// Flags for one file, most severe first.
     pub fn review_flags_for(&self, path: &str) -> Vec<Flag> {
-        self.review_flags
+        self.review
+            .flags
             .with(|all| all.iter().filter(|f| f.path == path).cloned().collect())
     }
 
@@ -290,7 +295,7 @@ impl AppState {
 
     /// Map the TDD panel's state onto the review gate's test status.
     fn review_test_status(&self) -> TestStatus {
-        match self.tdd_status.get() {
+        match self.tests.status.get() {
             TddStatus::Passed => TestStatus::Passing,
             TddStatus::Failed => TestStatus::Failing,
             TddStatus::Running => TestStatus::Running,
@@ -300,9 +305,9 @@ impl AppState {
 
     /// The current readiness verdict (reactive — for the panel).
     pub fn review_ship_verdict(&self) -> ShipVerdict {
-        let (danger, warn, _) = self.review_flags.with(|f| flags::counts(f));
+        let (danger, warn, _) = self.review.flags.with(|f| flags::counts(f));
         ship_verdict(&ShipCheck {
-            reviewed: self.review_changeset.with(|cs| cs.progress()),
+            reviewed: self.review.changeset.with(|cs| cs.progress()),
             danger_flags: danger,
             warn_flags: warn,
             tests: self.review_test_status(),
@@ -332,7 +337,8 @@ impl AppState {
     /// Which routes the current changeset reaches, and why.
     pub fn review_attribution(&self) -> e_review::routes::Attribution {
         let routes = self.review_route_table();
-        self.review_changeset
+        self.review
+            .changeset
             .with_untracked(|cs| e_review::routes::attribute(&cs.files, &routes))
     }
 
@@ -348,12 +354,12 @@ impl AppState {
     /// Write routes are listed but never replayed — firing a PATCH at the app to
     /// see how fast it is would change data.
     pub fn review_measure_evidence(&self) {
-        if self.review_evidence_busy.get_untracked() {
+        if self.review.evidence_busy.get_untracked() {
             return;
         }
         let attribution = self.review_attribution();
         if attribution.affected.is_empty() {
-            self.review_evidence.set(Some(Vec::new()));
+            self.review.evidence.set(Some(Vec::new()));
             return;
         }
         let base = self.app_base();
@@ -378,9 +384,9 @@ impl AppState {
             })
             .collect();
 
-        self.review_evidence_busy.set(true);
-        let busy = self.review_evidence_busy;
-        let out = self.review_evidence;
+        self.review.evidence_busy.set(true);
+        let busy = self.review.evidence_busy;
+        let out = self.review.evidence;
         let send = create_ext_action(self.cx, move |m: crate::evidence::Measured| {
             busy.set(false);
             out.set(Some(m.rows));
@@ -416,7 +422,8 @@ impl AppState {
         // status and timing, but the query and N+1 columns are blank rather than
         // zero — say why, or a reader will read the blanks as "nothing to see".
         let blind = self
-            .review_evidence
+            .review
+            .evidence
             .with_untracked(|e| {
                 e.as_ref().map(|rows| {
                     rows.iter()
@@ -432,7 +439,7 @@ impl AppState {
                     .to_string(),
             );
         }
-        let migrations = self.review_changeset.with_untracked(|cs| {
+        let migrations = self.review.changeset.with_untracked(|cs| {
             cs.files
                 .iter()
                 .filter(|f| f.path.contains("database/migrations/"))
@@ -450,7 +457,7 @@ impl AppState {
 
     /// The "## Evidence" block for the pull request, if anything was measured.
     fn review_evidence_markdown(&self) -> Option<String> {
-        let rows = self.review_evidence.get_untracked()?;
+        let rows = self.review.evidence.get_untracked()?;
         let unattributed = self.review_attribution().unattributed.len();
         let md = e_verify::evidence_markdown(&rows, unattributed, &self.review_evidence_caveats());
         (!md.is_empty()).then_some(md)
@@ -461,13 +468,13 @@ impl AppState {
     /// Create a branch, commit the changeset in logical groups, push, and open a
     /// PR — all from the review panel.
     pub fn review_commit_and_pr(&self, open_pr: bool) {
-        if self.review_shipping.get_untracked() {
+        if self.review.shipping.get_untracked() {
             return;
         }
         let Some(root) = self.agent_repo_root() else {
             return;
         };
-        let cs = self.review_changeset.get_untracked();
+        let cs = self.review.changeset.get_untracked();
         if cs.is_empty() {
             Self::notify("Nothing to commit");
             return;
@@ -475,10 +482,10 @@ impl AppState {
         let groups = commits::plan_commits(&cs);
         let branch = commits::suggest_branch(&cs);
         let title = commits::pr_title(&cs);
-        let (danger, warn, _) = self.review_flags.with_untracked(|f| flags::counts(f));
+        let (danger, warn, _) = self.review.flags.with_untracked(|f| flags::counts(f));
         let verdict = self.review_ship_verdict();
         let tests = self.review_test_status();
-        let summary = self.review_summary.get_untracked();
+        let summary = self.review.summary.get_untracked();
         let evidence = self.review_evidence_markdown();
         let body = commits::pr_body(
             &cs,
@@ -490,9 +497,9 @@ impl AppState {
             evidence.as_deref(),
         );
 
-        self.review_shipping.set(true);
+        self.review.shipping.set(true);
         let state = *self;
-        let shipping = self.review_shipping;
+        let shipping = self.review.shipping;
         let send = create_ext_action(self.cx, move |res: Result<String, String>| {
             shipping.set(false);
             match res {
@@ -536,7 +543,7 @@ impl AppState {
 
     /// Ask the agent for a review of the whole session changeset.
     pub fn review_ask_summary(&self) {
-        let (summary, paths) = self.review_changeset.with_untracked(|cs| {
+        let (summary, paths) = self.review.changeset.with_untracked(|cs| {
             (
                 cs.summary(),
                 cs.files
@@ -606,4 +613,31 @@ mod tests {
         assert!(flags[0].message.starts_with("GET orders/{order} hands"));
         let _ = std::fs::remove_dir_all(&root);
     }
+}
+
+/// Session review (⌘⌥V): the changeset, its flags and the ship gate.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct ReviewPanel {
+    pub open: floem::reactive::RwSignal<bool>,
+    pub changeset: floem::reactive::RwSignal<e_review::Changeset>,
+    /// Commit the session started at; `None` = review everything uncommitted.
+    pub base: floem::reactive::RwSignal<Option<String>>,
+    /// Review just one agent turn: its before and after trees. `None` reviews
+    /// the session.
+    pub turn: floem::reactive::RwSignal<Option<(String, String)>>,
+    pub selected: floem::reactive::RwSignal<Option<String>>,
+    pub busy: floem::reactive::RwSignal<bool>,
+    /// Automated diff inspections over the changeset.
+    pub flags: floem::reactive::RwSignal<Vec<e_review::flags::Flag>>,
+    /// A branch/commit/PR is being created.
+    pub shipping: floem::reactive::RwSignal<bool>,
+    /// The agent's written summary of the session (used as the PR description);
+    /// set over the sync socket by `{"method":"review_summary"}`.
+    pub summary: floem::reactive::RwSignal<Option<String>>,
+    /// Measured evidence for the routes this changeset touches, once replayed.
+    /// `None` until someone asks for it — replaying hits the running app.
+    pub evidence: floem::reactive::RwSignal<Option<Vec<e_verify::RouteEvidence>>>,
+    pub evidence_busy: floem::reactive::RwSignal<bool>,
 }

@@ -123,9 +123,9 @@ impl AppState {
     pub(crate) fn ui_state(&self) -> Value {
         let panels: Vec<(&str, bool)> = vec![
             ("agent", self.agent.open.get_untracked()),
-            ("review", self.review_open.get_untracked()),
+            ("review", self.review.open.get_untracked()),
             ("runtime", self.runtime_open.get_untracked()),
-            ("grove", self.grove_panel_open.get_untracked()),
+            ("grove", self.grove.panel_open.get_untracked()),
             ("migrations", self.migrations_open.get_untracked()),
             ("verify", self.verify_open.get_untracked()),
             ("contract", self.contract_open.get_untracked()),
@@ -138,10 +138,10 @@ impl AppState {
             ("semantic", self.sem_open.get_untracked()),
             ("tinker", self.tinker_open.get_untracked()),
             ("terminal", self.terminal_open.get_untracked()),
-            ("tdd", self.tdd_open.get_untracked()),
-            ("debug", self.debug_open.get_untracked()),
+            ("tdd", self.tests.open.get_untracked()),
+            ("debug", self.debug.open.get_untracked()),
             ("settings", self.settings_open.get_untracked()),
-            ("git", self.git_panel_open.get_untracked()),
+            ("git", self.git.panel_open.get_untracked()),
             ("goto_file", self.palette_open.get_untracked()),
             ("command_palette", self.cmd.open.get_untracked()),
         ];
@@ -259,13 +259,13 @@ impl AppState {
             })
         });
 
-        let review = self.review_open.get_untracked().then(|| {
-            self.review_changeset.with_untracked(|cs| {
+        let review = self.review.open.get_untracked().then(|| {
+            self.review.changeset.with_untracked(|cs| {
                 json!({
-                    "turn": self.review_turn.get_untracked().is_some(),
+                    "turn": self.review.turn.get_untracked().is_some(),
                     "summary": cs.summary(),
                     "files": cs.files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
-                    "flags": self.review_flags.with_untracked(|f| f
+                    "flags": self.review.flags.with_untracked(|f| f
                         .iter()
                         .map(|f| json!({
                             "path": f.path,
@@ -318,14 +318,14 @@ impl AppState {
         });
 
         let debug = json!({
-            "status": self.debug_status.get_untracked(),
-            "session": self.debug_client.with_untracked(Option::is_some),
-            "frames": self.debug_frames.with_untracked(|f| f.iter().map(|f| f.name.clone()).collect::<Vec<_>>()),
-            "vars": self.debug_vars.with_untracked(|v| v.iter().map(|v| json!({"name": v.name, "value": v.value})).collect::<Vec<_>>()),
+            "status": self.debug.status.get_untracked(),
+            "session": self.debug.client.with_untracked(Option::is_some),
+            "frames": self.debug.frames.with_untracked(|f| f.iter().map(|f| f.name.clone()).collect::<Vec<_>>()),
+            "vars": self.debug.vars.with_untracked(|v| v.iter().map(|v| json!({"name": v.name, "value": v.value})).collect::<Vec<_>>()),
         });
 
         let tests = json!({
-            "status": format!("{:?}", self.tdd_status.get_untracked()).to_lowercase(),
+            "status": format!("{:?}", self.tests.status.get_untracked()).to_lowercase(),
         });
 
         json!({

@@ -35,7 +35,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
     let title =
         label(|| "Tests".to_string()).style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
 
-    let status = label(move || match state.tdd_status.get() {
+    let status = label(move || match state.tests.status.get() {
         TddStatus::Idle => "—".to_string(),
         TddStatus::Running => "● running…".to_string(),
         TddStatus::Passed => "✓ passing".to_string(),
@@ -48,7 +48,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .padding_horiz(8.0)
             .padding_vert(2.0)
             .border_radius(4.0);
-        match state.tdd_status.get() {
+        match state.tests.status.get() {
             TddStatus::Passed => s.color(theme::success()),
             TddStatus::Failed => s.color(theme::error()),
             TddStatus::Running => s.color(theme::accent()),
@@ -57,7 +57,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
     });
 
     let iter = label(move || {
-        let i = state.tdd_iteration.get();
+        let i = state.tests.iteration.get();
         if i > 0 {
             format!("iteration {i}")
         } else {
@@ -73,7 +73,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.tdd_open.set(false));
+        .on_click_stop(move |_| state.tests.open.set(false));
 
     let header = stack((
         title,
@@ -96,7 +96,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
     let run = pill("▶ Run", false, move || state.run_tests());
     // "Fix to green" starts the autonomous loop; while it, or any run, goes
     // on, the same button stops it.
-    let busy = move || state.tdd_loop.get() || state.tdd_status.get() == TddStatus::Running;
+    let busy = move || state.tests.fix_loop.get() || state.tests.status.get() == TddStatus::Running;
     let fix = label(move || {
         if busy() {
             "■ Stop".to_string()
@@ -121,7 +121,8 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
         }
     })
     .on_click_stop(move |_| {
-        if state.tdd_loop.get_untracked() || state.tdd_status.get_untracked() == TddStatus::Running
+        if state.tests.fix_loop.get_untracked()
+            || state.tests.status.get_untracked() == TddStatus::Running
         {
             state.tdd_stop();
         } else {
@@ -131,7 +132,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
     // `12 passed · 2 failed`, from the parsed report rather than the exit code —
     // "the suite failed" and "two of ninety tests failed" are different news.
     let tally = label(move || {
-        state.tdd_results.with(|r| {
+        state.tests.results.with(|r| {
             if r.is_empty() {
                 String::new()
             } else {
@@ -145,7 +146,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .items_center()
             .font_size(12.0)
             .color(theme::fg_dim());
-        if state.tdd_results.with(|r| r.failed() > 0) {
+        if state.tests.results.with(|r| r.failed() > 0) {
             s.color(theme::error())
         } else {
             s
@@ -167,7 +168,8 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
     let failures = dyn_stack(
         move || {
             state
-                .tdd_results
+                .tests
+                .results
                 .get()
                 .problems()
                 .cloned()
@@ -222,21 +224,21 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
                     // JUnit lines are 1-based; the editor counts from zero.
                     let uri = format!("file://{}", file.display());
                     state.jump_to(&uri, (line as usize).saturating_sub(1), 0);
-                    state.tdd_open.set(false);
+                    state.tests.open.set(false);
                 }
             })
         },
     )
     .style(move |s| {
         let s = s.flex_col().width_full();
-        if state.tdd_results.with(|r| r.failed() == 0) {
+        if state.tests.results.with(|r| r.failed() == 0) {
             s.hide()
         } else {
             s.border_bottom(1.0).border_color(theme::border())
         }
     });
 
-    let output = scroll(label(move || state.tdd_output.get()).style(|s| {
+    let output = scroll(label(move || state.tests.output.get()).style(|s| {
         s.font_family(theme::mono_family())
             .font_size(12.0)
             .padding(10.0)
@@ -262,7 +264,7 @@ pub fn tdd_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.tdd_open.get() {
+        if state.tests.open.get() {
             s
         } else {
             s.hide()

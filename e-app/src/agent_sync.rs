@@ -488,7 +488,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 let _ = reply.send(json!({"ok": false, "error": "missing text"}));
                 return;
             };
-            state.review_summary.set(Some(text.to_string()));
+            state.review.summary.set(Some(text.to_string()));
             json!({"ok": true})
         }
         // The agent wrote a file and wants the servers' verdict on it: answered

@@ -60,7 +60,7 @@ pub struct DebugVar {
 impl AppState {
     /// Copy a file's breakpoint lines into its open buffer's gutter marks.
     pub(crate) fn sync_bp_marks(&self, path: &str) {
-        let lines: HashSet<usize> = self.debug_breakpoints.with_untracked(|m| {
+        let lines: HashSet<usize> = self.debug.breakpoints.with_untracked(|m| {
             m.get(path)
                 .map(|v| v.iter().map(|l| (*l as usize).saturating_sub(1)).collect())
                 .unwrap_or_default()
@@ -80,7 +80,8 @@ impl AppState {
     pub(crate) fn follow_breakpoints(&self, path: &Path, old: &Rope, new: &str) {
         let key = path.to_string_lossy();
         let Some(lines) = self
-            .debug_breakpoints
+            .debug
+            .breakpoints
             .with_untracked(|m| m.get(key.as_ref()).cloned())
         else {
             return;
@@ -97,7 +98,7 @@ impl AppState {
             return;
         }
         let key = key.into_owned();
-        self.debug_breakpoints.update(|m| {
+        self.debug.breakpoints.update(|m| {
             if moved.is_empty() {
                 m.remove(&key);
             } else {
@@ -142,7 +143,7 @@ impl AppState {
     /// editor and its other debug adapters work regardless.
     pub fn set_grove_xdebug(&self, on: bool) {
         let state = *self;
-        let report = create_ext_action(self.cx, move |msg: String| state.debug_status.set(msg));
+        let report = create_ext_action(self.cx, move |msg: String| state.debug.status.set(msg));
         std::thread::spawn(move || {
             let arg = if on { "on" } else { "off" };
             let msg = match std::process::Command::new("grove")
@@ -193,8 +194,8 @@ impl AppState {
 
     /// Toggle the debug panel without touching the session.
     pub fn toggle_debug_panel(&self) {
-        let open = !self.debug_open.get_untracked();
-        self.debug_open.set(open);
+        let open = !self.debug.open.get_untracked();
+        self.debug.open.set(open);
     }
 
     /// F5: start a session, or continue if one is already paused.
@@ -202,11 +203,11 @@ impl AppState {
         if !self.may_run_project_code("the debugger") {
             return;
         }
-        if self.debug_client.get_untracked().is_some() {
+        if self.debug.client.get_untracked().is_some() {
             self.debug_continue();
             return;
         }
-        self.debug_open.set(true);
+        self.debug.open.set(true);
 
         let root = self.root.get_untracked();
         let active_file = self
@@ -218,7 +219,7 @@ impl AppState {
         let spec = match adapter_spec(language, &root, active_file.as_deref()) {
             Ok(s) => s,
             Err(e) => {
-                self.debug_status.set(e);
+                self.debug.status.set(e);
                 return;
             }
         };
@@ -227,7 +228,7 @@ impl AppState {
         // when it ends (`end_debug_session`), not in the app's for good.
         self.end_debug_session();
         let session = self.cx.create_child();
-        self.debug_session.set(Some(session));
+        self.debug.session.set(Some(session));
 
         // Bridge the adapter's continuous event stream onto the UI thread via a
         // channel (`create_ext_action` is one-shot; DAP events are not).
@@ -239,9 +240,9 @@ impl AppState {
         let initialized_early = session.create_rw_signal(false);
         session.create_effect(move |_| {
             if let Some(ev) = events.get() {
-                if ev.event == "initialized" && state.debug_client.get_untracked().is_none() {
+                if ev.event == "initialized" && state.debug.client.get_untracked().is_none() {
                     initialized_early.set(true);
-                    state.debug_status.set("running".to_string());
+                    state.debug.status.set("running".to_string());
                     return;
                 }
                 state.on_dap_event(ev);
@@ -256,14 +257,14 @@ impl AppState {
             session,
             move |res: Result<std::sync::Arc<DapClient>, String>| match res {
                 Ok(c) => {
-                    state.debug_client.set(Some(c.clone()));
-                    state.debug_status.set("launching…".to_string());
+                    state.debug.client.set(Some(c.clone()));
+                    state.debug.status.set("launching…".to_string());
                     if initialized_early.get_untracked() {
                         state.debug_configure(c);
                     }
                 }
                 Err(e) => {
-                    state.debug_status.set(e);
+                    state.debug.status.set(e);
                     state.end_debug_session();
                 }
             },
@@ -271,15 +272,15 @@ impl AppState {
         // The handshake failing ends the session instead of leaving it at
         // "launching…" for good.
         let failed = create_ext_action(session, move |e: String| {
-            if let Some(client) = state.debug_client.get_untracked() {
+            if let Some(client) = state.debug.client.get_untracked() {
                 std::thread::spawn(move || client.disconnect(true));
             }
-            state.debug_client.set(None);
-            state.debug_status.set(e);
+            state.debug.client.set(None);
+            state.debug.status.set(e);
             state.end_debug_session();
         });
 
-        self.debug_status.set("starting adapter…".to_string());
+        self.debug.status.set("starting adapter…".to_string());
 
         // Spawning the adapter and connecting (TCP adapters can take a moment)
         // must never block the UI thread — do it all on a worker. The client is
@@ -320,28 +321,28 @@ impl AppState {
     pub(crate) fn on_dap_event(&self, ev: DapEvent) {
         match ev.event.as_str() {
             "initialized" => {
-                self.debug_status.set("running".to_string());
-                if let Some(client) = self.debug_client.get_untracked() {
+                self.debug.status.set("running".to_string());
+                if let Some(client) = self.debug.client.get_untracked() {
                     self.debug_configure(client);
                 }
             }
             "stopped" => {
-                self.debug_status.set("paused".to_string());
+                self.debug.status.set("paused".to_string());
                 let tid = ev.body["threadId"].as_i64().unwrap_or(1);
-                self.debug_thread.set(tid);
+                self.debug.thread.set(tid);
                 self.debug_refresh(tid);
             }
             "continued" => {
-                self.debug_status.set("running".to_string());
-                self.debug_frames.set(Vec::new());
-                self.debug_vars.set(Vec::new());
+                self.debug.status.set("running".to_string());
+                self.debug.frames.set(Vec::new());
+                self.debug.vars.set(Vec::new());
                 self.clear_stop_lines();
             }
             "output" => {
                 if let Some(line) = ev.body["output"].as_str() {
                     let line = line.trim_end().to_string();
                     if !line.is_empty() {
-                        self.debug_output.update(|o| {
+                        self.debug.output.update(|o| {
                             o.push(line);
                             let len = o.len();
                             if len > 500 {
@@ -352,10 +353,10 @@ impl AppState {
                 }
             }
             "terminated" | "exited" => {
-                self.debug_status.set("terminated".to_string());
-                self.debug_client.set(None);
-                self.debug_frames.set(Vec::new());
-                self.debug_vars.set(Vec::new());
+                self.debug.status.set("terminated".to_string());
+                self.debug.client.set(None);
+                self.debug.frames.set(Vec::new());
+                self.debug.vars.set(Vec::new());
                 self.clear_stop_lines();
                 self.end_debug_session();
             }
@@ -366,7 +367,7 @@ impl AppState {
     /// The adapter is ready for its configuration: the breakpoints, then
     /// `configurationDone`.
     fn debug_configure(&self, client: std::sync::Arc<DapClient>) {
-        let bps = self.debug_breakpoints.get_untracked();
+        let bps = self.debug.breakpoints.get_untracked();
         std::thread::spawn(move || {
             for (path, lines) in &bps {
                 let _ = client.set_breakpoints(path, lines);
@@ -379,22 +380,22 @@ impl AppState {
     /// Dispose of what the debug session set up. Safe from inside its own
     /// event effect (Floem's own channel signals end themselves that way).
     pub(crate) fn end_debug_session(&self) {
-        if let Some(session) = self.debug_session.get_untracked() {
-            self.debug_session.set(None);
+        if let Some(session) = self.debug.session.get_untracked() {
+            self.debug.session.set(None);
             session.dispose();
         }
     }
 
     /// Fetch the call stack + top-frame variables after a stop.
     fn debug_refresh(&self, thread_id: i64) {
-        let Some(client) = self.debug_client.get_untracked() else {
+        let Some(client) = self.debug.client.get_untracked() else {
             return;
         };
         let state = *self;
         let store = create_ext_action(
             self.cx,
             move |(frames, vars): (Vec<DebugFrame>, Vec<DebugVar>)| {
-                state.debug_vars.set(vars);
+                state.debug.vars.set(vars);
                 // Reveal + mark the stopped location.
                 if let Some(top) = frames.first() {
                     if !top.path.is_empty() {
@@ -403,7 +404,7 @@ impl AppState {
                         state.set_stop_line(&top.path, line0);
                     }
                 }
-                state.debug_frames.set(frames);
+                state.debug.frames.set(frames);
             },
         );
         std::thread::spawn(move || {
@@ -437,17 +438,17 @@ impl AppState {
     }
 
     fn control(&self, f: impl FnOnce(&DapClient, i64) + Send + 'static) {
-        let Some(client) = self.debug_client.get_untracked() else {
+        let Some(client) = self.debug.client.get_untracked() else {
             return;
         };
-        let tid = self.debug_thread.get_untracked();
+        let tid = self.debug.thread.get_untracked();
         std::thread::spawn(move || f(&client, tid));
     }
 
     pub fn debug_continue(&self) {
-        self.debug_status.set("running".to_string());
-        self.debug_frames.set(Vec::new());
-        self.debug_vars.set(Vec::new());
+        self.debug.status.set("running".to_string());
+        self.debug.frames.set(Vec::new());
+        self.debug.vars.set(Vec::new());
         self.control(|c, t| {
             let _ = c.continue_(t);
         });
@@ -472,14 +473,14 @@ impl AppState {
     }
 
     pub fn debug_stop(&self) {
-        if let Some(client) = self.debug_client.get_untracked() {
+        if let Some(client) = self.debug.client.get_untracked() {
             std::thread::spawn(move || client.disconnect(true));
         }
-        self.debug_client.set(None);
+        self.debug.client.set(None);
         self.end_debug_session();
-        self.debug_status.set("stopped".to_string());
-        self.debug_frames.set(Vec::new());
-        self.debug_vars.set(Vec::new());
+        self.debug.status.set("stopped".to_string());
+        self.debug.frames.set(Vec::new());
+        self.debug.vars.set(Vec::new());
         self.clear_stop_lines();
     }
 
@@ -504,7 +505,7 @@ impl AppState {
         let line = (line0 + 1) as u32;
         let key = path.to_string_lossy().into_owned();
 
-        self.debug_breakpoints.update(|m| {
+        self.debug.breakpoints.update(|m| {
             let v = m.entry(key.clone()).or_default();
             if let Some(pos) = v.iter().position(|l| *l == line) {
                 v.remove(pos);
@@ -525,9 +526,10 @@ impl AppState {
 
     /// Send the breakpoints set in `path` to a live debug session.
     fn push_breakpoints(&self, path: String) {
-        if let Some(client) = self.debug_client.get_untracked() {
+        if let Some(client) = self.debug.client.get_untracked() {
             let lines = self
-                .debug_breakpoints
+                .debug
+                .breakpoints
                 .with_untracked(|m| m.get(&path).cloned().unwrap_or_default());
             std::thread::spawn(move || {
                 let _ = client.set_breakpoints(&path, &lines);
@@ -1086,4 +1088,25 @@ services:
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// The debugger (F5): its session, where it stopped, its panel.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct DebugPanel {
+    pub open: floem::reactive::RwSignal<bool>,
+    pub status: floem::reactive::RwSignal<String>,
+    pub thread: floem::reactive::RwSignal<i64>,
+    pub frames: floem::reactive::RwSignal<Vec<crate::debug::DebugFrame>>,
+    pub vars: floem::reactive::RwSignal<Vec<crate::debug::DebugVar>>,
+    pub output: floem::reactive::RwSignal<Vec<String>>,
+    /// Breakpoints keyed by file path → 1-based line numbers.
+    pub breakpoints: floem::reactive::RwSignal<std::collections::HashMap<String, Vec<u32>>>,
+    /// The live adapter client, if a session is running.
+    pub client: floem::reactive::RwSignal<Option<std::sync::Arc<e_dap::DapClient>>>,
+    /// What the running debug session owns (its event effect), disposed when
+    /// the session ends, so a finished session's events no longer reach the
+    /// next one.
+    pub session: floem::reactive::RwSignal<Option<floem::reactive::Scope>>,
 }

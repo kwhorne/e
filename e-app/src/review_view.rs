@@ -127,7 +127,8 @@ fn file_row(state: AppState, r: Row) -> impl IntoView {
     stack((tick, kind, name, flag_dot, badge, counts))
         .style(move |s| {
             let sel = state
-                .review_selected
+                .review
+                .selected
                 .with(|p| p.as_deref() == Some(selected_path.as_str()));
             let s = s
                 .flex_row()
@@ -156,7 +157,8 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
     };
 
     let (binary, blocks) = state
-        .review_changeset
+        .review
+        .changeset
         .with_untracked(|cs| match cs.get(&path) {
             Some(f) => (
                 f.binary,
@@ -302,7 +304,7 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
 
 pub fn review_panel(state: AppState) -> impl IntoView {
     let title = label(move || {
-        if state.review_turn.with(Option::is_some) {
+        if state.review.turn.with(Option::is_some) {
             "Review: one turn".to_string()
         } else {
             "Session review".to_string()
@@ -312,20 +314,20 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     // Back from one turn to everything the session changed.
     let whole = btn("Whole session", false)
         .style(move |s| {
-            if state.review_turn.with(Option::is_some) {
+            if state.review.turn.with(Option::is_some) {
                 s
             } else {
                 s.hide()
             }
         })
         .on_click_stop(move |_| {
-            state.review_turn.set(None);
+            state.review.turn.set(None);
             state.refresh_review();
         });
-    let summary = label(move || state.review_changeset.with(|cs| cs.summary()))
+    let summary = label(move || state.review.changeset.with(|cs| cs.summary()))
         .style(|s| s.font_size(11.0).color(theme::fg_dim()).margin_left(10.0));
     let progress = label(move || {
-        let (done, total) = state.review_changeset.with(|cs| cs.progress());
+        let (done, total) = state.review.changeset.with(|cs| cs.progress());
         if total == 0 {
             String::new()
         } else {
@@ -333,7 +335,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
         }
     })
     .style(move |s| {
-        let all = state.review_changeset.with(|cs| cs.all_reviewed());
+        let all = state.review.changeset.with(|cs| cs.all_reviewed());
         s.flex_grow(1.0_f32)
             .margin_left(10.0)
             .font_size(11.0)
@@ -348,7 +350,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.review_open.set(false));
+        .on_click_stop(move |_| state.review.open.set(false));
     let header = stack((title, summary, progress, whole, ask, refresh, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -362,7 +364,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
 
     let list = dyn_stack(
         move || {
-            state.review_changeset.with(|cs| {
+            state.review.changeset.with(|cs| {
                 cs.files
                     .iter()
                     .enumerate()
@@ -377,7 +379,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
                                 removed: f.removed,
                                 reviewed: f.reviewed,
                                 kind: f.kind,
-                                flag: state.review_flags.with(|all| {
+                                flag: state.review.flags.with(|all| {
                                     all.iter()
                                         .filter(|x| x.path == f.path)
                                         .map(|x| x.severity)
@@ -395,7 +397,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col().width_full());
 
     let empty_hint = label(move || {
-        if state.review_busy.get() {
+        if state.review.busy.get() {
             "Reading changes…".to_string()
         } else {
             "No changes since the session started.".to_string()
@@ -403,7 +405,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let s = s.padding(14.0).color(theme::fg_dim()).font_size(12.0);
-        if state.review_changeset.with(|cs| cs.is_empty()) {
+        if state.review.changeset.with(|cs| cs.is_empty()) {
             s
         } else {
             s.hide()
@@ -425,8 +427,8 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     // Rebuild the diff pane when the selection or the changeset materially changes.
     let right = dyn_container(
         move || {
-            let sel = state.review_selected.get();
-            let fingerprint = state.review_changeset.with(|cs| {
+            let sel = state.review.selected.get();
+            let fingerprint = state.review.changeset.with(|cs| {
                 (
                     cs.len(),
                     cs.total_added(),
@@ -471,10 +473,10 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     // Sits next to the tests because it answers the neighbouring question: the
     // tests say the change is correct, this says what it did.
     let measure = label(move || {
-        if state.review_evidence_busy.get() {
+        if state.review.evidence_busy.get() {
             "Measuring…".to_string()
         } else {
-            match state.review_evidence.with(|e| e.as_ref().map(|r| r.len())) {
+            match state.review.evidence.with(|e| e.as_ref().map(|r| r.len())) {
                 Some(0) => "No routes".to_string(),
                 Some(n) => format!("Measured {n}"),
                 None => "Measure routes".to_string(),
@@ -503,7 +505,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     })
     .on_click_stop(move |_| state.review_measure_evidence());
     let ship = label(move || {
-        if state.review_shipping.get() {
+        if state.review.shipping.get() {
             "Shipping…".to_string()
         } else {
             "Commit & PR".to_string()
@@ -532,7 +534,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
                 .padding_vert(8.0)
                 .border_top(1.0)
                 .border_color(theme::border());
-            if state.review_changeset.with(|cs| cs.is_empty()) {
+            if state.review.changeset.with(|cs| cs.is_empty()) {
                 s.hide()
             } else {
                 s
@@ -562,7 +564,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.review_open.get() {
+        if state.review.open.get() {
             s
         } else {
             s.hide()

@@ -461,9 +461,9 @@ fn app_view() -> impl IntoView {
 
     // Bridge the LSP reader threads' events (diagnostics, edits, messages,
     // progress, exits) into the UI thread.
-    if let Some(rx) = state.lsp_rx.try_update(|opt| opt.take()).flatten() {
+    if let Some(rx) = state.lsp.rx.try_update(|opt| opt.take()).flatten() {
         let notif = create_signal_from_channel(rx);
-        let queue = state.lsp_queue.get_untracked();
+        let queue = state.lsp.queue.get_untracked();
         create_effect(move |_| {
             if notif.get().is_none() {
                 return;
@@ -560,7 +560,7 @@ fn app_view() -> impl IntoView {
     create_effect(move |_| {
         state.runtime_reqs.track();
         state.laravel.track();
-        state.grove_sql_capture.track();
+        state.grove.sql_capture.track();
         state.refresh_runtime_lenses();
     });
     // Reflect Grove's real Xdebug state in the setting (no-op without Grove).
@@ -662,7 +662,7 @@ fn app_view() -> impl IntoView {
                 if tick.is_multiple_of(30) {
                     state.refresh_runtime_lenses();
                 }
-                if state.grove_panel_open.get_untracked() {
+                if state.grove.panel_open.get_untracked() {
                     state.refresh_grove_panel();
                 }
                 if state.model_wizard_open.get_untracked() {
@@ -721,7 +721,7 @@ fn app_view() -> impl IntoView {
     });
 
     let sidebar_content = dyn_container(
-        move || state.git_panel_open.get(),
+        move || state.git.panel_open.get(),
         move |git| {
             if git {
                 crate::git_view::git_panel(state).into_any()
@@ -751,7 +751,7 @@ fn app_view() -> impl IntoView {
     // Keep the Source Control panel in sync with filesystem changes.
     create_effect(move |_| {
         state.fs_rev.get();
-        if state.git_panel_open.get_untracked() {
+        if state.git.panel_open.get_untracked() {
             state.refresh_git_status();
         }
     });
@@ -881,7 +881,7 @@ fn app_view() -> impl IntoView {
                     crate::runtime_view::runtime_panel(state).into_any(),
                 ),
                 (
-                    state.grove_panel_open,
+                    state.grove.panel_open,
                     crate::grove_view::grove_panel(state).into_any(),
                 ),
                 (
@@ -893,7 +893,7 @@ fn app_view() -> impl IntoView {
                     crate::verify_view::verify_panel(state).into_any(),
                 ),
                 (
-                    state.review_open,
+                    state.review.open,
                     crate::review_view::review_panel(state).into_any(),
                 ),
                 (
@@ -925,7 +925,7 @@ fn app_view() -> impl IntoView {
                     crate::semantic_view::semantic_panel(state).into_any(),
                 ),
                 (
-                    state.debug_open,
+                    state.debug.open,
                     crate::debug_view::debug_panel(state).into_any(),
                 ),
             ]),

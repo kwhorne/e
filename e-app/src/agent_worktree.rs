@@ -230,7 +230,7 @@ impl AppState {
         }
         self.agent.native_client.set(None);
         self.agent.turn_before.set(None);
-        self.review_turn.set(None);
+        self.review.turn.set(None);
         self.agent.worktree.set(t);
         self.start_native_agent();
         self.agent.focus_pulse.update(|x| *x += 1);

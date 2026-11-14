@@ -60,12 +60,12 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
     let title =
         label(|| "Debug".to_string()).style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
 
-    let status = label(move || state.debug_status.get()).style(move |s| {
+    let status = label(move || state.debug.status.get()).style(move |s| {
         s.flex_grow(1.0_f32)
             .margin_left(10.0)
             .font_size(11.0)
             .font_family(theme::mono_family())
-            .color(status_color(&state.debug_status.get()))
+            .color(status_color(&state.debug.status.get()))
     });
 
     let close = label(|| "✕".to_string())
@@ -75,7 +75,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.debug_open.set(false));
+        .on_click_stop(move |_| state.debug.open.set(false));
 
     let header = stack((title, status, close)).style(|s| {
         s.flex_row()
@@ -110,7 +110,8 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
     let frames = dyn_stack(
         move || {
             state
-                .debug_frames
+                .debug
+                .frames
                 .get()
                 .into_iter()
                 .enumerate()
@@ -155,7 +156,8 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
     let vars = dyn_stack(
         move || {
             state
-                .debug_vars
+                .debug
+                .vars
                 .get()
                 .into_iter()
                 .enumerate()
@@ -199,7 +201,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
     let breakpoints = dyn_stack(
         move || {
             let mut out: Vec<(String, u32)> = Vec::new();
-            state.debug_breakpoints.with(|m| {
+            state.debug.breakpoints.with(|m| {
                 for (path, lines) in m {
                     for l in lines {
                         out.push((path.clone(), *l));
@@ -243,7 +245,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let s = s.padding(14.0).color(theme::fg_dim()).font_size(11.5);
-        if state.debug_client.get().is_none() && state.debug_frames.with(|f| f.is_empty()) {
+        if state.debug.client.get().is_none() && state.debug.frames.with(|f| f.is_empty()) {
             s
         } else {
             s.hide()
@@ -282,7 +284,7 @@ pub fn debug_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.debug_open.get() {
+        if state.debug.open.get() {
             s
         } else {
             s.hide()

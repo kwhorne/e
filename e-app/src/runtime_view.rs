@@ -196,7 +196,7 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
                 .runtime_expanded
                 .with(|e| e.as_deref() == Some(id.as_str()))
             {
-                row.detail_lines(state.grove_sql_capture.get())
+                row.detail_lines(state.grove.sql_capture.get())
                     .into_iter()
                     .enumerate()
                     .collect::<Vec<_>>()
@@ -289,10 +289,10 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
     // Grove correlates SQL with requests only while capture is on; the toggle
     // lives here because an empty query list is the moment you want it.
     let sql = label(move || {
-        if state.grove_site.get().flatten().is_none() {
+        if state.grove.site.get().flatten().is_none() {
             return String::new();
         }
-        match state.grove_sql_capture.get() {
+        match state.grove.sql_capture.get() {
             Some(true) => "SQL capture: on".to_string(),
             Some(false) => "SQL capture: off".to_string(),
             None => "SQL capture: ?".to_string(),
@@ -306,7 +306,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
             .font_size(11.0)
             .cursor(floem::style::CursorStyle::Pointer)
             .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
-        match state.grove_sql_capture.get() {
+        match state.grove.sql_capture.get() {
             Some(true) => s.color(green()),
             _ => s.color(theme::fg_dim()),
         }
@@ -343,7 +343,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
     });
 
     let hint = label(move || {
-        if state.grove_site.get().flatten().is_some() {
+        if state.grove.site.get().flatten().is_some() {
             "Browse your app — Grove captures every request live, nothing to install.".to_string()
         } else {
             "Browse your app — requests are captured live via Clockwork.".to_string()

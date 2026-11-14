@@ -15,11 +15,11 @@ use crate::theme;
 impl AppState {
     /// Toggle the Source Control panel (and ensure the sidebar is visible).
     pub fn toggle_git_panel(&self) {
-        let open = self.git_panel_open.get_untracked();
+        let open = self.git.panel_open.get_untracked();
         if open {
-            self.git_panel_open.set(false);
+            self.git.panel_open.set(false);
         } else {
-            self.git_panel_open.set(true);
+            self.git.panel_open.set(true);
             self.sidebar_open.set(true);
             self.refresh_git_status();
         }
@@ -57,21 +57,21 @@ impl AppState {
                         // compare against something else now.
                         let head =
                             |l: &[(String, String, String, String)]| l.first().map(|c| c.0.clone());
-                        if state.git_log.with_untracked(|old| head(old)) != head(&log) {
+                        if state.git.log.with_untracked(|old| head(old)) != head(&log) {
                             state.refresh_head_texts();
                         }
-                        state.git_root.set(Some(repo));
-                        state.git_branch.set(branch);
-                        state.git_status.set(status);
-                        state.git_log.set(log);
-                        state.git_stash_count.set(stashes);
+                        state.git.root.set(Some(repo));
+                        state.git.branch.set(branch);
+                        state.git.status.set(status);
+                        state.git.log.set(log);
+                        state.git.stash_count.set(stashes);
                     }
                     None => {
-                        state.git_root.set(None);
-                        state.git_branch.set(None);
-                        state.git_status.set(Vec::new());
-                        state.git_log.set(Vec::new());
-                        state.git_stash_count.set(0);
+                        state.git.root.set(None);
+                        state.git.branch.set(None);
+                        state.git.status.set(Vec::new());
+                        state.git.log.set(Vec::new());
+                        state.git.stash_count.set(0);
                     }
                 }
             },
@@ -97,7 +97,7 @@ impl AppState {
         f: impl FnOnce(&std::path::Path) -> Result<(), String> + Send + 'static,
         on_ok: impl FnOnce(&AppState) + 'static,
     ) {
-        let Some(repo) = self.git_root.get_untracked() else {
+        let Some(repo) = self.git.root.get_untracked() else {
             return;
         };
         let state = *self;
@@ -171,7 +171,7 @@ impl AppState {
     /// Commit, and clear the message box only once the commit exists — a
     /// rejected commit (a failing hook, nothing staged) keeps the message.
     pub fn git_commit(&self) {
-        let msg = self.git_commit_msg.get_untracked();
+        let msg = self.git.commit_msg.get_untracked();
         let msg = msg.trim().to_string();
         if msg.is_empty() {
             return;
@@ -182,8 +182,8 @@ impl AppState {
             move |repo| git::commit(repo, &msg),
             move |s| {
                 // Only if it wasn't edited while the commit ran.
-                if s.git_commit_msg.get_untracked().trim() == sent {
-                    s.git_commit_msg.set(String::new());
+                if s.git.commit_msg.get_untracked().trim() == sent {
+                    s.git.commit_msg.set(String::new());
                 }
             },
         );
@@ -192,10 +192,10 @@ impl AppState {
     /// Suggest a Conventional Commits message from the current changes and put
     /// it in the message box (off the UI thread).
     pub fn suggest_commit_message(&self) {
-        let Some(repo) = self.git_root.get_untracked() else {
+        let Some(repo) = self.git.root.get_untracked() else {
             return;
         };
-        let target = self.git_commit_msg;
+        let target = self.git.commit_msg;
         let send = floem::ext_event::create_ext_action(self.cx, move |s: String| {
             if !s.is_empty() {
                 target.set(s);
@@ -208,7 +208,7 @@ impl AppState {
 
     /// Open a status file in the editor.
     pub fn open_git_file(&self, rel: String) {
-        if let Some(repo) = self.git_root.get_untracked() {
+        if let Some(repo) = self.git.root.get_untracked() {
             self.open_path(repo.join(rel));
         }
     }
@@ -297,7 +297,7 @@ fn group(state: AppState, title: &'static str, staged: bool) -> impl IntoView {
 
     let rows = dyn_stack(
         move || {
-            state.git_status.with(|st| {
+            state.git.status.with(|st| {
                 st.iter()
                     .filter(|e| {
                         if staged {
@@ -317,7 +317,7 @@ fn group(state: AppState, title: &'static str, staged: bool) -> impl IntoView {
     .style(|s| s.flex_col().width_full());
 
     let any = move || {
-        state.git_status.with(|st| {
+        state.git.status.with(|st| {
             st.iter().any(|e| {
                 if staged {
                     e.is_staged()
@@ -342,7 +342,8 @@ pub fn git_panel(state: AppState) -> impl IntoView {
     // Header: branch (click to switch) + refresh / pull / push.
     let branch = label(move || {
         state
-            .git_branch
+            .git
+            .branch
             .get()
             .map(|b| format!("⎇ {b}  ▾"))
             .unwrap_or_else(|| "Not a git repository".to_string())
@@ -356,9 +357,9 @@ pub fn git_panel(state: AppState) -> impl IntoView {
             .cursor(floem::style::CursorStyle::Pointer)
     })
     .popout_menu(move || {
-        let current = state.git_branch.get_untracked().unwrap_or_default();
+        let current = state.git.branch.get_untracked().unwrap_or_default();
         let mut menu = floem::menu::Menu::new("Switch branch");
-        let repo = state.git_root.get_untracked();
+        let repo = state.git.root.get_untracked();
         let branches = repo.map(|r| git::branches(&r)).unwrap_or_default();
         for b in branches {
             let mark = if b == current { "● " } else { "   " };
@@ -388,7 +389,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
     });
 
     // Commit message + buttons.
-    let msg_input = text_input(state.git_commit_msg)
+    let msg_input = text_input(state.git.commit_msg)
         .placeholder("Message (Enter to commit)")
         .on_enter(move || state.git_commit())
         .style(|s| {
@@ -463,7 +464,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
         })
     };
     let stash_btn = small("Stash".to_string()).on_click_stop(move |_| state.git_stash());
-    let pop_btn = label(move || format!("Pop ({})", state.git_stash_count.get()))
+    let pop_btn = label(move || format!("Pop ({})", state.git.stash_count.get()))
         .style(move |s| {
             let s = s
                 .height(26.0)
@@ -478,7 +479,7 @@ pub fn git_panel(state: AppState) -> impl IntoView {
                 .color(theme::fg())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()));
-            if state.git_stash_count.get() == 0 {
+            if state.git.stash_count.get() == 0 {
                 s.color(theme::fg_dim())
             } else {
                 s
@@ -497,7 +498,8 @@ pub fn git_panel(state: AppState) -> impl IntoView {
     let commits_rows = dyn_stack(
         move || {
             state
-                .git_log
+                .git
+                .log
                 .get()
                 .into_iter()
                 .enumerate()

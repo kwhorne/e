@@ -252,7 +252,7 @@ impl AppState {
     /// by the reflog's modification time, and bring the change marks up to
     /// date. A `stat` per call; called on the idle tick.
     pub fn check_head_moved(&self) {
-        let Some(repo) = self.git_root.get_untracked() else {
+        let Some(repo) = self.git.root.get_untracked() else {
             return;
         };
         let reflog = repo.join(".git/logs/HEAD");

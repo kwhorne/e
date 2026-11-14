@@ -239,7 +239,7 @@ impl AppState {
                 .get_untracked()
                 .map(|d| d.all_routes.clone())
                 .unwrap_or_default();
-            let sql_capture = self.grove_sql_capture.get_untracked();
+            let sql_capture = self.grove.sql_capture.get_untracked();
             let root = self.root.get_untracked();
             let psr4 = self.psr4();
             self.runtime_reqs.with_untracked(|reqs| {

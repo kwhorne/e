@@ -74,7 +74,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "run-test" => state.run_test(),
         "stop-tests" => state.tdd_stop(),
         "tdd-run" => {
-            state.tdd_open.set(true);
+            state.tests.open.set(true);
             state.run_tests();
         }
 
@@ -217,8 +217,8 @@ fn close_overlays(state: AppState) {
         state.agent.log_open.set(false);
         return;
     }
-    if state.tdd_open.get() {
-        state.tdd_open.set(false);
+    if state.tests.open.get() {
+        state.tests.open.set(false);
         return;
     }
     if state.req_open.get() {
@@ -233,8 +233,8 @@ fn close_overlays(state: AppState) {
         state.runtime_open.set(false);
         return;
     }
-    if state.grove_panel_open.get() {
-        state.grove_panel_open.set(false);
+    if state.grove.panel_open.get() {
+        state.grove.panel_open.set(false);
         return;
     }
     if state.migrations_open.get() {
@@ -273,8 +273,8 @@ fn close_overlays(state: AppState) {
         state.sem_open.set(false);
         return;
     }
-    if state.debug_open.get() {
-        state.debug_open.set(false);
+    if state.debug.open.get() {
+        state.debug.open.set(false);
         return;
     }
     if state.db.edit.get().is_some() {

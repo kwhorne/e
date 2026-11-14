@@ -707,6 +707,10 @@ impl AppState {
                         e_core::undotree::UndoTree::new(content.clone())
                     }
                 }
+                // A very large file keeps no history tree: it would hold a
+                // second full copy and diff the whole file on every edit.
+                // Floem's own undo still works.
+                _ if large => e_core::undotree::UndoTree::new(String::new()),
                 _ => e_core::undotree::UndoTree::new(content.clone()),
             };
             Rc::new(RefCell::new(t))
@@ -717,8 +721,10 @@ impl AppState {
         if let (Some(lang_id), Some(uri)) = (self.lsp_language_id(language), uri.as_ref()) {
             // Starts every server for this language; each needs its own didOpen.
             self.ensure_lsp(language);
+            // One copy of the text for every server, not one each.
+            let shared = std::sync::Arc::new(content.clone());
             for client in self.lsp_clients_for(language) {
-                client.did_open(uri, lang_id, 1, &content);
+                client.did_open_shared(uri, lang_id, 1, shared.clone());
             }
         }
 
@@ -746,33 +752,36 @@ impl AppState {
                 app.editor.last_edit.set(now_ms());
                 // A peek shows the hunk as it was; an edit may have moved it.
                 app.close_hunk_peek();
-                let text = doc.text().to_string();
+                // One copy of the text per edit, shared with the language
+                // servers rather than copied into each.
+                let shared = std::sync::Arc::new(doc.text().to_string());
+                let text: &str = &shared;
                 // Undoing back to what's on disk leaves nothing to save. Set
                 // only on a change: every subscriber (title, tab, status)
                 // re-renders on a set, even to the same value.
-                let changed = !same_text(&saved.borrow(), &text);
+                let changed = !same_text(&saved.borrow(), text);
                 if dirty.get_untracked() != changed {
                     dirty.set(changed);
                 }
                 if let Some(path) = &test_path {
                     // A test's mark moves with its declaration.
                     if app.tests.outcomes.with_untracked(|o| !o.is_empty()) {
-                        *test_marks.borrow_mut() = app.test_marks_for(path, &text);
+                        *test_marks.borrow_mut() = app.test_marks_for(path, text);
                     }
                     // And a breakpoint, or a logged exception, with its line.
                     if let Some(old) = update.old_text() {
-                        app.follow_breakpoints(path, old, &text);
-                        app.follow_caught(path, old, &text);
+                        app.follow_breakpoints(path, old, text);
+                        app.follow_caught(path, old, text);
                     }
                 }
-                if !undo_nav.get() {
+                if !undo_nav.get() && !large {
                     let now = now_ms() as u64;
                     // Do the recording (and any save) inside a scope so the
                     // mutable borrow is dropped before undo_rev.update runs the
                     // undo-tree view's effect, which borrows `undo` again.
                     let (recorded, json) = {
                         let mut t = undo.borrow_mut();
-                        let rec = t.record(&text, now, 700);
+                        let rec = t.record(text, now, 700);
                         let json = if rec && undo_path.is_some() {
                             t.json_if_due(now)
                         } else {
@@ -805,17 +814,17 @@ impl AppState {
                     // when this file was larger.
                     hl_gen.set(hl_gen.get() + 1);
                     if let Some(tree) = syntax.borrow_mut().as_mut() {
-                        tree.update(&text, &mut highlights.borrow_mut());
+                        tree.update(text, &mut highlights.borrow_mut());
                     }
                     if let Some(head) = &*head_text.borrow() {
                         let lc = text.split_inclusive('\n').count().max(1);
-                        *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                        *git_marks.borrow_mut() = git::marks(head, text, lc);
                     }
                 } else if text.len() <= SYNC_HIGHLIGHT_LIMIT {
-                    *highlights.borrow_mut() = highlight_lines(language, &text);
+                    *highlights.borrow_mut() = highlight_lines(language, text);
                     if let Some(head) = &*head_text.borrow() {
                         let lc = text.split_inclusive('\n').count().max(1);
-                        *git_marks.borrow_mut() = git::marks(head, &text, lc);
+                        *git_marks.borrow_mut() = git::marks(head, text, lc);
                     }
                 } else {
                     // Too expensive to keep inline — see SYNC_HIGHLIGHT_LIMIT.
@@ -828,7 +837,7 @@ impl AppState {
                         gen,
                         hl_gen.clone(),
                         language,
-                        text.clone(),
+                        text.to_string(),
                         head_text.borrow().clone(),
                         highlights.clone(),
                         git_marks.clone(),
@@ -843,7 +852,7 @@ impl AppState {
                         let v = version.get() + 1;
                         version.set(v);
                         for client in clients {
-                            client.did_change(uri, v, &text);
+                            client.did_change_shared(uri, v, shared.clone());
                         }
                     }
                 }

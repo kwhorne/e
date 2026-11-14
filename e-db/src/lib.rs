@@ -941,24 +941,75 @@ fn expand_tilde(path: &str) -> String {
 /// secret only ever lives in process memory — never written to disk.
 const ASKPASS_ENV: &str = "E_SSH_ASKPASS_SECRET";
 
-/// Write a temporary SSH_ASKPASS helper (mode 0700) that echoes the secret read
-/// from an environment variable, so the secret itself is never written to disk.
+/// A temporary SSH_ASKPASS helper, in a directory of its own that is removed
+/// (with the helper) when this is dropped.
 #[cfg(unix)]
-fn write_askpass() -> Result<PathBuf, String> {
+struct Askpass {
+    dir: PathBuf,
+    script: PathBuf,
+}
+
+#[cfg(unix)]
+impl Drop for Askpass {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.script);
+        let _ = std::fs::remove_dir(&self.dir);
+    }
+}
+
+/// Write a temporary SSH_ASKPASS helper that echoes the secret read from an
+/// environment variable, so the secret itself is never written to disk.
+///
+/// `ssh` runs the helper with the secret in its environment, so nobody else
+/// may get to write it, or to put something of theirs where it will be. It
+/// goes in a new directory under an unguessable name, made with mode 0700
+/// (`mkdir` fails rather than reuse one that exists, a symlink included),
+/// and is itself created new (`O_EXCL`) with mode 0700.
+#[cfg(unix)]
+fn write_askpass_in(parent: &Path) -> Result<Askpass, String> {
+    use std::hash::{BuildHasher, Hasher};
     use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let mut path = std::env::temp_dir();
-    path.push(format!("e-askpass-{}-{}.sh", std::process::id(), nanos));
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let mut tries = 0;
+    let dir = loop {
+        // Each RandomState is seeded from the OS's randomness.
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u128(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        );
+        let dir = parent.join(format!(
+            "e-askpass-{}-{:016x}",
+            std::process::id(),
+            h.finish()
+        ));
+        match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+            Ok(()) => break dir,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && tries < 8 => tries += 1,
+            Err(e) => return Err(format!("creating the SSH askpass helper: {e}")),
+        }
+    };
+    let askpass = Askpass {
+        script: dir.join("askpass.sh"),
+        dir,
+    };
     let script = format!("#!/bin/sh\nprintf '%s\\n' \"${ASKPASS_ENV}\"\n");
-    let mut f = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-    f.write_all(script.as_bytes()).map_err(|e| e.to_string())?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
-        .map_err(|e| e.to_string())?;
-    Ok(path)
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o700)
+        .open(&askpass.script)
+        .map_err(|e| format!("creating the SSH askpass helper: {e}"))?;
+    f.write_all(script.as_bytes())
+        .map_err(|e| format!("writing the SSH askpass helper: {e}"))?;
+    Ok(askpass)
+}
+
+#[cfg(unix)]
+fn write_askpass() -> Result<Askpass, String> {
+    write_askpass_in(&std::env::temp_dir())
 }
 
 fn wait_port(
@@ -1060,12 +1111,12 @@ fn start_tunnel(config: &DbConfig) -> Result<SshTunnel, String> {
         cmd.args(["-o", "IdentitiesOnly=yes"]);
     }
 
-    let mut askpass: Option<PathBuf> = None;
+    let mut askpass: Option<Askpass> = None;
     if secret.is_empty() {
         cmd.args(["-o", "BatchMode=yes"]);
     } else {
         let p = write_askpass()?;
-        cmd.env("SSH_ASKPASS", &p);
+        cmd.env("SSH_ASKPASS", &p.script);
         cmd.env("SSH_ASKPASS_REQUIRE", "force");
         cmd.env("DISPLAY", "localhost:0");
         // The secret travels via the environment, not the on-disk helper.
@@ -1084,9 +1135,7 @@ fn start_tunnel(config: &DbConfig) -> Result<SshTunnel, String> {
         .spawn()
         .map_err(|e| format!("failed to start ssh: {e}"))?;
     let res = wait_port(local_port, &mut child, std::time::Duration::from_secs(15));
-    if let Some(p) = &askpass {
-        let _ = std::fs::remove_file(p);
-    }
+    drop(askpass);
     if let Err(e) = res {
         // A tunnel that never came up must not live on, holding the port.
         let _ = child.kill();
@@ -3565,6 +3614,32 @@ mod pg_live_tests {
             Vec::<String>::new()
         );
         assert_eq!(ch_params("", true, None, false, 100), ["readonly=2"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_askpass_helper_is_private_and_goes_away() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = std::env::temp_dir().join(format!("e-db-askpass-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+        let a = write_askpass_in(&parent).unwrap();
+        let b = write_askpass_in(&parent).unwrap();
+        assert_ne!(a.dir, b.dir, "each helper gets a directory of its own");
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&a.dir), 0o700);
+        assert_eq!(mode(&a.script), 0o700);
+        let out = std::process::Command::new(&a.script)
+            .env(ASKPASS_ENV, "s3cret")
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "s3cret\n");
+        let (dir, script) = (a.dir.clone(), a.script.clone());
+        drop(a);
+        assert!(!script.exists() && !dir.exists());
+        drop(b);
+        assert_eq!(std::fs::read_dir(&parent).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&parent);
     }
 
     /// `--ignored`, with `E_PG_PORT` (+ `E_PG_PASSWORD`) and/or `E_CH_PORT`.

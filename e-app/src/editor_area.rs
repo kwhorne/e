@@ -449,7 +449,13 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 let editor_handle = editor_handle.clone();
                 floem::reactive::create_effect(move |_| {
                     let vid = editor_handle.editor_view_id.get();
-                    if active_sig.get() == Some(id) && !state.any_overlay_open() {
+                    // Only the focused pane's editor takes the keyboard: with
+                    // the same file in both panes, both are "active", and the
+                    // pane that asked last used to win.
+                    if active_sig.get() == Some(id)
+                        && state.focused.get() == pane_idx
+                        && !state.any_overlay_open()
+                    {
                         if let Some(vid) = vid {
                             floem::action::exec_after(
                                 std::time::Duration::from_millis(0),

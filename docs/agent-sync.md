@@ -262,6 +262,21 @@ test-fix-rerun loop.
 `php artisan tinker` and returns `{code, stdout, stderr}` the same way; it is
 given up on after 60 seconds.
 
+Both wait for you first. A card shows the command (or the PHP) and where it
+runs:
+
+- **Run once** runs it; the next one asks again.
+- **Allow for this session** runs it and everything the agent asks to run
+  until `e` restarts, including requests already waiting. Click it once and
+  a test-fix-rerun loop runs on its own.
+- **Deny** runs nothing and replies
+  `{"ok":false,"error":"denied by the user — …"}`.
+
+The reply comes when you've answered, so a client should wait for it rather
+than time out. Several requests at once queue, one card at a time. To run
+everything without asking, as before, turn off **Ask before agent commands**
+in Settings → Agents (`"ask_before_agent_commands": false`).
+
 ## Proposing edits (reviewed)
 
 Instead of writing files blindly, an agent can propose a new version and let you
@@ -309,10 +324,12 @@ access to that environment variable — a malicious postinstall script in your o
 project, say. Treat `$E_EDITOR_SOCK` the way you'd treat a shell: anything
 holding it can run commands as you.
 
-`run` and `tinker` deliberately execute without a per-call prompt; the
-autonomous test-fix-rerun loop is built on that, and a dialog per command would
-break it. `db_query` is the exception — it asks every time, because the risk
-there is your data rather than your machine. Everything the agent does is
+`run` and `tinker` ask before they execute (see [Running commands](#running-commands)):
+an agent, or text it read that told it what to do, can't run something on your
+machine you haven't seen. **Allow for this session** keeps an autonomous loop
+from asking at every step. `db_query` asks every time. The agent can't answer
+these cards for itself: the socket's UI automation, which could, is only on
+for `e`'s own tests (`E_UI_AUTOMATION=1`). Everything the agent does is
 recorded in the **Agent Timeline** (⌘⌥A).
 
 ## Notes

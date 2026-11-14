@@ -32,6 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `DB_SSLMODE` and `MYSQL_ATTR_SSL_CA` are read from `.env`.
 
+### Changed
+
+- **An agent's commands wait for your OK.** `run` (a shell command) and
+  `tinker` (PHP in your app) over the editor socket used to execute as soon
+  as an agent sent them. A card now shows what is about to run:
+  - **Run once:** runs it, and the next command asks again.
+  - **Allow for this session:** runs it and everything after, so a
+    test-fix loop goes on by itself after one click.
+  - **Deny:** runs nothing.
+
+  **Ask before agent commands** in Settings → Agents turns the card off.
+
 ### Fixed
 
 - **Foreign keys in PostgreSQL could point the wrong way.** The query behind

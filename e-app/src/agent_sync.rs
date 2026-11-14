@@ -27,7 +27,8 @@
 //!   ones marked † need `E_UI_AUTOMATION=1`):
 //!   `{"method":"commands"}`, `{"method":"command","id":"session-review"}`,
 //!   `{"method":"code_actions"}` then `{"method":"apply_code_action","index":0}`,
-//!   `{"method":"dialog","action":"confirm|cancel"}` †,
+//!   `{"method":"dialog","action":"confirm|cancel"}` † (`session` too, on the
+//!   card for an agent's `run` / `tinker`),
 //!   `{"method":"cascade","action":"send","text":"…"}` (and steer, next, stop,
 //!   new_session, new_worktree, take_down, review_turn, undo_turn…; `answer` †),
 //!   `{"method":"wait_idle","timeout_ms":120000}` and `{"method":"ui_state"}`.
@@ -771,8 +772,16 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             }
         }
         "dialog" => {
-            let confirm = req.get("action").and_then(|v| v.as_str()) == Some("confirm");
-            if state.rename_plan.with_untracked(Option::is_some) {
+            let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+            let confirm = action == "confirm";
+            if state.run_consents.with_untracked(|q| !q.is_empty()) {
+                match action {
+                    "confirm" => state.run_consent_once(),
+                    "session" => state.run_consent_session(),
+                    _ => state.run_consent_deny(),
+                }
+                json!({"ok": true})
+            } else if state.rename_plan.with_untracked(Option::is_some) {
                 if confirm {
                     state.confirm_rename();
                 } else {
@@ -913,29 +922,15 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             return;
         }
 
-        // ---- Laravel Tinker (async) ---------------------------------------
+        // ---- Laravel Tinker / a shell command (async, user-consented) -----
         "tinker" => {
             let Some(code) = req.get("code").and_then(|c| c.as_str()).map(String::from) else {
                 let _ = reply.send(json!({"ok": false, "error": "missing code"}));
                 return;
             };
-            let root = state.root.get_untracked();
-            std::thread::spawn(move || {
-                let resp = match crate::phptools::tinker(&root, &code) {
-                    Ok(o) => json!({
-                        "ok": true,
-                        "code": o.status.code(),
-                        "stdout": String::from_utf8_lossy(&o.stdout),
-                        "stderr": String::from_utf8_lossy(&o.stderr),
-                    }),
-                    Err(e) => json!({"ok": false, "error": e}),
-                };
-                let _ = reply.send(resp);
-            });
+            state.agent_run(crate::run_consent::AgentRun::Tinker { code }, reply);
             return;
         }
-
-        // ---- Run a shell command (async) ----------------------------------
         "run" => {
             let Some(command) = req
                 .get("command")
@@ -950,9 +945,7 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 .and_then(|c| c.as_str())
                 .map(String::from)
                 .unwrap_or_else(|| state.root.get_untracked().to_string_lossy().into_owned());
-            std::thread::spawn(move || {
-                let _ = reply.send(run_command(&command, &cwd));
-            });
+            state.agent_run(crate::run_consent::AgentRun::Shell { command, cwd }, reply);
             return;
         }
 
@@ -1041,7 +1034,7 @@ fn db_schema(conn: &e_db::Conn) -> Value {
     json!({"ok": true, "tables": out})
 }
 
-fn run_command(command: &str, cwd: &str) -> Value {
+pub(crate) fn run_command(command: &str, cwd: &str) -> Value {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     match std::process::Command::new(shell)
         .arg("-ilc")

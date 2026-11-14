@@ -122,7 +122,7 @@ impl App {
     /// One request over the socket, and its answer.
     fn call(&self, request: Value) -> Value {
         let path = self.socket().expect("socket");
-        let mut stream = UnixStream::connect(path).expect("connect");
+        let mut stream = connect(&path);
         stream.set_read_timeout(Some(PATIENCE)).unwrap();
         writeln!(stream, "{request}").unwrap();
         let mut line = String::new();
@@ -435,6 +435,35 @@ fn typing_marks_the_file_and_undo_unmarks_it() {
         s["editor"]["dirty"] == false
     });
     assert!(lines_of(&s, "changes").is_empty());
+}
+
+/// Connect to `e`'s socket. With many windows up at once, macOS sometimes
+/// refuses a connection to a listener that is alive and accepting (the
+/// request never reached `e`, so trying again is safe); wait and try again
+/// rather than fail the test.
+fn connect(path: &Path) -> UnixStream {
+    let start = Instant::now();
+    let mut tries = 0;
+    loop {
+        match UnixStream::connect(path) {
+            Ok(stream) => {
+                if tries > 0 {
+                    eprintln!("ui_flows: connected after {tries} refused attempt(s)");
+                }
+                return stream;
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::WouldBlock
+                ) && start.elapsed() < PATIENCE =>
+            {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => panic!("connect: {e:?}"),
+        }
+    }
 }
 
 /// The binary behind whatever `program` is on PATH, which prints its own path

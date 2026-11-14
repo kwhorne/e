@@ -223,13 +223,27 @@ impl AppState {
             }
         };
 
+        // Everything the session sets up lives in its own scope, disposed
+        // when it ends (`end_debug_session`), not in the app's for good.
+        self.end_debug_session();
+        let session = self.cx.create_child();
+        self.debug_session.set(Some(session));
+
         // Bridge the adapter's continuous event stream onto the UI thread via a
         // channel (`create_ext_action` is one-shot; DAP events are not).
         let state = *self;
         let (tx, rx) = channel::<DapEvent>();
         let events = create_signal_from_channel(rx);
-        self.cx.create_effect(move |_| {
+        // `initialized` can beat the client to the UI thread; then the
+        // breakpoints go out as soon as the client is stored.
+        let initialized_early = session.create_rw_signal(false);
+        session.create_effect(move |_| {
             if let Some(ev) = events.get() {
+                if ev.event == "initialized" && state.debug_client.get_untracked().is_none() {
+                    initialized_early.set(true);
+                    state.debug_status.set("running".to_string());
+                    return;
+                }
                 state.on_dap_event(ev);
             }
         });
@@ -239,15 +253,31 @@ impl AppState {
 
         // Marshal the created client (or an error) back to the UI thread.
         let store = create_ext_action(
-            self.cx,
+            session,
             move |res: Result<std::sync::Arc<DapClient>, String>| match res {
                 Ok(c) => {
-                    state.debug_client.set(Some(c));
+                    state.debug_client.set(Some(c.clone()));
                     state.debug_status.set("launching…".to_string());
+                    if initialized_early.get_untracked() {
+                        state.debug_configure(c);
+                    }
                 }
-                Err(e) => state.debug_status.set(e),
+                Err(e) => {
+                    state.debug_status.set(e);
+                    state.end_debug_session();
+                }
             },
         );
+        // The handshake failing ends the session instead of leaving it at
+        // "launching…" for good.
+        let failed = create_ext_action(session, move |e: String| {
+            if let Some(client) = state.debug_client.get_untracked() {
+                std::thread::spawn(move || client.disconnect(true));
+            }
+            state.debug_client.set(None);
+            state.debug_status.set(e);
+            state.end_debug_session();
+        });
 
         self.debug_status.set("starting adapter…".to_string());
 
@@ -275,8 +305,11 @@ impl AppState {
             match client {
                 Ok(c) => {
                     store(Ok(c.clone()));
-                    let _ = c.initialize(&adapter_id);
-                    let _ = c.launch(launch);
+                    if let Err(e) = c.initialize(&adapter_id) {
+                        failed(format!("the debug adapter didn't initialise: {e:#}"));
+                    } else if let Err(e) = c.launch(launch) {
+                        failed(format!("launch failed: {e:#}"));
+                    }
                 }
                 Err(e) => store(Err(format!("adapter failed to start: {e}"))),
             }
@@ -289,14 +322,7 @@ impl AppState {
             "initialized" => {
                 self.debug_status.set("running".to_string());
                 if let Some(client) = self.debug_client.get_untracked() {
-                    let bps = self.debug_breakpoints.get_untracked();
-                    std::thread::spawn(move || {
-                        for (path, lines) in &bps {
-                            let _ = client.set_breakpoints(path, lines);
-                        }
-                        let _ = client.set_exception_breakpoints(&[]);
-                        let _ = client.configuration_done();
-                    });
+                    self.debug_configure(client);
                 }
             }
             "stopped" => {
@@ -331,8 +357,31 @@ impl AppState {
                 self.debug_frames.set(Vec::new());
                 self.debug_vars.set(Vec::new());
                 self.clear_stop_lines();
+                self.end_debug_session();
             }
             _ => {}
+        }
+    }
+
+    /// The adapter is ready for its configuration: the breakpoints, then
+    /// `configurationDone`.
+    fn debug_configure(&self, client: std::sync::Arc<DapClient>) {
+        let bps = self.debug_breakpoints.get_untracked();
+        std::thread::spawn(move || {
+            for (path, lines) in &bps {
+                let _ = client.set_breakpoints(path, lines);
+            }
+            let _ = client.set_exception_breakpoints(&[]);
+            let _ = client.configuration_done();
+        });
+    }
+
+    /// Dispose of what the debug session set up. Safe from inside its own
+    /// event effect (Floem's own channel signals end themselves that way).
+    pub(crate) fn end_debug_session(&self) {
+        if let Some(session) = self.debug_session.get_untracked() {
+            self.debug_session.set(None);
+            session.dispose();
         }
     }
 
@@ -427,6 +476,7 @@ impl AppState {
             std::thread::spawn(move || client.disconnect(true));
         }
         self.debug_client.set(None);
+        self.end_debug_session();
         self.debug_status.set("stopped".to_string());
         self.debug_frames.set(Vec::new());
         self.debug_vars.set(Vec::new());

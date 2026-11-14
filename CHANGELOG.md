@@ -7,7 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A read-only PostgreSQL connection could be switched to writes.** The
+  read-only check skipped quoted names, so
+  `SELECT pg_catalog."set_config"('default_transaction_read_only', 'off', false)`
+  counted as a plain read. It also misread `$$ … $$` strings and nested
+  `/* /* */ */` comments, which could hide a `DELETE`. Quoted names now
+  count, calls such as `set_config` and `nextval` are writes however they
+  are spelled, and PostgreSQL's quoting and comments are read as PostgreSQL
+  reads them.
+- **The SSH password helper had a predictable name in `/tmp`.** It is now
+  made in a new private folder (0700) and removed afterwards, even when ssh
+  fails to start.
+
 ### Fixed
+
+- **Read-only ClickHouse connections couldn't read.** Every limited read
+  (browsing a table, counting rows, the console) failed with "Cannot modify
+  'max_result_rows' setting in readonly mode". They now use ClickHouse's
+  `readonly=2`, which allows the row limit and still refuses writes and DDL.
+- **ROLLBACK was refused on a read-only connection.** After an error in a
+  transaction on a read-only PostgreSQL connection, nothing could end it.
+  ROLLBACK, ABORT and ROLLBACK TO a savepoint now go through, and read-only
+  is set again afterwards.
+- **A limited PostgreSQL read could run twice.** When a read failed inside
+  the row limit e wraps it in, it was run again as written for any error
+  in class 42, such as a permission error partway through. A volatile
+  function in it then ran twice. Now it is rerun only for errors the
+  wrapping itself can cause.
+- **Cancel didn't stop the rest of a run.** In a console run of several
+  statements, the ones after the cancelled one still ran. **Search all
+  data** went on through the remaining tables. Both now stop.
+- **A slow answer could land on the wrong table.** A page, a row count or a
+  table's columns that arrived after you had moved on to another table
+  were shown on that one. They are now dropped.
+- **A new password showed as you typed it**, and editing a connection
+  dropped its label, so a connection marked production could lose that
+  mark. The password field starts hidden, and the label is kept. For MySQL
+  over SSH, the TLS hint now says that Verify can't check the host name
+  there.
 
 - **Staged changes in the data grid were lost.** Cell edits and row deletes
   waiting for **Submit** were dropped without a word when you went to another

@@ -176,7 +176,15 @@ label is guessed from the host and name and drives the safety rails:
   Tinker; **⬆ CSV** imports a CSV into the table.
 - **Search all data…** in the panel header scans every table's text columns for
   a value and shows one result tab per matching table.
-- Row counts appear next to each table in the tree.
+- Row counts appear next to each table in the tree. They come from the
+  server's catalog in one query rather than a count of every table:
+  - **PostgreSQL** shows the planner's estimate, as `≈12.3k`. A table is
+    blank until it has been analyzed.
+  - **MySQL** shows the estimate from `TABLE_ROWS`, also with `≈`.
+  - **ClickHouse** shows its exact counts.
+  - **SQLite** counts each table.
+
+  Opening a table counts its rows exactly.
 
 ## Connection actions
 

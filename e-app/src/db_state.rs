@@ -329,7 +329,6 @@ impl AppState {
         let Some(conn) = entry.conn.get_untracked() else {
             return;
         };
-        let engine = entry.config.engine.clone();
         let tables = entry.tables.get_untracked();
         if tables.is_empty() {
             return;
@@ -337,18 +336,13 @@ impl AppState {
         let counts_sig = entry.table_counts;
         let send = create_ext_action(
             self.cx,
-            move |counts: std::collections::HashMap<String, i64>| {
+            move |counts: std::collections::HashMap<String, e_db::RowCount>| {
                 counts_sig.set(counts);
             },
         );
+        // The server's own figures in one query, not a COUNT(*) per table.
         std::thread::spawn(move || {
-            let mut counts = std::collections::HashMap::new();
-            for t in tables {
-                if let Ok(n) = e_db::count_rows(&conn, &engine, &t, None) {
-                    counts.insert(t, n);
-                }
-            }
-            send(counts);
+            send(e_db::row_counts(&conn, &tables).unwrap_or_default());
         });
     }
 

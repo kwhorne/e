@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Connecting to a large database held it busy.** The Database panel
+  counted every table's rows, one `SELECT COUNT(*)` after another, as soon as
+  a connection opened. On a large PostgreSQL or MySQL database that scanned
+  table after table for minutes, and the panel's one connection was busy
+  all the while. The table tree now shows what the server already knows: one
+  catalog query for PostgreSQL's and MySQL's estimates (shown as `≈12.3k`)
+  and ClickHouse's own counts. The exact count still comes when you open a
+  table.
 - **Formatting a file applied its changes one at a time.** A formatter's
   edits, trimming trailing whitespace on save and a completion's extra edits
   (a `use` import, say) each went in as a separate change. Every change

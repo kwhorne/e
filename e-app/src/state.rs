@@ -59,8 +59,8 @@ pub struct DbEntry {
     pub connecting: RwSignal<bool>,
     pub tables: RwSignal<Vec<String>>,
     pub views: RwSignal<Vec<String>>,
-    /// Lazily-loaded approximate row counts per table (shown in the tree).
-    pub table_counts: RwSignal<HashMap<String, i64>>,
+    /// Row counts per table for the tree, mostly the server's estimates.
+    pub table_counts: RwSignal<HashMap<String, e_db::RowCount>>,
     pub error: RwSignal<Option<String>>,
     pub filter: RwSignal<String>,
     /// Block writes (cell edits, …). Defaults on for production-looking targets.

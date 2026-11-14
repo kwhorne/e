@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Staged changes in the data grid were lost.** Cell edits and row deletes
+  waiting for **Submit** were dropped without a word when you went to another
+  page, sorted, filtered or opened another table. A console result could even
+  show them on the wrong cells. They are now held by each row's primary key
+  and stay staged until you submit or revert them, showing again on their
+  rows wherever those turn up. The pending-changes bar names the table they
+  belong to, and Submit works from anywhere in the panel.
+- **+ Row skipped the safety rails.** Inserting a row wrote it at once, with
+  no confirmation on staging or production and no entry in the write log.
+  On a database that isn't local it now opens the confirmation dialog first,
+  as any other write there does, and every insert is logged, with an Undo
+  when the primary key was given.
+- **Importing a CSV could log a cancelled Submit.** The import recorded
+  whatever statements an earlier, cancelled Submit had prepared as if they
+  had run, and it cleared the staged changes. The confirmed statements now
+  carry their own log entries.
+
 ## [0.20.0] - 2026-11-14
 
 ### Added

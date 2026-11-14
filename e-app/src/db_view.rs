@@ -2618,8 +2618,15 @@ fn pending_bar(state: AppState) -> impl IntoView {
         let e = state.db.pending_edits.with(|m| m.len());
         let d = state.db.pending_deletes.with(|m| m.len());
         let total = e + d;
+        // The changes stay staged while another table or a console result is
+        // shown, so say which table they are for.
+        let table = state
+            .db
+            .pending_target
+            .with(|t| t.as_ref().map(|(_, t)| t.clone()))
+            .unwrap_or_default();
         format!(
-            "⚠ {total} pending change{}  ·  {e} update{}, {d} delete{}",
+            "⚠ {total} pending change{} to {table}  ·  {e} update{}, {d} delete{}",
             if total == 1 { "" } else { "s" },
             if e == 1 { "" } else { "s" },
             if d == 1 { "" } else { "s" },
@@ -2871,10 +2878,10 @@ fn result_grid(state: AppState) -> impl IntoView {
                     label(move || text.clone())
                         .style(move |s| {
                             let selected = state.db.selected_cell.get() == Some((ri, ci));
-                            let pending_edit =
-                                state.db.pending_edits.with(|m| m.contains_key(&(ri, ci)));
-                            let pending_del =
-                                state.db.pending_deletes.with(|m| m.contains_key(&ri));
+                            let (pending_edit, pending_del) = state
+                                .db
+                                .pending_view
+                                .with(|v| (v.cells.contains(&(ri, ci)), v.rows.contains(&ri)));
                             let s = s
                                 .width(180.0)
                                 .flex_shrink(0.0_f32)

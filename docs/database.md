@@ -104,7 +104,9 @@ In the **Data** view of a table that has a primary key:
     An active filter appears as a chip in the toolbar — click it to clear.
 - **+ Row** on the toolbar opens an insert dialog with one field per column
   (each with a NULL toggle). Columns left blank (and not marked NULL) are
-  omitted, so database defaults and auto-increment apply.
+  omitted, so database defaults and auto-increment apply. On a database that
+  isn't local, **Insert** opens the confirmation dialog first; every insert is
+  in the **Log**, with an **Undo** when the dialog gave the primary key.
 
 A connection that looks like **production** defaults to **read-only** (a
 🔒 / 🔓 badge toggles it); see below.
@@ -155,10 +157,13 @@ label is guessed from the host and name and drives the safety rails:
   that lists the exact statements; non-local writes require an explicit
   acknowledgement.
 - **Transactional editing:** cell edits and row deletes are *staged* (edited
-  cells turn amber, deleted rows red). A **N pending changes** bar offers
-  **Submit** (all in one transaction, via the confirmation dialog) and
-  **Revert**. A **Log** button shows the session's writes with an **Undo** where
-  a reverse statement can be generated.
+  cells turn amber, deleted rows red). They stay staged while you page, sort,
+  filter, open another table or run a query, until you submit or revert them.
+  A **N pending changes to `table`** bar offers **Submit** (all in one
+  transaction, via the confirmation dialog) and **Revert**. Staged changes
+  belong to one table at a time: to edit another, submit or revert the first.
+  A **Log** button shows the session's writes with an **Undo** where a reverse
+  statement can be generated.
 - **Snapshots:** the **⤓** action on a local connection dumps the database
   (SQLite copy / mysqldump / pg_dump) into `~/.config/e/snapshots/` — handy
   before a migration.

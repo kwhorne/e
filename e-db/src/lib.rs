@@ -270,6 +270,24 @@ pub struct Conn {
     /// The MySQL statements running now: the server's id of the pooled
     /// connection each runs on, so Cancel can `KILL QUERY` it.
     mysql_running: Mutex<Vec<(u64, u32)>>,
+    /// The ClickHouse queries running now, by the `query_id` each was sent
+    /// with, so Cancel can `KILL QUERY` them.
+    ch_running: Mutex<Vec<String>>,
+}
+
+/// While alive, the ClickHouse query sent with its id can be stopped by
+/// [`cancel`].
+struct ChRunning<'a> {
+    conn: &'a Conn,
+    query_id: String,
+}
+
+impl Drop for ChRunning<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut r) = self.conn.ch_running.lock() {
+            r.retain(|id| *id != self.query_id);
+        }
+    }
 }
 
 /// While alive, the MySQL connection it was made for can be stopped by
@@ -479,6 +497,7 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
         pg_cancel,
         sqlite_running: Mutex::new(Vec::new()),
         mysql_running: Mutex::new(Vec::new()),
+        ch_running: Mutex::new(Vec::new()),
     })
 }
 
@@ -488,6 +507,25 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
 /// with PostgreSQL's "canceling statement due to user request", and the
 /// connection is free again.
 pub fn cancel(conn: &Conn) -> Result<bool, String> {
+    if let Backend::Clickhouse { .. } = &conn.backend {
+        // The query ends with ClickHouse's "Query was cancelled".
+        let ids: Vec<String> = conn.ch_running.lock().map_err(|e| e.to_string())?.clone();
+        if !ids.is_empty() {
+            let list = ids
+                .iter()
+                .map(|id| quote_literal("clickhouse", id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            ch_query_as(
+                &conn.backend,
+                &format!("KILL QUERY WHERE query_id IN ({list}) ASYNC"),
+                0,
+                false,
+                None,
+            )?;
+        }
+        return Ok(true);
+    }
     if let Backend::Mysql(pool) = &conn.backend {
         // From another connection of the pool: `KILL QUERY` ends the
         // statement ("Query execution was interrupted"; a `SLEEP` returns 1)
@@ -561,6 +599,29 @@ impl Conn {
     /// Open the SQLite file, read-only while the connection is.
     fn sqlite(&self, path: &str) -> Result<rusqlite::Connection, String> {
         sqlite_open(path, self.is_read_only())
+    }
+
+    /// A fresh `query_id` for a ClickHouse query, noted as running until the
+    /// returned guard is dropped, so [`cancel`] can stop it.
+    fn ch_running(&self) -> ChRunning<'_> {
+        use std::sync::atomic::AtomicU64;
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let query_id = format!(
+            "e-{}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        if let Ok(mut r) = self.ch_running.lock() {
+            r.push(query_id.clone());
+        }
+        ChRunning {
+            conn: self,
+            query_id,
+        }
     }
 
     /// Note the pooled MySQL connection `c` as running a statement, until
@@ -1250,15 +1311,17 @@ fn tsv_unescape(s: &str) -> String {
 }
 
 fn ch_query(backend: &Backend, sql: &str, max: usize) -> Result<QueryResult, String> {
-    ch_query_as(backend, sql, max, false)
+    ch_query_as(backend, sql, max, false, None)
 }
 
-/// [`ch_query`], with ClickHouse itself refusing writes when `read_only`.
+/// [`ch_query`], with ClickHouse itself refusing writes when `read_only`,
+/// and sent with `query_id` when given (so it can be killed).
 fn ch_query_as(
     backend: &Backend,
     sql: &str,
     max: usize,
     read_only: bool,
+    query_id: Option<&str>,
 ) -> Result<QueryResult, String> {
     let Backend::Clickhouse {
         agent,
@@ -1283,6 +1346,9 @@ fn ch_query_as(
     }
     if read_only {
         params.push("readonly=1".into());
+    }
+    if let Some(id) = query_id {
+        params.push(format!("query_id={}", url_encode(id)));
     }
     // The server stops making rows past the ones shown (it may finish the
     // block it is in; the reader below cuts there).
@@ -1780,7 +1846,14 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
         }
         Backend::Clickhouse { .. } => {
             for s in statements {
-                ch_query_as(&conn.backend, s, 0, conn.is_read_only())?;
+                let running = conn.ch_running();
+                ch_query_as(
+                    &conn.backend,
+                    s,
+                    0,
+                    conn.is_read_only(),
+                    Some(&running.query_id),
+                )?;
             }
             Ok(0)
         }
@@ -2640,7 +2713,16 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
                 })
             }
         }
-        Backend::Clickhouse { .. } => ch_query_as(&conn.backend, sql, max, conn.is_read_only()),
+        Backend::Clickhouse { .. } => {
+            let running = conn.ch_running();
+            ch_query_as(
+                &conn.backend,
+                sql,
+                max,
+                conn.is_read_only(),
+                Some(&running.query_id),
+            )
+        }
     }
 }
 
@@ -3259,6 +3341,41 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
 #[cfg(test)]
 mod pg_live_tests {
     use super::*;
+
+    /// `--ignored`, with `E_CH_PORT` (HTTP).
+    #[test]
+    #[ignore]
+    fn cancel_kills_a_running_clickhouse_query() {
+        let Some(port) = std::env::var("E_CH_PORT").ok() else {
+            return;
+        };
+        let conn = std::sync::Arc::new(
+            connect(&DbConfig {
+                engine: "clickhouse".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        let running = conn.clone();
+        let t = Instant::now();
+        let handle = std::thread::spawn(move || {
+            query(
+                &running,
+                "SELECT sum(cityHash64(number)) FROM numbers(100000000000)",
+                10,
+            )
+        });
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(cancel(&conn), Ok(true));
+        let err = handle.join().unwrap().unwrap_err();
+        assert!(err.to_lowercase().contains("cancel"), "{err}");
+        assert!(t.elapsed() < Duration::from_secs(10), "{:?}", t.elapsed());
+        eprintln!("clickhouse: cancelled after {:?}", t.elapsed());
+        assert!(conn.ch_running.lock().unwrap().is_empty());
+        assert!(query(&conn, "SELECT 1", 10).is_ok());
+    }
 
     /// `--ignored`, with `E_MYSQL_PORT` (user root, no password; reads only).
     #[test]

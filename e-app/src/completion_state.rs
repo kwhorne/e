@@ -857,15 +857,15 @@ impl AppState {
                 (shift(s), shift(t.max(s)), e.new_text.clone())
             })
             .collect();
-        offs.sort_by_key(|b| std::cmp::Reverse(b.0));
         let caret = editor.cursor.get_untracked().offset();
-        let mut caret_shift: isize = 0;
-        for (s, t, text) in offs {
-            buf.doc
-                .edit_single(Selection::region(s, t), &text, EditType::InsertChars);
-            if s < caret {
-                caret_shift += text.len() as isize - (t - s) as isize;
-            }
+        let caret_shift: isize = offs
+            .iter()
+            .filter(|(s, _, _)| *s < caret)
+            .map(|(s, t, text)| text.len() as isize - (t - s) as isize)
+            .sum();
+        offs.retain(|(s, t, text)| !(s == t && text.is_empty()));
+        if !offs.is_empty() {
+            crate::state::apply_batch(&buf.doc, offs, EditType::InsertChars);
         }
         if caret_shift != 0 {
             let pos = (caret as isize + caret_shift).max(0) as usize;

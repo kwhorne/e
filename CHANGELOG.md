@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Formatting a file applied its changes one at a time.** A formatter's
+  edits, trimming trailing whitespace on save and a completion's extra edits
+  (a `use` import, say) each went in as a separate change. Every change
+  rebuilt the file's text and redid its syntax tree, git marks and
+  language-server update on the UI thread, so a formatter touching 400 lines
+  did all of that 400 times. They now go in as one change: in a measurement
+  of 2000 edits, 1 ms instead of 124 ms, before any of that work.
 - **Inline evaluation could write files.** `⌘↵` rolled back the database
   and faked mail and HTTP, but files written through `Storage` landed on
   disk, so evaluating something that saves an invoice saved it. Writes now

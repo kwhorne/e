@@ -6558,17 +6558,12 @@ impl AppState {
                 (s, en.max(s), e.new_text.clone())
             })
             .collect();
-        offs.sort_by_key(|b| std::cmp::Reverse(b.0));
-        let mut changed = false;
-        for (s, en, text) in offs {
-            if s == en && text.is_empty() {
-                continue;
-            }
-            buf.doc
-                .edit_single(Selection::region(s, en), &text, EditType::InsertChars);
-            changed = true;
+        offs.retain(|(s, en, text)| !(s == en && text.is_empty()));
+        if offs.is_empty() {
+            return false;
         }
-        changed
+        apply_batch(&buf.doc, offs, EditType::InsertChars);
+        true
     }
 
     /// Open a file by path. If it's already open, just focus it.
@@ -7344,16 +7339,14 @@ impl AppState {
         if edits.is_empty() && !needs_newline {
             return;
         }
-        // Delete trailing whitespace bottom-up so offsets stay valid.
-        for (s, e) in edits.into_iter().rev() {
-            buf.doc
-                .edit_single(Selection::region(s, e), "", EditType::Delete);
-        }
+        let mut batch: Vec<(usize, usize, String)> = edits
+            .into_iter()
+            .map(|(s, e)| (s, e, String::new()))
+            .collect();
         if needs_newline {
-            let len = buf.doc.text().len();
-            buf.doc
-                .edit_single(Selection::region(len, len), "\n", EditType::InsertChars);
+            batch.push((text.len(), text.len(), "\n".to_string()));
         }
+        apply_batch(&buf.doc, batch, EditType::Delete);
     }
 
     /// Save the active buffer to disk (formatting / trimming first, if enabled).
@@ -7901,6 +7894,41 @@ pub(crate) fn is_word_byte(b: u8) -> bool {
 
 /// Byte ranges of trailing whitespace per line, plus whether a final newline
 /// is missing. Used by trim-on-save.
+/// `edits` — `(start, end, new text)`, offsets into the document as it is now
+/// — as one edit: the document, its undo history, the syntax tree, the git
+/// marks and the language servers update once, not once per edit (a
+/// formatter that touches 400 lines made 400 full passes on the UI thread).
+pub(crate) fn apply_batch(
+    doc: &TextDocument,
+    edits: Vec<(usize, usize, String)>,
+    edit_type: EditType,
+) {
+    use floem::views::editor::text::Document;
+    let edits = batch_edits(edits);
+    let mut iter = edits
+        .iter()
+        .map(|(s, e, text)| (Selection::region(*s, *e), text.as_str()));
+    doc.edit(&mut iter, edit_type);
+}
+
+/// Edits in the order one batch takes them: by position, and inserts at the
+/// same place joined in the order they came (the language server protocol
+/// says that order is the order of the text; the batch would keep only one).
+fn batch_edits(mut edits: Vec<(usize, usize, String)>) -> Vec<(usize, usize, String)> {
+    edits.sort_by_key(|(s, e, _)| (*s, *e)); // stable: equal ones keep their order
+    let mut out: Vec<(usize, usize, String)> = Vec::with_capacity(edits.len());
+    for (s, e, text) in edits {
+        if let Some(last) = out.last_mut() {
+            if last.0 == s && last.1 == s && e == s {
+                last.2.push_str(&text);
+                continue;
+            }
+        }
+        out.push((s, e, text));
+    }
+    out
+}
+
 fn trailing_trim_edits(text: &str) -> (Vec<(usize, usize)>, bool) {
     let mut edits = Vec::new();
     let mut off = 0;
@@ -8418,5 +8446,95 @@ mod saved_text_tests {
         let mut edited = text.clone();
         edited.replace_range(40_000..40_001, "X");
         assert!(!same_text(&saved, &edited));
+    }
+}
+
+#[cfg(test)]
+mod batch_edit_tests {
+    use super::{apply_batch, batch_edits, trailing_trim_edits};
+    use floem::reactive::Scope;
+    use floem::views::editor::core::editor::EditType;
+    use floem::views::editor::text::Document;
+    use floem::views::editor::text_document::TextDocument;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// The edits one at a time, last first: what applying them used to do.
+    fn one_by_one(text: &str, edits: &[(usize, usize, &str)]) -> String {
+        let mut sorted = edits.to_vec();
+        sorted.sort_by_key(|(s, _, _)| std::cmp::Reverse(*s));
+        let mut out = text.to_string();
+        for (s, e, t) in sorted {
+            out.replace_range(s..e, t);
+        }
+        out
+    }
+
+    fn doc_with(text: &str) -> (Rc<TextDocument>, Rc<Cell<usize>>) {
+        let doc = Rc::new(TextDocument::new(Scope::new(), text));
+        let updates = Rc::new(Cell::new(0));
+        let seen = updates.clone();
+        doc.clone().add_on_update(move |_| seen.set(seen.get() + 1));
+        (doc, updates)
+    }
+
+    #[test]
+    fn a_batch_gives_the_same_text_in_one_update() {
+        let text = "fn a(){\n  x+1\n}\nfn b(){ y }\n";
+        let edits = [
+            (6, 6, " "),
+            (10, 13, "x + 1;"),
+            (0, 2, "pub fn"),
+            (21, 23, "{\n    y\n}"),
+        ];
+        let (doc, updates) = doc_with(text);
+        apply_batch(
+            &doc,
+            edits
+                .iter()
+                .map(|(s, e, t)| (*s, *e, t.to_string()))
+                .collect(),
+            EditType::InsertChars,
+        );
+        assert_eq!(doc.text().to_string(), one_by_one(text, &edits));
+        assert_eq!(updates.get(), 1, "one update for the whole batch");
+    }
+
+    #[test]
+    fn inserts_at_one_place_keep_their_order() {
+        let edits = vec![
+            (3, 3, "b".to_string()),
+            (0, 1, "X".to_string()),
+            (3, 3, "c".to_string()),
+            (3, 5, "D".to_string()),
+        ];
+        assert_eq!(
+            batch_edits(edits.clone()),
+            vec![
+                (0, 1, "X".to_string()),
+                (3, 3, "bc".to_string()),
+                (3, 5, "D".to_string()),
+            ]
+        );
+        let (doc, _) = doc_with("abcdefg");
+        apply_batch(&doc, edits, EditType::InsertChars);
+        assert_eq!(doc.text().to_string(), "XbcbcDfg");
+    }
+
+    #[test]
+    fn trimming_is_one_edit_too() {
+        let text = "a  \nb\t\nc";
+        let (edits, nl) = trailing_trim_edits(text);
+        let mut batch: Vec<(usize, usize, String)> = edits
+            .into_iter()
+            .map(|(s, e)| (s, e, String::new()))
+            .collect();
+        if nl {
+            batch.push((text.len(), text.len(), "\n".into()));
+        }
+        let (doc, updates) = doc_with(text);
+        apply_batch(&doc, batch, EditType::Delete);
+        assert_eq!(doc.text().to_string(), "a\nb\nc\n");
+        assert_eq!(updates.get(), 1);
     }
 }

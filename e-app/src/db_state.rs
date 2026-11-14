@@ -410,11 +410,25 @@ impl AppState {
         });
         self.db.result_loading.set(true);
         self.db.result_error.set(None);
+        // What each answer below is for. The user may have moved on to
+        // another table (or connection, or a console run) by the time it
+        // comes, and then it is dropped.
+        let gen = self.db_next_browse();
+        let shown = {
+            let state = *self;
+            let (key, table) = (key.clone(), table.clone());
+            move || state.db_browse_current(gen, &key, &table)
+        };
         // Total row count (with the active filter) for pagination, loaded in
         // parallel with the page.
         let send_count = create_ext_action(self.cx, {
             let state = *self;
-            move |n: i64| state.db.total_rows.set(Some(n))
+            let shown = shown.clone();
+            move |n: i64| {
+                if shown() {
+                    state.db.total_rows.set(Some(n));
+                }
+            }
         });
         {
             let (conn, engine, table, filter) =
@@ -426,7 +440,11 @@ impl AppState {
         }
         let send = create_ext_action(self.cx, {
             let state = *self;
-            move |res: Result<e_db::QueryResult, String>| state.db_apply_result(res)
+            move |res: Result<e_db::QueryResult, String>| {
+                if shown() {
+                    state.db_apply_result(res);
+                }
+            }
         });
         std::thread::spawn(move || {
             let by = sort.as_ref().map(|(c, a)| (c.as_str(), *a));
@@ -627,6 +645,38 @@ impl AppState {
         self.db_reload_table();
     }
 
+    /// Whether the results view still shows `table` of connection `key`.
+    fn db_showing(&self, key: &str, table: &str) -> bool {
+        self.db
+            .result_key
+            .with_untracked(|k| k.as_deref() == Some(key))
+            && self
+                .db
+                .result_table
+                .with_untracked(|t| t.as_deref() == Some(table))
+    }
+
+    /// Start a new browse (see `DbPanel::browse_gen`): answers to earlier
+    /// ones are dropped from now on. Returns the new one's number.
+    fn db_next_browse(&self) -> u64 {
+        self.db.browse_gen.update(|g| *g += 1);
+        self.db.browse_gen.get_untracked()
+    }
+
+    /// Whether browse `gen` of `table` on connection `key` is still the one
+    /// shown.
+    fn db_browse_current(&self, gen: u64, key: &str, table: &str) -> bool {
+        self.db.browse_gen.get_untracked() == gen && self.db_showing(key, table)
+    }
+
+    /// A fresh stop flag for a console run or search about to start, set by
+    /// Cancel (see `DbPanel::run_stop`).
+    fn db_new_run_stop(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.db.run_stop.set(stop.clone());
+        stop
+    }
+
     pub fn db_set_subview(&self, view: &str) {
         self.db.subview.set(view.to_string());
     }
@@ -637,7 +687,14 @@ impl AppState {
         };
         let send = create_ext_action(self.cx, {
             let state = *self;
+            let (key, table) = (entry.key(), table.clone());
             move |(cols, idx): (Vec<e_db::ColumnInfo>, Vec<e_db::IndexInfo>)| {
+                // The columns (and with them the primary key edits are made
+                // by) of a table no longer shown must not land on the one
+                // that is.
+                if !state.db_showing(&key, &table) {
+                    return;
+                }
                 state.db.columns.set(cols);
                 state.db.indexes.set(idx);
                 // The first page may have come before the primary key was known.
@@ -907,6 +964,8 @@ impl AppState {
         self.db.result_open.set(true);
         self.db.run_gen.update(|g| *g += 1);
         let gen = self.db.run_gen.get_untracked();
+        self.db_next_browse();
+        let stop = self.db_new_run_stop();
         let state = *self;
         let send = create_ext_action(self.cx, move |hits: Vec<(String, e_db::QueryResult)>| {
             if state.db.run_gen.get_untracked() != gen {
@@ -915,7 +974,9 @@ impl AppState {
             state.db_show_search_results(key.clone(), hits);
         });
         std::thread::spawn(move || {
-            send(e_db::search_all(&conn, &engine, &needle, DB_PAGE).unwrap_or_default());
+            // Cancel stops it before the next table.
+            let stopped = || stop.load(std::sync::atomic::Ordering::SeqCst);
+            send(e_db::search_all(&conn, &engine, &needle, DB_PAGE, stopped).unwrap_or_default());
         });
     }
 
@@ -1290,6 +1351,9 @@ impl AppState {
         // ignored when it returns.
         self.db.run_gen.update(|g| *g += 1);
         let gen = self.db.run_gen.get_untracked();
+        // A table page still on its way is no longer wanted either.
+        self.db_next_browse();
+        let stop = self.db_new_run_stop();
         // Metadata for the query-history log (written off the UI thread).
         let project = self.root.get_untracked().to_string_lossy().into_owned();
         let conn_label = entry.config.display_name();
@@ -1308,6 +1372,12 @@ impl AppState {
         std::thread::spawn(move || {
             let mut out = Vec::with_capacity(statements.len());
             for stmt in &statements {
+                // After Cancel the statements left aren't run: the one that
+                // was running has been stopped, and the rest would go on
+                // unseen (their results are dropped).
+                if stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
                 let res = e_db::query(&conn, stmt, e_db::MAX_ROWS);
                 if let Some(hp) = &history_path {
                     let (rows, dur, ok, err) = match &res {
@@ -1376,6 +1446,11 @@ impl AppState {
     /// elsewhere it runs to its end in the background.
     pub fn db_cancel_query(&self) {
         self.db.run_gen.update(|g| *g += 1);
+        self.db_next_browse();
+        // A console run or search stops before its next statement or table.
+        self.db
+            .run_stop
+            .with_untracked(|s| s.store(true, std::sync::atomic::Ordering::SeqCst));
         self.db.result_loading.set(false);
         let conn = self.db.result_key.get_untracked().and_then(|key| {
             self.db.conns.with_untracked(|c| {
@@ -2176,6 +2251,9 @@ impl AppState {
                     state.db.filter.set(None);
                     state.db.page.set(0);
                     state.db.columns.set(Vec::new());
+                    // A page of the table left behind (it may be this one,
+                    // through a self-reference) is no longer wanted.
+                    state.db_next_browse();
                     state.db_load_columns(entry.clone(), ref_table);
                     state.db_apply_result(res);
                 }

@@ -2124,15 +2124,20 @@ fn is_texty(data_type: &str) -> bool {
 
 /// Search every table's text columns for `needle` (case-insensitive substring),
 /// returning `(table, matching_rows)` for tables with at least one hit. Each
-/// table is capped at `limit` rows. Skips tables with no text columns.
+/// table is capped at `limit` rows. Skips tables with no text columns. Stops
+/// (with the hits so far) before the next table once `stopped` says so.
 pub fn search_all(
     conn: &Conn,
     engine: &str,
     needle: &str,
     limit: usize,
+    stopped: impl Fn() -> bool,
 ) -> Result<Vec<(String, QueryResult)>, String> {
     let mut out = Vec::new();
     for t in tables(conn)? {
+        if stopped() {
+            break;
+        }
         let cols = match columns(conn, &t) {
             Ok(c) => c,
             Err(_) => continue,
@@ -4690,13 +4695,17 @@ mod tests {
         assert!(referencing(&conn, "posts", "id").unwrap().is_empty());
 
         // search_all: 'O'Brien' is in posts.title
-        let hits = search_all(&conn, "sqlite", "Brien", 50).unwrap();
+        let hits = search_all(&conn, "sqlite", "Brien", 50, || false).unwrap();
         assert!(
             hits.iter().any(|(t, _)| t == "posts"),
             "expected a posts hit, got {:?}",
             hits.iter().map(|(t, _)| t).collect::<Vec<_>>()
         );
-        assert!(search_all(&conn, "sqlite", "nonexistent-zzz", 50)
+        assert!(search_all(&conn, "sqlite", "nonexistent-zzz", 50, || false)
+            .unwrap()
+            .is_empty());
+        // Stopped (cancelled), it searches no further.
+        assert!(search_all(&conn, "sqlite", "Brien", 50, || true)
             .unwrap()
             .is_empty());
 

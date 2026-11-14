@@ -628,6 +628,15 @@ pub struct DbPanel {
     /// Run generation: bumped on each run and on cancel, so a cancelled/superseded
     /// query's result is discarded when it finally returns.
     pub run_gen: RwSignal<u64>,
+    /// Set by Cancel for the console run or cross-table search going now, so
+    /// its thread stops before its next statement or table instead of
+    /// running through the rest unseen.
+    pub run_stop: RwSignal<Arc<std::sync::atomic::AtomicBool>>,
+    /// Browse generation: bumped on each table (re)load, and by anything
+    /// else that takes over the grid (a console run, a search, Cancel), so a
+    /// slow page, count or column list for a table no longer shown is
+    /// dropped instead of landing on the one that is.
+    pub browse_gen: RwSignal<u64>,
     /// Total row count of the current browsed table (with filter), for paging.
     pub total_rows: RwSignal<Option<i64>>,
     /// EXPLAIN findings (full scans / missing indexes) for the current plan.
@@ -723,6 +732,8 @@ impl DbPanel {
             result_tabs: RwSignal::new(Vec::new()),
             active_tab: RwSignal::new(0),
             run_gen: RwSignal::new(0),
+            run_stop: RwSignal::new(Arc::default()),
+            browse_gen: RwSignal::new(0),
             total_rows: RwSignal::new(None),
             explain_issues: RwSignal::new(Vec::new()),
             search_query: RwSignal::new(String::new()),

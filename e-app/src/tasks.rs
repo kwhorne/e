@@ -156,9 +156,15 @@ pub fn filter_pattern(name: &str) -> String {
 
 /// The arguments that narrow a PHP test run to `name` in `file` (a path
 /// relative to the root): appended to `test_command`'s runner.
+/// Both are quoted for the shell the run goes through: a test name is
+/// whatever the test file says, `$(…)` and backquotes included.
 pub fn single_test_args(file: &str, name: &str) -> String {
-    let pattern = filter_pattern(name).replace('"', "\\\"");
-    format!("{file} --filter=\"{pattern}\"")
+    use crate::cascade::shell_quote;
+    format!(
+        "{} --filter={}",
+        shell_quote(file),
+        shell_quote(&filter_pattern(name))
+    )
 }
 
 /// Tasks Grove adds to a Laravel project: its dev processes (Vite, queue
@@ -364,5 +370,39 @@ mod test_at_cursor_tests {
             "sends a receipt \\(once\\)"
         );
         assert_eq!(filter_pattern("test_totals"), "test_totals");
+    }
+
+    #[test]
+    fn single_test_args_are_quoted_for_the_shell() {
+        assert_eq!(
+            single_test_args("tests/Unit/OrderTest.php", "test_totals"),
+            "tests/Unit/OrderTest.php --filter=test_totals"
+        );
+        assert_eq!(
+            single_test_args("tests/Feature/A Test.php", "it's (once)"),
+            "'tests/Feature/A Test.php' --filter='it'\\''s \\(once\\)'"
+        );
+    }
+
+    /// What the shell hands the test runner is the file and the pattern,
+    /// untouched: nothing in a test's name is run.
+    #[cfg(unix)]
+    #[test]
+    fn a_test_name_is_not_run_by_the_shell() {
+        let name = r#"runs $(echo HACKED) `echo HACKED` "q" it's a\b ${HOME}"#;
+        let args = single_test_args("tests/$(echo HACKED).php", name);
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!("printf '%s\\n' {args}"))
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<&str> = out.lines().collect();
+        let filter = format!("--filter={}", filter_pattern(name));
+        assert_eq!(
+            lines,
+            vec!["tests/$(echo HACKED).php", filter.as_str()],
+            "{out}"
+        );
     }
 }

@@ -132,6 +132,10 @@ pub struct DbForm {
     pub password: String,
     pub path: String,
     pub group: String,
+    /// The connection's label (from .env, the project's name), which the
+    /// form doesn't show but must keep: it is one of the hints that a
+    /// connection is production.
+    pub label: String,
     pub use_ssh: bool,
     pub ssh_host: String,
     pub ssh_port: String,
@@ -158,6 +162,7 @@ impl Default for DbForm {
             password: String::new(),
             path: String::new(),
             group: String::new(),
+            label: String::new(),
             use_ssh: false,
             ssh_host: String::new(),
             ssh_port: "22".into(),
@@ -187,7 +192,7 @@ impl DbForm {
             password: self.password.clone(),
             path: self.path.clone(),
             group: self.group.clone(),
-            label: String::new(),
+            label: self.label.clone(),
             use_ssh: self.use_ssh,
             ssh_host: self.ssh_host.clone(),
             ssh_port: self.ssh_port.parse().unwrap_or(22),

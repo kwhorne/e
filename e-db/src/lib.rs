@@ -582,10 +582,14 @@ impl Conn {
     }
 
     /// Refuse `statements` if this connection is read-only and any of them
-    /// might write.
+    /// might write. A ROLLBACK always goes through: it only discards, and a
+    /// PostgreSQL session in a failed transaction can't do anything else.
     fn guard(&self, statements: &[&str]) -> Result<(), String> {
         if self.is_read_only() {
-            if let Some(s) = statements.iter().find(|s| !is_read_only(s)) {
+            if let Some(s) = statements
+                .iter()
+                .find(|s| !is_read_only(s) && !classify::is_rollback(s))
+            {
                 let head: String = s.trim().chars().take(60).collect();
                 return Err(format!(
                     "Read-only connection: refusing a statement that may write ({head}). \
@@ -679,6 +683,15 @@ impl Conn {
             .map_err(pg_err)?;
         self.session_ro.store(want, Ordering::SeqCst);
         Ok(())
+    }
+
+    /// Set the PostgreSQL session's read-only mode again, whatever it is
+    /// thought to be: after a ROLLBACK, which undoes a SET made inside the
+    /// transaction it ends.
+    fn resync_pg_session(&self, client: &mut postgres::Client) -> Result<(), String> {
+        self.session_ro
+            .store(!self.is_read_only(), Ordering::SeqCst);
+        self.sync_pg_session(client)
     }
 }
 
@@ -2690,7 +2703,12 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
         }
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
-            conn.sync_pg_session(&mut client)?;
+                                                                          // A ROLLBACK goes first: in a failed transaction the SET that
+                                                                          // syncs the session would itself fail.
+            let rollback = classify::is_rollback(sql);
+            if !rollback {
+                conn.sync_pg_session(&mut client)?;
+            }
             let res = match pg_limited(sql, max) {
                 Some(limited) => match pg_run(&mut client, &limited, max) {
                     Ok(res) => res,
@@ -2713,6 +2731,11 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
                 },
                 None => pg_query(&mut client, sql, max)?,
             };
+            if rollback {
+                // The rollback also undid any SET made in the transaction,
+                // the session's read-only one among them.
+                conn.resync_pg_session(&mut client)?;
+            }
             if select || !res.columns.is_empty() {
                 Ok(QueryResult {
                     columns: res.columns,
@@ -4237,6 +4260,12 @@ mod tests {
         assert!(query(&conn, "DELETE FROM t", 0).is_err());
         assert!(query(&conn, "WITH d AS (SELECT 1) DELETE FROM t", 0).is_err());
         assert!(execute_transaction(&conn, &["UPDATE t SET v = 'b'".into()]).is_err());
+        // A ROLLBACK is let through (here SQLite has no transaction to end).
+        let err = query(&conn, "ROLLBACK", 0).unwrap_err();
+        assert!(!err.starts_with("Read-only connection"), "{err}");
+        assert!(query(&conn, "ROLLBACK; DELETE FROM t", 0)
+            .unwrap_err()
+            .starts_with("Read-only connection"));
         // A write the classifier would wave through still fails at the driver,
         // because the file is opened read-only.
         assert!(conn

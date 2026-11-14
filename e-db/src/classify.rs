@@ -2,23 +2,31 @@
 //! write?
 //!
 //! Both questions are answered from the statement's words outside string
-//! literals, quoted identifiers and comments. The read-only answer gates writes
-//! to production and read-only connections, so it errs towards "writes": a
-//! statement is read-only only when it starts with a reading keyword and no
-//! writing keyword appears anywhere in it — which also catches writable CTEs
-//! (`WITH d AS (DELETE …) SELECT …`), `SELECT … INTO` and `EXPLAIN ANALYZE
-//! <write>`.
+//! literals and comments. The read-only answer gates writes to production and
+//! read-only connections, so it errs towards "writes": a statement is
+//! read-only only when it starts with a reading keyword and no writing keyword
+//! appears anywhere in it — which also catches writable CTEs (`WITH d AS
+//! (DELETE …) SELECT …`), `SELECT … INTO` and `EXPLAIN ANALYZE <write>`. A
+//! quoted identifier is never a keyword, but it can still name a function
+//! that writes (`pg_catalog."set_config"(…)`).
 //!
-//! Engines disagree on two lexical points that matter here: MySQL treats `\`
-//! inside a string as an escape and `#` as a line comment, PostgreSQL (with
-//! standard strings) does neither. A statement written to look harmless under
-//! one reading could hide a write under the other, so it is tokenised both ways
-//! and counts as read-only only if both readings agree.
+//! Engines disagree on several lexical points that matter here. MySQL treats
+//! `\` inside a string as an escape and `#` as a line comment, and runs the
+//! body of `/*! … */`. PostgreSQL (with
+//! standard strings) does none of that, but has dollar-quoted strings
+//! (`$$ … $$`, `$tag$ … $tag$`) and block comments that nest. A statement
+//! written to look harmless under one reading could hide a write under the
+//! other, so it is tokenised both ways and counts as read-only only if both
+//! readings agree.
 
-/// A word or one of the punctuation marks the rules care about.
+/// A word, a quoted identifier, or one of the punctuation marks the rules
+/// care about.
 #[derive(Debug, PartialEq)]
 enum Tok {
     Word(String),
+    /// A `"…"` or `` `…` `` name, lowercased. (To MySQL `"…"` is a string,
+    /// but taking it for a name only ever finds more writes.)
+    Quoted(String),
     Open,
     Close,
     Eq,
@@ -30,16 +38,43 @@ struct Dialect {
     backslash_escapes: bool,
     /// `#` starts a line comment.
     hash_comments: bool,
+    /// MySQL's block comments: the body of `/*! … */` and `/*+ … */` is
+    /// SQL, and the first `*/` ends a comment. Otherwise (PostgreSQL) every
+    /// `/* … */` is a comment, and they nest.
+    mysql_comments: bool,
+    /// `$$ … $$` and `$tag$ … $tag$` are strings.
+    dollar_quotes: bool,
 }
 
 const MYSQLISH: Dialect = Dialect {
     backslash_escapes: true,
     hash_comments: true,
+    mysql_comments: true,
+    dollar_quotes: false,
 };
 const STANDARD: Dialect = Dialect {
     backslash_escapes: false,
     hash_comments: false,
+    mysql_comments: false,
+    dollar_quotes: true,
 };
+
+/// The length of the `$tag$` opening a dollar-quoted string at `i`, if one
+/// does: `$`, an optional tag (a name not starting with a digit — `$1` is a
+/// parameter), `$`. A `$` inside a name (`a$b`) never gets here: names
+/// take it in.
+fn dollar_tag(chars: &[char], i: usize) -> Option<usize> {
+    let mut j = i + 1;
+    if chars.get(j).is_some_and(|c| c.is_alphabetic() || *c == '_') {
+        while chars
+            .get(j)
+            .is_some_and(|c| c.is_alphanumeric() || *c == '_')
+        {
+            j += 1;
+        }
+    }
+    (chars.get(j) == Some(&'$')).then_some(j + 1 - i)
+}
 
 fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
     let chars: Vec<char> = sql.chars().collect();
@@ -66,8 +101,23 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
                     }
                     j += 1;
                 }
+                if c != '\'' {
+                    let name: String = chars[i + 1..j.min(chars.len())].iter().collect();
+                    out.push(Tok::Quoted(name.to_lowercase()));
+                }
                 i = j + 1;
             }
+            '$' if d.dollar_quotes && dollar_tag(&chars, i).is_some() => {
+                let len = dollar_tag(&chars, i).unwrap_or(1);
+                let tag = &chars[i..i + len];
+                let mut j = i + len;
+                while j < chars.len() && !chars[j..].starts_with(tag) {
+                    j += 1;
+                }
+                i = j + len;
+            }
+            // (MySQL wants a space after `--`; both readings take `--x` for a
+            // comment anyway, as every other engine does.)
             '-' if next == Some('-') => {
                 while i < chars.len() && chars[i] != '\n' {
                     i += 1;
@@ -79,13 +129,27 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
                 }
             }
             // MySQL runs the body of `/*! … */` (and hints in `/*+ … */` are
-            // still SQL), so only a plain block comment is skipped.
-            '/' if next == Some('*') && !matches!(chars.get(i + 2), Some('!') | Some('+')) => {
+            // still SQL), so there only a plain block comment is skipped.
+            '/' if next == Some('*')
+                && !(d.mysql_comments && matches!(chars.get(i + 2), Some('!') | Some('+'))) =>
+            {
                 i += 2;
-                while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
-                    i += 1;
+                let mut depth = 1;
+                while i < chars.len() {
+                    if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                        i += 2;
+                        depth -= 1;
+                        if depth == 0 || d.mysql_comments {
+                            break;
+                        }
+                    } else if !d.mysql_comments && chars[i] == '/' && chars.get(i + 1) == Some(&'*')
+                    {
+                        i += 2;
+                        depth += 1;
+                    } else {
+                        i += 1;
+                    }
                 }
-                i += 2;
             }
             '(' => {
                 out.push(Tok::Open);
@@ -101,7 +165,9 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
             }
             c if c.is_alphanumeric() || c == '_' => {
                 let start = i;
-                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                while i < chars.len()
+                    && (chars[i].is_alphanumeric() || chars[i] == '_' || chars[i] == '$')
+                {
                     i += 1;
                 }
                 out.push(Tok::Word(
@@ -114,10 +180,13 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
     out
 }
 
-/// The statement's first keyword, skipping leading comments and `(`.
+/// The statement's first keyword, skipping leading comments and `(`. A
+/// quoted name where the keyword should be is no keyword (`"select"` is a
+/// column), so it gives a word that matches none.
 fn first_word(toks: &[Tok]) -> Option<&str> {
     toks.iter().find_map(|t| match t {
         Tok::Word(w) => Some(w.as_str()),
+        Tok::Quoted(_) => Some("\""),
         _ => None,
     })
 }
@@ -143,21 +212,15 @@ pub(crate) fn limitable(sql: &str) -> bool {
 
 /// Keywords that make a statement write, wherever they appear.
 const WRITE_WORDS: &[&str] = &[
-    "insert",
-    "update",
-    "delete",
-    "merge",
-    "upsert",
-    "truncate",
-    "drop",
-    "alter",
-    "create",
-    "rename",
-    "grant",
-    "revoke",
-    // `SELECT … INTO new_table` / `INTO OUTFILE`.
+    "insert", "update", "delete", "merge", "upsert", "truncate", "drop", "alter", "create",
+    "rename", "grant", "revoke", // `SELECT … INTO new_table` / `INTO OUTFILE`.
     "into",
-    // PostgreSQL functions that change state from inside a SELECT.
+];
+
+/// PostgreSQL functions that change state from inside a SELECT. Unlike a
+/// keyword, a function can be named in quotes (`"set_config"(…)`), so these
+/// count quoted too.
+const WRITE_FUNCTIONS: &[&str] = &[
     "setval",
     "nextval",
     "set_config",
@@ -194,7 +257,15 @@ fn read_only_in(sql: &str, d: Dialect) -> bool {
             _ => None,
         })
     };
-    let writes = || words().any(|w| WRITE_WORDS.contains(&w));
+    let writes = || {
+        toks.iter().any(|t| match t {
+            Tok::Word(w) => {
+                WRITE_WORDS.contains(&w.as_str()) || WRITE_FUNCTIONS.contains(&w.as_str())
+            }
+            Tok::Quoted(name) => WRITE_FUNCTIONS.contains(&name.as_str()),
+            _ => false,
+        })
+    };
     match first_word(&toks) {
         Some("select" | "with" | "values" | "table" | "show" | "describe" | "desc") => !writes(),
         // A plain EXPLAIN only plans; EXPLAIN ANALYZE runs the statement.
@@ -221,6 +292,41 @@ fn read_only_in(sql: &str, d: Dialect) -> bool {
 /// counts as a write.
 pub fn is_read_only(sql: &str) -> bool {
     read_only_in(sql, MYSQLISH) && read_only_in(sql, STANDARD)
+}
+
+fn rollback_in(sql: &str, d: Dialect) -> bool {
+    let toks = tokens(sql, d);
+    // Each token as a word; a quoted name as `"`, punctuation as nothing.
+    let words: Vec<Option<&str>> = toks
+        .iter()
+        .map(|t| match t {
+            Tok::Word(w) => Some(w.as_str()),
+            Tok::Quoted(_) => Some("\""),
+            _ => None,
+        })
+        .collect();
+    let rest = match words.as_slice() {
+        [Some("rollback" | "abort"), Some("work" | "transaction"), rest @ ..]
+        | [Some("rollback" | "abort"), rest @ ..] => rest,
+        _ => return false,
+    };
+    match rest {
+        [] | [Some("and"), Some("chain")] | [Some("and"), Some("no"), Some("chain")] => true,
+        // `TO [SAVEPOINT] name`.
+        [Some("to"), Some("savepoint"), Some(_)] => true,
+        [Some("to"), Some(name)] => *name != "savepoint",
+        _ => false,
+    }
+}
+
+/// Whether the statement only ends (or goes back within) the transaction:
+/// `ROLLBACK`, `ABORT` or `ROLLBACK TO SAVEPOINT`, and nothing else. That
+/// discards changes rather than making them, and a session left in a failed
+/// transaction can do nothing else, so a read-only connection lets it
+/// through. (`ROLLBACK PREPARED` throws away another transaction's work and
+/// doesn't count.)
+pub(crate) fn is_rollback(sql: &str) -> bool {
+    rollback_in(sql, MYSQLISH) && rollback_in(sql, STANDARD)
 }
 
 fn destructive_in(sql: &str, d: Dialect) -> Option<&'static str> {
@@ -439,5 +545,87 @@ mod tests {
         // `#` is a comment to MySQL, an operator to Postgres.
         let sql = "WITH a AS (SELECT 1 # 1), d AS (DELETE FROM t RETURNING 1) SELECT 1";
         assert!(!is_read_only(sql));
+    }
+
+    #[test]
+    fn a_quoted_function_name_still_counts() {
+        // Turning PostgreSQL's read-only session off from inside a SELECT.
+        for sql in [
+            "SELECT pg_catalog.\"set_config\"('default_transaction_read_only', 'off', false)",
+            "SELECT \"set_config\"('default_transaction_read_only', 'off', false)",
+            "SELECT \"SetVal\"('s', 1)",
+            "SELECT `nextval`('s')",
+        ] {
+            assert!(!is_read_only(sql), "{sql}");
+        }
+        // A quoted name isn't a keyword, though.
+        assert!(is_read_only("SELECT \"into\", `drop` FROM t"));
+        assert!(!is_read_only("\"select\" FROM t"));
+    }
+
+    #[test]
+    fn dollar_quotes_are_strings_to_postgres() {
+        // Read as `'…'` strings, the quotes hid the DELETE.
+        for sql in [
+            "WITH a AS (SELECT $$ ' $$), d AS (DELETE FROM t RETURNING 1) SELECT $$ ' $$",
+            "WITH a AS (SELECT $q$ ' $q$), d AS (DELETE FROM t RETURNING 1) SELECT $q$ ' $q$",
+        ] {
+            assert!(!is_read_only(sql), "{sql}");
+            assert_eq!(is_destructive(sql), Some("DELETE without WHERE"), "{sql}");
+        }
+        // To PostgreSQL what's inside one is a string. (MySQL has no dollar
+        // quotes, so the statement as a whole still isn't vouched for.)
+        let pg = |sql| read_only_in(sql, STANDARD);
+        assert!(pg("SELECT $$delete from t$$"));
+        assert!(pg("SELECT $body$ drop table x $body$ AS s"));
+        assert!(!is_read_only("SELECT $$delete from t$$"));
+        // A tag must match: `$a$` doesn't end at `$b$`.
+        assert!(pg("SELECT $a$ $b$ drop $b$ $a$"));
+        // `a$b$` is a name and `$1$` no tag, not quotes.
+        assert!(!pg("SELECT a$b$ FROM t; DELETE FROM t; SELECT $b$"));
+        assert!(!pg("SELECT $1$ FROM t; DELETE FROM t; SELECT $1$"));
+    }
+
+    #[test]
+    fn postgres_block_comments_nest() {
+        // PostgreSQL's comment ends at the second `*/`, so the quote after the
+        // first one is inside it and the DELETE runs.
+        let sql = "WITH a AS (SELECT 1 /* /* */ ' */), d AS (DELETE FROM t RETURNING 1) SELECT '1'";
+        assert!(!is_read_only(sql));
+        assert_eq!(is_destructive(sql), Some("DELETE without WHERE"));
+        assert!(read_only_in(
+            "/* outer /* inner */ still a comment */ SELECT 1",
+            STANDARD
+        ));
+        // `/*! … */` is SQL only to MySQL; to PostgreSQL it is a comment.
+        let sql = "WITH a AS (SELECT 1 /*! ' */), d AS (DELETE FROM t RETURNING 1) SELECT '1'";
+        assert!(!is_read_only(sql));
+        assert_eq!(is_destructive(sql), Some("DELETE without WHERE"));
+    }
+
+    #[test]
+    fn rollbacks_are_recognised() {
+        for sql in [
+            "ROLLBACK",
+            "rollback;",
+            "ROLLBACK WORK",
+            "ROLLBACK TRANSACTION AND NO CHAIN",
+            "ABORT",
+            "ROLLBACK TO SAVEPOINT sp1",
+            "ROLLBACK TO sp1",
+            "ROLLBACK TRANSACTION TO SAVEPOINT \"Sp 1\"",
+            "-- give up\nROLLBACK",
+        ] {
+            assert!(is_rollback(sql), "{sql}");
+        }
+        for sql in [
+            "ROLLBACK PREPARED 'tx1'",
+            "ROLLBACK; DELETE FROM t",
+            "ROLLBACK TO SAVEPOINT",
+            "SELECT 1",
+            "ROLLBACK /* x */ AND DROP",
+        ] {
+            assert!(!is_rollback(sql), "{sql}");
+        }
     }
 }

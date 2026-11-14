@@ -5,7 +5,7 @@
 | **Status** | Under arbeid — alle fem faser er påbegynt, mange krav er delvis levert |
 | **Eier** | Knut W. Horne |
 | **Baseline** | `e` v0.7.5 (juli 2026) |
-| **Status oppdatert** | `e` v0.20.0 (november 2026), etter gjennomgang av koden |
+| **Status oppdatert** | `e` v0.20.0 (november 2026), etter gjennomgang av koden; feilrettinger etter v0.20.0 (#54, #56) tatt med |
 | **Referansenivå** | PhpStorm 2026.x database tools (DataGrip-motoren) |
 
 ## 1. Bakgrunn og mål
@@ -83,18 +83,31 @@ tabell, `db_explain`/`db_snapshot` på agent-socketen.
 
 ### Kjente feil og hull (bør tas før nye krav)
 
-1. **Ventende endringer forsvinner stille.** Enhver ny innlasting — bla side,
-   sortere, filtrere, bytte tabell — tømmer dem (`db_apply_result` i
-   `db_state.rs`). Endringslinjen skal nettopp hindre at endringer «glemmes»
-   (§5.1).
-2. **«+ Row» går utenom trygghetsrekkverket.** Innsetting skrives straks, uten
-   bekreftelsesdialog på staging/produksjon og uten innslag i angre-loggen
-   (`db_commit_insert`). Bryter DB-303 og DB-703.
-3. **Å åpne en tabell sletter alle resultat-faner**, også pinnede (DB-404).
-4. **Søk i data og EXPLAIN fra runtime-panelet bruker første tilkoblede
+1. **Å åpne en tabell sletter alle resultat-faner**, også pinnede (DB-404).
+2. **Søk i data og EXPLAIN fra runtime-panelet bruker første tilkoblede
    database**, ikke den aktive.
-5. **Konsoll-completion henter skjema fra `.env`-tilkoblingen**, ikke fra
+3. **Konsoll-completion henter skjema fra `.env`-tilkoblingen**, ikke fra
    tilkoblingen konsollen kjører mot.
+
+### Rettet etter v0.20.0
+
+- **Ventende endringer forsvant stille** ved bla, sortering, filter og
+  tabellbytte. De holdes nå per primærnøkkel og overlever til Submit eller
+  Revert; endringslinjen sier hvilken tabell de gjelder (#54).
+- **«+ Row» gikk utenom trygghetsrekkverket.** Mot ikke-lokale tilkoblinger går
+  innsetting nå via bekreftelsesdialogen, og alle innsettinger logges (#54).
+- **Read-only ClickHouse kunne ikke lese** (`readonly=1` nektet radgrensen);
+  nå `readonly=2` (#56).
+- **Klassifisereren lot seg lure** av siterte navn (`"set_config"`),
+  `$$`-strenger og nestede kommentarer, og nektet ROLLBACK på read-only
+  PostgreSQL (#56).
+- **En begrenset PostgreSQL-lesing kunne kjøres to ganger** ved
+  rettighetsfeil underveis (#56).
+- **Cancel stoppet ikke resten** av en flersetnings-kjøring eller søk i data,
+  og et tregt svar for forrige tabell kunne havne på den nye (#56).
+- **Redigering av en tilkobling mistet etiketten** (og dermed en
+  produksjonsmarkering gjettet fra den), og et nytt passord ble vist mens det
+  ble skrevet (#56).
 
 ### Dokumentasjon som lover mer enn koden
 
@@ -112,8 +125,9 @@ tabell, `db_explain`/`db_snapshot` på agent-socketen.
   lest fra `.env` (`DB_SSLMODE`, `MYSQL_ATTR_SSL_CA`); Verify gjennom tunnel
   sjekker det ekte vertsnavnet.
 - **Skrivevern på serveren**, ikke bare i UI: read-only-sesjon i MySQL og
-  PostgreSQL, SQLite åpnet read-only, ClickHouse `readonly=1`, og en
-  token-klassifiserer foran konsoll, import, agent-queries og transaksjoner.
+  PostgreSQL, SQLite åpnet read-only, ClickHouse `readonly=2`, og en
+  token-klassifiserer foran konsoll, import, agent-queries og transaksjoner
+  (med PostgreSQLs egen lesing av `$$`-strenger og nestede kommentarer).
 - **Radgrense på serveren**: PostgreSQL stopper ved grensen, ClickHouse
   strømmes; store resultater leses ikke hele før de kappes.
 - **PostgreSQL-feil** vises med serverens egen melding, DETAIL og HINT.
@@ -141,8 +155,8 @@ på manuell testing.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-101 | ✅ Auto-tilkobling fra `.env`, manuelle tilkoblinger, SSH-tunnel | — | ✅ |
-| DB-102 | Miljø-etikett per tilkobling: `local` / `staging` / `production`, med farge (grønn/gul/rød) synlig i panel-header, datagrid og konsoll. Auto-gjettes (hostname, `.env` vs manuell) men kan overstyres | P0 | ◐ Gjettes fra navn og vert; prikk + badge i tilkoblingslisten, prikk i resultat-header, farget tittel i bekreftelsen. Mangler: manuell overstyring, badge i grid/konsoll, farget grid-ramme, miljø i agent-consent |
-| DB-103 | ✅ Read-only-flagg per tilkobling; produksjon read-only som standard | — | ✅ Alle ikke-lokale verter og SSH starter read-only. Bryteren lagres ikke |
+| DB-102 | Miljø-etikett per tilkobling: `local` / `staging` / `production`, med farge (grønn/gul/rød) synlig i panel-header, datagrid og konsoll. Auto-gjettes (hostname, `.env` vs manuell) men kan overstyres | P0 | ◐ Gjettes fra navn og vert; prikk + badge i tilkoblingslisten, prikk i resultat-header, farget tittel i bekreftelsen. Etiketten beholdes nå når en tilkobling redigeres. Mangler: manuell overstyring, badge i grid/konsoll, farget grid-ramme, miljø i agent-consent |
+| DB-103 | ✅ Read-only-flagg per tilkobling; produksjon read-only som standard | — | ✅ Alle ikke-lokale verter og SSH starter read-only. Bryteren lagres ikke. ClickHouse bruker `readonly=2` (radgrensen virker) |
 | DB-104 | Flere samtidige tilkoblinger åpne, med rask bytte (dropdown i panel-header); aktiv tilkobling alltid synlig med miljøfarge | P0 | ◐ Flere tilkoblinger kan være åpne samtidig. Mangler: dropdown i header for å bytte aktiv tilkobling |
 | DB-105 | Tilkoblingstest med tydelig feilmelding (DNS, auth, tunnel, driver) | P1 | ◐ Test-knapp viser driverens rå feil. Mangler: kategorier (DNS, auth, tunnel, driver) |
 | DB-106 | Keychain-lagring av passord (macOS Keychain / Secret Service på Linux) i stedet for klartekst i prosjektfil | P1 | ✅ Faller tilbake til `databases.json` (0600) uten keyring |
@@ -165,7 +179,7 @@ på manuell testing.
 | --- | --- | --- | --- |
 | DB-301 | ✅ Sortering, kolonnefiltre, celle-redigering, ny rad, slett rad, FK-hopping | — | ✅ Kolonnefilter er ett likhetsfilter fra en celle (chip), ikke en filterrad |
 | DB-302 | Paginering: «neste/forrige side» + hopp til side, med totalantall; rad-cap erstattes av ekte sider | P0 | ✅ 200 rader per side, hopp til side, totalantall. Sidestørrelsen er ikke en innstilling; konsollen kappes fortsatt ved 1000 |
-| DB-303 | Transaksjonell redigering: endringer (celler, nye rader, slettinger) samles lokalt og markeres visuelt; egen **Submit**-knapp kjører alt i én transaksjon, **Revert** forkaster. Direkte-skriv beholdes som opt-in for lokal utvikling | P0 | ◐ Celleendringer og slettinger samles, Submit/Revert i én transaksjon. Mangler: nye rader (skrives direkte), gjennomstreking, opt-in direkte-skriv. Ventende endringer tømmes ved innlasting (§3) |
+| DB-303 | Transaksjonell redigering: endringer (celler, nye rader, slettinger) samles lokalt og markeres visuelt; egen **Submit**-knapp kjører alt i én transaksjon, **Revert** forkaster. Direkte-skriv beholdes som opt-in for lokal utvikling | P0 | ◐ Celleendringer og slettinger samles per primærnøkkel og overlever bla, sortering, filter og tabellbytte; Submit/Revert i én transaksjon. Mangler: nye rader i endringssettet (lokalt skrives de direkte, ellers via bekreftelse), gjennomstreking, opt-in direkte-skriv |
 | DB-304 | Verdi-editor: åpne celleverdi i eget felt/modal for lange tekster; JSON-kolonner vises formatert (pretty-print) med fold, og valideres før lagring | P0 | ◐ Skrivebeskyttet verdivisning med JSON pretty-print. Mangler: flerlinjers editor, fold, valider-før-lagre, ⌘Enter |
 | DB-305 | NULL håndteres eksplisitt: vis `NULL` distinkt fra tom streng; sett-til-NULL-handling | P0 | ✅ Dim `NULL` (ikke kursiv), NULL-avkrysning i rediger- og ny rad-dialog |
 | DB-306 | Kopier celle / rad (som CSV, JSON eller `INSERT`-setning) fra kontekstmeny | P1 | ✗ |
@@ -188,7 +202,7 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | DB-406 | ✅ Lagrede queries per prosjekt | — | ✅ Ingen UI for å slette en lagret query |
 | DB-407 | Feilposisjonering: syntaksfeil fra serveren markerer riktig posisjon i konsollen der driveren oppgir den; «✨ Explain with agent» beholdes | P1 | ✗ Feilen vises som tekst; «Explain with agent» finnes |
 | DB-408 | Parametere: `:navn`-placeholdere prompter for verdi ved kjøring (med husk-siste) | P1 | ✅ Siste verdier huskes bare i økten |
-| DB-409 | Kansellerbar kjøring: lange queries kan avbrytes uten å fryse panelet | P0 | ✅ PostgreSQL cancel-token, MySQL/ClickHouse `KILL QUERY`, SQLite interrupt |
+| DB-409 | Kansellerbar kjøring: lange queries kan avbrytes uten å fryse panelet | P0 | ✅ PostgreSQL cancel-token, MySQL/ClickHouse `KILL QUERY`, SQLite interrupt; stopper også resten av en flersetnings-kjøring |
 | DB-410 | Format SQL-kommando i konsollen | P2 | ✗ |
 
 ### 4.5 Import og eksport
@@ -217,9 +231,9 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | --- | --- | --- | --- |
 | DB-701 | ✅ Prod-deteksjon med read-only som standard; consent-dialog for agent-queries | — | ✅ |
 | DB-702 | Destruktive setninger (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` uten `WHERE`) krever eksplisitt bekreftelse med setningen gjengitt — på *alle* miljøer, ikke bare prod | P0 | ✅ |
-| DB-703 | Ved skriv mot ikke-lokal tilkobling: bekreftelsesdialog viser miljøetikett i farge + antall rader som påvirkes | P0 | ◐ Miljøfarget tittel, setningene, avkrysning når ikke-lokal. Mangler: antall rader som påvirkes; «+ Row» går utenom |
+| DB-703 | Ved skriv mot ikke-lokal tilkobling: bekreftelsesdialog viser miljøetikett i farge + antall rader som påvirkes | P0 | ◐ Miljøfarget tittel, setningene, avkrysning når ikke-lokal. «+ Row» går også via dialogen. Mangler: antall rader som påvirkes |
 | DB-704 | Databasesnapshots: ta snapshot (mysqldump/pg_dump/SQLite-kopi) og tilbakestill, én knapp per tilkobling (kun lokale miljøer). Integreres med agent-flyter («ta snapshot før migrasjon») | P2 | ◐ Snapshot lokalt (SQLite, MySQL, PostgreSQL). Mangler: gjenoppretting i UI (`restore_snapshot` finnes), agent-flyt, ClickHouse |
-| DB-705 | Angre-logg for datagrid-endringer i økten: liste over utførte skriv med generert motsatt setning der det er mulig | P2 | ◐ Angre-logg for celleendringer i økten. Mangler: slettinger og innsettinger |
+| DB-705 | Angre-logg for datagrid-endringer i økten: liste over utførte skriv med generert motsatt setning der det er mulig | P2 | ◐ Angre-logg for celleendringer og innsettinger i økten (Undo for innsetting når primærnøkkelen ble oppgitt). Mangler: slettinger |
 
 ### 4.8 Laravel- og agent-lag (forbi paritet — skal bevares og utvides)
 
@@ -229,7 +243,7 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | DB-802 | Factory-integrasjon: «Seed N rader» på tabell (kjører factory via Tinker); «Generer factory fra skjema» der factory mangler | P1 | ◐ «Seed 10» via factory (fast antall, lokalt, krever trust). Mangler: valgt N, factory fra skjema |
 | DB-803 | Migrasjonsgenerering fra strukturendringer: endrer man kolonner/indekser i Structure-fanen, tilbys en generert migrasjon i stedet for direkte DDL (direkte DDL kun på lokale miljøer) | P2 | ◐ «+ Migration» lager tomt `Schema::table`-skjelett. Structure kan ikke redigeres |
 | DB-804 | Agent-socket utvides: `db_explain` (fritt, read-only) og `db_snapshot` (consent) | P2 | ✗ Socketen har `db_schema` og `db_query` |
-| DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 | ◐ LIKE over tekstkolonner, 200 rader per tabell. Mangler: velger første database, avbrudd stopper ikke løkken, skiller store/små bokstaver på PostgreSQL |
+| DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 | ◐ LIKE over tekstkolonner, 200 rader per tabell. Cancel stopper før neste tabell. Mangler: velger første database, skiller store/små bokstaver på PostgreSQL |
 
 ## 5. Design
 
@@ -417,7 +431,9 @@ fremmed verktøy.
   dedikert tråd per tilkobling. PostgreSQL bruker driverens `CancelToken`,
   MySQL `KILL QUERY <id>` fra en annen tilkobling, ClickHouse
   `KILL QUERY WHERE query_id …`, SQLite `InterruptHandle`. Resultatet
-  forkastes uansett om serveren rekker å stoppe.
+  forkastes uansett om serveren rekker å stoppe. Et stopp-flagg avslutter
+  resten av en flersetnings-kjøring og søk i data, og et generasjonstall
+  (`browse_gen`) hindrer at et sent svar for en tabell havner på en annen.
 - Submit bygger literal SQL med `quote_literal`, ikke parametriserte
   setninger.
 - ClickHouse kjører et endringssett setning for setning (best-effort), uten
@@ -452,9 +468,10 @@ Ingen fase er helt ferdig. Krav utenfor faseplanen som mangler helt: 203,
 
 ### Neste steg
 
-1. **Rette feilene i §3** — særlig at ventende endringer forsvinner og at
-   «+ Row» går utenom bekreftelsen. Dette er trygghetsløfter PRD-en gir, og
-   koden bryter dem.
+1. **Rette de gjenværende feilene i §3**: faner som forsvinner ved
+   tabellbytte, søk/EXPLAIN mot feil database, og completion fra feil
+   tilkobling. (De to trygghetsbruddene — tapte ventende endringer og «+ Row»
+   uten bekreftelse — er rettet i #54.)
 2. **Fullføre fase 1 og 2** («paritet i praksis»): completion med alias,
    nøkkelord og riktig tilkobling (402); faner som overlever tabellbytte og
    viser queryen (404); nye rader i endringssettet og radantall i

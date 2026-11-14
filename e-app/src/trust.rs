@@ -79,13 +79,7 @@ fn trusted_list(path: &Path, seed: impl FnOnce() -> Vec<PathBuf>) -> Vec<PathBuf
 /// The repository a git worktree at `root` belongs to: `.git` is then a file
 /// saying `gitdir: <repo>/.git/worktrees/<name>`.
 fn worktree_repo(root: &Path) -> Option<PathBuf> {
-    let text = std::fs::read_to_string(root.join(".git")).ok()?;
-    let gitdir = PathBuf::from(text.strip_prefix("gitdir:")?.trim());
-    let gitdir = if gitdir.is_relative() {
-        root.join(gitdir)
-    } else {
-        gitdir
-    };
+    let gitdir = e_core::git::linked_git_dir(root)?;
     let worktrees = gitdir.parent()?;
     if worktrees.file_name()? != "worktrees" {
         return None;

@@ -466,6 +466,31 @@ pub fn repo_root(path: &Path) -> Option<std::path::PathBuf> {
     git_root(path)
 }
 
+/// The folder git keeps the work tree at `root`'s own state in — `HEAD`,
+/// `index`, `logs/HEAD`: `<root>/.git`, or in a linked worktree, where
+/// `.git` is a file, the folder that file names (`<repo>/.git/worktrees/
+/// <name>`). Branches and objects live in the main repository's `.git`.
+/// `None` when `root` has no `.git`. Reads the file; runs no git.
+pub fn git_dir(root: &Path) -> Option<PathBuf> {
+    let dot_git = root.join(".git");
+    if std::fs::metadata(&dot_git).ok()?.is_dir() {
+        return Some(dot_git);
+    }
+    linked_git_dir(root)
+}
+
+/// The folder a `.git` *file* at `root` points to (`gitdir: <path>`, taken
+/// against `root` when relative), as a linked worktree or a submodule has.
+pub fn linked_git_dir(root: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(root.join(".git")).ok()?;
+    let dir = PathBuf::from(text.lines().next()?.strip_prefix("gitdir:")?.trim());
+    Some(if dir.is_relative() {
+        root.join(dir)
+    } else {
+        dir
+    })
+}
+
 /// Per-line blame: `(author, unix_time, summary)` for each line of `path`.
 /// Uncommitted lines yield `("You", 0, "Uncommitted changes")`.
 pub fn blame(path: &Path) -> Vec<(String, i64, String)> {
@@ -1108,9 +1133,71 @@ pub fn undo_tree_change(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_hunk, diff, hunk_at, line_bytes, marks, parse_status_z, parse_worktrees, DiffKind,
-        Hunk, LineMark,
+        apply_hunk, diff, git_dir, hunk_at, line_bytes, marks, parse_status_z, parse_worktrees,
+        DiffKind, Hunk, LineMark,
     };
+
+    /// `.git` as a folder, as a worktree's `gitdir:` file (absolute or
+    /// relative), and missing.
+    #[test]
+    fn git_dir_follows_a_worktrees_git_file() {
+        let dir = std::env::temp_dir().join(format!("e-git-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = dir.join("repo");
+        let wt = dir.join("wt");
+        std::fs::create_dir_all(repo.join(".git/worktrees/wt/logs")).unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        assert_eq!(git_dir(&repo), Some(repo.join(".git")));
+        assert_eq!(git_dir(&wt), None);
+
+        let linked = repo.join(".git/worktrees/wt");
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", linked.display())).unwrap();
+        assert_eq!(git_dir(&wt), Some(linked.clone()));
+
+        std::fs::write(wt.join(".git"), "gitdir: ../repo/.git/worktrees/wt\n").unwrap();
+        let found = git_dir(&wt).unwrap();
+        assert_eq!(
+            found.canonicalize().unwrap(),
+            linked.canonicalize().unwrap()
+        );
+
+        std::fs::write(wt.join(".git"), "not a gitdir line\n").unwrap();
+        assert_eq!(git_dir(&wt), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The real thing: `git worktree add` writes a `.git` file that leads to
+    /// the folder with the worktree's own `HEAD` and reflog.
+    #[test]
+    fn git_dir_of_a_real_worktree_has_its_head() {
+        let dir = std::env::temp_dir().join(format!("e-git-dir-wt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = dir.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(["-c", "user.name=e", "-c", "user.email=e@example.com"])
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "first"]);
+        git(&["worktree", "add", "-q", "-b", "side", "../wt"]);
+        let wt = dir.join("wt");
+        assert!(wt.join(".git").is_file());
+        let gd = git_dir(&wt).expect("the worktree's git dir");
+        assert!(gd.join("HEAD").is_file(), "{}", gd.display());
+        assert!(gd.join("index").is_file(), "{}", gd.display());
+        assert_ne!(
+            gd.canonicalize().unwrap(),
+            repo.join(".git").canonicalize().unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn status_leaves_the_index_alone() {

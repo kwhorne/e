@@ -1283,17 +1283,8 @@ pub fn foreign_keys(conn: &Conn) -> Result<Vec<ForeignKey>, String> {
         }
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
-            let res = pg_query(
-                &mut client,
-                "SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name \
-                 FROM information_schema.table_constraints tc \
-                 JOIN information_schema.key_column_usage kcu \
-                   ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema \
-                 JOIN information_schema.constraint_column_usage ccu \
-                   ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema \
-                 WHERE tc.constraint_type = 'FOREIGN KEY'",
-                MAX_ROWS,
-            )?;
+                                                                          // Metadata, not data: every foreign key, not the first MAX_ROWS.
+            let res = pg_query(&mut client, PG_FOREIGN_KEYS, usize::MAX)?;
             Ok(res
                 .rows
                 .into_iter()
@@ -1423,6 +1414,42 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
         }
     }
 }
+
+/// PostgreSQL's foreign keys between the tables the panel shows by bare name.
+///
+/// The catalog rather than `information_schema`: there, a constraint's columns
+/// can only be matched up by constraint name, which repeats across tables, so a
+/// composite key came back as every pairing of its columns, and
+/// `constraint_column_usage` leaves out tables the user doesn't own. Here the
+/// key's columns pair up by position (`conkey`/`confkey`).
+///
+/// A bare name means the table [`pg_table_schema`] picks: the one
+/// `search_path` reaches, else the first schema with one by that name. Keys
+/// from or to a namesake in another schema would send a hop to the wrong
+/// table, so they're left out.
+const PG_FOREIGN_KEYS: &str = "\
+    WITH shown AS ( \
+      SELECT c.oid FROM ( \
+        SELECT c.oid, row_number() OVER ( \
+                 PARTITION BY c.relname \
+                 ORDER BY pg_table_is_visible(c.oid) DESC, n.nspname) AS pick \
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE c.relkind IN ('r', 'p') \
+           AND n.nspname NOT IN ('pg_catalog', 'information_schema') \
+           AND n.nspname NOT LIKE 'pg_toast%' \
+      ) c WHERE c.pick = 1 \
+    ) \
+    SELECT cl.relname, a.attname, rcl.relname, ra.attname \
+      FROM pg_constraint con \
+      JOIN pg_class cl ON cl.oid = con.conrelid \
+      JOIN pg_class rcl ON rcl.oid = con.confrelid \
+      CROSS JOIN LATERAL unnest(con.conkey, con.confkey) WITH ORDINALITY AS k(col, refcol, ord) \
+      JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.col \
+      JOIN pg_attribute ra ON ra.attrelid = con.confrelid AND ra.attnum = k.refcol \
+     WHERE con.contype = 'f' \
+       AND con.conrelid IN (SELECT oid FROM shown) \
+       AND con.confrelid IN (SELECT oid FROM shown) \
+     ORDER BY cl.relname, con.conname, k.ord";
 
 /// SQL for the schema a bare PostgreSQL table name refers to.
 ///
@@ -2919,6 +2946,83 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
             snapshot,
         ),
         other => Err(format!("restore not supported for {other}")),
+    }
+}
+
+/// Against a real PostgreSQL — `--ignored`, with `E_PG_PORT` (user
+/// `postgres`, password `E_PG_PASSWORD`, a scratch database it may fill).
+#[cfg(test)]
+mod pg_live_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn foreign_keys_follow_the_tables_the_panel_shows() {
+        let Some(port) = std::env::var("E_PG_PORT").ok() else {
+            return;
+        };
+        let conn = connect(&DbConfig {
+            engine: "postgres".into(),
+            host: "127.0.0.1".into(),
+            port: port.parse().unwrap(),
+            username: "postgres".into(),
+            password: std::env::var("E_PG_PASSWORD").unwrap_or_default(),
+            database: "postgres".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        for sql in [
+            "DROP SCHEMA IF EXISTS other CASCADE",
+            "DROP SCHEMA IF EXISTS app CASCADE",
+            "DROP TABLE IF EXISTS line_items, posts, comments, orders, users CASCADE",
+            "CREATE TABLE users (id int PRIMARY KEY)",
+            "CREATE TABLE orders (id int PRIMARY KEY, no int, user_id int REFERENCES users (id), UNIQUE (id, no))",
+            // A composite key: its two columns pair up, not four ways.
+            "CREATE TABLE line_items (order_id int, order_no int, \
+               FOREIGN KEY (order_id, order_no) REFERENCES orders (id, no))",
+            // One constraint name on two tables of one schema.
+            "CREATE TABLE posts (user_id int CONSTRAINT fk_owner REFERENCES users (id))",
+            "CREATE TABLE comments (user_id int CONSTRAINT fk_owner REFERENCES users (id))",
+            // Namesakes in a schema off the search path: not what `orders` means.
+            "CREATE SCHEMA other",
+            "CREATE TABLE other.users (id int PRIMARY KEY)",
+            "CREATE TABLE other.orders (id int PRIMARY KEY, buyer_id int REFERENCES other.users (id))",
+            // Only in a schema off the search path: the panel shows these.
+            "CREATE SCHEMA app",
+            "CREATE TABLE app.customers (id int PRIMARY KEY)",
+            "CREATE TABLE app.invoices (customer_id int REFERENCES app.customers (id))",
+        ] {
+            query(&conn, sql, 0).unwrap_or_else(|e| panic!("{sql}: {e}"));
+        }
+        let mut got: Vec<String> = foreign_keys(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|f| {
+                format!(
+                    "{}.{} -> {}.{}",
+                    f.table, f.column, f.ref_table, f.ref_column
+                )
+            })
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                "comments.user_id -> users.id",
+                "invoices.customer_id -> customers.id",
+                "line_items.order_id -> orders.id",
+                "line_items.order_no -> orders.no",
+                "orders.user_id -> users.id",
+                "posts.user_id -> users.id",
+            ]
+        );
+        for sql in [
+            "DROP SCHEMA other CASCADE",
+            "DROP SCHEMA app CASCADE",
+            "DROP TABLE line_items, posts, comments, orders, users CASCADE",
+        ] {
+            let _ = query(&conn, sql, 0);
+        }
     }
 }
 

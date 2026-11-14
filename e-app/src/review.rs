@@ -294,7 +294,7 @@ impl AppState {
             TddStatus::Passed => TestStatus::Passing,
             TddStatus::Failed => TestStatus::Failing,
             TddStatus::Running => TestStatus::Running,
-            TddStatus::Idle => TestStatus::Unknown,
+            TddStatus::Idle | TddStatus::Stopped => TestStatus::Unknown,
         }
     }
 

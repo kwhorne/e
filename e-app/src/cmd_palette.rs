@@ -137,6 +137,8 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("add-cursor-below", "Add Cursor Below (⌥⌘↓)"),
     ("run-task", "Run Task…"),
     ("run-test", "Run Tests"),
+    ("stop-tests", "Stop Tests"),
+    ("tdd-run", "Tests: Run in Panel"),
     ("source-control", "Toggle Source Control"),
     ("split", "Toggle Split View"),
     ("focus-other-pane", "Focus Other Pane"),

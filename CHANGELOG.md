@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stop didn't stop a test run.** Tests ran without e keeping hold of
+  them, so a run that hung went on, the Tests panel said “running” for
+  good and tests on save waited behind it. Each run now has its own process
+  group. **Stop** in the Tests panel, or **Stop Tests** (`⌘⇧P`), ends the
+  whole run, PHP and anything it started included. The run then shows as
+  stopped, not failed, so the fix-to-green loop doesn't hand it to the agent.
 - **Foreign keys in PostgreSQL could point the wrong way.** The query behind
   the Database panel's foreign-key hops matched constraints by name across
   schemas and tables. A table with a namesake in another schema got that

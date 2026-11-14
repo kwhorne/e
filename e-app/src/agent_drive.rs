@@ -324,10 +324,15 @@ impl AppState {
             "vars": self.debug_vars.with_untracked(|v| v.iter().map(|v| json!({"name": v.name, "value": v.value})).collect::<Vec<_>>()),
         });
 
+        let tests = json!({
+            "status": format!("{:?}", self.tdd_status.get_untracked()).to_lowercase(),
+        });
+
         json!({
             "ok": true,
             "open": open,
             "dialog": dialog,
+            "tests": tests,
             "debug": debug,
             "code_actions": code_actions,
             "editor": editor,

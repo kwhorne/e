@@ -271,12 +271,14 @@ pub struct InsertField {
 }
 
 /// Status of the TDD test-runner loop.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TddStatus {
     Idle,
     Running,
     Passed,
     Failed,
+    /// Stop was pressed: neither passed nor failed.
+    Stopped,
 }
 
 /// One segment of a proposed edit: unchanged context, or a reviewable change.

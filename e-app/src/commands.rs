@@ -72,6 +72,11 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "install-laravel-lsp" => state.install_lsp_by_id("laravel-lsp"),
         "eloquent-helper" => state.generate_eloquent_helper(),
         "run-test" => state.run_test(),
+        "stop-tests" => state.tdd_stop(),
+        "tdd-run" => {
+            state.tdd_open.set(true);
+            state.run_tests();
+        }
 
         // Git.
         "source-control" => state.toggle_git_panel(),

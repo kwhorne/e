@@ -46,9 +46,15 @@ impl AppState {
         self.tdd_open.set(true);
         self.tdd_status.set(TddStatus::Running);
         let state = *self;
-        self.spawn_test_run(cmd, move |code, text, run| {
+        self.spawn_test_run(cmd, move |code, text, run, stopped| {
             state.keep_test_results(&run);
             state.tdd_results.set(run);
+            if stopped {
+                // Not a failing suite: nothing for the agent to fix.
+                state.tdd_status.set(TddStatus::Stopped);
+                state.tdd_output.set(text);
+                return;
+            }
             state.tdd_iteration.update(|i| *i += 1);
             let passed = code == 0;
             state.tdd_status.set(if passed {
@@ -71,11 +77,12 @@ impl AppState {
     }
 
     /// Run `cmd` (a test command) in the project off the UI thread, and hand
-    /// `on_done` its exit code, its output and the results it reported.
+    /// `on_done` its exit code, its output, the results it reported and
+    /// whether it was stopped.
     pub(crate) fn spawn_test_run(
         &self,
         cmd: String,
-        on_done: impl FnOnce(i32, String, crate::testrun::TestRun) + 'static,
+        on_done: impl FnOnce(i32, String, crate::testrun::TestRun, bool) + 'static,
     ) {
         use std::sync::atomic::{AtomicU64, Ordering};
         static RUN: AtomicU64 = AtomicU64::new(0);
@@ -92,28 +99,26 @@ impl AppState {
         let cmd = crate::testrun::junit_command(&cmd, &report).unwrap_or(cmd);
         let send = create_ext_action(
             self.cx,
-            move |(code, text, run): (i32, String, crate::testrun::TestRun)| {
-                on_done(code, text, run)
+            move |(code, text, run, stopped): (i32, String, crate::testrun::TestRun, bool)| {
+                on_done(code, text, run, stopped)
             },
         );
         std::thread::spawn(move || {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-            let (code, text) = match std::process::Command::new(shell)
-                .arg("-ilc")
-                .arg(&cmd)
-                .current_dir(&root)
-                .output()
-            {
-                Ok(o) => {
+            let (code, text, stopped) = match crate::test_proc::run(&cmd, &root) {
+                Ok(ended) => {
+                    let o = ended.output;
                     let code = o.status.code().unwrap_or(-1);
                     let mut t = String::from_utf8_lossy(&o.stdout).into_owned();
                     let e = String::from_utf8_lossy(&o.stderr);
                     if !e.trim().is_empty() {
                         t.push_str(&e);
                     }
-                    (code, t)
+                    if ended.stopped {
+                        t.push_str("\n[stopped]");
+                    }
+                    (code, t, ended.stopped)
                 }
-                Err(e) => (-1, format!("failed to run tests: {e}")),
+                Err(e) => (-1, format!("failed to run tests: {e}"), false),
             };
             // The report only exists if the runner wrote one. A missing file
             // means no structured results, not a failed run — every runner this
@@ -122,7 +127,7 @@ impl AppState {
                 .map(|xml| crate::testrun::parse_junit(&xml, &root))
                 .unwrap_or_default();
             let _ = std::fs::remove_file(&report);
-            send((code, text, run));
+            send((code, text, run, stopped));
         });
     }
 
@@ -227,8 +232,10 @@ impl AppState {
         self.run_tests();
     }
 
+    /// Stop: end the fix-to-green loop and any test run in flight.
     pub fn tdd_stop(&self) {
         self.tdd_loop.set(false);
+        crate::test_proc::stop_all();
     }
 }
 

@@ -154,8 +154,15 @@ impl AppState {
             .set(Some(SaveRun::Running { files: files.len() }));
         self.tdd_status.set(TddStatus::Running);
         let state = *self;
-        self.spawn_test_run(cmd, move |code, text, run| {
+        self.spawn_test_run(cmd, move |code, text, run, stopped| {
             state.keep_test_results(&run);
+            if stopped {
+                state.save_run.set(None);
+                state.tdd_status.set(TddStatus::Stopped);
+                state.tdd_output.set(text);
+                state.tdd_results.set(run);
+                return;
+            }
             state.save_run.set(Some(SaveRun::Done {
                 passed: run.passed(),
                 failed: run.failed(),

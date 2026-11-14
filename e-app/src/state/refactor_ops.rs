@@ -342,6 +342,8 @@ impl AppState {
             crate::move_class::class_of(&old_fqn),
             Default::default(),
             5000,
+            &crate::workspace_search::OpenTexts::new(),
+            &|| false,
         )
         .into_iter()
         .filter_map(|h| h.path.strip_prefix(&project).ok().map(|p| p.to_path_buf()))

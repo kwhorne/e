@@ -150,27 +150,40 @@ pub fn palette(state: AppState) -> impl IntoView {
             });
         match t {
             Tab::Text => {
+                // The palette's own generation, readable off the UI thread, so
+                // a search typed past stops walking.
+                static LATEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                LATEST.store(g, std::sync::atomic::Ordering::Relaxed);
+                let open = state.open_texts();
                 std::thread::spawn(move || {
-                    let hits = crate::workspace_search::search(&roots, &q, Default::default(), 200)
-                        .into_iter()
-                        .map(|h| {
-                            let rel = h
-                                .path
-                                .strip_prefix(&root)
-                                .unwrap_or(&h.path)
-                                .to_string_lossy()
-                                .into_owned();
-                            Hit {
-                                label: h.text,
-                                detail: format!("{rel}:{}", h.line + 1),
-                                action: Action::Goto {
-                                    uri: format!("file://{}", h.path.display()),
-                                    line: h.line,
-                                    col: h.col,
-                                },
-                            }
-                        })
-                        .collect();
+                    let cancelled = || LATEST.load(std::sync::atomic::Ordering::Relaxed) != g;
+                    let hits = crate::workspace_search::search(
+                        &roots,
+                        &q,
+                        Default::default(),
+                        200,
+                        &open,
+                        &cancelled,
+                    )
+                    .into_iter()
+                    .map(|h| {
+                        let rel = h
+                            .path
+                            .strip_prefix(&root)
+                            .unwrap_or(&h.path)
+                            .to_string_lossy()
+                            .into_owned();
+                        Hit {
+                            label: h.text,
+                            detail: format!("{rel}:{}", h.line + 1),
+                            action: Action::Goto {
+                                uri: format!("file://{}", h.path.display()),
+                                line: h.line,
+                                col: h.col,
+                            },
+                        }
+                    })
+                    .collect();
                     send((g, hits));
                 });
             }

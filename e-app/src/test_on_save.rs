@@ -91,7 +91,9 @@ impl AppState {
     fn start_save_run(&self) {
         // One run at a time, and never under the agent's fix-to-green loop:
         // try again once the running one is done.
-        if self.tdd_status.get_untracked() == TddStatus::Running || self.tdd_loop.get_untracked() {
+        if self.tests.status.get_untracked() == TddStatus::Running
+            || self.tests.fix_loop.get_untracked()
+        {
             let state = *self;
             floem::action::exec_after(Duration::from_secs(1), move |_| state.start_save_run());
             return;
@@ -152,15 +154,15 @@ impl AppState {
         let cmd = format!("{cmd} {}", run_args(&files));
         self.save_run
             .set(Some(SaveRun::Running { files: files.len() }));
-        self.tdd_status.set(TddStatus::Running);
+        self.tests.status.set(TddStatus::Running);
         let state = *self;
         self.spawn_test_run(cmd, move |code, text, run, stopped| {
             state.keep_test_results(&run);
             if stopped {
                 state.save_run.set(None);
-                state.tdd_status.set(TddStatus::Stopped);
-                state.tdd_output.set(text);
-                state.tdd_results.set(run);
+                state.tests.status.set(TddStatus::Stopped);
+                state.tests.output.set(text);
+                state.tests.results.set(run);
                 return;
             }
             state.save_run.set(Some(SaveRun::Done {
@@ -168,13 +170,13 @@ impl AppState {
                 failed: run.failed(),
             }));
             // The Tests panel shows this run when opened from the status bar.
-            state.tdd_status.set(if code == 0 {
+            state.tests.status.set(if code == 0 {
                 TddStatus::Passed
             } else {
                 TddStatus::Failed
             });
-            state.tdd_output.set(text);
-            state.tdd_results.set(run);
+            state.tests.output.set(text);
+            state.tests.results.set(run);
         });
     }
 }
@@ -201,7 +203,7 @@ pub fn save_run_status(state: AppState) -> impl IntoView {
             .cursor(floem::style::CursorStyle::Pointer)
             .hover(|s| s.color(theme::fg()))
     })
-    .on_click_stop(move |_| state.tdd_open.set(true))
+    .on_click_stop(move |_| state.tests.open.set(true))
 }
 
 #[cfg(test)]

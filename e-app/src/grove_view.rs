@@ -23,16 +23,16 @@ fn tab(state: AppState, which: GroveTab, text: &'static str) -> impl IntoView {
                 .font_size(12.0)
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
-            if state.grove_tab.get() == which {
+            if state.grove.tab.get() == which {
                 s.background(theme::bg_active()).color(theme::fg())
             } else {
                 s.color(theme::fg_dim())
             }
         })
         .on_click_stop(move |_| {
-            state.grove_tab.set(which);
-            state.grove_selected.set(None);
-            state.grove_detail.set(String::new());
+            state.grove.tab.set(which);
+            state.grove.selected.set(None);
+            state.grove.detail.set(String::new());
         })
 }
 
@@ -83,7 +83,7 @@ fn row(
             .padding_vert(5.0)
             .cursor(floem::style::CursorStyle::Pointer)
             .hover(|s| s.background(theme::bg_hover()));
-        if state.grove_selected.get() == Some((tab, id)) {
+        if state.grove.selected.get() == Some((tab, id)) {
             s.background(theme::bg_active())
         } else {
             s
@@ -111,13 +111,13 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
                 .color(amber())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()));
-            match state.grove_selected.get() {
+            match state.grove.selected.get() {
                 Some((GroveTab::Hooks, _)) => s,
                 _ => s.hide(),
             }
         })
         .on_click_stop(move |_| {
-            if let Some((GroveTab::Hooks, id)) = state.grove_selected.get_untracked() {
+            if let Some((GroveTab::Hooks, id)) = state.grove.selected.get_untracked() {
                 state.grove_replay_hook(id);
             }
         });
@@ -128,7 +128,7 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.grove_panel_open.set(false));
+        .on_click_stop(move |_| state.grove.panel_open.set(false));
     let header = stack((title, tabs, replay, agent, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -142,9 +142,10 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
 
     // The list: mail or webhooks, whichever tab is active.
     let rows = dyn_stack(
-        move || match state.grove_tab.get() {
+        move || match state.grove.tab.get() {
             GroveTab::Mail => state
-                .grove_mail
+                .grove
+                .mail
                 .get()
                 .into_iter()
                 .map(|m| {
@@ -159,7 +160,8 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
                 })
                 .collect::<Vec<_>>(),
             GroveTab::Hooks => state
-                .grove_hooks
+                .grove
+                .hooks
                 .get()
                 .into_iter()
                 .map(|h| {
@@ -176,7 +178,7 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col().width_full());
 
-    let empty = label(move || match state.grove_tab.get() {
+    let empty = label(move || match state.grove.tab.get() {
         GroveTab::Mail => {
             "No mail captured yet. Point the app's MAIL_* at Grove (`grove env`) and send one."
                 .to_string()
@@ -188,9 +190,9 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let s = s.padding(14.0).color(theme::fg_dim()).font_size(12.0);
-        let empty = match state.grove_tab.get() {
-            GroveTab::Mail => state.grove_mail.with(|m| m.is_empty()),
-            GroveTab::Hooks => state.grove_hooks.with(|h| h.is_empty()),
+        let empty = match state.grove.tab.get() {
+            GroveTab::Mail => state.grove.mail.with(|m| m.is_empty()),
+            GroveTab::Hooks => state.grove.hooks.with(|h| h.is_empty()),
         };
         if empty {
             s
@@ -199,7 +201,7 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
         }
     });
 
-    let detail = scroll(label(move || state.grove_detail.get()).style(|s| {
+    let detail = scroll(label(move || state.grove.detail.get()).style(|s| {
         s.font_size(12.0)
             .font_family(theme::mono_family())
             .color(theme::fg())
@@ -212,7 +214,7 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
             .height(220.0)
             .border_top(1.0)
             .border_color(theme::border());
-        if state.grove_selected.get().is_some() {
+        if state.grove.selected.get().is_some() {
             s
         } else {
             s.hide()
@@ -243,7 +245,7 @@ pub fn grove_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 96));
-        if state.grove_panel_open.get() {
+        if state.grove.panel_open.get() {
             s
         } else {
             s.hide()

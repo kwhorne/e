@@ -63,7 +63,8 @@ pub fn status_bar(state: AppState) -> impl IntoView {
 
     let branch = label(move || {
         state
-            .git_branch
+            .git
+            .branch
             .get()
             .map(|b| format!("⎇ {b}"))
             .unwrap_or_default()

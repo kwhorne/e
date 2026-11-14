@@ -234,8 +234,8 @@ impl AppState {
     /// thread; until it lands the Runtime panel falls back to Clockwork.
     pub fn resolve_grove_site(&self) {
         let root = self.root.get_untracked();
-        let site_sig = self.grove_site;
-        let sql_sig = self.grove_sql_capture;
+        let site_sig = self.grove.site;
+        let sql_sig = self.grove.sql_capture;
         self.spawn_bg(
             move || {
                 if !grove::available() {
@@ -265,7 +265,7 @@ impl AppState {
 
     /// The Grove site for this project, if resolved and served.
     pub fn grove_site(&self) -> Option<grove::Site> {
-        self.grove_site.get_untracked().flatten()
+        self.grove.site.get_untracked().flatten()
     }
 
     /// Poll for new requests. Called on the idle tick while the panel is open.
@@ -388,8 +388,8 @@ impl AppState {
 
     /// Turn Grove's SQL capture on or off (MySQL general log ↔ timeline).
     pub fn toggle_grove_sql_capture(&self) {
-        let on = !self.grove_sql_capture.get_untracked().unwrap_or(false);
-        let sig = self.grove_sql_capture;
+        let on = !self.grove.sql_capture.get_untracked().unwrap_or(false);
+        let sig = self.grove.sql_capture;
         self.spawn_bg(
             move || grove::set_sql_capture(on),
             move |state: Option<bool>| {
@@ -450,7 +450,7 @@ impl AppState {
         };
         if let Some(gid) = r.grove_id {
             let app = *self;
-            let sql_capture = self.grove_sql_capture.get_untracked();
+            let sql_capture = self.grove.sql_capture.get_untracked();
             let fallback = clockwork_prompt(&r);
             self.spawn_bg(
                 move || grove::explain(gid),

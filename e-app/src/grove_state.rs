@@ -20,31 +20,31 @@ pub enum GroveTab {
 impl AppState {
     /// Open the Grove panel on `tab` (or close it if it's already showing that tab).
     pub fn toggle_grove_panel(&self, tab: GroveTab) {
-        let open = self.grove_panel_open.get_untracked();
-        let same = self.grove_tab.get_untracked() == tab;
+        let open = self.grove.panel_open.get_untracked();
+        let same = self.grove.tab.get_untracked() == tab;
         if open && same {
-            self.grove_panel_open.set(false);
+            self.grove.panel_open.set(false);
             return;
         }
-        self.grove_tab.set(tab);
-        self.grove_selected.set(None);
-        self.grove_detail.set(String::new());
-        self.grove_panel_open.set(true);
+        self.grove.tab.set(tab);
+        self.grove.selected.set(None);
+        self.grove.detail.set(String::new());
+        self.grove.panel_open.set(true);
         self.refresh_grove_panel();
     }
 
     /// Re-list mail and webhooks. Called on the idle tick while the panel is open.
     pub fn refresh_grove_panel(&self) {
-        if self.grove_refreshing.get_untracked() {
+        if self.grove.refreshing.get_untracked() {
             return;
         }
         if self.grove_site().is_none() && !grove::available() {
             return;
         }
-        self.grove_refreshing.set(true);
-        let mail_sig = self.grove_mail;
-        let hooks_sig = self.grove_hooks;
-        let busy = self.grove_refreshing;
+        self.grove.refreshing.set(true);
+        let mail_sig = self.grove.mail;
+        let hooks_sig = self.grove.hooks;
+        let busy = self.grove.refreshing;
         self.spawn_bg(
             move || (grove::mail(), grove::hooks(50)),
             move |(mail, hooks): (Vec<grove::Email>, Vec<grove::Request>)| {
@@ -61,11 +61,11 @@ impl AppState {
 
     /// Select an entry and load what there is to show for it.
     pub fn grove_select(&self, tab: GroveTab, id: u64) {
-        self.grove_selected.set(Some((tab, id)));
+        self.grove.selected.set(Some((tab, id)));
         match tab {
             GroveTab::Mail => {
-                let detail = self.grove_detail;
-                self.grove_detail.set("Loading…".into());
+                let detail = self.grove.detail;
+                self.grove.detail.set("Loading…".into());
                 self.spawn_bg(
                     move || grove::mail_show(id),
                     move |body: Option<grove::EmailBody>| {
@@ -80,7 +80,7 @@ impl AppState {
                 // The CLI lists webhooks but doesn't print one's body; what we
                 // can show is the entry itself, and what we can do is re-deliver.
                 let text = self
-                    .grove_hooks
+                    .grove.hooks
                     .with_untracked(|h| h.iter().find(|r| r.id == id).cloned())
                     .map(|r| {
                         format!(
@@ -95,7 +95,7 @@ impl AppState {
                         )
                     })
                     .unwrap_or_default();
-                self.grove_detail.set(text);
+                self.grove.detail.set(text);
             }
         }
     }
@@ -104,7 +104,8 @@ impl AppState {
     /// app's own URL rather than Grove's capture bucket.
     pub fn grove_replay_hook(&self, id: u64) {
         let Some(hook) = self
-            .grove_hooks
+            .grove
+            .hooks
             .with_untracked(|h| h.iter().find(|r| r.id == id).cloned())
         else {
             return;
@@ -130,14 +131,15 @@ impl AppState {
 
     /// Hand the selected mail or webhook to the agent.
     pub fn grove_to_agent(&self) {
-        let Some((tab, id)) = self.grove_selected.get_untracked() else {
+        let Some((tab, id)) = self.grove.selected.get_untracked() else {
             return;
         };
-        let detail = self.grove_detail.get_untracked();
+        let detail = self.grove.detail.get_untracked();
         let prompt = match tab {
             GroveTab::Mail => {
                 let head = self
-                    .grove_mail
+                    .grove
+                    .mail
                     .with_untracked(|m| m.iter().find(|e| e.id == id).cloned())
                     .map(|e| {
                         format!(
@@ -161,4 +163,25 @@ impl AppState {
         };
         self.send_to_agent(&prompt);
     }
+}
+
+/// Grove: the project's site, its mail and hooks, and the panel.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct GrovePanel {
+    /// The Grove site serving this project: `None` = not resolved yet,
+    /// `Some(None)` = Grove isn't around or doesn't serve it.
+    pub site: floem::reactive::RwSignal<Option<Option<crate::grove::Site>>>,
+    /// Whether Grove correlates SQL with its request timeline (`None` = unknown).
+    pub sql_capture: floem::reactive::RwSignal<Option<bool>>,
+    /// The Grove panel (mail-catcher + webhooks).
+    pub panel_open: floem::reactive::RwSignal<bool>,
+    pub tab: floem::reactive::RwSignal<crate::grove_state::GroveTab>,
+    pub mail: floem::reactive::RwSignal<Vec<crate::grove::Email>>,
+    pub hooks: floem::reactive::RwSignal<Vec<crate::grove::Request>>,
+    /// The selected entry `(tab, id)`, and the text shown for it.
+    pub selected: floem::reactive::RwSignal<Option<(crate::grove_state::GroveTab, u64)>>,
+    pub detail: floem::reactive::RwSignal<String>,
+    pub refreshing: floem::reactive::RwSignal<bool>,
 }

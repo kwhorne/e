@@ -14,7 +14,7 @@ impl AppState {
     // ---- Autonomous TDD loop ------------------------------------------
 
     pub fn toggle_tdd(&self) {
-        self.tdd_open.update(|o| *o = !*o);
+        self.tests.open.update(|o| *o = !*o);
     }
 
     /// Run the project's test suite, parse pass/fail, and (when the loop is
@@ -25,47 +25,49 @@ impl AppState {
         }
         let root = self.root.get_untracked();
         let Some(cmd) = crate::tasks::test_command(&root) else {
-            self.tdd_output
+            self.tests
+                .output
                 .set("No test command detected for this project.".into());
-            self.tdd_status.set(TddStatus::Failed);
-            self.tdd_open.set(true);
+            self.tests.status.set(TddStatus::Failed);
+            self.tests.open.set(true);
             return;
         };
         // "Run this test" narrows one run; the next run is the whole suite again.
-        let cmd = match self.tdd_filter.try_update(|f| f.take()).flatten() {
+        let cmd = match self.tests.filter.try_update(|f| f.take()).flatten() {
             Some(extra) => format!("{cmd} {extra}"),
             None => cmd,
         };
         // Safety cap so an unproductive loop can't run forever.
-        if self.tdd_loop.get_untracked() && self.tdd_iteration.get_untracked() >= 15 {
-            self.tdd_loop.set(false);
-            self.tdd_output
+        if self.tests.fix_loop.get_untracked() && self.tests.iteration.get_untracked() >= 15 {
+            self.tests.fix_loop.set(false);
+            self.tests
+                .output
                 .update(|o| o.push_str("\n\n[stopped: reached 15 iterations]"));
             return;
         }
-        self.tdd_open.set(true);
-        self.tdd_status.set(TddStatus::Running);
+        self.tests.open.set(true);
+        self.tests.status.set(TddStatus::Running);
         let state = *self;
         self.spawn_test_run(cmd, move |code, text, run, stopped| {
             state.keep_test_results(&run);
-            state.tdd_results.set(run);
+            state.tests.results.set(run);
             if stopped {
                 // Not a failing suite: nothing for the agent to fix.
-                state.tdd_status.set(TddStatus::Stopped);
-                state.tdd_output.set(text);
+                state.tests.status.set(TddStatus::Stopped);
+                state.tests.output.set(text);
                 return;
             }
-            state.tdd_iteration.update(|i| *i += 1);
+            state.tests.iteration.update(|i| *i += 1);
             let passed = code == 0;
-            state.tdd_status.set(if passed {
+            state.tests.status.set(if passed {
                 TddStatus::Passed
             } else {
                 TddStatus::Failed
             });
-            state.tdd_output.set(text.clone());
+            state.tests.output.set(text.clone());
             if passed {
-                state.tdd_loop.set(false);
-            } else if state.tdd_loop.get_untracked() {
+                state.tests.fix_loop.set(false);
+            } else if state.tests.fix_loop.get_untracked() {
                 let tail = output_tail(&text, 4000);
                 state.send_to_agent(&format!(
                     "The test suite is failing. Fix the code so the tests pass. \
@@ -190,7 +192,8 @@ impl AppState {
             .unwrap_or(path)
             .to_string_lossy()
             .into_owned();
-        self.tdd_filter
+        self.tests
+            .filter
             .set(Some(crate::tasks::single_test_args(&rel, name)));
         self.run_tests();
     }
@@ -227,14 +230,14 @@ impl AppState {
     }
 
     pub fn tdd_fix_to_green(&self) {
-        self.tdd_iteration.set(0);
-        self.tdd_loop.set(true);
+        self.tests.iteration.set(0);
+        self.tests.fix_loop.set(true);
         self.run_tests();
     }
 
     /// Stop: end the fix-to-green loop and any test run in flight.
     pub fn tdd_stop(&self) {
-        self.tdd_loop.set(false);
+        self.tests.fix_loop.set(false);
         crate::test_proc::stop_all();
     }
 }
@@ -266,4 +269,22 @@ mod tests {
         }
         assert_eq!(output_tail("short", 4000), "short");
     }
+}
+
+/// The Tests panel and the fix-to-green loop.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct TestsPanel {
+    pub open: floem::reactive::RwSignal<bool>,
+    /// Extra arguments for the next test run only (`tests/X.php --filter=…`).
+    pub filter: floem::reactive::RwSignal<Option<String>>,
+    pub status: floem::reactive::RwSignal<TddStatus>,
+    pub output: floem::reactive::RwSignal<String>,
+    /// Parsed per-test results from the last run, when the runner could produce
+    /// them. Empty for runners that can't write JUnit XML.
+    pub results: floem::reactive::RwSignal<crate::testrun::TestRun>,
+    pub iteration: floem::reactive::RwSignal<usize>,
+    /// When true, a failing run asks the agent to fix and re-runs on apply.
+    pub fix_loop: floem::reactive::RwSignal<bool>,
 }

@@ -8,7 +8,7 @@
 mod classify;
 pub mod history;
 
-pub use classify::is_read_only;
+pub use classify::{is_destructive, is_read_only};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -2840,25 +2840,6 @@ impl Environment {
     }
     pub fn is_local(self) -> bool {
         self == Environment::Local
-    }
-}
-
-/// If `sql` is a destructive statement that should require explicit confirmation
-/// (DROP, TRUNCATE, or DELETE/UPDATE with no WHERE clause), return a short
-/// human-readable reason; otherwise `None`. Operates on a single statement.
-pub fn is_destructive(sql: &str) -> Option<&'static str> {
-    let trimmed = sql.trim_start().to_ascii_lowercase();
-    let first = trimmed.split_whitespace().next().unwrap_or("");
-    // Whole-word presence of `where` (ignores it appearing inside identifiers).
-    let has_where = trimmed
-        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|w| w == "where");
-    match first {
-        "drop" => Some("DROP"),
-        "truncate" => Some("TRUNCATE"),
-        "delete" if !has_where => Some("DELETE without WHERE"),
-        "update" if !has_where => Some("UPDATE without WHERE"),
-        _ => None,
     }
 }
 

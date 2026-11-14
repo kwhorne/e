@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A comment could hide a destructive statement in the SQL console.** The
+  check that asks before a `DROP`, `TRUNCATE` or a `DELETE`/`UPDATE` without
+  `WHERE` read only the first word, so `-- cleanup` on the line above, or a
+  `/* … */` in front, let it run on a local database without asking. It now
+  reads past comments and strings, and also catches `ALTER TABLE … DROP`, a
+  `DELETE` inside a `WITH`, and a `WHERE` that belongs to a subquery rather
+  than the statement.
 - **A split editor mixed up its two panes.** Both panes kept their editor
   for a file in one place, and the right one won, so in the left pane
   auto-closing brackets, completion, go-to and hover moved the caret in the

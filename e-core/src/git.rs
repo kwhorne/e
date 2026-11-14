@@ -121,11 +121,17 @@ pub fn current_branch(root: &Path) -> Option<String> {
 }
 
 /// Parse `git status --porcelain` into per-file entries.
+///
+/// `--no-optional-locks`: a plain `git status` may take `index.lock` and
+/// rewrite the index to refresh its stat cache. Run in the background as files
+/// change, that collides with a stage or a commit made at the same moment,
+/// and the rewrite is itself a change to `.git/index` that the editor's watch
+/// on the project reports, asking for another status.
 pub fn status(root: &Path) -> Vec<StatusEntry> {
     let out = match Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["status", "--porcelain", "-z"])
+        .args(["--no-optional-locks", "status", "--porcelain", "-z"])
         .output()
     {
         Ok(o) if o.status.success() => o,
@@ -1105,6 +1111,40 @@ mod tests {
         apply_hunk, diff, hunk_at, line_bytes, marks, parse_status_z, parse_worktrees, DiffKind,
         Hunk, LineMark,
     };
+
+    #[test]
+    fn status_leaves_the_index_alone() {
+        let dir = std::env::temp_dir().join(format!("e-git-status-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(["-c", "user.name=e", "-c", "user.email=e@example.com"])
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&["add", "a.txt"]);
+        git(&["commit", "-qm", "a"]);
+        // Touch the file without changing it: a plain status would refresh
+        // the index's stat cache and write the index.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(dir.join("a.txt"), "a").unwrap();
+        let before = std::fs::metadata(dir.join(".git/index"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert!(super::status(&dir).is_empty());
+        let after = std::fs::metadata(dir.join(".git/index"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(before, after, "status wrote the index");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn status_keeps_spaces_non_ascii_and_the_new_side_of_a_rename() {

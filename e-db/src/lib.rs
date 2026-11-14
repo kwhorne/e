@@ -530,8 +530,14 @@ impl Conn {
     }
 }
 
+/// How long a statement waits for a lock another process holds on the file
+/// (the app's queue worker writing, say) before giving up with "database is
+/// locked". rusqlite sets the same five seconds when it opens a connection;
+/// said here so `e` doesn't depend on that default.
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
 fn sqlite_open(path: &str, read_only: bool) -> Result<rusqlite::Connection, String> {
-    if read_only {
+    let c = if read_only {
         use rusqlite::OpenFlags;
         rusqlite::Connection::open_with_flags(
             path,
@@ -542,7 +548,10 @@ fn sqlite_open(path: &str, read_only: bool) -> Result<rusqlite::Connection, Stri
     } else {
         rusqlite::Connection::open(path)
     }
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    c.busy_timeout(SQLITE_BUSY_TIMEOUT)
+        .map_err(|e| e.to_string())?;
+    Ok(c)
 }
 
 /// A TLS connector for `mode`: checking certificates only for `Verify`, and
@@ -632,7 +641,7 @@ fn build_backend(eff: &DbConfig, config: &DbConfig) -> Result<(Backend, Option<P
             if !Path::new(&config.path).exists() {
                 return Err(format!("SQLite file not found: {}", config.path));
             }
-            rusqlite::Connection::open(&config.path).map_err(|e| e.to_string())?;
+            sqlite_open(&config.path, false)?;
             Backend::Sqlite(config.path.clone())
         }
         "postgres" | "postgresql" | "pgsql" => {
@@ -962,7 +971,7 @@ pub fn views(conn: &Conn) -> Result<Vec<String>, String> {
             Ok(rows.into_iter().map(|(name, _)| name).collect())
         }
         Backend::Sqlite(path) => {
-            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let c = conn.sqlite(path)?;
             let mut stmt = c
                 .prepare("SELECT name FROM sqlite_master WHERE type='view' ORDER BY name")
                 .map_err(|e| e.to_string())?;
@@ -1001,7 +1010,7 @@ pub fn table_ddl(conn: &Conn, table: &str) -> Result<String, String> {
             Ok(row.map(|(_, ddl)| ddl).unwrap_or_default())
         }
         Backend::Sqlite(path) => {
-            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let c = conn.sqlite(path)?;
             c.query_row(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?1",
                 [table],
@@ -1055,7 +1064,7 @@ pub fn view_definition(conn: &Conn, view: &str) -> Result<String, String> {
             Ok(row.map(|(_, def, _, _)| def).unwrap_or_default())
         }
         Backend::Sqlite(path) => {
-            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let c = conn.sqlite(path)?;
             c.query_row(
                 "SELECT sql FROM sqlite_master WHERE type='view' AND name = ?1",
                 [view],
@@ -1090,7 +1099,7 @@ pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
             c.query("SHOW TABLES").map_err(|e| e.to_string())
         }
         Backend::Sqlite(path) => {
-            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let c = conn.sqlite(path)?;
             let mut stmt = c
                 .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
                 .map_err(|e| e.to_string())?;
@@ -1301,7 +1310,7 @@ pub fn foreign_keys(conn: &Conn) -> Result<Vec<ForeignKey>, String> {
                 .collect())
         }
         Backend::Sqlite(path) => {
-            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let c = conn.sqlite(path)?;
             let tables: Vec<String> = {
                 let mut stmt = c
                     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
@@ -1370,7 +1379,7 @@ pub fn columns(conn: &Conn, table: &str) -> Result<Vec<ColumnInfo>, String> {
                 .collect())
         }
         Backend::Sqlite(path) => {
-            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let c = conn.sqlite(path)?;
             let q = format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\""));
             let mut stmt = c.prepare(&q).map_err(|e| e.to_string())?;
             let rows = stmt
@@ -1546,7 +1555,7 @@ pub fn indexes(conn: &Conn, table: &str) -> Result<Vec<IndexInfo>, String> {
             })))
         }
         Backend::Sqlite(path) => {
-            let c = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
+            let c = conn.sqlite(path)?;
             let list_q = format!("PRAGMA index_list(\"{}\")", table.replace('"', "\"\""));
             // index_list columns: seq, name, unique, origin, partial.
             let listed: Vec<(String, bool)> = {
@@ -4273,6 +4282,25 @@ mod tests {
         assert!(search_all(&conn, "sqlite", "nonexistent-zzz", 50)
             .unwrap()
             .is_empty());
+
+        // A lock another process holds is waited for, not given up on.
+        {
+            let other = rusqlite::Connection::open(&dbfile).unwrap();
+            other.execute_batch("BEGIN EXCLUSIVE").unwrap();
+            let release = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(500));
+                other.execute_batch("COMMIT").unwrap();
+            });
+            let t = Instant::now();
+            let r = query(&conn, "SELECT COUNT(*) FROM users", 10);
+            assert!(r.is_ok(), "waited for the lock: {r:?}");
+            assert!(
+                t.elapsed() >= Duration::from_millis(400),
+                "{:?}",
+                t.elapsed()
+            );
+            release.join().unwrap();
+        }
 
         // Nothing to cancel on SQLite: said so, not pretended.
         assert_eq!(cancel(&conn), Ok(false));

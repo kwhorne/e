@@ -267,6 +267,24 @@ pub struct Conn {
     /// The SQLite statements running now (each query opens the file
     /// afresh), by a number of their own, so Cancel can interrupt them.
     sqlite_running: Mutex<Vec<(u64, rusqlite::InterruptHandle)>>,
+    /// The MySQL statements running now: the server's id of the pooled
+    /// connection each runs on, so Cancel can `KILL QUERY` it.
+    mysql_running: Mutex<Vec<(u64, u32)>>,
+}
+
+/// While alive, the MySQL connection it was made for can be stopped by
+/// [`cancel`].
+struct MysqlRunning<'a> {
+    conn: &'a Conn,
+    id: u64,
+}
+
+impl Drop for MysqlRunning<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut r) = self.conn.mysql_running.lock() {
+            r.retain(|(id, _)| *id != self.id);
+        }
+    }
 }
 
 /// While alive, the SQLite connection it was made for can be interrupted
@@ -460,6 +478,7 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
         _tunnel: tunnel.map(Mutex::new),
         pg_cancel,
         sqlite_running: Mutex::new(Vec::new()),
+        mysql_running: Mutex::new(Vec::new()),
     })
 }
 
@@ -469,6 +488,27 @@ pub fn connect(config: &DbConfig) -> Result<Conn, String> {
 /// with PostgreSQL's "canceling statement due to user request", and the
 /// connection is free again.
 pub fn cancel(conn: &Conn) -> Result<bool, String> {
+    if let Backend::Mysql(pool) = &conn.backend {
+        // From another connection of the pool: `KILL QUERY` ends the
+        // statement ("Query execution was interrupted"; a `SLEEP` returns 1)
+        // and leaves its connection open.
+        use mysql::prelude::Queryable;
+        let ids: Vec<u32> = conn
+            .mysql_running
+            .lock()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .map(|(_, server_id)| *server_id)
+            .collect();
+        if !ids.is_empty() {
+            let mut c = pool.get_conn().map_err(|e| e.to_string())?;
+            for id in ids {
+                c.query_drop(format!("KILL QUERY {id}"))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        return Ok(true);
+    }
     if let Backend::Sqlite(_) = conn.backend {
         // Interrupted, a statement ends with SQLite's "interrupted".
         let running = conn.sqlite_running.lock().map_err(|e| e.to_string())?;
@@ -521,6 +561,18 @@ impl Conn {
     /// Open the SQLite file, read-only while the connection is.
     fn sqlite(&self, path: &str) -> Result<rusqlite::Connection, String> {
         sqlite_open(path, self.is_read_only())
+    }
+
+    /// Note the pooled MySQL connection `c` as running a statement, until
+    /// the returned guard is dropped, so [`cancel`] can stop it.
+    fn mysql_running(&self, c: &mysql::PooledConn) -> MysqlRunning<'_> {
+        use std::sync::atomic::AtomicU64;
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut r) = self.mysql_running.lock() {
+            r.push((id, c.connection_id()));
+        }
+        MysqlRunning { conn: self, id }
     }
 
     /// Note `c` as running a statement, until the returned guard is dropped,
@@ -1692,6 +1744,7 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
             use mysql::prelude::Queryable;
             let mut c = pool.get_conn().map_err(|e| e.to_string())?;
             conn.sync_mysql_session(&mut c)?;
+            let _running = conn.mysql_running(&c);
             let mut tx = c
                 .start_transaction(mysql::TxOpts::default())
                 .map_err(|e| e.to_string())?;
@@ -2459,6 +2512,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
             use mysql::prelude::Queryable;
             let mut c = pool.get_conn().map_err(|e| e.to_string())?;
             conn.sync_mysql_session(&mut c)?;
+            let _running = conn.mysql_running(&c);
             if select {
                 let result = c.query_iter(sql).map_err(|e| e.to_string())?;
                 let columns: Vec<String> = result
@@ -3205,6 +3259,36 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
 #[cfg(test)]
 mod pg_live_tests {
     use super::*;
+
+    /// `--ignored`, with `E_MYSQL_PORT` (user root, no password; reads only).
+    #[test]
+    #[ignore]
+    fn cancel_kills_a_running_mysql_query() {
+        let Some(port) = std::env::var("E_MYSQL_PORT").ok() else {
+            return;
+        };
+        let conn = std::sync::Arc::new(
+            connect(&DbConfig {
+                engine: "mysql".into(),
+                host: "127.0.0.1".into(),
+                port: port.parse().unwrap(),
+                username: "root".into(),
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        let running = conn.clone();
+        let t = Instant::now();
+        let handle = std::thread::spawn(move || query(&running, "SELECT SLEEP(30)", 10));
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(cancel(&conn), Ok(true));
+        // An interrupted SLEEP returns 1 instead of an error.
+        let r = handle.join().unwrap().unwrap();
+        assert_eq!(r.rows[0][0].as_deref(), Some("1"));
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+        assert!(conn.mysql_running.lock().unwrap().is_empty());
+        assert!(query(&conn, "SELECT 1", 10).is_ok());
+    }
 
     /// `--ignored`, with `E_PG_PORT` (+ `E_PG_PASSWORD`).
     #[test]

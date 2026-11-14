@@ -13,7 +13,7 @@
 //! — are beyond its reach.)
 
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// What evaluating an expression gave.
 #[derive(Clone, Debug, PartialEq)]
@@ -326,8 +326,9 @@ const MARK: &str = "__E_EVAL__";
 
 /// The PHP that boots the app at `root` and evaluates `code` in `context`
 /// (a file's namespace and imports), answering with one JSON line — with,
-/// when `explain`, the database's plan for each query it ran.
-pub fn runner(root: &Path, context: &str, code: &str, explain: bool) -> String {
+/// when `explain`, the database's plan for each query it ran. What it writes
+/// through `Storage` goes under `scratch`.
+pub fn runner(root: &Path, scratch: &Path, context: &str, code: &str, explain: bool) -> String {
     let quoted = |p: &Path| {
         format!(
             "'{}'",
@@ -346,6 +347,7 @@ pub fn runner(root: &Path, context: &str, code: &str, explain: bool) -> String {
     RUNNER
         .replace("{autoload}", &quoted(&root.join("vendor/autoload.php")))
         .replace("{bootstrap}", &quoted(&root.join("bootstrap/app.php")))
+        .replace("{scratch}", &quoted(scratch))
         .replace("{mark}", MARK)
         .replace("{explain}", if explain { "true" } else { "false" })
         .replace("{source}", &format!("<<<'{tag}'\n{source}\n{tag}"))
@@ -361,15 +363,47 @@ $__eApp = require {bootstrap};
 function __e_refuses_connection(string $name): ?string {
     try {
         $connection = config('database.connections.' . $name) ?? [];
+        // A URL (`DB_URL`) wins over the keys beside it, as Laravel reads it:
+        // its driver, host and database, then whatever its query string sets.
+        $url = (string) ($connection['url'] ?? '');
+        if ($url !== '') {
+            $parts = parse_url(preg_replace('#^(sqlite3?):///#', '$1://null/', $url));
+            if ($parts === false) {
+                return 'its database URL could not be read';
+            }
+            $scheme = strtolower($parts['scheme'] ?? '');
+            if (in_array($scheme, ['sqlite', 'sqlite3'], true)) {
+                $connection['driver'] = 'sqlite';
+            } else {
+                $connection['driver'] = $scheme === '' ? ($connection['driver'] ?? '') : $scheme;
+                if (isset($parts['host'])) {
+                    $connection['host'] = rawurldecode($parts['host']);
+                }
+            }
+            if (($parts['path'] ?? '/') !== '/') {
+                $connection['database'] = rawurldecode(substr($parts['path'], 1));
+            }
+            $query = [];
+            parse_str($parts['query'] ?? '', $query);
+            $connection = array_merge($connection, $query);
+        }
         $database = (string) ($connection['database'] ?? '');
         $named = preg_match('/(^|[^a-z])(prod|production|live)([^a-z]|$)/i', basename($database));
         if (($connection['driver'] ?? '') === 'sqlite') {
             return $named ? "its database $database looks like production" : null;
         }
-        $host = $connection['host'] ?? '';
-        $host = strtolower(trim((string) (is_array($host) ? reset($host) : $host)));
-        if (!in_array($host, ['', 'localhost', '127.0.0.1', '::1', '0.0.0.0', 'host.docker.internal'], true)) {
-            return "its database is on $host, not this machine";
+        // Every host it may reach: its own, and those of its read and write
+        // connections.
+        $hosts = [];
+        foreach ([$connection, $connection['read'] ?? [], $connection['write'] ?? []] as $part) {
+            foreach ((array) (is_array($part) ? ($part['host'] ?? '') : '') as $host) {
+                $hosts[] = strtolower(trim((string) $host));
+            }
+        }
+        foreach ($hosts as $host) {
+            if (!in_array($host, ['', 'localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0', 'host.docker.internal'], true)) {
+                return "its database is on $host, not this machine";
+            }
         }
         return $named ? "its database $database looks like production" : null;
     } catch (\Throwable $e) {
@@ -391,7 +425,7 @@ function __e_refuses($app): ?string {
 // Files: what a disk holds is read as it is, what the expression writes goes
 // to a scratch copy beside it (and what it deletes is only marked gone), so
 // it reads back its own writes and nothing reaches the real files. The
-// scratch copy is removed when the run ends.
+// scratch copy is in a directory e makes for the run, and removes after it.
 if (class_exists(\Illuminate\Filesystem\FilesystemManager::class)) {
     class __EOverlayDisk implements \Illuminate\Contracts\Filesystem\Cloud {
         private $real;
@@ -401,7 +435,27 @@ if (class_exists(\Illuminate\Filesystem\FilesystemManager::class)) {
             $this->real = $real;
             $this->root = $root;
         }
-        private function n($path): string { return trim(str_replace('\\', '/', (string) $path), '/'); }
+        // A path on the disk, as Flysystem takes it: from the disk's root
+        // (a leading `/` included), `.` and `..` resolved, and refused when
+        // `..` would climb out of the disk — or out of the scratch copy, to
+        // write or delete the real files beside it.
+        private function n($path): string {
+            $parts = [];
+            foreach (explode('/', str_replace('\\', '/', (string) $path)) as $part) {
+                if ($part === '' || $part === '.') {
+                    continue;
+                }
+                if ($part === '..') {
+                    if ($parts === []) {
+                        throw new \RuntimeException("Path traversal detected: $path");
+                    }
+                    array_pop($parts);
+                    continue;
+                }
+                $parts[] = $part;
+            }
+            return implode('/', $parts);
+        }
         private function over($path): string { return $this->root . '/' . $this->n($path); }
         private function mine($path): bool { return is_file($this->over($path)); }
         private function removed($path): bool {
@@ -542,17 +596,6 @@ if (class_exists(\Illuminate\Filesystem\FilesystemManager::class)) {
             return new __EOverlayDisk(parent::build($config), self::$scratch . '/' . md5(serialize($config)));
         }
     }
-}
-
-function __e_remove_tree(string $dir): void {
-    if (!is_dir($dir)) {
-        return;
-    }
-    $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
-    foreach ($it as $f) {
-        $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
-    }
-    @rmdir($dir);
 }
 
 function __e_refuse(string $why): void {
@@ -806,8 +849,8 @@ try {
 }
 try {
     if (class_exists('__EStorage')) {
-        __EStorage::$scratch = sys_get_temp_dir() . '/e-eval-files-' . getmypid() . '-' . bin2hex(random_bytes(4));
-        register_shutdown_function(fn () => __e_remove_tree(__EStorage::$scratch));
+        // Made private by e, which removes it after the run however it ended.
+        __EStorage::$scratch = {scratch};
         $__eApp->instance('filesystem', new __EStorage($__eApp));
         $__eApp->forgetInstance('filesystem.disk');
         $__eApp->forgetInstance('filesystem.cloud');
@@ -986,18 +1029,95 @@ pub fn explain(root: &Path, file: &str, code: &str) -> Result<Evaluated, String>
     run_as(root, file, code, true)
 }
 
-fn run_as(root: &Path, file: &str, code: &str, explain: bool) -> Result<Evaluated, String> {
+/// A directory of a run's own, for its script and the scratch copy of what it
+/// writes through `Storage`: made afresh (`mkdir` fails on a name that is
+/// already there, a link included) and readable only by you, and removed
+/// when dropped — however the run ended, PHP killed at the timeout too.
+struct RunDir(PathBuf);
+
+impl RunDir {
+    fn new() -> std::io::Result<Self> {
+        let base = std::env::temp_dir();
+        for _ in 0..16 {
+            let dir = base.join(format!("e-eval-{}", unguessable()));
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(&dir) {
+                Ok(()) => return Ok(Self(dir)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(std::io::Error::other(
+            "couldn't make a directory of its own to run in",
+        ))
+    }
+
+    /// Write a new file in it, readable only by you.
+    fn create(&self, name: &str, contents: &str) -> std::io::Result<PathBuf> {
+        use std::io::Write;
+        let path = self.0.join(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options.open(&path)?.write_all(contents.as_bytes())?;
+        Ok(path)
+    }
+}
+
+impl Drop for RunDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A name nobody can guess ahead: 64 random bits, or — without
+/// `/dev/urandom` — the process, the time and a count (`mkdir` still refuses
+/// one that was taken).
+fn unguessable() -> String {
+    use std::io::Read;
+    let mut buf = [0u8; 8];
+    if std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .is_ok()
+    {
+        return buf.iter().map(|b| format!("{b:02x}")).collect();
+    }
     static RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let script = std::env::temp_dir().join(format!("e-eval-{}-{n}.php", std::process::id()));
-    std::fs::write(&script, runner(root, &context_of(file), code, explain))
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!(
+        "{}-{nanos}-{}",
+        std::process::id(),
+        RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
+fn run_as(root: &Path, file: &str, code: &str, explain: bool) -> Result<Evaluated, String> {
+    let dir = RunDir::new().map_err(|e| e.to_string())?;
+    let scratch = dir.0.join("files");
+    let script = dir
+        .create(
+            "eval.php",
+            &runner(root, &scratch, &context_of(file), code, explain),
+        )
         .map_err(|e| e.to_string())?;
     let out = crate::phptools::php(
         root,
         &[&script.to_string_lossy()],
         std::time::Duration::from_secs(30),
     );
-    let _ = std::fs::remove_file(&script);
+    drop(dir);
     let out = out?;
     read_answer(
         &String::from_utf8_lossy(&out.stdout),
@@ -1130,7 +1250,7 @@ class OrderController extends Controller
         .unwrap();
         std::fs::write(
             root.join("bootstrap/app.php"),
-            "<?php\nfunction config($key) { return $key === 'database.default' ? 'sqlite' : ['driver' => 'sqlite', 'database' => getenv('E_STUB_DB') ?: '/tmp/app.sqlite']; }\nreturn new class { public function make($c) { return new class { public function bootstrap() {} }; } public function environment($env) { return getenv('E_STUB_ENV') === $env; } };\n",
+            "<?php\nfunction config($key) { return $key === 'database.default' ? 'sqlite' : ['driver' => 'sqlite', 'url' => getenv('E_STUB_URL') ?: null, 'database' => getenv('E_STUB_DB') ?: '/tmp/app.sqlite']; }\nreturn new class { public function make($c) { return new class { public function bootstrap() {} }; } public function environment($env) { return getenv('E_STUB_ENV') === $env; } };\n",
         )
         .unwrap();
         let file = "<?php\n\nnamespace App\\Http;\n\nuse App\\Support\\Money;\n\nclass X {}\n";
@@ -1159,6 +1279,115 @@ class OrderController extends Controller
             e.error.as_deref(),
             Some("Not evaluated: its database /srv/shop_production.sqlite looks like production")
         );
+        // Nor on another machine named by a URL (`DB_URL`), which wins over
+        // the host beside it — in its query string too.
+        for (url, host) in [
+            (
+                "mysql://forge:secret@db.example.com:3306/shop",
+                "db.example.com",
+            ),
+            (
+                "pgsql://127.0.0.1/shop?host=db.example.com",
+                "db.example.com",
+            ),
+        ] {
+            std::env::set_var("E_STUB_URL", url);
+            let e = run(&root, file, "Money::cents(1)").unwrap();
+            std::env::remove_var("E_STUB_URL");
+            assert_eq!(
+                e.error,
+                Some(format!(
+                    "Not evaluated: its database is on {host}, not this machine"
+                )),
+                "{url}"
+            );
+        }
+        std::env::set_var("E_STUB_URL", "mysql://root@127.0.0.1/shop");
+        let e = run(&root, file, "Money::cents(1)").unwrap();
+        std::env::remove_var("E_STUB_URL");
+        assert_eq!(e.error, None, "{e:?}");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// The scratch copy `Storage` writes to, against a stand-in filesystem:
+    /// `..` can't climb out of it, and it is gone after the run.
+    #[test]
+    fn storage_writes_stay_in_a_scratch_copy_that_goes_with_the_run() {
+        if std::process::Command::new("php")
+            .arg("-v")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("e-eval-disk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("vendor")).unwrap();
+        std::fs::create_dir_all(root.join("bootstrap")).unwrap();
+        std::fs::write(
+            root.join("vendor/autoload.php"),
+            "<?php
+namespace Illuminate\\Contracts\\Filesystem { interface Cloud {} }
+namespace Illuminate\\Filesystem {
+    class FilesystemManager {
+        public function __construct($app) {}
+        public function getDefaultDriver() { return 'local'; }
+        public function disk($name = null) { return new Disk(); }
+        public function build($config) { return new Disk(); }
+    }
+    class Disk {
+        public function exists($path) { return false; }
+        public function get($path) { return null; }
+    }
+}
+",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("bootstrap/app.php"),
+            "<?php\nfunction config($key) { return $key === 'database.default' ? 'sqlite' : ['driver' => 'sqlite', 'database' => '/tmp/app.sqlite']; }\nreturn new class { public function make($c) { return new class { public function bootstrap() {} }; } public function environment($env) { return false; } };\n",
+        )
+        .unwrap();
+        let victim = root.join("real.txt");
+        std::fs::write(&victim, "real").unwrap();
+        let file = "<?php\n\nnamespace App;\n";
+        let eval = |code: &str| {
+            let e = run(&root, file, code).unwrap();
+            assert_eq!(e.error, None, "{code}: {e:?}");
+            serde_json::from_str::<String>(&e.value).unwrap_or(e.value)
+        };
+
+        // `..` that climbs out is refused, as Flysystem refuses it: neither
+        // a write nor a delete reaches a real file.
+        let up = "../".repeat(40);
+        let victim_from_root = victim.to_string_lossy().trim_start_matches('/').to_string();
+        for call in [
+            format!("$d->delete('{up}{victim_from_root}')"),
+            format!("$d->put('{up}{victim_from_root}', 'gone')"),
+            "$d->put('../x.txt', 'out')".to_string(),
+        ] {
+            let said = eval(&format!(
+                "(function () {{ $d = (new \\__EStorage(null))->disk(); $d->put('x.txt', 'x'); \
+                 try {{ {call}; return 'done'; }} catch (\\Throwable $e) {{ return $e->getMessage(); }} }})()"
+            ));
+            assert!(
+                said.starts_with("Path traversal detected"),
+                "{call}: {said}"
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "real");
+
+        // Within the disk, `.`, `..` and a leading `/` resolve as on a disk.
+        let said = eval(
+            "(function () { $d = (new \\__EStorage(null))->disk(); $d->put('/a/./b/../c.txt', 'made'); \
+             return $d->get('a/c.txt') . '|' . \\__EStorage::$scratch; })()",
+        );
+        let (made, scratch) = said.split_once('|').unwrap();
+        assert_eq!(made, "made");
+        // The run's directory went with it.
+        let scratch = Path::new(scratch);
+        assert!(scratch.ends_with("files"), "{said}");
+        assert!(!scratch.parent().unwrap().exists(), "{said}");
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -1232,14 +1461,22 @@ class OrderController extends Controller
         assert!(v.contains("real") && v.contains("more|false"), "{v}");
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "real");
         // Every disk, not just the default; and the scratch copy is gone.
-        eval("Storage::disk('public')->put('avatar.png', 'x')");
+        let scratch = eval(
+            "(function () { Storage::disk('public')->put('avatar.png', 'x'); return \\__EStorage::$scratch; })()",
+        );
         assert!(!root.join("storage/app/public/avatar.png").exists());
-        let left = std::fs::read_dir(std::env::temp_dir())
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|e| e.file_name().to_string_lossy().starts_with("e-eval-files-"))
-            .count();
-        assert_eq!(left, 0, "a scratch copy was left behind");
+        let scratch: String = serde_json::from_str(&scratch).unwrap();
+        assert!(
+            !Path::new(&scratch).exists(),
+            "a scratch copy was left behind"
+        );
+        // `..` out of the disk is refused, as Flysystem refuses it.
+        let v = eval(
+            "(function () { try { Storage::delete('../../../reports/real.txt'); return 'deleted'; } \
+             catch (\\Throwable $e) { return $e->getMessage(); } })()",
+        );
+        assert!(v.contains("Path traversal detected"), "{v}");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "real");
         std::fs::remove_dir_all(&root).ok();
     }
 }

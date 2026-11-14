@@ -641,13 +641,16 @@ it changes, and goes when its own line changes.
 - **Files written through `Storage` go to a scratch copy**, on every disk:
   - The expression reads its own writes back, and deletes and directories
     behave as they would.
-  - Your real files are read but never changed.
-  - The scratch copy is removed when the run ends.
+  - Your real files are read but never changed. A path that climbs out of
+    the disk with `..` is refused, as Laravel refuses it.
+  - The scratch copy is in a folder only you can read, removed when the run
+    ends, even when it is stopped at the 30-second limit.
 - **Production is off limits.** `e` won't run it when the app boots as
-  production, or when its default database isn't on this machine or has
-  `prod` or `live` in its name. The check runs before the app's service
-  providers start. It reads the configuration the app actually loaded, so a
-  cached config counts as well as `.env`.
+  production, or when its default database isn't on this machine (by its
+  `host`, its read and write hosts, or the `url` / `DB_URL` that overrides
+  them) or has `prod` or `live` in its name. The check runs before the app's
+  service providers start. It reads the configuration the app actually
+  loaded, so a cached config counts as well as `.env`.
 
 Some things are beyond it:
 - DDL on MySQL commits as it runs.

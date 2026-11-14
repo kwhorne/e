@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Inline evaluation could write files.** `⌘↵` rolled back the database
+  and faked mail and HTTP, but files written through `Storage` landed on
+  disk, so evaluating something that saves an invoice saved it. Writes now
+  go to a scratch copy the expression reads back from, on every disk. Real
+  files are read and never changed, and the copy is removed afterwards.
 - **Updates on Linux are signed.** The updater checked a downloaded archive
   only against the `.sha256` beside it on the same release page, so anyone
   who could change one could change both. Archives are now signed by the

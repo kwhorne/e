@@ -7,8 +7,10 @@
 //! namespace, with its `use` imports. Writes are rolled back — it runs in a
 //! transaction on every connection it reaches — mail, notifications and
 //! queued jobs are faked and outgoing HTTP is stopped, so evaluating
-//! `$order->ship()` sends nothing. Files written through `Storage` are not
-//! held back.
+//! `$order->ship()` sends nothing. Files written through `Storage` go to a
+//! scratch copy the run reads back from and then removes; the real files are
+//! read but never changed. (Files written with plain PHP — `file_put_contents`
+//! — are beyond its reach.)
 
 use std::ops::Range;
 use std::path::Path;
@@ -386,6 +388,173 @@ function __e_refuses($app): ?string {
     }
 }
 
+// Files: what a disk holds is read as it is, what the expression writes goes
+// to a scratch copy beside it (and what it deletes is only marked gone), so
+// it reads back its own writes and nothing reaches the real files. The
+// scratch copy is removed when the run ends.
+if (class_exists(\Illuminate\Filesystem\FilesystemManager::class)) {
+    class __EOverlayDisk implements \Illuminate\Contracts\Filesystem\Cloud {
+        private $real;
+        private $root;
+        private $gone = [];
+        public function __construct($real, string $root) {
+            $this->real = $real;
+            $this->root = $root;
+        }
+        private function n($path): string { return trim(str_replace('\\', '/', (string) $path), '/'); }
+        private function over($path): string { return $this->root . '/' . $this->n($path); }
+        private function mine($path): bool { return is_file($this->over($path)); }
+        private function removed($path): bool {
+            $p = $this->n($path);
+            foreach ($this->gone as $g => $_) {
+                if ($p === $g || str_starts_with($p, $g . '/')) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        private function write($path, string $contents): bool {
+            $to = $this->over($path);
+            @mkdir(dirname($to), 0700, true);
+            unset($this->gone[$this->n($path)]);
+            return file_put_contents($to, $contents) !== false;
+        }
+        private function contentsOf($contents): string {
+            if (is_resource($contents)) {
+                return (string) stream_get_contents($contents);
+            }
+            if (is_object($contents) && method_exists($contents, 'getRealPath')) {
+                return (string) file_get_contents($contents->getRealPath());
+            }
+            return (string) $contents;
+        }
+        public function path($path) { return $this->mine($path) ? $this->over($path) : $this->real->path($path); }
+        public function exists($path) { return $this->mine($path) || (!$this->removed($path) && $this->real->exists($path)); }
+        public function missing($path) { return !$this->exists($path); }
+        public function get($path) {
+            if ($this->mine($path)) {
+                return file_get_contents($this->over($path));
+            }
+            return $this->removed($path) ? null : $this->real->get($path);
+        }
+        public function json($path, $flags = 0) {
+            $c = $this->get($path);
+            return $c === null ? null : json_decode($c, true, 512, $flags);
+        }
+        public function readStream($path) {
+            if ($this->mine($path)) {
+                return fopen($this->over($path), 'rb');
+            }
+            return $this->removed($path) ? null : $this->real->readStream($path);
+        }
+        public function put($path, $contents, $options = []) {
+            if (is_object($contents) && method_exists($contents, 'hashName')) {
+                return $this->putFile($path, $contents, $options);
+            }
+            return $this->write($path, $this->contentsOf($contents));
+        }
+        public function putFile($path, $file = null, $options = []) {
+            if ($file === null || is_array($file)) {
+                [$path, $file, $options] = ['', $path, $file ?? []];
+            }
+            $file = is_string($file) ? new \Illuminate\Http\File($file) : $file;
+            return $this->putFileAs($path, $file, $file->hashName(), $options);
+        }
+        public function putFileAs($path, $file, $name = null, $options = []) {
+            if ($name === null || is_array($name)) {
+                [$path, $file, $name, $options] = ['', $path, $file, $name ?? []];
+            }
+            $file = is_string($file) ? new \Illuminate\Http\File($file) : $file;
+            $name = $name ?? $file->hashName();
+            $target = trim($this->n($path) . '/' . $name, '/');
+            return $this->write($target, $this->contentsOf($file)) ? $target : false;
+        }
+        public function writeStream($path, $resource, array $options = []) { return $this->write($path, $this->contentsOf($resource)); }
+        public function getVisibility($path) { return $this->mine($path) ? 'private' : $this->real->getVisibility($path); }
+        public function setVisibility($path, $visibility) { return true; }
+        public function prepend($path, $data, $separator = PHP_EOL) {
+            return $this->write($path, $this->exists($path) ? $data . $separator . $this->get($path) : $data);
+        }
+        public function append($path, $data, $separator = PHP_EOL) {
+            return $this->write($path, $this->exists($path) ? $this->get($path) . $separator . $data : $data);
+        }
+        public function delete($paths) {
+            foreach (is_array($paths) ? $paths : func_get_args() as $path) {
+                @unlink($this->over($path));
+                $this->gone[$this->n($path)] = true;
+            }
+            return true;
+        }
+        public function copy($from, $to) {
+            $c = $this->get($from);
+            return $c !== null && $this->write($to, $c);
+        }
+        public function move($from, $to) { return $this->copy($from, $to) && $this->delete($from); }
+        public function size($path) { return $this->mine($path) ? filesize($this->over($path)) : $this->real->size($path); }
+        public function lastModified($path) { return $this->mine($path) ? filemtime($this->over($path)) : $this->real->lastModified($path); }
+        private function scratch($directory, bool $dirs, bool $recursive): array {
+            $base = rtrim($this->over($directory ?? ''), '/');
+            if (!is_dir($base)) {
+                return [];
+            }
+            $out = [];
+            $it = $recursive
+                ? new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST)
+                : new \FilesystemIterator($base, \FilesystemIterator::SKIP_DOTS);
+            foreach ($it as $f) {
+                if ($f->isDir() === $dirs) {
+                    $out[] = substr($f->getPathname(), strlen($this->root) + 1);
+                }
+            }
+            return $out;
+        }
+        private function listing(array $real, array $mine): array {
+            $real = array_filter($real, fn ($p) => !$this->removed($p));
+            $all = array_values(array_unique(array_merge($real, $mine)));
+            sort($all);
+            return $all;
+        }
+        public function files($directory = null, $recursive = false) {
+            return $this->listing($this->removed($directory ?? '') ? [] : $this->real->files($directory, $recursive), $this->scratch($directory, false, $recursive));
+        }
+        public function allFiles($directory = null) { return $this->files($directory, true); }
+        public function directories($directory = null, $recursive = false) {
+            return $this->listing($this->removed($directory ?? '') ? [] : $this->real->directories($directory, $recursive), $this->scratch($directory, true, $recursive));
+        }
+        public function allDirectories($directory = null) { return $this->directories($directory, true); }
+        public function makeDirectory($path) { return @mkdir($this->over($path), 0700, true) || is_dir($this->over($path)); }
+        public function deleteDirectory($directory) {
+            $this->gone[$this->n($directory)] = true;
+            return true;
+        }
+        public function url($path) { return $this->real->url($path); }
+        public function __call($method, $args) { return $this->real->$method(...$args); }
+    }
+    class __EStorage extends \Illuminate\Filesystem\FilesystemManager {
+        public static $scratch;
+        private $overlays = [];
+        public function disk($name = null) {
+            $name = $name ?: $this->getDefaultDriver();
+            return $this->overlays[$name] ??= new __EOverlayDisk(parent::disk($name), self::$scratch . '/' . md5($name));
+        }
+        public function drive($name = null) { return $this->disk($name); }
+        public function build($config) {
+            return new __EOverlayDisk(parent::build($config), self::$scratch . '/' . md5(serialize($config)));
+        }
+    }
+}
+
+function __e_remove_tree(string $dir): void {
+    if (!is_dir($dir)) {
+        return;
+    }
+    $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
+    foreach ($it as $f) {
+        $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
+    }
+    @rmdir($dir);
+}
+
 function __e_refuse(string $why): void {
     echo "\n{mark}" . json_encode(['value' => '', 'full' => '', 'error' => "Not evaluated: $why", 'printed' => '', 'ms' => 0, 'queries' => []]) . "\n";
     exit(0);
@@ -633,6 +802,17 @@ try {
     \Illuminate\Support\Facades\Mail::fake();
     \Illuminate\Support\Facades\Notification::fake();
     \Illuminate\Support\Facades\Queue::fake();
+} catch (\Throwable $e) {
+}
+try {
+    if (class_exists('__EStorage')) {
+        __EStorage::$scratch = sys_get_temp_dir() . '/e-eval-files-' . getmypid() . '-' . bin2hex(random_bytes(4));
+        register_shutdown_function(fn () => __e_remove_tree(__EStorage::$scratch));
+        $__eApp->instance('filesystem', new __EStorage($__eApp));
+        $__eApp->forgetInstance('filesystem.disk');
+        $__eApp->forgetInstance('filesystem.cloud');
+        \Illuminate\Support\Facades\Storage::clearResolvedInstance('filesystem');
+    }
 } catch (\Throwable $e) {
 }
 try {
@@ -979,6 +1159,87 @@ class OrderController extends Controller
             e.error.as_deref(),
             Some("Not evaluated: its database /srv/shop_production.sqlite looks like production")
         );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Against a real Laravel app — `--ignored`, with `E_LARAVEL_VENDOR`
+    /// pointing at a Laravel project's `vendor` folder.
+    #[test]
+    #[ignore]
+    fn storage_reads_the_real_files_and_never_writes_them() {
+        let Ok(vendor) = std::env::var("E_LARAVEL_VENDOR") else {
+            return;
+        };
+        let root = std::env::temp_dir().join(format!("e-eval-storage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in [
+            "bootstrap/cache",
+            "storage/app/private/reports",
+            "storage/app/public",
+            "storage/framework/cache",
+            "storage/framework/views",
+            "storage/framework/sessions",
+            "storage/logs",
+            "database",
+        ] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        std::os::unix::fs::symlink(&vendor, root.join("vendor")).unwrap();
+        std::fs::write(
+            root.join("bootstrap/app.php"),
+            "<?php\nreturn Illuminate\\Foundation\\Application::configure(basePath: dirname(__DIR__))\n    ->withMiddleware(function ($m) {})->withExceptions(function ($e) {})->create();\n",
+        )
+        .unwrap();
+        // No package discovery: only the framework's own providers.
+        std::fs::write(
+            root.join("bootstrap/cache/packages.php"),
+            "<?php return [];\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("database/database.sqlite"), "").unwrap();
+        std::fs::write(
+            root.join(".env"),
+            format!(
+                "APP_ENV=local\nAPP_KEY=base64:{}\nDB_CONNECTION=sqlite\nDB_DATABASE={}\n",
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                root.join("database/database.sqlite").display()
+            ),
+        )
+        .unwrap();
+        let real = root.join("storage/app/private/reports/real.txt");
+        std::fs::write(&real, "real").unwrap();
+        let file = "<?php\n\nnamespace App;\n\nuse Illuminate\\Support\\Facades\\Storage;\n";
+        let eval = |code: &str| {
+            let e = run(&root, file, code).unwrap();
+            assert_eq!(e.error, None, "{code}: {e:?}");
+            e.value
+        };
+
+        // The real files are read.
+        assert!(eval("Storage::get('reports/real.txt')").contains("real"));
+        // What it writes, it reads back, and the disk never sees it.
+        assert!(eval(
+            "(function () { Storage::put('reports/new.txt', 'made'); \
+             return Storage::get('reports/new.txt') . '|' . implode(',', Storage::files('reports')); })()"
+        )
+        .contains("made|reports/new.txt,reports/real.txt"));
+        assert!(!root.join("storage/app/private/reports/new.txt").exists());
+        // Changing or deleting a real file leaves it as it was.
+        let v = eval(
+            "(function () { Storage::append('reports/real.txt', 'more'); $a = Storage::get('reports/real.txt'); \
+             Storage::delete('reports/real.txt'); return $a . '|' . var_export(Storage::exists('reports/real.txt'), true); })()",
+        );
+        assert!(v.contains("real") && v.contains("more|false"), "{v}");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "real");
+        // Every disk, not just the default; and the scratch copy is gone.
+        eval("Storage::disk('public')->put('avatar.png', 'x')");
+        assert!(!root.join("storage/app/public/avatar.png").exists());
+        let left = std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with("e-eval-files-"))
+            .count();
+        assert_eq!(left, 0, "a scratch copy was left behind");
         std::fs::remove_dir_all(&root).ok();
     }
 }

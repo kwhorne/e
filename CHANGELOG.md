@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Foreign keys in PostgreSQL could point the wrong way.** The query behind
+  the Database panel's foreign-key hops matched constraints by name across
+  schemas and tables. A table with a namesake in another schema got that
+  table's keys too, a key over two columns came back as every pairing of
+  them, and keys on tables owned by someone else went missing. Keys now come
+  from PostgreSQL's catalog, column by column, for the tables the panel
+  shows.
 - **A comment could hide a destructive statement in the SQL console.** The
   check that asks before a `DROP`, `TRUNCATE` or a `DELETE`/`UPDATE` without
   `WHERE` read only the first word, so `-- cleanup` on the line above, or a

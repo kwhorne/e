@@ -2462,18 +2462,24 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner()); // recover a poisoned lock instead of crashing the app
             conn.sync_pg_session(&mut client)?;
             let res = match pg_limited(sql, max) {
-                Some(limited) => match pg_query(&mut client, &limited, max) {
+                Some(limited) => match pg_run(&mut client, &limited, max) {
                     Ok(res) => res,
-                    // Whatever went wrong, the statement as written says it
-                    // best — unless the first failure aborted the user's own
-                    // transaction, which then refuses everything.
-                    Err(first) => pg_query(&mut client, sql, max).map_err(|second| {
-                        if second.contains("current transaction is aborted") {
-                            first
-                        } else {
-                            second
-                        }
-                    })?,
+                    // An error the wrapping may have caused (a syntax or name
+                    // error) is better told by the statement as written —
+                    // unless the first failure aborted the user's own
+                    // transaction, which then refuses everything. Anything
+                    // else (a cancel, a runtime error) is the answer.
+                    Err(first) if pg_wrapping_may_cause(&first) => pg_run(&mut client, sql, max)
+                        .map_err(|second| {
+                            if second.code()
+                                == Some(&postgres::error::SqlState::IN_FAILED_SQL_TRANSACTION)
+                            {
+                                pg_err(first)
+                            } else {
+                                pg_err(second)
+                            }
+                        })?,
+                    Err(e) => return Err(pg_err(e)),
                 },
                 None => pg_query(&mut client, sql, max)?,
             };
@@ -2606,9 +2612,21 @@ fn pg_limited(sql: &str, max: usize) -> Option<String> {
     ))
 }
 
+/// Whether `e` from a statement wrapped by [`pg_limited`] could be the
+/// wrapping's doing: a syntax or name error (SQLSTATE class 42) or a
+/// feature PostgreSQL won't do in a subquery (0A).
+fn pg_wrapping_may_cause(e: &postgres::Error) -> bool {
+    e.code()
+        .is_some_and(|c| c.code().starts_with("42") || c.code().starts_with("0A"))
+}
+
 fn pg_query(client: &mut postgres::Client, sql: &str, max: usize) -> Result<PgRows, String> {
+    pg_run(client, sql, max).map_err(pg_err)
+}
+
+fn pg_run(client: &mut postgres::Client, sql: &str, max: usize) -> Result<PgRows, postgres::Error> {
     use postgres::SimpleQueryMessage::*;
-    let msgs = client.simple_query(sql).map_err(pg_err)?;
+    let msgs = client.simple_query(sql)?;
     let mut columns: Vec<String> = Vec::new();
     let mut rows: Vec<Vec<Option<String>>> = Vec::new();
     let mut affected = None;

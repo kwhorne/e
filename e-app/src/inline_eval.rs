@@ -257,8 +257,8 @@ impl AppState {
     /// panel.
     pub(crate) fn show_eval(&self, line: usize) {
         if let Some(e) = self.eval_at(line) {
-            self.tinker_output.set(e.report);
-            self.tinker_open.set(true);
+            self.tinker.output.set(e.report);
+            self.tinker.open.set(true);
         }
     }
 

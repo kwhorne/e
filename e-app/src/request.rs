@@ -64,7 +64,7 @@ fn normalize(sql: &str) -> String {
 }
 
 pub fn request_view(state: AppState) -> impl IntoView {
-    let title = label(move || state.req_url.get()).style(|s| {
+    let title = label(move || state.req.url.get()).style(|s| {
         s.flex_grow(1.0_f32)
             .font_size(12.0)
             .font_family(theme::mono_family())
@@ -72,9 +72,9 @@ pub fn request_view(state: AppState) -> impl IntoView {
             .text_ellipsis()
     });
 
-    let status = label(move || match state.req_status.get() {
+    let status = label(move || match state.req.status.get() {
         Some(code) => format!("{code}"),
-        None if state.req_running.get() => "…".to_string(),
+        None if state.req.running.get() => "…".to_string(),
         None => String::new(),
     })
     .style(move |s| {
@@ -84,7 +84,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
             .padding_horiz(8.0)
             .padding_vert(2.0)
             .border_radius(4.0);
-        match state.req_status.get() {
+        match state.req.status.get() {
             Some(c) if (200..300).contains(&c) => s.color(theme::success()),
             Some(_) => s.color(theme::error()),
             None => s.color(theme::fg_dim()),
@@ -92,7 +92,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
     });
 
     let time = label(move || {
-        let t = state.req_time.get();
+        let t = state.req.time.get();
         if t.is_empty() {
             String::new()
         } else {
@@ -112,13 +112,14 @@ pub fn request_view(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         })
         .on_click_stop(move |_| {
-            let url = state.req_url.get_untracked();
+            let url = state.req.url.get_untracked();
             let status = state
-                .req_status
+                .req
+                .status
                 .get_untracked()
                 .map(|c| c.to_string())
                 .unwrap_or_default();
-            let qn = state.req_queries.with_untracked(|q| q.len());
+            let qn = state.req.queries.with_untracked(|q| q.len());
             state.send_to_agent(&format!(
                 "Analyze this request. URL: {url} (status {status}). It ran {qn} SQL queries. \
                  Point out any N+1 problems and how to fix them."
@@ -137,7 +138,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()));
             // Only meaningful once we have a response.
-            if state.req_status.get().is_some() {
+            if state.req.status.get().is_some() {
                 s
             } else {
                 s.hide()
@@ -167,9 +168,9 @@ pub fn request_view(state: AppState) -> impl IntoView {
 
     // Query summary bar with N+1 warning.
     let qsummary = label(move || {
-        let qs = state.req_queries.get();
+        let qs = state.req.queries.get();
         if qs.is_empty() {
-            if state.req_running.get() {
+            if state.req.running.get() {
                 String::new()
             } else {
                 "No queries captured (install laravel/clockwork to see SQL).".to_string()
@@ -193,7 +194,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let s = s.font_size(11.0).padding_horiz(12.0).padding_vert(4.0);
-        let has_dupe = state.req_queries.with(|qs| {
+        let has_dupe = state.req.queries.with(|qs| {
             let mut counts: HashMap<String, usize> = HashMap::new();
             for (sql, _) in qs {
                 *counts.entry(normalize(sql)).or_default() += 1;
@@ -210,7 +211,8 @@ pub fn request_view(state: AppState) -> impl IntoView {
     let queries = dyn_stack(
         move || {
             state
-                .req_queries
+                .req
+                .queries
                 .get()
                 .into_iter()
                 .enumerate()
@@ -244,7 +246,8 @@ pub fn request_view(state: AppState) -> impl IntoView {
     // Inertia component header (click to open the page component).
     let inertia_head = label(move || {
         state
-            .req_inertia
+            .req
+            .inertia
             .with(|i| i.as_ref().map(|(c, _)| format!("⚛ {c}")))
             .unwrap_or_default()
     })
@@ -259,7 +262,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
             .border_top(1.0)
             .border_color(theme::border())
             .hover(|s| s.background(theme::bg_hover()));
-        if state.req_inertia.with(|i| i.is_some()) {
+        if state.req.inertia.with(|i| i.is_some()) {
             s
         } else {
             s.hide()
@@ -267,7 +270,8 @@ pub fn request_view(state: AppState) -> impl IntoView {
     })
     .on_click_stop(move |_| {
         if let Some(c) = state
-            .req_inertia
+            .req
+            .inertia
             .with_untracked(|i| i.as_ref().map(|(c, _)| c.clone()))
         {
             state.open_page_or_view(&c);
@@ -278,7 +282,8 @@ pub fn request_view(state: AppState) -> impl IntoView {
     let inertia_tree = dyn_stack(
         move || {
             state
-                .req_inertia
+                .req
+                .inertia
                 .with(|i| {
                     i.as_ref().map(|(_, props)| {
                         let mut out = Vec::new();
@@ -308,7 +313,7 @@ pub fn request_view(state: AppState) -> impl IntoView {
     )
     .style(move |s| {
         let s = s.flex_col().width_full();
-        if state.req_inertia.with(|i| i.is_some()) {
+        if state.req.inertia.with(|i| i.is_some()) {
             s
         } else {
             s.hide()
@@ -318,14 +323,14 @@ pub fn request_view(state: AppState) -> impl IntoView {
     let body = scroll(
         stack((
             inertia_tree,
-            label(move || state.req_body.get()).style(move |s| {
+            label(move || state.req.body.get()).style(move |s| {
                 let s = s
                     .font_family(theme::mono_family())
                     .font_size(12.0)
                     .padding(10.0)
                     .color(theme::fg());
                 // Hide the raw HTML body once we have a parsed Inertia tree.
-                if state.req_inertia.with(|i| i.is_some()) {
+                if state.req.inertia.with(|i| i.is_some()) {
                     s.hide()
                 } else {
                     s
@@ -341,13 +346,13 @@ pub fn request_view(state: AppState) -> impl IntoView {
             .border_color(theme::border())
     });
 
-    let err = label(move || state.req_error.get().unwrap_or_default()).style(move |s| {
+    let err = label(move || state.req.error.get().unwrap_or_default()).style(move |s| {
         let s = s
             .padding_horiz(12.0)
             .padding_vert(4.0)
             .font_size(11.0)
             .color(theme::error());
-        if state.req_error.get().is_some() {
+        if state.req.error.get().is_some() {
             s
         } else {
             s.hide()
@@ -380,10 +385,28 @@ pub fn request_view(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.req_open.get() {
+        if state.req.open.get() {
             s
         } else {
             s.hide()
         }
     })
+}
+
+/// The request runner: what was sent and what came back.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct RequestPanel {
+    pub open: floem::reactive::RwSignal<bool>,
+    pub url: floem::reactive::RwSignal<String>,
+    pub status: floem::reactive::RwSignal<Option<u16>>,
+    pub time: floem::reactive::RwSignal<String>,
+    pub body: floem::reactive::RwSignal<String>,
+    /// Captured SQL queries `(sql, duration)` (via Clockwork if available).
+    pub queries: floem::reactive::RwSignal<Vec<(String, String)>>,
+    pub error: floem::reactive::RwSignal<Option<String>>,
+    pub running: floem::reactive::RwSignal<bool>,
+    /// For an Inertia response: `(component, props)` shown as a tree.
+    pub inertia: floem::reactive::RwSignal<Option<(String, serde_json::Value)>>,
 }

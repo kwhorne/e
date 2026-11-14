@@ -61,7 +61,7 @@ fn btn(text: &'static str, primary: bool) -> impl IntoView {
 /// The body of the notice, which depends on the current update status.
 fn notice_body(state: AppState) -> impl IntoView {
     dyn_container(
-        move || state.update_status.get(),
+        move || state.updater.status.get(),
         move |status| match status {
             UpdateStatus::Downloading => label(|| "Downloading update…".to_string())
                 .style(|s| s.color(theme::fg()).font_size(14.0))
@@ -121,7 +121,7 @@ fn notice_body(state: AppState) -> impl IntoView {
 
             // Idle / Checking with an available update.
             _ => {
-                let info = state.update_info.get();
+                let info = state.updater.info.get();
                 let Some(info) = info else {
                     return label(String::new).into_any();
                 };
@@ -138,10 +138,10 @@ fn notice_body(state: AppState) -> impl IntoView {
                             .margin_top(2.0)
                             .cursor(floem::style::CursorStyle::Pointer)
                     })
-                    .on_click_stop(move |_| state.update_notes_open.update(|o| *o = !*o));
+                    .on_click_stop(move |_| state.updater.notes_open.update(|o| *o = !*o));
 
                 let notes_view = dyn_container(
-                    move || state.update_notes_open.get(),
+                    move || state.updater.notes_open.get(),
                     move |open| {
                         if open {
                             let notes = notes.clone();
@@ -175,9 +175,9 @@ fn notice_body(state: AppState) -> impl IntoView {
 
 pub fn update_notice(state: AppState) -> impl IntoView {
     let visible = move || {
-        state.update_info.get().is_some()
+        state.updater.info.get().is_some()
             || matches!(
-                state.update_status.get(),
+                state.updater.status.get(),
                 UpdateStatus::Downloading
                     | UpdateStatus::Installed
                     | UpdateStatus::Failed(_)

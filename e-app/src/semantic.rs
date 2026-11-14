@@ -553,3 +553,16 @@ mod tests {
         assert_eq!(tokenize("Mail::to($user)"), vec!["mail", "to", "user"]);
     }
 }
+
+/// Semantic search: the index, the query and its results.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct SemanticSearch {
+    pub open: floem::reactive::RwSignal<bool>,
+    pub query: floem::reactive::RwSignal<String>,
+    pub status: floem::reactive::RwSignal<String>,
+    pub results: floem::reactive::RwSignal<Vec<crate::semantic::SemHit>>,
+    pub index:
+        floem::reactive::RwSignal<std::rc::Rc<std::cell::RefCell<crate::semantic::SemIndex>>>,
+}

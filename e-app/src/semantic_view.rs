@@ -11,7 +11,7 @@ use crate::state::AppState;
 use crate::theme;
 
 pub fn semantic_panel(state: AppState) -> impl IntoView {
-    let input = text_input(state.sem_query)
+    let input = text_input(state.sem.query)
         .placeholder("Describe what you're looking for… e.g. where is the invoice email sent")
         .style(|s| {
             theme::input_colors(s)
@@ -48,7 +48,7 @@ pub fn semantic_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.sem_open.set(false));
+        .on_click_stop(move |_| state.sem.open.set(false));
 
     let header = stack((input, go, close)).style(|s| {
         s.flex_row()
@@ -60,13 +60,13 @@ pub fn semantic_panel(state: AppState) -> impl IntoView {
             .border_color(theme::border())
     });
 
-    let status = label(move || state.sem_status.get()).style(move |s| {
+    let status = label(move || state.sem.status.get()).style(move |s| {
         let s = s
             .padding_horiz(12.0)
             .padding_vert(4.0)
             .font_size(11.0)
             .color(theme::fg_dim());
-        if state.sem_status.with(|t| t.is_empty()) {
+        if state.sem.status.with(|t| t.is_empty()) {
             s.hide()
         } else {
             s
@@ -76,7 +76,8 @@ pub fn semantic_panel(state: AppState) -> impl IntoView {
     let results = dyn_stack(
         move || {
             state
-                .sem_results
+                .sem
+                .results
                 .get()
                 .into_iter()
                 .enumerate()
@@ -141,7 +142,7 @@ pub fn semantic_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.sem_open.get() {
+        if state.sem.open.get() {
             s
         } else {
             s.hide()

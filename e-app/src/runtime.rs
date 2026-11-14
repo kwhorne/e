@@ -218,15 +218,15 @@ impl AppState {
     // ---- Runtime insight -----------------------------------------------
 
     pub fn toggle_runtime(&self) {
-        let open = !self.runtime_open.get_untracked();
-        self.runtime_open.set(open);
+        let open = !self.runtime.open.get_untracked();
+        self.runtime.open.set(open);
         if open {
             self.poll_runtime();
         }
     }
 
     pub fn clear_runtime(&self) {
-        self.runtime_reqs.set(Vec::new());
+        self.runtime.reqs.set(Vec::new());
     }
 
     /// Find out, once, whether Grove serves this project — and if so, the real
@@ -270,7 +270,7 @@ impl AppState {
 
     /// Poll for new requests. Called on the idle tick while the panel is open.
     pub fn poll_runtime(&self) {
-        if self.runtime_polling.get_untracked() {
+        if self.runtime.polling.get_untracked() {
             return;
         }
         match self.grove_site() {
@@ -281,12 +281,13 @@ impl AppState {
 
     /// Grove's timeline for this site: merge what we haven't seen, newest on top.
     fn poll_runtime_grove(&self, site: grove::Site) {
-        self.runtime_polling.set(true);
+        self.runtime.polling.set(true);
         let known: Vec<u64> = self
-            .runtime_reqs
+            .runtime
+            .reqs
             .with_untracked(|l| l.iter().filter_map(|r| r.grove_id).collect());
-        let reqs = self.runtime_reqs;
-        let polling = self.runtime_polling;
+        let reqs = self.runtime.reqs;
+        let polling = self.runtime.polling;
         self.spawn_bg(
             move || {
                 let list = grove::requests(&site.name, 50).unwrap_or_default();
@@ -326,10 +327,10 @@ impl AppState {
 
     /// Poll Clockwork for the latest request and prepend it if it's new.
     fn poll_runtime_clockwork(&self) {
-        self.runtime_polling.set(true);
+        self.runtime.polling.set(true);
         let base = self.app_base();
-        let reqs = self.runtime_reqs;
-        let polling = self.runtime_polling;
+        let reqs = self.runtime.reqs;
+        let polling = self.runtime.polling;
         let send = create_ext_action(self.cx, move |req: Option<RuntimeReq>| {
             polling.set(false);
             if let Some(req) = req {
@@ -358,7 +359,8 @@ impl AppState {
     /// Fetch a Grove entry's chain on demand (a backlog row being expanded).
     pub fn runtime_load_chain(&self, id: &str) {
         let req = self
-            .runtime_reqs
+            .runtime
+            .reqs
             .with_untracked(|list| list.iter().find(|r| r.id == id).cloned());
         let Some(req) = req else {
             return;
@@ -369,7 +371,7 @@ impl AppState {
         if req.chain_loaded {
             return;
         }
-        let reqs = self.runtime_reqs;
+        let reqs = self.runtime.reqs;
         let id = id.to_string();
         self.spawn_bg(
             move || grove::explain(gid),
@@ -419,7 +421,8 @@ impl AppState {
     /// and again after, with `verify_route`.
     pub fn runtime_fix(&self, id: &str) {
         let Some(r) = self
-            .runtime_reqs
+            .runtime
+            .reqs
             .with_untracked(|list| list.iter().find(|r| r.id == id).cloned())
         else {
             return;
@@ -443,7 +446,8 @@ impl AppState {
     fn runtime_to_agent(&self, id: &str, suffix: &str) {
         let suffix = suffix.to_string();
         let req = self
-            .runtime_reqs
+            .runtime
+            .reqs
             .with_untracked(|list| list.iter().find(|r| r.id == id).cloned());
         let Some(r) = req else {
             return;
@@ -581,4 +585,17 @@ mod tests {
         // With capture on, an empty chain is just empty.
         assert!(r.detail_lines(Some(true)).is_empty());
     }
+}
+
+/// Runtime Insight: the requests the app served and the lenses they put in the code.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct RuntimePanel {
+    pub open: floem::reactive::RwSignal<bool>,
+    /// What the editor shows at controller methods; see [`crate::runtime_lens`].
+    pub lenses: floem::reactive::RwSignal<std::sync::Arc<Vec<crate::runtime_lens::Lens>>>,
+    pub reqs: floem::reactive::RwSignal<Vec<RuntimeReq>>,
+    pub expanded: floem::reactive::RwSignal<Option<String>>,
+    pub polling: floem::reactive::RwSignal<bool>,
 }

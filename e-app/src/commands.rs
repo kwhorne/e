@@ -194,7 +194,7 @@ fn close_focused(state: AppState) {
         state.close_db_result();
     } else if state.agent.focused.get() {
         state.agent.open.set(false);
-    } else if state.terminal_focused.get() {
+    } else if state.term.focused.get() {
         if let Some(id) = state.focused_term_id() {
             state.close_terminal(id);
         }
@@ -221,7 +221,7 @@ fn close_overlays(state: AppState) {
         state.tests.open.set(false);
         return;
     }
-    if state.req_open.get() {
+    if state.req.open.get() {
         state.close_request();
         return;
     }
@@ -229,16 +229,16 @@ fn close_overlays(state: AppState) {
         state.log_open.set(false);
         return;
     }
-    if state.runtime_open.get() {
-        state.runtime_open.set(false);
+    if state.runtime.open.get() {
+        state.runtime.open.set(false);
         return;
     }
     if state.grove.panel_open.get() {
         state.grove.panel_open.set(false);
         return;
     }
-    if state.migrations_open.get() {
-        state.migrations_open.set(false);
+    if state.migrations.open.get() {
+        state.migrations.open.set(false);
         return;
     }
     if state.artisan.open.get() {
@@ -269,8 +269,8 @@ fn close_overlays(state: AppState) {
         state.undo_open.set(false);
         return;
     }
-    if state.sem_open.get() {
-        state.sem_open.set(false);
+    if state.sem.open.get() {
+        state.sem.open.set(false);
         return;
     }
     if state.debug.open.get() {
@@ -281,12 +281,12 @@ fn close_overlays(state: AppState) {
         state.db_cancel_edit();
         return;
     }
-    if state.tinker_open.get() {
-        state.tinker_open.set(false);
+    if state.tinker.open.get() {
+        state.tinker.open.set(false);
         return;
     }
-    if state.model_wizard_open.get() {
-        state.model_wizard_open.set(false);
+    if state.model_wizard.open.get() {
+        state.model_wizard.open.set(false);
         return;
     }
     if state.map_open.get() {

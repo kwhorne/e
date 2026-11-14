@@ -111,7 +111,7 @@ fn verdict_view(state: AppState, c: &Comparison) -> impl IntoView {
 }
 
 fn body(state: AppState, busy: bool, phase: Option<VerifyPhase>) -> floem::AnyView {
-    let session = state.verify_session.get_untracked();
+    let session = state.verify.session.get_untracked();
     let Some(session) = session else {
         // No session yet — we're taking the baseline measurement.
         return label(|| "Measuring baseline…".to_string())
@@ -207,8 +207,8 @@ pub fn verify_panel(state: AppState) -> impl IntoView {
 
     let content = dyn_container(
         move || {
-            let busy = state.verify_busy.get();
-            let phase = state.verify_session.with(|s| s.as_ref().map(|s| s.phase));
+            let busy = state.verify.busy.get();
+            let phase = state.verify.session.with(|s| s.as_ref().map(|s| s.phase));
             (busy, phase)
         },
         move |(busy, phase)| body(state, busy, phase),
@@ -231,7 +231,7 @@ pub fn verify_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.verify_open.get() {
+        if state.verify.open.get() {
             s
         } else {
             s.hide()

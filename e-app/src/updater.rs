@@ -613,3 +613,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// The in-app updater's notice.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct UpdatePanel {
+    /// The available update, if GitHub reports a newer release.
+    pub info: floem::reactive::RwSignal<Option<crate::updater::UpdateInfo>>,
+    /// Progress of the current check/install.
+    pub status: floem::reactive::RwSignal<crate::updater::UpdateStatus>,
+    /// Whether the changelog is expanded in the update notice.
+    pub notes_open: floem::reactive::RwSignal<bool>,
+}

@@ -147,11 +147,12 @@ impl AppState {
     /// Start verifying a captured request: checkpoint the working tree, replay
     /// the request, and record the baseline.
     pub fn verify_begin(&self, id: &str) {
-        if self.verify_busy.get_untracked() {
+        if self.verify.busy.get_untracked() {
             return;
         }
         let req = self
-            .runtime_reqs
+            .runtime
+            .reqs
             .with_untracked(|list| list.iter().find(|r| r.id == id).cloned());
         let Some(req) = req else {
             return;
@@ -161,10 +162,10 @@ impl AppState {
         let root = self.root.get_untracked();
         let (method, uri, url_for_session) = (req.method.clone(), req.uri.clone(), url.clone());
 
-        self.verify_busy.set(true);
-        self.verify_open.set(true);
-        let session_sig = self.verify_session;
-        let busy_sig = self.verify_busy;
+        self.verify.busy.set(true);
+        self.verify.open.set(true);
+        let session_sig = self.verify.session;
+        let busy_sig = self.verify.busy;
         let send = create_ext_action(self.cx, move |res: (Option<Checkpoint>, RequestSample)| {
             busy_sig.set(false);
             let (cp, before) = res;
@@ -185,19 +186,20 @@ impl AppState {
 
     /// Re-measure the current session's request (after a fix was applied).
     pub fn verify_measure(&self) {
-        if self.verify_busy.get_untracked() {
+        if self.verify.busy.get_untracked() {
             return;
         }
         let Some(url) = self
-            .verify_session
+            .verify
+            .session
             .with_untracked(|s| s.as_ref().map(|s| s.url.clone()))
         else {
             return;
         };
         let base = self.app_base();
-        self.verify_busy.set(true);
-        let session_sig = self.verify_session;
-        let busy_sig = self.verify_busy;
+        self.verify.busy.set(true);
+        let session_sig = self.verify.session;
+        let busy_sig = self.verify.busy;
         let send = create_ext_action(self.cx, move |sample: RequestSample| {
             busy_sig.set(false);
             session_sig.update(|s| {
@@ -214,21 +216,22 @@ impl AppState {
 
     /// Keep the applied fix and close the panel (the checkpoint is dropped).
     pub fn verify_keep(&self) {
-        self.verify_session.set(None);
-        self.verify_busy.set(false);
-        self.verify_open.set(false);
+        self.verify.session.set(None);
+        self.verify.busy.set(false);
+        self.verify.open.set(false);
         Self::notify("Fix kept");
     }
 
     /// Revert to the checkpoint taken at `verify_begin` and close the panel.
     pub fn verify_discard(&self) {
         let cp = self
-            .verify_session
+            .verify
+            .session
             .with_untracked(|s| s.as_ref().and_then(|s| s.checkpoint.clone()));
         let root = self.root.get_untracked();
-        self.verify_session.set(None);
-        self.verify_busy.set(false);
-        self.verify_open.set(false);
+        self.verify.session.set(None);
+        self.verify.busy.set(false);
+        self.verify.open.set(false);
         let Some(cp) = cp else {
             Self::notify("Nothing to revert (no checkpoint)");
             return;
@@ -336,4 +339,17 @@ mod tests {
         assert!(s.contains("→"));
         assert!(s.contains("-4"));
     }
+}
+
+/// Verify: a route measured before and after a change.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct VerifyPanel {
+    /// The in-progress "verify the fix" session, if any (see [`crate::verify`]).
+    pub session: floem::reactive::RwSignal<Option<crate::verify::VerifySession>>,
+    /// A verify measurement (baseline or after) is in flight.
+    pub busy: floem::reactive::RwSignal<bool>,
+    /// Whether the verify panel is open (single source of truth for visibility).
+    pub open: floem::reactive::RwSignal<bool>,
 }

@@ -910,15 +910,15 @@ pub fn plan(spec: &Spec, timestamp: &str) -> Vec<GeneratedFile> {
 
 impl AppState {
     pub fn open_model_wizard(&self, pivot: bool) {
-        self.model_wizard_pivot.set(pivot);
-        self.model_wizard_reset.update(|n| *n += 1);
-        self.model_wizard_open.set(true);
+        self.model_wizard.pivot.set(pivot);
+        self.model_wizard.reset.update(|n| *n += 1);
+        self.model_wizard.open.set(true);
     }
 
     /// Re-read the spec and refresh the preview. Called on the idle tick while
     /// the panel is open, so the file list follows what is typed.
     pub fn refresh_model_wizard_preview(&self) {
-        let Some(doc) = self.model_wizard_doc.get_untracked() else {
+        let Some(doc) = self.model_wizard.doc.get_untracked() else {
             return;
         };
         let text = doc.text().to_string();
@@ -932,25 +932,25 @@ impl AppState {
             ),
             Err(errs) => (Vec::new(), errs),
         };
-        if self.model_wizard_files.with_untracked(|f| *f != files) {
-            self.model_wizard_files.set(files);
+        if self.model_wizard.files.with_untracked(|f| *f != files) {
+            self.model_wizard.files.set(files);
         }
-        if self.model_wizard_errors.with_untracked(|e| *e != errors) {
-            self.model_wizard_errors.set(errors);
+        if self.model_wizard.errors.with_untracked(|e| *e != errors) {
+            self.model_wizard.errors.set(errors);
         }
     }
 
     /// Write every file the spec implies. Existing files are left alone and
     /// reported; the model (or the migration, for a pivot) opens afterwards.
     pub fn model_wizard_create(&self) {
-        let Some(doc) = self.model_wizard_doc.get_untracked() else {
+        let Some(doc) = self.model_wizard.doc.get_untracked() else {
             return;
         };
         let text = doc.text().to_string();
         let spec = match parse_spec(&text) {
             Ok(s) => s,
             Err(errs) => {
-                self.model_wizard_errors.set(errs);
+                self.model_wizard.errors.set(errs);
                 return;
             }
         };
@@ -991,7 +991,7 @@ impl AppState {
         };
         eprintln!("e: model wizard: {summary}");
         Self::notify(&summary);
-        self.model_wizard_open.set(false);
+        self.model_wizard.open.set(false);
         if let Some(first) = written.first() {
             self.open_path(first.clone());
         }
@@ -1003,15 +1003,15 @@ impl AppState {
 pub fn model_wizard_panel(state: AppState) -> impl IntoView {
     let editor = text_editor(TEMPLATE);
     let doc: Rc<dyn Document> = editor.doc();
-    state.model_wizard_doc.set(Some(doc.clone()));
+    state.model_wizard.doc.set(Some(doc.clone()));
     // Swap the template when the panel is opened for a model or a pivot.
     {
         let doc = doc.clone();
         floem::reactive::create_effect(move |_| {
-            if state.model_wizard_reset.get() == 0 {
+            if state.model_wizard.reset.get() == 0 {
                 return;
             }
-            let template = if state.model_wizard_pivot.get_untracked() {
+            let template = if state.model_wizard.pivot.get_untracked() {
                 PIVOT_TEMPLATE
             } else {
                 TEMPLATE
@@ -1026,7 +1026,7 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
     }
 
     let title = label(move || {
-        if state.model_wizard_pivot.get() {
+        if state.model_wizard.pivot.get() {
             "New Pivot Table".to_string()
         } else {
             "New Eloquent Model".to_string()
@@ -1047,7 +1047,7 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
                 .border_radius(5.0)
                 .font_size(12.0)
                 .cursor(floem::style::CursorStyle::Pointer);
-            if state.model_wizard_errors.with(|e| e.is_empty()) {
+            if state.model_wizard.errors.with(|e| e.is_empty()) {
                 base.background(theme::accent()).color(theme::on_accent())
             } else {
                 base.background(theme::bg_hover()).color(theme::fg_dim())
@@ -1061,7 +1061,7 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.model_wizard_open.set(false));
+        .on_click_stop(move |_| state.model_wizard.open.set(false));
     let header = stack((title, create, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -1090,10 +1090,10 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
 
     // Preview: the files that will be created, or what's wrong with the spec.
     let preview_title = label(move || {
-        if state.model_wizard_errors.with(|e| !e.is_empty()) {
+        if state.model_wizard.errors.with(|e| !e.is_empty()) {
             "Fix the spec".to_string()
         } else {
-            let n = state.model_wizard_files.with(|f| f.len());
+            let n = state.model_wizard.files.with(|f| f.len());
             format!("Will create {n} file(s)")
         }
     })
@@ -1105,10 +1105,11 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
     });
     let lines = dyn_stack(
         move || {
-            let errors = state.model_wizard_errors.get();
+            let errors = state.model_wizard.errors.get();
             let items: Vec<(bool, String)> = if errors.is_empty() {
                 state
-                    .model_wizard_files
+                    .model_wizard
+                    .files
                     .get()
                     .into_iter()
                     .map(|f| (false, f))
@@ -1168,7 +1169,7 @@ pub fn model_wizard_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
-        if state.model_wizard_open.get() {
+        if state.model_wizard.open.get() {
             s
         } else {
             s.hide()
@@ -1384,4 +1385,21 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// The model wizard: its spec, its plan and the panel.
+///
+/// `Copy`, like `AppState`: signals and handles only.
+#[derive(Clone, Copy)]
+pub struct ModelWizardPanel {
+    pub open: floem::reactive::RwSignal<bool>,
+    /// `true` when the panel was opened for a pivot table.
+    pub pivot: floem::reactive::RwSignal<bool>,
+    /// Bumped on open so the panel swaps in the right template.
+    pub reset: floem::reactive::RwSignal<u64>,
+    pub doc:
+        floem::reactive::RwSignal<Option<std::rc::Rc<dyn floem::views::editor::text::Document>>>,
+    /// Preview: the files the current spec would create, or its errors.
+    pub files: floem::reactive::RwSignal<Vec<String>>,
+    pub errors: floem::reactive::RwSignal<Vec<String>>,
 }

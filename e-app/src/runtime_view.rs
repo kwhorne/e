@@ -174,9 +174,10 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
     })
     .on_click_stop(move |_| {
         let opening = state
-            .runtime_expanded
+            .runtime
+            .expanded
             .with_untracked(|e| e.as_deref() != Some(id_for_expand.as_str()));
-        state.runtime_expanded.update(|e| {
+        state.runtime.expanded.update(|e| {
             *e = if opening {
                 Some(id_for_expand.clone())
             } else {
@@ -193,7 +194,8 @@ fn request_row(state: AppState, r: RuntimeReq) -> impl IntoView {
     let detail = dyn_stack(
         move || {
             if state
-                .runtime_expanded
+                .runtime
+                .expanded
                 .with(|e| e.as_deref() == Some(id.as_str()))
             {
                 row.detail_lines(state.grove.sql_capture.get())
@@ -277,7 +279,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
     let title =
         label(|| "Runtime".to_string()).style(|s| s.font_size(13.0).font_bold().color(theme::fg()));
     let count = label(move || {
-        let n = state.runtime_reqs.with(|r| r.len());
+        let n = state.runtime.reqs.with(|r| r.len());
         format!("{n} captured")
     })
     .style(|s| {
@@ -330,7 +332,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.runtime_open.set(false));
+        .on_click_stop(move |_| state.runtime.open.set(false));
     let header = stack((title, count, sql, clear, close)).style(|s| {
         s.flex_row()
             .items_center()
@@ -351,7 +353,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
     })
     .style(move |s| {
         let s = s.padding(14.0).color(theme::fg_dim()).font_size(12.0);
-        if state.runtime_reqs.with(|r| r.is_empty()) {
+        if state.runtime.reqs.with(|r| r.is_empty()) {
             s
         } else {
             s.hide()
@@ -359,7 +361,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
     });
 
     let rows = dyn_stack(
-        move || state.runtime_reqs.get(),
+        move || state.runtime.reqs.get(),
         |r| format!("{}:{}", r.id, r.chain_loaded),
         move |r| request_row(state, r),
     )
@@ -388,7 +390,7 @@ pub fn runtime_panel(state: AppState) -> impl IntoView {
             .items_center()
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
-        if state.runtime_open.get() {
+        if state.runtime.open.get() {
             s
         } else {
             s.hide()

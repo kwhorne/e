@@ -34,12 +34,21 @@ pub fn pane_of(id: u64, split: bool, focused: u8, active: [Option<u64>; 2]) -> u
     }
 }
 
-#[derive(Clone, Copy)]
 pub struct PerPane<T: 'static> {
     id: u64,
     slots: [RwSignal<T>; 2],
     panes: Panes,
 }
+
+// Signals are handles: a `PerPane` copies whatever `T` is (a derive would
+// ask `T: Copy`, which an `Option<Editor>` isn't).
+impl<T: 'static> Clone for PerPane<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for PerPane<T> {}
 
 impl<T: Clone + 'static> PerPane<T> {
     pub fn new(id: u64, panes: Panes, init: T) -> Self {
@@ -82,6 +91,11 @@ impl<T: Clone + 'static> PerPane<T> {
     /// Pane `pane`'s value, whichever pane the buffer is worked in.
     pub fn get_in(&self, pane: u8) -> T {
         self.slots[usize::from(pane.min(1))].get_untracked()
+    }
+
+    /// Pane `pane`'s value, tracked: for a view that belongs to one pane.
+    pub fn track_in(&self, pane: u8) -> T {
+        self.slots[usize::from(pane.min(1))].get()
     }
 
     /// Set pane `pane`'s value.

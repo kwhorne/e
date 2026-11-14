@@ -234,7 +234,9 @@ fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
         let Some(buf) = state.buffer_by_id(id) else {
             return Vec::new();
         };
-        let Some(editor) = buf.editor.get() else {
+        // This pane's editor, not the one the buffer is worked in: with the
+        // same file in both panes, each header follows its own scroll.
+        let Some(editor) = buf.editor.track_in(pane_idx) else {
             return Vec::new();
         };
         let lh = editor.line_height(0) as f64;
@@ -268,7 +270,11 @@ fn sticky_header(state: AppState, pane_idx: u8) -> impl IntoView {
                         .cursor(floem::style::CursorStyle::Pointer)
                         .hover(|s| s.background(theme::bg_hover()))
                 })
-                .on_click_stop(move |_| state.goto_line(line_idx + 1, 1))
+                .on_click_stop(move |_| {
+                    // The jump is in this pane, which the click focuses.
+                    state.editor.focused.set(pane_idx);
+                    state.goto_line(line_idx + 1, 1)
+                })
         },
     )
     .style(move |s| {
@@ -390,6 +396,8 @@ fn pane(state: AppState, pane_idx: u8) -> impl IntoView {
                 .get_in(pane_idx)
                 .or_else(|| b.caret.get_in(1 - pane_idx.min(1)))
             {
+                // The text may have shrunk since that caret was seen.
+                let caret = crate::state::clamp_cursor(&caret, &b.doc.text()).unwrap_or(caret);
                 editor_handle.cursor.set(caret);
             }
             b.editor.set_in(pane_idx, Some(editor_handle.clone()));

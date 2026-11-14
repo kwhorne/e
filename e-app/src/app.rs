@@ -713,9 +713,10 @@ fn app_view() -> impl IntoView {
     ))
     .style(|s| s.flex_col().flex_grow(1.0_f32).height_full());
 
-    // Keep the document outline in sync with the active buffer.
+    // Keep the document outline and inlay hints in sync with the buffer of
+    // the focused pane.
     create_effect(move |_| {
-        state.editor.active.get();
+        state.focused_active_id();
         state.request_outline();
         state.request_inlay_hints_active();
     });

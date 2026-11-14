@@ -86,19 +86,20 @@ impl AppState {
         cmd: String,
         on_done: impl FnOnce(i32, String, crate::testrun::TestRun, bool) + 'static,
     ) {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static RUN: AtomicU64 = AtomicU64::new(0);
         let root = self.root.get_untracked();
         // Ask the runner for machine-readable results where it can produce
         // them, so a failure has somewhere to jump to instead of being a wall of
         // text. Runners that can't are run exactly as before. One report per
-        // run, as a run after a save may overlap one from the panel.
-        let report = std::env::temp_dir().join(format!(
-            "e-junit-{}-{}.xml",
-            std::process::id(),
-            RUN.fetch_add(1, Ordering::Relaxed)
-        ));
-        let cmd = crate::testrun::junit_command(&cmd, &report).unwrap_or(cmd);
+        // run, as a run after a save may overlap one from the panel, in a
+        // new private folder (0700) so nobody else can put a report, or a
+        // link, where the runner writes. Without a folder, no report is asked
+        // for.
+        let report_dir = tempfile::Builder::new().prefix("e-junit-").tempdir().ok();
+        let report = report_dir.as_ref().map(|d| d.path().join("report.xml"));
+        let cmd = report
+            .as_ref()
+            .and_then(|r| crate::testrun::junit_command(&cmd, r))
+            .unwrap_or(cmd);
         let send = create_ext_action(
             self.cx,
             move |(code, text, run, stopped): (i32, String, crate::testrun::TestRun, bool)| {
@@ -125,10 +126,11 @@ impl AppState {
             // The report only exists if the runner wrote one. A missing file
             // means no structured results, not a failed run — every runner this
             // doesn't know how to ask still works exactly as before.
-            let run = std::fs::read_to_string(&report)
+            let run = report
+                .and_then(|r| std::fs::read_to_string(r).ok())
                 .map(|xml| crate::testrun::parse_junit(&xml, &root))
                 .unwrap_or_default();
-            let _ = std::fs::remove_file(&report);
+            drop(report_dir);
             send((code, text, run, stopped));
         });
     }

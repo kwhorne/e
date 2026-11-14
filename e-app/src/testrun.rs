@@ -766,10 +766,6 @@ at tests/Feature/DemoTest.php:7</failure>
 mod live_run {
     use super::*;
 
-    fn report_path() -> PathBuf {
-        std::env::temp_dir().join("e-junit-live.xml")
-    }
-
     #[test]
     #[ignore]
     fn a_real_suite_produces_locatable_failures() {
@@ -784,12 +780,15 @@ mod live_run {
             eprintln!("no test command detected in {} — skipping", root.display());
             return;
         };
-        let Some(cmd) = junit_command(&base, &report_path()) else {
+        let dir = tempfile::Builder::new()
+            .prefix("e-junit-live-")
+            .tempdir()
+            .expect("a private temporary folder");
+        let report = dir.path().join("report.xml");
+        let Some(cmd) = junit_command(&base, &report) else {
             eprintln!("runner `{base}` cannot write JUnit — skipping");
             return;
         };
-        let report = report_path();
-        let _ = std::fs::remove_file(&report);
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
         let out = std::process::Command::new(shell)
@@ -823,6 +822,5 @@ mod live_run {
                 c.file
             );
         }
-        let _ = std::fs::remove_file(&report);
     }
 }

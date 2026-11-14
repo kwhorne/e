@@ -1402,11 +1402,25 @@ fn grove_queries_for_replay(
 /// Perform the request via the system `curl` (`-k` so Grove's private-CA HTTPS
 /// works), then fetch Clockwork query data if the app exposes it.
 fn do_http_request(base: &str, url: &str) -> RequestResult {
-    // One file per request: the request panel, the verify loop and the
-    // agent's `verify_route` can be replaying at the same time.
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let hdr = std::env::temp_dir().join(format!("e-req-{}-{seq}.hdr", std::process::id()));
+    // One folder per request: the request panel, the verify loop and the
+    // agent's `verify_route` can be replaying at the same time. It is new,
+    // randomly named and private (0700), so nobody else can put a file or a
+    // link where curl writes the headers; it goes when `dir` is dropped.
+    let dir = match tempfile::Builder::new().prefix("e-req-").tempdir() {
+        Ok(d) => d,
+        Err(e) => {
+            return RequestResult {
+                clockwork: false,
+                status: None,
+                time: String::new(),
+                body: String::new(),
+                queries: Vec::new(),
+                error: Some(format!("couldn't make a temporary folder: {e}")),
+                inertia: None,
+            }
+        }
+    };
+    let hdr = dir.path().join("headers");
     let out = std::process::Command::new("curl")
         .args([
             "-sk",
@@ -1480,7 +1494,7 @@ fn do_http_request(base: &str, url: &str) -> RequestResult {
             }
         }
     }
-    let _ = std::fs::remove_file(&hdr);
+    drop(dir);
     let inertia = extract_inertia(&body);
     RequestResult {
         clockwork,

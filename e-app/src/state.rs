@@ -216,8 +216,24 @@ pub struct DbConsent {
 pub enum ConfirmRun {
     /// Execute this SQL in the console (per-statement result tabs).
     Console(String),
-    /// Execute these statements as one transaction, then reload the table.
-    Transaction(Vec<String>),
+    /// Execute these statements as one transaction on connection `key`, then
+    /// reload the table if it is the one shown.
+    Transaction(DbTransaction),
+}
+
+/// Statements to run as one transaction once confirmed, with what to record
+/// when they succeed.
+#[derive(Clone)]
+pub struct DbTransaction {
+    /// The connection to run them on.
+    pub key: String,
+    pub statements: Vec<String>,
+    /// Appended to the session write log on success.
+    pub log: Vec<WriteLogEntry>,
+    /// The staged grid changes these statements carry out, cleared on success.
+    pub submits_pending: bool,
+    /// What the message on success says was done, e.g. "Submitted".
+    pub done: &'static str,
 }
 
 /// A pending destructive / non-local / submit action awaiting confirmation.
@@ -254,6 +270,16 @@ pub struct PendingEdit {
     pub new: Option<String>,
     /// The value before the edit, for the session undo-log's reverse statement.
     pub old: Option<String>,
+}
+
+/// Where the staged changes show in the grid on screen: each shown row's
+/// primary key as read from the database (before any staged edit), and the
+/// cells and rows that have a staged change.
+#[derive(Clone, Default)]
+pub struct PendingView {
+    pub row_pks: Vec<Option<RowPk>>,
+    pub cells: HashSet<(usize, usize)>,
+    pub rows: HashSet<usize>,
 }
 
 /// A workspace-wide replace that has been planned but not yet written.
@@ -610,17 +636,20 @@ pub struct DbPanel {
     /// Session undo-log of executed writes (newest last), and the panel's state.
     pub write_log: RwSignal<Vec<WriteLogEntry>>,
     pub write_log_open: RwSignal<bool>,
-    /// Log entries for the in-flight submit, appended to the log on success.
-    pub pending_log: RwSignal<Vec<WriteLogEntry>>,
     /// A destructive / non-local / submit action awaiting confirmation, if any.
     pub confirm: RwSignal<Option<DbConfirm>>,
     /// A `:param` prompt awaiting values, and the last-entered values to prefill.
     pub params: RwSignal<Option<DbParams>>,
     pub param_last: RwSignal<HashMap<String, String>>,
-    /// Staged cell edits `(row, col) -> edit` and staged row deletions
-    /// `row -> pk`, for transactional editing (Submit / Revert).
-    pub pending_edits: RwSignal<HashMap<(usize, usize), PendingEdit>>,
-    pub pending_deletes: RwSignal<HashMap<usize, RowPk>>,
+    /// Staged cell edits `(pk, column) -> edit` and staged row deletions, for
+    /// transactional editing (Submit / Revert). They are keyed by primary key,
+    /// not position, so paging, sorting and filtering keep them; they all
+    /// belong to one table, `pending_target` (connection key, table).
+    pub pending_edits: RwSignal<HashMap<(RowPk, String), PendingEdit>>,
+    pub pending_deletes: RwSignal<HashSet<RowPk>>,
+    pub pending_target: RwSignal<Option<(String, String)>>,
+    /// Where the staged changes fall in the grid on screen.
+    pub pending_view: RwSignal<PendingView>,
     /// The table being browsed (None in free-query mode).
     pub result_table: RwSignal<Option<String>>,
     /// Results subview: `data` or `structure`.
@@ -696,12 +725,13 @@ impl DbPanel {
             erd_open: RwSignal::new(false),
             write_log: RwSignal::new(Vec::new()),
             write_log_open: RwSignal::new(false),
-            pending_log: RwSignal::new(Vec::new()),
             confirm: RwSignal::new(None),
             params: RwSignal::new(None),
             param_last: RwSignal::new(HashMap::new()),
             pending_edits: RwSignal::new(HashMap::new()),
-            pending_deletes: RwSignal::new(HashMap::new()),
+            pending_deletes: RwSignal::new(HashSet::new()),
+            pending_target: RwSignal::new(None),
+            pending_view: RwSignal::new(PendingView::default()),
             result_table: RwSignal::new(None),
             subview: RwSignal::new("data".into()),
             columns: RwSignal::new(Vec::new()),

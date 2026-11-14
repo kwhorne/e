@@ -5,6 +5,7 @@
 //! that drive it. Extracted from the former `state.rs` god-module (fields stay on
 //! `AppState`); same pattern as [`crate::debug`] / [`crate::runtime`].
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use floem::ext_event::create_ext_action;
@@ -15,7 +16,7 @@ use floem::views::editor::text::Document;
 
 use e_core::language::Language;
 
-use crate::state::{AppState, DbEntry, DbForm, InsertField};
+use crate::state::{AppState, DbEntry, DbForm, InsertField, RowPk};
 
 /// Rows per page when browsing a table in the Database panel.
 pub(crate) const DB_PAGE: usize = 200;
@@ -525,7 +526,7 @@ impl AppState {
     /// Insert the row built in the dialog. Columns left blank (and not marked
     /// NULL) are omitted so database defaults / auto-increment apply.
     pub fn db_commit_insert(&self) {
-        let Some((entry, conn, table, engine)) = self.db_edit_target() else {
+        let Some((entry, _, table, engine)) = self.db_edit_target() else {
             return;
         };
         if entry.read_only.get_untracked() {
@@ -553,21 +554,44 @@ impl AppState {
             Self::notify("Insert: fill at least one column");
             return;
         }
-        let state = *self;
-        let send = create_ext_action(self.cx, move |res: Result<u64, String>| match res {
-            Ok(_) => {
-                state.db.insert_open.set(false);
-                Self::notify("Row inserted");
-                state.db_reload_table();
-            }
-            Err(e) => {
-                state.db.insert_open.set(false);
-                state.db.result_error.set(Some(e));
-            }
+        let sql = e_db::insert_sql(&engine, &table, &values);
+        // The reverse is a DELETE by primary key, when the dialog gave every
+        // key column a value; an auto-increment key isn't known until the
+        // insert has run, so that row has no reverse.
+        let pk_names: Vec<String> = self.db.columns.with_untracked(|cols| {
+            cols.iter()
+                .filter(|c| c.key == "PRI")
+                .map(|c| c.name.clone())
+                .collect()
         });
-        std::thread::spawn(move || {
-            send(e_db::insert_row(&conn, &engine, &table, &values));
-        });
+        let reverse =
+            insert_pk(&pk_names, &values).map(|pk| e_db::delete_sql(&engine, &table, &pk));
+        self.db.insert_open.set(false);
+        let env = entry.config.environment();
+        let tx = crate::state::DbTransaction {
+            key: entry.key(),
+            statements: vec![sql.clone()],
+            log: vec![crate::state::WriteLogEntry {
+                forward: sql.clone(),
+                reverse,
+            }],
+            submits_pending: false,
+            done: "Inserted",
+        };
+        // A write to another machine is confirmed, as in the console and on
+        // Submit (DB-703); a local one runs at once.
+        if env.is_local() {
+            self.execute_submit(tx);
+        } else {
+            self.db.confirm.set(Some(crate::state::DbConfirm {
+                verb: "Insert".into(),
+                statements: vec![sql],
+                env,
+                needs_ack: true,
+                ack: self.cx.create_rw_signal(false),
+                run: crate::state::ConfirmRun::Transaction(tx),
+            }));
+        }
     }
 
     /// Toggle the sort on a column (asc → desc → off) and reload.
@@ -616,6 +640,8 @@ impl AppState {
             move |(cols, idx): (Vec<e_db::ColumnInfo>, Vec<e_db::IndexInfo>)| {
                 state.db.columns.set(cols);
                 state.db.indexes.set(idx);
+                // The first page may have come before the primary key was known.
+                state.db_load_pending_view();
             }
         });
         std::thread::spawn(move || {
@@ -1001,6 +1027,7 @@ impl AppState {
         }
         let engine = entry.config.engine.clone();
         let env = entry.config.environment();
+        let key = entry.key();
         let columns: Vec<String> = self
             .db
             .columns
@@ -1028,7 +1055,13 @@ impl AppState {
                         env,
                         needs_ack: !env.is_local(),
                         ack: state.cx.create_rw_signal(false),
-                        run: crate::state::ConfirmRun::Transaction(stmts),
+                        run: crate::state::ConfirmRun::Transaction(crate::state::DbTransaction {
+                            key: key.clone(),
+                            statements: stmts,
+                            log: Vec::new(),
+                            submits_pending: false,
+                            done: "Imported",
+                        }),
                     }));
                 }
                 Err(e) => Self::notify(&format!("Import: {e}")),
@@ -1218,7 +1251,7 @@ impl AppState {
         self.db.confirm.set(None);
         match c.run {
             crate::state::ConfirmRun::Console(sql) => self.execute_console_sql(sql),
-            crate::state::ConfirmRun::Transaction(stmts) => self.execute_submit(stmts),
+            crate::state::ConfirmRun::Transaction(tx) => self.execute_submit(tx),
         }
     }
 
@@ -1377,6 +1410,7 @@ impl AppState {
         self.db.result.set(tab.result.clone());
         self.db.result_error.set(tab.error.clone());
         self.db.selected_cell.set(None);
+        self.db.pending_view.set(Default::default());
     }
 
     /// Toggle whether tab `i` is pinned (survives the next run).
@@ -1549,14 +1583,14 @@ impl AppState {
         // Browsing a table is a single result; drop any console result tabs.
         self.db.result_tabs.set(Vec::new());
         self.db.explain_issues.set(Vec::new());
-        // Pending edits are keyed by row/col of the *current* result, which just
-        // changed — clear them so we never write against stale indices.
-        self.db.pending_edits.update(|m| m.clear());
-        self.db.pending_deletes.update(|m| m.clear());
+        // Staged changes are keyed by primary key, so they outlive the rows
+        // they were made on; place them on the new ones.
+        self.db.pending_view.set(Default::default());
         match res {
             Ok(r) => {
                 self.db.result_error.set(None);
                 self.db.result.set(Some(r));
+                self.db_load_pending_view();
             }
             Err(e) => {
                 self.db.result.set(None);
@@ -1648,25 +1682,13 @@ impl AppState {
         });
     }
 
-    /// Write the edited cell back to the database.
+    /// Stage the edited cell: show the new value in the grid and keep it
+    /// until Submit writes it or Revert drops it.
     pub fn db_commit_edit(&self) {
         let Some((row, col, column)) = self.db.edit.get_untracked() else {
             return;
         };
-        let (Some(key), Some(table)) = (
-            self.db.result_key.get_untracked(),
-            self.db.result_table.get_untracked(),
-        ) else {
-            return;
-        };
-        let Some(entry) = self
-            .db
-            .conns
-            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
-        else {
-            return;
-        };
-        let Some(_conn) = entry.conn.get_untracked() else {
+        let Some((entry, _, table, _)) = self.db_edit_target() else {
             return;
         };
         // Write guard: refuse edits to a read-only (e.g. production) connection.
@@ -1678,25 +1700,25 @@ impl AppState {
             self.db.edit.set(None);
             return;
         }
-        let Some(result) = self.db.result.get_untracked() else {
-            return;
-        };
-        let _ = table;
-        // Primary key of this row (from its current values).
-        let Some(pk) = self.db_row_pk_full(row, &result) else {
+        let Some(pk) = self.db_shown_row_pk(row) else {
             Self::notify("Edit: table has no primary key — cannot edit safely");
             self.db.edit.set(None);
             return;
         };
+        if !self.db_claim_pending_target(&entry.key(), &table) {
+            self.db.edit.set(None);
+            return;
+        }
         let is_null = self.db.edit_null.get_untracked();
         let value = self.db.edit_value.get_untracked();
-        let new = if is_null { None } else { Some(value.clone()) };
-        let old = result
-            .rows
-            .get(row)
-            .and_then(|r| r.get(col))
-            .cloned()
-            .flatten();
+        let new = if is_null { None } else { Some(value) };
+        let shown = self.db.result.with_untracked(|r| {
+            r.as_ref()
+                .and_then(|r| r.rows.get(row))
+                .and_then(|r| r.get(col))
+                .cloned()
+                .flatten()
+        });
 
         // Stage the edit (transactional): reflect it in the grid and record it as
         // pending; the write happens on Submit.
@@ -1708,16 +1730,26 @@ impl AppState {
             }
         });
         self.db.pending_edits.update(|m| {
-            m.insert(
-                (row, col),
-                crate::state::PendingEdit {
-                    column: column.clone(),
-                    pk,
-                    new,
-                    old,
-                },
-            );
+            let k = (pk.clone(), column.clone());
+            // Editing a cell again keeps the value it had in the database, and
+            // setting it back to that value is no change at all.
+            let old = m.get(&k).map(|e| e.old.clone()).unwrap_or(shown);
+            if old == new {
+                m.remove(&k);
+            } else {
+                m.insert(
+                    k,
+                    crate::state::PendingEdit {
+                        column: column.clone(),
+                        pk,
+                        new,
+                        old,
+                    },
+                );
+            }
         });
+        self.db_release_pending_target_if_empty();
+        self.db_mark_pending();
         self.db.edit.set(None);
     }
 
@@ -1763,32 +1795,118 @@ impl AppState {
         Some((entry, conn, table, engine))
     }
 
-    /// Primary-key `(name, value)` pairs for `row` in the current result grid.
-    fn db_row_pk(&self, row: usize) -> Vec<(String, Option<String>)> {
-        let Some(result) = self.db.result.get_untracked() else {
-            return Vec::new();
-        };
-        let pk_names: Vec<String> = self.db.columns.with_untracked(|cols| {
-            cols.iter()
-                .filter(|c| c.key == "PRI")
-                .map(|c| c.name.clone())
-                .collect()
-        });
-        let mut pk = Vec::new();
-        for name in &pk_names {
-            if let Some(idx) = result.columns.iter().position(|c| c == name) {
-                pk.push((name.clone(), result.rows[row].get(idx).cloned().flatten()));
-            }
-        }
-        pk
+    /// The primary key of shown row `row`, as read from the database.
+    fn db_shown_row_pk(&self, row: usize) -> Option<RowPk> {
+        self.db
+            .pending_view
+            .with_untracked(|v| v.row_pks.get(row).cloned().flatten())
     }
 
-    /// Delete the row currently open in the edit overlay.
+    /// Whether the grid shows the table the staged changes belong to.
+    fn db_showing_pending_target(&self) -> bool {
+        let (Some(key), Some(table)) = (
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
+        ) else {
+            return false;
+        };
+        self.db.pending_target.get_untracked() == Some((key, table))
+    }
+
+    /// Make `(key, table)` the table that staged changes belong to, unless
+    /// another table already has some: one Submit is one transaction on one
+    /// connection, so those must be submitted or reverted first.
+    fn db_claim_pending_target(&self, key: &str, table: &str) -> bool {
+        match self.db.pending_target.get_untracked() {
+            Some((k, t)) if k == key && t == table => true,
+            Some((_, t)) => {
+                let n = self.db_pending_count();
+                Self::notify(&format!(
+                    "{n} change{} to {t} {} not submitted — Submit or Revert {} first",
+                    if n == 1 { "" } else { "s" },
+                    if n == 1 { "is" } else { "are" },
+                    if n == 1 { "it" } else { "them" },
+                ));
+                false
+            }
+            None => {
+                self.db
+                    .pending_target
+                    .set(Some((key.to_string(), table.to_string())));
+                true
+            }
+        }
+    }
+
+    fn db_pending_count(&self) -> usize {
+        self.db.pending_edits.with_untracked(|m| m.len())
+            + self.db.pending_deletes.with_untracked(|m| m.len())
+    }
+
+    fn db_release_pending_target_if_empty(&self) {
+        if self.db_pending_count() == 0 {
+            self.db.pending_target.set(None);
+        }
+    }
+
+    /// Read the primary key of each shown row, once per result, and put the
+    /// staged edits for the shown table into its cells.
+    pub(crate) fn db_load_pending_view(&self) {
+        let have = self
+            .db
+            .pending_view
+            .with_untracked(|v| !v.row_pks.is_empty());
+        if !have && self.db.result_table.get_untracked().is_some() {
+            let pk_names: Vec<String> = self.db.columns.with_untracked(|cols| {
+                cols.iter()
+                    .filter(|c| c.key == "PRI")
+                    .map(|c| c.name.clone())
+                    .collect()
+            });
+            let row_pks = self
+                .db
+                .result
+                .with_untracked(|r| r.as_ref().map(|r| row_pks(r, &pk_names)))
+                .unwrap_or_default();
+            if row_pks.iter().any(Option::is_some) {
+                if self.db_showing_pending_target() {
+                    let edits = self.db.pending_edits.get_untracked();
+                    self.db.result.update(|r| {
+                        if let Some(r) = r {
+                            overlay_edits(r, &row_pks, &edits);
+                        }
+                    });
+                }
+                self.db.pending_view.update(|v| v.row_pks = row_pks);
+            }
+        }
+        self.db_mark_pending();
+    }
+
+    /// Mark the shown cells and rows that have a staged change.
+    fn db_mark_pending(&self) {
+        let showing = self.db_showing_pending_target();
+        let columns = self
+            .db
+            .result
+            .with_untracked(|r| r.as_ref().map(|r| r.columns.clone()).unwrap_or_default());
+        let edits = self.db.pending_edits.get_untracked();
+        let deletes = self.db.pending_deletes.get_untracked();
+        self.db.pending_view.update(|v| {
+            v.cells.clear();
+            v.rows.clear();
+            if showing {
+                mark_pending(v, &columns, &edits, &deletes);
+            }
+        });
+    }
+
+    /// Stage deleting the row open in the edit overlay; again un-stages it.
     pub fn db_delete_row(&self) {
         let Some((row, _, _)) = self.db.edit.get_untracked() else {
             return;
         };
-        let Some((entry, ..)) = self.db_edit_target() else {
+        let Some((entry, _, table, _)) = self.db_edit_target() else {
             return;
         };
         if entry.read_only.get_untracked() {
@@ -1799,35 +1917,46 @@ impl AppState {
             self.db.edit.set(None);
             return;
         }
-        let pk = self.db_row_pk(row);
-        if pk.is_empty() {
+        let Some(pk) = self.db_shown_row_pk(row) else {
             Self::notify("Delete: table has no primary key — cannot delete safely");
+            return;
+        };
+        if !self.db_claim_pending_target(&entry.key(), &table) {
+            self.db.edit.set(None);
             return;
         }
         // Stage the deletion (transactional): mark the row pending; the DELETE
         // runs on Submit. Toggling again un-marks it.
         self.db.pending_deletes.update(|m| {
-            if m.remove(&row).is_none() {
-                m.insert(row, pk);
+            if !m.remove(&pk) {
+                m.insert(pk);
             }
         });
+        self.db_release_pending_target_if_empty();
+        self.db_mark_pending();
         self.db.edit.set(None);
     }
 
-    /// Discard all staged changes and reload the table from the database.
+    /// Drop all staged changes, and show the table's real values again.
     pub fn db_revert_changes(&self) {
+        let showing = self.db_showing_pending_target();
+        self.db_clear_pending();
+        if showing {
+            self.db_reload_table();
+        }
+    }
+
+    fn db_clear_pending(&self) {
         self.db.pending_edits.update(|m| m.clear());
         self.db.pending_deletes.update(|m| m.clear());
-        self.db_reload_table();
+        self.db.pending_target.set(None);
+        self.db_mark_pending();
     }
 
     /// Review staged changes and (after confirmation) run them in one
     /// transaction. Builds UPDATE/DELETE statements from the pending sets.
     pub fn db_submit_changes(&self) {
-        let (Some(key), Some(table)) = (
-            self.db.result_key.get_untracked(),
-            self.db.result_table.get_untracked(),
-        ) else {
+        let Some((key, table)) = self.db.pending_target.get_untracked() else {
             return;
         };
         let Some(entry) = self
@@ -1835,8 +1964,23 @@ impl AppState {
             .conns
             .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
         else {
+            Self::notify("Submit: the connection these changes belong to is gone");
             return;
         };
+        if entry.conn.get_untracked().is_none() {
+            Self::notify(&format!(
+                "Submit: connect to {} first",
+                entry.config.display_name()
+            ));
+            return;
+        }
+        if entry.read_only.get_untracked() {
+            Self::notify(
+                "Read-only: this connection is protected from writes. Toggle read-only off \
+                 in the Database panel to submit.",
+            );
+            return;
+        }
         let engine = entry.config.engine.clone();
         let mut stmts: Vec<String> = Vec::new();
         let mut log: Vec<crate::state::WriteLogEntry> = Vec::new();
@@ -1853,7 +1997,7 @@ impl AppState {
             }
         });
         self.db.pending_deletes.with_untracked(|dels| {
-            for pk in dels.values() {
+            for pk in dels {
                 let fwd = e_db::delete_sql(&engine, &table, pk);
                 stmts.push(fwd.clone());
                 // A delete's reverse (re-insert) needs the full row; not tracked.
@@ -1866,7 +2010,6 @@ impl AppState {
         if stmts.is_empty() {
             return;
         }
-        self.db.pending_log.set(log);
         let env = entry.config.environment();
         self.db.confirm.set(Some(crate::state::DbConfirm {
             verb: "Submit".into(),
@@ -1874,45 +2017,60 @@ impl AppState {
             env,
             needs_ack: !env.is_local(),
             ack: self.cx.create_rw_signal(false),
-            run: crate::state::ConfirmRun::Transaction(stmts),
+            run: crate::state::ConfirmRun::Transaction(crate::state::DbTransaction {
+                key,
+                statements: stmts,
+                log,
+                submits_pending: true,
+                done: "Submitted",
+            }),
         }));
     }
 
-    /// Run the staged statements as one transaction, then refresh.
-    fn execute_submit(&self, stmts: Vec<String>) {
-        let Some(key) = self.db.result_key.get_untracked() else {
-            return;
-        };
+    /// Run confirmed statements as one transaction, log them, and refresh the
+    /// table if it is the one they wrote to.
+    fn execute_submit(&self, tx: crate::state::DbTransaction) {
         let Some(entry) = self
             .db
             .conns
-            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+            .with_untracked(|c| c.iter().find(|e| e.key() == tx.key).cloned())
         else {
             return;
         };
         let Some(conn) = entry.conn.get_untracked() else {
+            Self::notify(&format!("Connect to {} first", entry.config.display_name()));
             return;
         };
         self.db.result_loading.set(true);
         let state = *self;
+        let crate::state::DbTransaction {
+            key,
+            statements,
+            log,
+            submits_pending,
+            done,
+        } = tx;
         let send = create_ext_action(self.cx, move |res: Result<u64, String>| {
             state.db.result_loading.set(false);
             match res {
                 Ok(n) => {
-                    state.db.pending_edits.update(|m| m.clear());
-                    state.db.pending_deletes.update(|m| m.clear());
+                    if submits_pending {
+                        state.db_clear_pending();
+                    }
                     // Record the executed writes in the session undo-log.
-                    let entries = state.db.pending_log.get_untracked();
-                    state.db.write_log.update(|log| log.extend(entries));
-                    state.db.pending_log.set(Vec::new());
-                    Self::notify(&format!("Submitted — {n} row(s) affected"));
-                    state.db_reload_table();
+                    state.db.write_log.update(|l| l.extend(log));
+                    Self::notify(&format!("{done} — {n} row(s) affected"));
+                    if state.db.result_key.get_untracked().as_deref() == Some(key.as_str())
+                        && state.db.result_table.get_untracked().is_some()
+                    {
+                        state.db_reload_table();
+                    }
                 }
                 Err(e) => state.db.result_error.set(Some(e)),
             }
         });
         std::thread::spawn(move || {
-            send(e_db::execute_transaction(&conn, &stmts));
+            send(e_db::execute_transaction(&conn, &statements));
         });
     }
 
@@ -2039,5 +2197,160 @@ impl AppState {
             };
             send(out);
         });
+    }
+}
+
+type PendingEdits = HashMap<(RowPk, String), crate::state::PendingEdit>;
+
+/// The primary key of each row of `r`, from the `pk` columns; `None` where
+/// the result lacks one of them.
+fn row_pks(r: &e_db::QueryResult, pk: &[String]) -> Vec<Option<RowPk>> {
+    let idx: Option<Vec<usize>> = pk
+        .iter()
+        .map(|n| r.columns.iter().position(|c| c == n))
+        .collect();
+    r.rows
+        .iter()
+        .map(|row| {
+            let idx = idx.as_ref().filter(|i| !i.is_empty())?;
+            Some(
+                pk.iter()
+                    .zip(idx)
+                    .map(|(n, &i)| (n.clone(), row.get(i).cloned().flatten()))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// Put the staged edits into the cells of `r` they belong to.
+fn overlay_edits(r: &mut e_db::QueryResult, row_pks: &[Option<RowPk>], edits: &PendingEdits) {
+    for (ri, pk) in row_pks.iter().enumerate() {
+        let Some(pk) = pk else { continue };
+        for (ci, col) in r.columns.iter().enumerate() {
+            if let Some(e) = edits.get(&(pk.clone(), col.clone())) {
+                if let Some(cell) = r.rows.get_mut(ri).and_then(|row| row.get_mut(ci)) {
+                    *cell = e.new.clone();
+                }
+            }
+        }
+    }
+}
+
+/// Mark in `v` the cells with a staged edit and the rows staged for deletion.
+fn mark_pending(
+    v: &mut crate::state::PendingView,
+    columns: &[String],
+    edits: &PendingEdits,
+    deletes: &HashSet<RowPk>,
+) {
+    for (ri, pk) in v.row_pks.iter().enumerate() {
+        let Some(pk) = pk else { continue };
+        if deletes.contains(pk) {
+            v.rows.insert(ri);
+        }
+        for (ci, col) in columns.iter().enumerate() {
+            if edits.contains_key(&(pk.clone(), col.clone())) {
+                v.cells.insert((ri, ci));
+            }
+        }
+    }
+}
+
+/// The primary key of a row about to be inserted with `values`, when every
+/// key column is given a value.
+fn insert_pk(pk: &[String], values: &[(String, Option<String>)]) -> Option<RowPk> {
+    if pk.is_empty() {
+        return None;
+    }
+    pk.iter()
+        .map(|n| values.iter().find(|(c, v)| c == n && v.is_some()).cloned())
+        .collect()
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+    use crate::state::{PendingEdit, PendingView};
+
+    fn page(rows: &[(&str, &str)]) -> e_db::QueryResult {
+        e_db::QueryResult {
+            columns: vec!["id".into(), "name".into()],
+            rows: rows
+                .iter()
+                .map(|(id, n)| vec![Some(id.to_string()), Some(n.to_string())])
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn pk(id: &str) -> RowPk {
+        vec![("id".into(), Some(id.into()))]
+    }
+
+    fn edit(id: &str, new: &str, old: &str) -> ((RowPk, String), PendingEdit) {
+        (
+            (pk(id), "name".into()),
+            PendingEdit {
+                column: "name".into(),
+                pk: pk(id),
+                new: Some(new.into()),
+                old: Some(old.into()),
+            },
+        )
+    }
+
+    #[test]
+    fn staged_changes_follow_their_rows_to_another_page() {
+        // Edited on one page, row 2 shows up first on the next (sorted) page.
+        let edits: PendingEdits = [edit("2", "Bobby", "Bob")].into_iter().collect();
+        let deletes: HashSet<RowPk> = [pk("3")].into_iter().collect();
+        let mut r = page(&[("2", "Bob"), ("9", "Zed"), ("3", "Cy")]);
+        let pks = row_pks(&r, &["id".into()]);
+        overlay_edits(&mut r, &pks, &edits);
+        assert_eq!(r.rows[0][1].as_deref(), Some("Bobby"));
+        assert_eq!(r.rows[1][1].as_deref(), Some("Zed"));
+
+        let mut v = PendingView {
+            row_pks: pks,
+            ..Default::default()
+        };
+        mark_pending(&mut v, &r.columns, &edits, &deletes);
+        assert_eq!(v.cells, [(0, 1)].into_iter().collect());
+        assert_eq!(v.rows, [2].into_iter().collect());
+    }
+
+    #[test]
+    fn a_page_without_the_staged_rows_shows_no_changes() {
+        let edits: PendingEdits = [edit("2", "Bobby", "Bob")].into_iter().collect();
+        let mut r = page(&[("7", "Ann")]);
+        let pks = row_pks(&r, &["id".into()]);
+        overlay_edits(&mut r, &pks, &edits);
+        assert_eq!(r.rows[0][1].as_deref(), Some("Ann"));
+        let mut v = PendingView {
+            row_pks: pks,
+            ..Default::default()
+        };
+        mark_pending(&mut v, &r.columns, &edits, &HashSet::new());
+        assert!(v.cells.is_empty() && v.rows.is_empty());
+    }
+
+    #[test]
+    fn rows_have_no_key_without_a_primary_key_or_its_column() {
+        let r = page(&[("1", "Ann")]);
+        assert_eq!(row_pks(&r, &[]), vec![None]);
+        assert_eq!(row_pks(&r, &["uuid".into()]), vec![None]);
+    }
+
+    #[test]
+    fn an_insert_has_a_key_only_when_every_key_column_is_given() {
+        let pk_cols = vec!["id".to_string()];
+        let with = vec![("id".into(), Some("5".into())), ("name".into(), None)];
+        assert_eq!(insert_pk(&pk_cols, &with), Some(pk("5")));
+        let auto = vec![("name".into(), Some("Ann".into()))];
+        assert_eq!(insert_pk(&pk_cols, &auto), None);
+        let null_id = vec![("id".into(), None)];
+        assert_eq!(insert_pk(&pk_cols, &null_id), None);
+        assert_eq!(insert_pk(&[], &with), None);
     }
 }

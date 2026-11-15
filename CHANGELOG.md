@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An import dialog for CSV.** **⬆ CSV** now opens a dialog before
+  anything is written:
+  - It reads the delimiter from the header (`,`, `;` as Excel writes it, or
+    tab) and ignores a byte-order mark.
+  - It maps each CSV column to a table column by name, loosely, and lets you
+    pick another or skip it.
+  - Empty fields go in as NULL or the column's default, and a preview shows
+    the first rows.
+  - It warns about values that don't fit their column's type, empty values
+    headed for a NOT NULL column, and rows with the wrong number of fields,
+    each by line.
+- **A view's definition** shows in its Structure tab, with **Copy
+  definition**. ClickHouse views are listed.
+- **Export and copy in every format.** **Export ▾** and **Copy ▾** each
+  offer CSV, TSV, JSON, a Markdown table and `INSERT` statements.
+
+### Fixed
+
+- **Exported `INSERT`s could break on MySQL.** A value ending in a backslash
+  ended its string early; names weren't quoted. They're now written for the
+  connection's database.
+- **JSON export sorted the columns** alphabetically, and kept one of two
+  columns with the same name. It keeps the result's columns as they are.
+- **Structure could show the previous table's columns** in place of the
+  next one's, since its rows were kept by position.
+
 ## [0.24.0] - 2026-11-15
 
 ### Added

@@ -258,6 +258,27 @@ pub struct DbTransaction {
     pub done: &'static str,
 }
 
+/// A CSV file read for importing into a table, while the import dialog
+/// maps its columns (DB-503).
+#[derive(Clone)]
+pub struct DbImport {
+    pub key: String,
+    pub table: String,
+    pub engine: String,
+    pub env: e_db::Environment,
+    /// The file's name, for the dialog's title.
+    pub file: String,
+    pub delimiter: char,
+    pub header: Vec<String>,
+    /// The rows after the header.
+    pub rows: Arc<Vec<Vec<String>>>,
+    pub columns: Vec<e_db::ColumnInfo>,
+    /// The table column each CSV column goes into (`None`: skipped).
+    pub mapping: RwSignal<Vec<Option<String>>>,
+    /// An empty field leaves its column to its default, instead of NULL.
+    pub empty_default: RwSignal<bool>,
+}
+
 /// A staged change, by its key in the pending sets.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Staged {
@@ -734,6 +755,11 @@ pub struct DbPanel {
     pub columns: RwSignal<Vec<e_db::ColumnInfo>>,
     /// Indexes of the currently-inspected table (Structure subview).
     pub indexes: RwSignal<Vec<e_db::IndexInfo>>,
+    /// The shown table's `CREATE VIEW`, when it is a view (DB-202); empty
+    /// when the engine gave none.
+    pub view_def: RwSignal<Option<String>>,
+    /// The CSV file the import dialog is open for.
+    pub import: RwSignal<Option<DbImport>>,
     /// Active sort: `(column, ascending)`.
     pub sort: RwSignal<Option<(String, bool)>>,
     /// Active data-view filter: `(column, Some(value) | None for IS NULL)`.
@@ -821,6 +847,8 @@ impl DbPanel {
             subview: RwSignal::new("data".into()),
             columns: RwSignal::new(Vec::new()),
             indexes: RwSignal::new(Vec::new()),
+            view_def: RwSignal::new(None),
+            import: RwSignal::new(None),
             sort: RwSignal::new(None),
             filter: RwSignal::new(None),
             page: RwSignal::new(0),

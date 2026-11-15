@@ -1241,7 +1241,21 @@ pub fn views(conn: &Conn) -> Result<Vec<String>, String> {
                 .filter_map(|r| r.into_iter().next().flatten())
                 .collect())
         }
-        Backend::Clickhouse { .. } => Ok(Vec::new()),
+        Backend::Clickhouse { .. } => {
+            let res = ch_query(
+                &conn.backend,
+                &format!(
+                    "SELECT name FROM system.tables WHERE database = currentDatabase() \
+                     AND engine IN ({CH_VIEW_ENGINES}) ORDER BY name"
+                ),
+                MAX_ROWS,
+            )?;
+            Ok(res
+                .rows
+                .into_iter()
+                .filter_map(|r| r.into_iter().next().flatten())
+                .collect())
+        }
     }
 }
 
@@ -1299,7 +1313,7 @@ pub fn table_ddl(conn: &Conn, table: &str) -> Result<String, String> {
     }
 }
 
-/// The `CREATE VIEW`/definition SQL for a view (read-only display).
+/// The `CREATE VIEW` statement for a view (read-only display and copy).
 pub fn view_definition(conn: &Conn, view: &str) -> Result<String, String> {
     match &conn.backend {
         Backend::Mysql(pool) => {
@@ -1321,10 +1335,30 @@ pub fn view_definition(conn: &Conn, view: &str) -> Result<String, String> {
         }
         Backend::Postgres(m) => {
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
-            let v = quote_literal("postgres", &quote_ident("postgres", view));
+            let name = quote_ident("postgres", view);
+            let v = quote_literal("postgres", &name);
             let res = pg_query(
                 &mut client,
                 &format!("SELECT pg_get_viewdef({v}::regclass, true)"),
+                1,
+            )?;
+            // PostgreSQL gives the query alone.
+            Ok(res
+                .rows
+                .into_iter()
+                .next()
+                .and_then(|r| r.into_iter().next().flatten())
+                .map(|body| format!("CREATE OR REPLACE VIEW {name} AS\n{}", body.trim_end()))
+                .unwrap_or_default())
+        }
+        Backend::Clickhouse { .. } => {
+            let res = ch_query(
+                &conn.backend,
+                &format!(
+                    "SELECT create_table_query FROM system.tables \
+                     WHERE database = currentDatabase() AND name = {}",
+                    quote_literal("clickhouse", view)
+                ),
                 1,
             )?;
             Ok(res
@@ -1334,7 +1368,6 @@ pub fn view_definition(conn: &Conn, view: &str) -> Result<String, String> {
                 .and_then(|r| r.into_iter().next().flatten())
                 .unwrap_or_default())
         }
-        Backend::Clickhouse { .. } => Ok(String::new()),
     }
 }
 
@@ -1369,7 +1402,15 @@ pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
                 .collect())
         }
         Backend::Clickhouse { .. } => {
-            let res = ch_query(&conn.backend, "SHOW TABLES", MAX_ROWS)?;
+            // Not `SHOW TABLES`, which lists views too: they're under views.
+            let res = ch_query(
+                &conn.backend,
+                &format!(
+                    "SELECT name FROM system.tables WHERE database = currentDatabase() \
+                     AND engine NOT IN ({CH_VIEW_ENGINES}) ORDER BY name"
+                ),
+                MAX_ROWS,
+            )?;
             Ok(res
                 .rows
                 .into_iter()
@@ -1378,6 +1419,9 @@ pub fn tables(conn: &Conn) -> Result<Vec<String>, String> {
         }
     }
 }
+
+/// The ClickHouse engines that make a view, as an SQL list.
+const CH_VIEW_ENGINES: &str = "'View', 'MaterializedView', 'LiveView', 'WindowView'";
 
 // ── ClickHouse over HTTP ───────────────────────────────────────
 

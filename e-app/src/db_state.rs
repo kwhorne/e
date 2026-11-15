@@ -452,6 +452,7 @@ impl AppState {
         self.db.page.set(0);
         self.db.total_rows.set(None);
         self.db.columns.set(Vec::new());
+        self.db.view_def.set(None);
         self.db.result_open.set(true);
         self.db_load_columns(entry.clone(), table.clone());
         self.db_reload_table();
@@ -759,7 +760,11 @@ impl AppState {
         let send = create_ext_action(self.cx, {
             let state = *self;
             let (key, table) = (entry.key(), table.clone());
-            move |(cols, idx): (Vec<e_db::ColumnInfo>, Vec<e_db::IndexInfo>)| {
+            move |(cols, idx, def): (
+                Vec<e_db::ColumnInfo>,
+                Vec<e_db::IndexInfo>,
+                Option<String>,
+            )| {
                 // The columns (and with them the primary key edits are made
                 // by) of a table no longer shown must not land on the one
                 // that is.
@@ -768,14 +773,17 @@ impl AppState {
                 }
                 state.db.columns.set(cols);
                 state.db.indexes.set(idx);
+                state.db.view_def.set(def);
                 // The first page may have come before the primary key was known.
                 state.db_load_pending_view();
             }
         });
+        let is_view = entry.views.with_untracked(|v| v.contains(&table));
         std::thread::spawn(move || {
             let cols = e_db::columns(&conn, &table).unwrap_or_default();
             let idx = e_db::indexes(&conn, &table).unwrap_or_default();
-            send((cols, idx));
+            let def = is_view.then(|| e_db::view_definition(&conn, &table).unwrap_or_default());
+            send((cols, idx, def));
         });
     }
 
@@ -867,6 +875,7 @@ impl AppState {
             .result_table
             .get_untracked()
             .unwrap_or_else(|| "results".into());
+        let engine = self.db_result_engine();
         let ext = fmt.extension();
         let opts = floem::file::FileDialogOptions::new()
             .title("Export results")
@@ -875,9 +884,40 @@ impl AppState {
             let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
                 return;
             };
-            let out = crate::db_export::format(&result, fmt, &table);
-            let _ = std::fs::write(&path, out);
+            let out = crate::db_export::format(&result, fmt, &table, &engine);
+            match std::fs::write(&path, out) {
+                Ok(()) => Self::notify(&format!(
+                    "Exported {} row{} as {}",
+                    result.rows.len(),
+                    if result.rows.len() == 1 { "" } else { "s" },
+                    fmt.name()
+                )),
+                Err(e) => Self::notify(&format!("Export: could not write the file ({e})")),
+            }
         });
+    }
+
+    /// The engine of the connection the shown result comes from, for SQL
+    /// written from it (MySQL's quoting when none is known).
+    fn db_result_engine(&self) -> String {
+        let key = self
+            .db
+            .active_tab
+            .get_untracked()
+            .and_then(|i| {
+                self.db
+                    .result_tabs
+                    .with_untracked(|t| t.get(i)?.key.clone())
+            })
+            .or_else(|| self.db.result_key.get_untracked());
+        key.and_then(|k| {
+            self.db.conns.with_untracked(|c| {
+                c.iter()
+                    .find(|e| e.key() == k)
+                    .map(|e| e.config.engine.clone())
+            })
+        })
+        .unwrap_or_default()
     }
 
     /// Take a snapshot of a (local) database: an SQLite file copy, or a
@@ -1161,6 +1201,16 @@ impl AppState {
 
     /// Copy the current table's CREATE DDL to the clipboard (DB-204).
     pub fn db_copy_ddl(&self) {
+        // A view's is its definition, read with its columns.
+        if let Some(def) = self.db.view_def.get_untracked() {
+            if def.is_empty() {
+                Self::notify("No definition available");
+            } else {
+                let _ = floem::Clipboard::set_contents(def);
+                Self::notify("View definition copied to clipboard");
+            }
+            return;
+        }
         let (Some(key), Some(table)) = (
             self.db.result_key.get_untracked(),
             self.db.result_table.get_untracked(),
@@ -1190,9 +1240,9 @@ impl AppState {
         });
     }
 
-    /// Import a CSV file into the current table: parse it, map columns by header
-    /// name, and stage the INSERTs behind the confirmation dialog (one
-    /// transaction).
+    /// Pick a CSV file to import into the current table, and open the
+    /// import dialog on it: its columns mapped by name, a preview, and what
+    /// doesn't fit the table (DB-503).
     pub fn db_import_csv(&self) {
         let (Some(key), Some(table)) = (
             self.db.result_key.get_untracked(),
@@ -1215,49 +1265,104 @@ impl AppState {
             );
             return;
         }
-        let engine = entry.config.engine.clone();
-        let env = entry.config.environment();
-        let key = entry.key();
-        let columns: Vec<String> = self
-            .db
-            .columns
-            .with_untracked(|cols| cols.iter().map(|c| c.name.clone()).collect());
+        let columns = self.db.columns.get_untracked();
         if columns.is_empty() {
             Self::notify("Import: table columns not loaded yet");
             return;
         }
         let state = *self;
-        let opts = floem::file::FileDialogOptions::new().title("Import CSV into this table");
+        let opts = floem::file::FileDialogOptions::new().title(format!("Import CSV into {table}"));
         floem::action::open_file(opts, move |info| {
             let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
                 return;
             };
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                Self::notify("Import: could not read the file");
-                return;
-            };
-            let rows = crate::db_import::parse_csv(&text);
-            match crate::db_import::build_inserts(&engine, &table, &rows, &columns) {
-                Ok(stmts) => {
-                    state.db_ask_confirm(crate::state::DbConfirm {
-                        verb: "Import".into(),
-                        statements: stmts.clone(),
-                        env,
-                        needs_ack: !env.is_local(),
-                        ack: state.cx.create_rw_signal(false),
-                        run: crate::state::ConfirmRun::Transaction(crate::state::DbTransaction {
-                            key: key.clone(),
-                            statements: stmts,
-                            log: Vec::new(),
-                            submits_pending: false,
-                            checks: Vec::new(),
-                            done: "Imported",
-                        }),
-                        counts: state.cx.create_rw_signal(Vec::new()),
-                    });
+            let text = match std::fs::read(&path) {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                Err(e) => {
+                    Self::notify(&format!("Import: could not read the file ({e})"));
+                    return;
                 }
-                Err(e) => Self::notify(&format!("Import: {e}")),
+            };
+            let delimiter = crate::db_import::sniff_delimiter(&text);
+            let mut rows = crate::db_import::parse_csv_with(&text, delimiter);
+            if rows.is_empty() {
+                Self::notify("Import: the file is empty");
+                return;
             }
+            let header = rows.remove(0);
+            let names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+            let mapping = crate::db_import::auto_map(&header, &names);
+            state.db.import.set(Some(crate::state::DbImport {
+                key: key.clone(),
+                table: table.clone(),
+                engine: entry.config.engine.clone(),
+                env: entry.config.environment(),
+                file: path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                delimiter,
+                header,
+                rows: Arc::new(rows),
+                columns: columns.clone(),
+                mapping: state.cx.create_rw_signal(mapping),
+                empty_default: state.cx.create_rw_signal(false),
+            }));
+        });
+    }
+
+    pub fn db_cancel_import(&self) {
+        self.db.import.set(None);
+    }
+
+    /// Import the CSV as the dialog maps it: its `INSERT`s go to the
+    /// confirmation dialog, and run in one transaction from there.
+    pub fn db_commit_import(&self) {
+        let Some(imp) = self.db.import.get_untracked() else {
+            return;
+        };
+        let mapping = imp.mapping.get_untracked();
+        let empty_default = imp.empty_default.get_untracked();
+        let problems = crate::db_import::problems(
+            &imp.rows,
+            imp.header.len(),
+            &mapping,
+            &imp.columns,
+            empty_default,
+        );
+        if let Some(p) = problems.iter().find(|p| p.blocking) {
+            Self::notify(&format!("Import: {}", p.text));
+            return;
+        }
+        let stmts = match crate::db_import::build_inserts(
+            &imp.engine,
+            &imp.table,
+            &imp.rows,
+            &mapping,
+            empty_default,
+        ) {
+            Ok(stmts) => stmts,
+            Err(e) => {
+                Self::notify(&format!("Import: {e}"));
+                return;
+            }
+        };
+        self.db.import.set(None);
+        self.db_ask_confirm(crate::state::DbConfirm {
+            verb: "Import".into(),
+            statements: stmts.clone(),
+            env: imp.env,
+            needs_ack: !imp.env.is_local(),
+            ack: self.cx.create_rw_signal(false),
+            run: crate::state::ConfirmRun::Transaction(crate::state::DbTransaction {
+                key: imp.key,
+                statements: stmts,
+                log: Vec::new(),
+                submits_pending: false,
+                checks: Vec::new(),
+                done: "Imported",
+            }),
+            counts: self.cx.create_rw_signal(Vec::new()),
         });
     }
 
@@ -1274,9 +1379,14 @@ impl AppState {
             .result_table
             .get_untracked()
             .unwrap_or_else(|| "results".into());
-        let text = crate::db_export::format(&result, fmt, &table);
+        let text = crate::db_export::format(&result, fmt, &table, &self.db_result_engine());
         let _ = floem::Clipboard::set_contents(text);
-        Self::notify("Result copied to clipboard");
+        Self::notify(&format!(
+            "Copied {} row{} as {}",
+            result.rows.len(),
+            if result.rows.len() == 1 { "" } else { "s" },
+            fmt.name()
+        ));
     }
 
     /// Open a blank query editor for a connection.

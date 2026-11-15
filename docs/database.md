@@ -132,10 +132,10 @@ connected:
   and if it finds a problem, asks the AI agent to propose a Laravel migration
   that adds the missing index.
 
-Both run against the database the Database panel is showing — the one whose
-table or result is open — or, if only one is connected, that one. With several
-connected and none open, `e` asks you to open a table in the one you mean
-rather than guess.
+Both run against the panel's **active connection** (see
+[below](#the-active-connection)), or, if none is chosen and only one is
+connected, that one. With several connected and none chosen, `e` asks you to
+pick one rather than guess.
 
 Schema-aware completion suggests table and column names as you type SQL,
 from the project's `.env` database.
@@ -166,8 +166,17 @@ after **⟳** or a reconnect. SQL keywords aren't completed.
 ## Environments & safety
 
 Each connection is labelled **local**, **staging** or **production** (green /
-amber / red), shown as a dot + badge in the list and on the active result. The
-label is guessed from the host and name and drives the safety rails:
+amber / red), shown as a dot + badge in the list and on the active connection.
+The label is guessed from the host and names: a remote host is staging, and
+`prod` in its label, database or host makes it production.
+
+When the guess is wrong, set it under **Environment** in the connection form
+(**✎**): **Auto** shows the guess, or pick **local**, **staging** or
+**production**. A connection set to production starts read-only; one set to
+local runs writes without asking, and the form warns when that overrides a
+guess of staging or production.
+
+The label drives the safety rails:
 
 - **Destructive statements** (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without a
   `WHERE`) and **any write to a non-local database** open a confirmation dialog
@@ -191,14 +200,14 @@ label is guessed from the host and name and drives the safety rails:
   `CREATE TABLE`, and **+ Migration** scaffolds a Laravel migration for the table
   and opens it (instead of running DDL directly).
 - The **⇄** button in the panel header shows **schema relationships** (every
-  foreign key as `table.column → ref_table.ref_column`) of the database the
-  panel is showing.
+  foreign key as `table.column → ref_table.ref_column`) of the active
+  connection.
 - The cell dialog can **Follow FK →** (jump to the referenced row) and show
   **Related →** rows (reverse foreign keys).
 - **Seed 10** (local tables) creates rows via the Eloquent factory through
   Tinker; **⬆ CSV** imports a CSV into the table.
 - **Search all data…** in the panel header scans every table's text columns of
-  the database the panel is showing for a value, and shows one result tab per
+  the active connection for a value, and shows one result tab per
   matching table. **✕ Cancel** stops it
   before the next table.
 - Row counts appear next to each table in the tree. They come from the
@@ -210,6 +219,19 @@ label is guessed from the host and name and drives the safety rails:
   - **SQLite** counts each table.
 
   Opening a table counts its rows exactly.
+
+## The active connection
+
+The chip under the panel's title, and at the top of the results panel, shows
+the **active connection** in its environment's colour (`● app · production
+▾`). The console runs against it, and **Search all data**, **⇄**
+relationships, EXPLAIN from the runtime panel and SQL under the cursor use it.
+
+Click the chip to switch: the menu lists every connection with its
+environment, and picking one that isn't connected connects it. A table open
+on the previous connection is left — its tab brings it back — and result tabs
+stay. Opening a table, or **⌗** on a connection, makes that connection active
+too, and the first one you connect is active until you choose another.
 
 ## Connection actions
 

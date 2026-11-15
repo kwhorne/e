@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Set a connection's environment by hand.** The connection form has an
+  **Environment** row: **Auto** shows the guess, or pick local, staging or
+  production. The choice drives the colour, the read-only default and which
+  writes ask first; the form warns when local overrides a guess of staging
+  or production.
+- **Active connection switcher.** A chip under the Database panel's title
+  and at the top of the results panel shows the active connection in its
+  environment's colour; click it to switch to another, connecting it if
+  need be. The console, search, EXPLAIN and relationships all use it.
+
+### Fixed
+
+- **⌗ New query kept a table open on another connection** as the grid's
+  table, so paging could load that table from the new connection.
+- **The grid could show the previous result's cells** under a new result's
+  columns, when switching result tabs or running a query after browsing a
+  table: rows were matched by position only.
+- **The results title named the table** while a result tab was shown; it now
+  names the tab.
+
 ## [0.20.2] - 2026-11-15
 
 ### Fixed

@@ -200,6 +200,15 @@ The label drives the safety rails:
   belong to one table at a time: to edit another, submit or revert the first.
   A **Log** button shows the session's writes with an **Undo** where a reverse
   statement can be generated.
+- **Conflicts:** Submit first reads each edited and deleted row again, in the
+  same transaction, and checks that the edited cell still holds the value you
+  read (compared as the grid showed it), and that a row to delete is still
+  there. If someone changed it meanwhile, **nothing is written**: a red banner
+  names each such row and what it holds now, those changes are no longer
+  staged, the table is read again, and the rest stay staged for another
+  Submit. The rows are locked while they are checked (`FOR UPDATE`; SQLite
+  takes its write lock first), so nothing gets in between. ClickHouse has no
+  transactions, so there the check runs just before the writes.
 - **Snapshots:** the **⤓** action on a local connection dumps the database
   (SQLite copy / mysqldump / pg_dump) into `~/.config/e/snapshots/` — handy
   before a migration.

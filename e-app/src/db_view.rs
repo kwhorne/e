@@ -1625,6 +1625,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         explain_banner(state),
         status,
         grid,
+        conflict_bar(state),
         pending_bar(state),
         db_value_viewer(state),
         db_edit_popup(state),
@@ -2965,6 +2966,58 @@ fn db_history_panel(state: AppState) -> impl IntoView {
 /// The transactional "pending changes" bar: shown at the bottom of the grid
 /// while there are staged edits/deletes, with Submit (one transaction, via the
 /// confirmation dialog) and Revert.
+/// What the last Submit found changed in the database since the grid read
+/// it: nothing was written, and the changes it names are no longer staged.
+fn conflict_bar(state: AppState) -> impl IntoView {
+    let text =
+        label(move || {
+            let lines = state.db.conflicts.get();
+            let n = lines.len();
+            let head =
+                format!(
+            "✕ Nothing was written: {n} row{} changed since {} read. The table now shows {}.",
+            if n == 1 { "" } else { "s" },
+            if n == 1 { "it was" } else { "they were" },
+            if n == 1 { "its current value" } else { "their current values" },
+        );
+            std::iter::once(head)
+                .chain(lines.iter().take(5).map(|l| format!("   {l}")))
+                .chain((n > 5).then(|| format!("   … and {} more", n - 5)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .style(|s| s.flex_grow(1.0_f32).font_size(12.0).color(theme::error()));
+    let dismiss = label(|| "✕".to_string())
+        .style(|s| {
+            s.padding_horiz(8.0)
+                .height(24.0)
+                .items_center()
+                .border_radius(4.0)
+                .font_size(12.0)
+                .color(theme::fg_dim())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db.conflicts.set(Vec::new()));
+    stack((text, dismiss)).style(move |s| {
+        let s = s
+            .flex_row()
+            .items_start()
+            .gap(8.0)
+            .width_full()
+            .padding_horiz(12.0)
+            .padding_vert(8.0)
+            .border_top(1.0)
+            .border_color(theme::error())
+            .background(theme::bg_panel());
+        if state.db.conflicts.with(Vec::is_empty) {
+            s.hide()
+        } else {
+            s
+        }
+    })
+}
+
 fn pending_bar(state: AppState) -> impl IntoView {
     let summary = label(move || {
         let e = state.db.pending_edits.with(|m| m.len());

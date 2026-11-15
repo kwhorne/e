@@ -477,7 +477,8 @@ Ingen fase er helt ferdig. Krav utenfor faseplanen som mangler helt: 203,
 ### Neste steg
 
 Feilene i §3 og dokumentasjonen som lovet for mye, er tatt, og fase 2 er
-nesten ferdig.
+nesten ferdig. Submit sjekker nå at radene ikke er endret siden de ble lest
+(optimistisk låsing, se §9).
 
 1. **Fullføre fase 1** («paritet i praksis»): completion med alias og
    nøkkelord (402); query som tooltip på fanene (404).
@@ -502,7 +503,7 @@ nesten ferdig.
 | Risiko | Avbøtning |
 | --- | --- |
 | Driver-forskjeller (fire motorer × alle features) gir kombinatorisk kompleksitet | Kapabilitets-flagg per driver i `e-db` (`supports_transactions`, `supports_kill`, …); UI degraderer eksplisitt i stedet for å feile. **v0.20.0: ikke gjort** — alt er `match Backend`, og degradering er stille (ClickHouse-views blir tomme) |
-| Transaksjonell redigering med samtidige eksterne endringer (optimistic locking) | Submit matcher på de opprinnelige verdiene i `WHERE`-klausulen; ved 0 raders treff varsles konflikt og grid refreshes. **v0.20.0: ikke gjort** — `WHERE` matcher bare på primærnøkkel, og 0 rader varsles ikke |
+| Transaksjonell redigering med samtidige eksterne endringer (optimistic locking) | Submit matcher på de opprinnelige verdiene i `WHERE`-klausulen; ved 0 raders treff varsles konflikt og grid refreshes. **v0.20.0: ikke gjort.** *Nå gjort, men annerledes:* Submit leser hver redigerte og slettede rad på nytt i samme transaksjon (`FOR UPDATE`; SQLite tar skrivelåsen først) og sammenligner verdien slik grid-en viste den, i stedet for i `WHERE` — det gir ingen falske konflikter for float, JSON og tidsstempler. Ved konflikt skrives ingenting; banner viser hva raden har nå, de berørte endringene tas ut, resten står igjen. ClickHouse: sjekken kjøres rett før skrivingen, uten transaksjon |
 | Query-kansellering er driver-spesifikk og skjør | Fallback: la queryen løpe ut i bakgrunnen, men frigjør UI og marker resultatet som forkastet. **v0.20.0: gjort**, og queryen stoppes nå også på serveren for alle fire motorer |
 | Historikk-DB vokser | Rullerende grense (f.eks. 10 000 innslag) + manuell tømming i settings. **v0.20.0: gjort** (global grense 10 000; tømming fra historikk-skuffen) |
 | Scope-kryp mot DataGrip | Ikke-målene i §1 håndheves; nye motorer/DBA-features krever egen PRD |

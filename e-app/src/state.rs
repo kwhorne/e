@@ -251,8 +251,20 @@ pub struct DbTransaction {
     pub log: Vec<WriteLogEntry>,
     /// The staged grid changes these statements carry out, cleared on success.
     pub submits_pending: bool,
+    /// What the rows must still hold for the statements to run, each with
+    /// the staged change it guards (optimistic locking).
+    pub checks: Vec<(e_db::RowCheck, Staged)>,
     /// What the message on success says was done, e.g. "Submitted".
     pub done: &'static str,
+}
+
+/// A staged change, by its key in the pending sets.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Staged {
+    /// An edit of this row's column.
+    Edit(RowPk, String),
+    /// Deleting this row.
+    Delete(RowPk),
 }
 
 /// A pending destructive / non-local / submit action awaiting confirmation.
@@ -708,6 +720,9 @@ pub struct DbPanel {
     /// Rows staged with "+ Row", inserted on Submit with the rest.
     pub pending_inserts: RwSignal<Vec<PendingInsert>>,
     pub pending_target: RwSignal<Option<(String, String)>>,
+    /// What the last Submit found changed in the database since the grid
+    /// read it (one line each), shown until dismissed or the next Submit.
+    pub conflicts: RwSignal<Vec<String>>,
     /// Where the staged changes fall in the grid on screen.
     pub pending_view: RwSignal<PendingView>,
     /// The table being browsed (None in free-query mode).
@@ -795,6 +810,7 @@ impl DbPanel {
             pending_deletes: RwSignal::new(HashSet::new()),
             pending_inserts: RwSignal::new(Vec::new()),
             pending_target: RwSignal::new(None),
+            conflicts: RwSignal::new(Vec::new()),
             pending_view: RwSignal::new(PendingView::default()),
             result_table: RwSignal::new(None),
             subview: RwSignal::new("data".into()),

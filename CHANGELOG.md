@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Submit no longer overwrites a change made meanwhile.** Before writing,
+  Submit reads each edited and deleted row again in the same transaction,
+  locked, and checks the edited cell still holds the value the grid showed.
+  If a row changed or went away, nothing is written: a banner says what each
+  such row holds now, those changes are taken off the staged set, the table
+  is read again, and the rest stay staged.
+
 ## [0.22.0] - 2026-11-15
 
 ### Added

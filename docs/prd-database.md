@@ -83,11 +83,7 @@ tabell, `db_explain`/`db_snapshot` på agent-socketen.
 
 ### Kjente feil og hull (bør tas før nye krav)
 
-1. **Å åpne en tabell sletter alle resultat-faner**, også pinnede (DB-404).
-2. **Søk i data og EXPLAIN fra runtime-panelet bruker første tilkoblede
-   database**, ikke den aktive.
-3. **Konsoll-completion henter skjema fra `.env`-tilkoblingen**, ikke fra
-   tilkoblingen konsollen kjører mot.
+Ingen kjente. De tre som sto her, er rettet (se under).
 
 ### Rettet etter v0.20.0
 
@@ -108,16 +104,28 @@ tabell, `db_explain`/`db_snapshot` på agent-socketen.
 - **Redigering av en tilkobling mistet etiketten** (og dermed en
   produksjonsmarkering gjettet fra den), og et nytt passord ble vist mens det
   ble skrevet (#56).
+- **Å åpne en tabell slettet alle resultat-faner**, også pinnede. Fanene
+  blir nå stående, og tabellen har sin egen fane først i stripen, som henter
+  den tilbake med side, sortering og filter. Rader i en resultat-fane er
+  skrivebeskyttet.
+- **Søk i data, EXPLAIN fra runtime-panelet, Run/Explain SQL under markøren
+  og relasjonsvisningen brukte første tilkoblede database.** Nå brukes den
+  panelet viser, eller den eneste tilkoblede; med flere og ingen valgt spør
+  panelet i stedet for å gjette.
+- **Konsoll-completion hentet skjema fra `.env`-tilkoblingen.** Nå leses
+  skjemaet fra konsollens egen tilkobling ved første bruk, og på nytt etter
+  ⟳ eller ny tilkobling.
+- **En EXPLAIN-plan havnet i grid-en som rader i tabellen sist vist**, og
+  cellene kunne redigeres som den tabellens. Planen får nå en egen,
+  skrivebeskyttet EXPLAIN-fane.
 
 ### Dokumentasjon som lover mer enn koden
 
-- `docs/database.md` og CHANGELOG nevner nøkkelord-completion i konsollen;
-  den finnes ikke.
-- `docs/database.md` sier at resultater kappes ved 1000 rader; det gjelder nå
-  bare konsollen (grid pagineres).
-- CHANGELOG 0.8.0 nevner «agent-suggested index migrations» for SQL; fra
-  konsollen er det bare en prompt til agenten, og «Suggest Index»-hintet i
-  EXPLAIN-banneret er ikke klikkbart.
+`docs/database.md` er rettet: den nevner ikke lenger nøkkelord-completion i
+konsollen, sier at bare konsollen kapper ved 1000 rader (grid pagineres), og
+«Suggest Index» i EXPLAIN-banneret er nå en knapp som ber agenten om
+migrasjonen. Eldre CHANGELOG-oppføringer (0.8.0 om nøkkelord og
+«agent-suggested index migrations») står som historikk.
 
 ### Levert utenfor PRD-en
 
@@ -195,9 +203,9 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-401 | Syntax-highlighting i konsollen (gjenbruk tree-sitter-SQL fra inline-SQL-arbeidet) | P0 | ✅ |
-| DB-402 | Skjema-bevisst completion: tabellnavn, kolonnenavn (alias-bevisst: `o.` foreslår `orders`-kolonner), nøkkelord, funksjoner (gjenbruk completion-motoren fra inline SQL) | P0 | ◐ Tabeller etter FROM/JOIN/…, kolonner med type. Mangler: alias, nøkkelord, funksjoner, kolonner avgrenset til setningens tabeller; skjema fra konsollens tilkobling |
+| DB-402 | Skjema-bevisst completion: tabellnavn, kolonnenavn (alias-bevisst: `o.` foreslår `orders`-kolonner), nøkkelord, funksjoner (gjenbruk completion-motoren fra inline SQL) | P0 | ◐ Tabeller etter FROM/JOIN/…, kolonner med type. Skjema fra konsollens egen tilkobling. Mangler: alias, nøkkelord, funksjoner, kolonner avgrenset til setningens tabeller |
 | DB-403 | Multi-statement: kjør hele konsollen, kjør valgt tekst, eller kjør setningen under markøren (⌘⏎); hver setning får eget resultat | P0 | ✅ |
-| DB-404 | Flere resultat-faner: hver kjøring får en fane (med queryen som tooltip); faner kan pinnes; ikke-pinnede gjenbrukes | P0 | ◐ Pin (★) og gjenbruk. Mangler: query som tooltip; åpne tabell sletter alle faner |
+| DB-404 | Flere resultat-faner: hver kjøring får en fane (med queryen som tooltip); faner kan pinnes; ikke-pinnede gjenbrukes | P0 | ◐ Pin (★) og gjenbruk; fanene overlever tabellbytte, og tabellen har egen fane. Mangler: query som tooltip |
 | DB-405 | Query-historikk: alle kjørte queries logges per prosjekt (tid, tilkobling, radantall, varighet); søkbar liste, klikk for å gjenåpne i konsollen | P0 | ✅ Bare konsoll-kjøringer logges |
 | DB-406 | ✅ Lagrede queries per prosjekt | — | ✅ Ingen UI for å slette en lagret query |
 | DB-407 | Feilposisjonering: syntaksfeil fra serveren markerer riktig posisjon i konsollen der driveren oppgir den; «✨ Explain with agent» beholdes | P1 | ✗ Feilen vises som tekst; «Explain with agent» finnes |
@@ -221,8 +229,8 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | --- | --- | --- | --- |
 | DB-601 | ✅ EXPLAIN med agent-indeksforslag; indeksvisning i Structure | — | ✅ |
 | DB-602 | Strukturert EXPLAIN-visning: plan som tre/tabell med markering av full table scans og manglende indekser (ikke bare råtekst) | P1 | ◐ Rå plan i grid + banner som lister full scans. Mangler: tre, kostnad per node |
-| DB-603 | «Foreslå indeks → generer migrasjon»: agent-indeksforslaget skrives som ferdig Laravel-migrasjonsfil (gjenbruk kodegen) | P1 | ◐ Fra SQL bare en prompt til agenten; banner-hintet er ikke klikkbart. Deterministisk migrasjon finnes for Eloquent (⌥⌘⏎) |
-| DB-604 | Kobling fra runtime-panelet (⌘⌥I): «EXPLAIN denne queryen» på enhver observert query, med hopp til DB-panelet | P1 | ✅ Bruker første tilkoblede database |
+| DB-603 | «Foreslå indeks → generer migrasjon»: agent-indeksforslaget skrives som ferdig Laravel-migrasjonsfil (gjenbruk kodegen) | P1 | ◐ Fra SQL bare en prompt til agenten (fra palett eller banner-knappen). Deterministisk migrasjon finnes for Eloquent (⌥⌘⏎) |
+| DB-604 | Kobling fra runtime-panelet (⌘⌥I): «EXPLAIN denne queryen» på enhver observert query, med hopp til DB-panelet | P1 | ✅ Mot databasen panelet viser, eller den eneste tilkoblede |
 | DB-605 | Varighet og radantall vises for hver kjøring i konsoll og historikk | P0 | ✅ |
 
 ### 4.7 Trygghet (forsterker DB-102/103/303)
@@ -243,7 +251,7 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | DB-802 | Factory-integrasjon: «Seed N rader» på tabell (kjører factory via Tinker); «Generer factory fra skjema» der factory mangler | P1 | ◐ «Seed 10» via factory (fast antall, lokalt, krever trust). Mangler: valgt N, factory fra skjema |
 | DB-803 | Migrasjonsgenerering fra strukturendringer: endrer man kolonner/indekser i Structure-fanen, tilbys en generert migrasjon i stedet for direkte DDL (direkte DDL kun på lokale miljøer) | P2 | ◐ «+ Migration» lager tomt `Schema::table`-skjelett. Structure kan ikke redigeres |
 | DB-804 | Agent-socket utvides: `db_explain` (fritt, read-only) og `db_snapshot` (consent) | P2 | ✗ Socketen har `db_schema` og `db_query` |
-| DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 | ◐ LIKE over tekstkolonner, 200 rader per tabell. Cancel stopper før neste tabell. Mangler: velger første database, skiller store/små bokstaver på PostgreSQL |
+| DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 | ◐ LIKE over tekstkolonner, 200 rader per tabell. Cancel stopper før neste tabell. Søker i databasen panelet viser. Mangler: skiller store/små bokstaver på PostgreSQL |
 
 ## 5. Design
 
@@ -468,17 +476,13 @@ Ingen fase er helt ferdig. Krav utenfor faseplanen som mangler helt: 203,
 
 ### Neste steg
 
-1. **Rette de gjenværende feilene i §3**: faner som forsvinner ved
-   tabellbytte, søk/EXPLAIN mot feil database, og completion fra feil
-   tilkobling. (De to trygghetsbruddene — tapte ventende endringer og «+ Row»
-   uten bekreftelse — er rettet i #54.)
-2. **Fullføre fase 1 og 2** («paritet i praksis»): completion med alias,
-   nøkkelord og riktig tilkobling (402); faner som overlever tabellbytte og
-   viser queryen (404); nye rader i endringssettet og radantall i
-   bekreftelsen (303, 703); verdi-editor (304); manuell miljøetikett og
-   tilkoblingsbytte i header (102, 104).
-3. **Rydde dokumentasjonen** som lover mer enn koden (§3).
-4. Deretter fase 3: CSV-import med mapping-dialog (503), views med definisjon
+Feilene i §3 og dokumentasjonen som lovet for mye, er tatt.
+
+1. **Fullføre fase 1 og 2** («paritet i praksis»): completion med alias og
+   nøkkelord (402); query som tooltip på fanene (404); nye rader i
+   endringssettet og radantall i bekreftelsen (303, 703); verdi-editor (304);
+   manuell miljøetikett og tilkoblingsbytte i header (102, 104).
+2. Deretter fase 3: CSV-import med mapping-dialog (503), views med definisjon
    (202), kopier-som i alle formater (505).
 
 ## 8. Suksessmetrikker

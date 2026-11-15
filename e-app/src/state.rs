@@ -77,6 +77,9 @@ use crate::styling::{
 };
 
 /// One open file/tab.
+/// Each table's (or view's) columns, by name.
+pub type TableColumns = HashMap<String, Vec<e_db::ColumnInfo>>;
+
 /// A saved database connection plus its live UI state.
 #[derive(Clone)]
 pub struct DbEntry {
@@ -93,6 +96,10 @@ pub struct DbEntry {
     pub filter: RwSignal<String>,
     /// Block writes (cell edits, …). Defaults on for production-looking targets.
     pub read_only: RwSignal<bool>,
+    /// This connection's tables and columns, for SQL console completion.
+    /// Loaded on first use and dropped on disconnect or refresh.
+    pub schema: RwSignal<Option<Arc<TableColumns>>>,
+    pub schema_loading: RwSignal<bool>,
 }
 
 impl DbEntry {
@@ -109,6 +116,8 @@ impl DbEntry {
             error: cx.create_rw_signal(None),
             filter: cx.create_rw_signal(String::new()),
             read_only: cx.create_rw_signal(config_read_only),
+            schema: cx.create_rw_signal(None),
+            schema_loading: cx.create_rw_signal(false),
         }
     }
     pub fn key(&self) -> String {
@@ -317,6 +326,10 @@ pub struct ResultTab {
     pub pinned: bool,
     /// Connection key, so the tab stays associated with its database.
     pub key: Option<String>,
+    /// EXPLAIN findings shown over the result (a plan's tab only).
+    pub explain: Vec<String>,
+    /// The query a plan's tab explains, for "Suggest Index".
+    pub sql: Option<String>,
 }
 
 /// One editable field in the "insert row" dialog, bound to its own signals.
@@ -623,8 +636,13 @@ pub struct DbPanel {
     pub history: RwSignal<Vec<e_db::history::HistoryEntry>>,
     pub history_query: RwSignal<String>,
     /// SQL console result tabs (one per statement of the last run + pinned ones).
+    /// Opening a table keeps them; it shows in a tab of its own.
     pub result_tabs: RwSignal<Vec<ResultTab>>,
-    pub active_tab: RwSignal<usize>,
+    /// The result tab shown in the grid, or `None` for the browsed table.
+    pub active_tab: RwSignal<Option<usize>>,
+    /// The table last browsed `(connection key, table)`, while a result tab
+    /// is shown instead, so its tab can bring it back.
+    pub browsed: RwSignal<Option<(String, String)>>,
     /// Run generation: bumped on each run and on cancel, so a cancelled/superseded
     /// query's result is discarded when it finally returns.
     pub run_gen: RwSignal<u64>,
@@ -730,7 +748,8 @@ impl DbPanel {
             history: RwSignal::new(Vec::new()),
             history_query: RwSignal::new(String::new()),
             result_tabs: RwSignal::new(Vec::new()),
-            active_tab: RwSignal::new(0),
+            active_tab: RwSignal::new(None),
+            browsed: RwSignal::new(None),
             run_gen: RwSignal::new(0),
             run_stop: RwSignal::new(Arc::default()),
             browse_gen: RwSignal::new(0),

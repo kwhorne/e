@@ -2706,10 +2706,9 @@ fn pending_bar(state: AppState) -> impl IntoView {
     })
 }
 
-/// The console result-tab strip: one tab per statement of the last run, plus
-/// pinned tabs. Click to switch, pin to keep, ✕ to close. Hidden when empty.
 /// A banner listing EXPLAIN findings (full scans / missing indexes) for the
-/// current plan, with a hint to ask the agent for an index migration (DB-602).
+/// current plan, with a button that asks the agent for an index migration
+/// (DB-602).
 fn explain_banner(state: AppState) -> impl IntoView {
     let issues = label(move || {
         let list = state.db.explain_issues.get();
@@ -2725,11 +2724,15 @@ fn explain_banner(state: AppState) -> impl IntoView {
             .color(theme::error())
             .text_ellipsis()
     });
-    let hint = label(|| "Suggest Index → ask the agent".to_string()).style(|s| {
-        s.font_size(10.5)
-            .color(theme::fg_dim())
-            .flex_shrink(0.0_f32)
-    });
+    let hint = label(|| "Suggest Index → ask the agent".to_string())
+        .style(|s| {
+            s.font_size(10.5)
+                .color(theme::fg_dim())
+                .flex_shrink(0.0_f32)
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.color(theme::fg()))
+        })
+        .on_click_stop(move |_| state.db_suggest_index_for_plan());
     stack((issues, hint)).style(move |s| {
         let s = s
             .flex_row()
@@ -2749,7 +2752,41 @@ fn explain_banner(state: AppState) -> impl IntoView {
     })
 }
 
+/// The result-tab strip: the browsed table's tab, then one tab per statement
+/// of the last run (or per table a search matched, or a plan), plus pinned
+/// tabs. Click to switch, pin to keep, ✕ to close. Hidden when empty.
 fn result_tabs_strip(state: AppState) -> impl IntoView {
+    // The browsed table's own tab, first, so result tabs don't replace it.
+    let table_tab = label(move || {
+        state
+            .db
+            .browsed
+            .get()
+            .map(|(_, t)| format!("▦ {t}"))
+            .unwrap_or_default()
+    })
+    .style(move |s| {
+        let shown = state.db.active_tab.get().is_none() && state.db.result_table.get().is_some();
+        let s = s
+            .font_size(12.0)
+            .padding_horiz(10.0)
+            .padding_vert(5.0)
+            .border_right(1.0)
+            .border_color(theme::border())
+            .color(theme::fg())
+            .cursor(floem::style::CursorStyle::Pointer);
+        let s = if shown {
+            s.background(theme::bg_active())
+        } else {
+            s.hover(|s| s.background(theme::bg_hover()))
+        };
+        if state.db.browsed.with(|b| b.is_none()) {
+            s.hide()
+        } else {
+            s
+        }
+    })
+    .on_click_stop(move |_| state.db_show_browsed());
     let tabs = dyn_stack(
         move || {
             state
@@ -2760,7 +2797,7 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
                 .enumerate()
                 .collect::<Vec<_>>()
         },
-        |(i, t)| (*i, t.pinned),
+        |(i, t)| (*i, t.title.clone(), t.pinned, t.error.is_some()),
         move |(i, t)| {
             let title = t.title.clone();
             let pinned = t.pinned;
@@ -2791,7 +2828,7 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
                 .on_click_stop(move |_| state.db_close_tab(i));
             stack((pin, name, close))
                 .style(move |s| {
-                    let active = state.db.active_tab.get() == i;
+                    let active = state.db.active_tab.get() == Some(i);
                     let s = s
                         .flex_row()
                         .items_center()
@@ -2812,18 +2849,20 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_row().items_center());
 
-    floem::views::scroll(tabs).style(move |s| {
-        let s = s
-            .width_full()
-            .border_bottom(1.0)
-            .border_color(theme::border())
-            .background(theme::bg_hover());
-        if state.db.result_tabs.with(|t| t.is_empty()) {
-            s.hide()
-        } else {
-            s
-        }
-    })
+    floem::views::scroll(stack((table_tab, tabs)).style(|s| s.flex_row().items_center())).style(
+        move |s| {
+            let s = s
+                .width_full()
+                .border_bottom(1.0)
+                .border_color(theme::border())
+                .background(theme::bg_hover());
+            if state.db.result_tabs.with(|t| t.is_empty()) {
+                s.hide()
+            } else {
+                s
+            }
+        },
+    )
 }
 
 fn result_grid(state: AppState) -> impl IntoView {

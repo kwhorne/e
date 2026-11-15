@@ -264,6 +264,7 @@ impl AppState {
     }
 
     pub fn db_remove(&self, key: String) {
+        self.db_forget_browsed(&key);
         self.db.conns.update(|c| c.retain(|e| e.key() != key));
         self.db_persist();
     }
@@ -283,6 +284,7 @@ impl AppState {
                     // e-db enforces the panel's read-only toggle itself, so the
                     // console, CSV import and agent queries all honour it.
                     conn.set_read_only(entry.read_only.get_untracked());
+                    entry.schema.set(None);
                     entry.conn.set(Some(conn));
                     entry.tables.set(tables);
                     entry.views.set(views);
@@ -304,9 +306,72 @@ impl AppState {
     }
 
     pub fn db_disconnect(&self, entry: DbEntry) {
+        self.db_forget_browsed(&entry.key());
         entry.conn.set(None);
         entry.tables.set(Vec::new());
+        entry.schema.set(None);
         entry.expanded.set(false);
+    }
+
+    /// Drop the browsed table's tab when its connection goes away.
+    fn db_forget_browsed(&self, key: &str) {
+        if self
+            .db
+            .browsed
+            .with_untracked(|b| b.as_ref().is_some_and(|(k, _)| k == key))
+        {
+            self.db.browsed.set(None);
+        }
+    }
+
+    /// The schema SQL console completion offers: that of the connection the
+    /// console runs against, loaded on first use (`None` until it is), or
+    /// the project's `.env` database while the console has none.
+    pub(crate) fn db_console_schema(&self) -> Option<Arc<crate::state::TableColumns>> {
+        let Some(key) = self.db.result_key.get_untracked() else {
+            return Some(self.db.schema_cache.get_untracked());
+        };
+        let entry = self
+            .db
+            .conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())?;
+        if let Some(schema) = entry.schema.get_untracked() {
+            return Some(schema);
+        }
+        self.db_load_conn_schema(entry);
+        None
+    }
+
+    /// Read every table's and view's columns on `entry`'s connection into
+    /// its schema, in the background.
+    fn db_load_conn_schema(&self, entry: DbEntry) {
+        if entry.schema_loading.get_untracked() {
+            return;
+        }
+        let Some(conn) = entry.conn.get_untracked() else {
+            return;
+        };
+        entry.schema_loading.set(true);
+        let mut names = entry.tables.get_untracked();
+        names.extend(entry.views.get_untracked());
+        let (schema, loading, live) = (entry.schema, entry.schema_loading, entry.conn);
+        let send = create_ext_action(self.cx, {
+            let conn = conn.clone();
+            move |map: crate::state::TableColumns| {
+                loading.set(false);
+                // Not if the connection was closed or remade meanwhile.
+                if live.with_untracked(|c| c.as_ref().is_some_and(|c| Arc::ptr_eq(c, &conn))) {
+                    schema.set(Some(Arc::new(map)));
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            let map = names
+                .into_iter()
+                .filter_map(|t| e_db::columns(&conn, &t).ok().map(|cols| (t, cols)))
+                .collect();
+            send(map);
+        });
     }
 
     pub fn db_toggle(&self, entry: DbEntry) {
@@ -353,6 +418,8 @@ impl AppState {
         };
         let send = create_ext_action(self.cx, move |tables: Vec<String>| {
             entry.tables.set(tables);
+            // Read again on next use, with the tables as they are now.
+            entry.schema.set(None);
         });
         std::thread::spawn(move || {
             let tables = e_db::tables(&conn).unwrap_or_default();
@@ -399,6 +466,13 @@ impl AppState {
         let Some(conn) = entry.conn.get_untracked() else {
             return;
         };
+        // Leaving a result tab for the table: its rows mustn't stay in the
+        // grid, where they'd pass for the table's, while the page loads.
+        if self.db.active_tab.get_untracked().is_some() {
+            self.db.active_tab.set(None);
+            self.db.result.set(None);
+            self.db.explain_issues.set(Vec::new());
+        }
         let engine = entry.config.engine.clone();
         let page = self.db.page.get_untracked();
         let sort = self.db.sort.get_untracked();
@@ -916,12 +990,7 @@ impl AppState {
     /// Load the active database's foreign-key relationships and open the schema-
     /// relationships (ERD) panel (DB-207). Works for tables without models.
     pub fn db_show_erd(&self) {
-        let Some(entry) = self.db.conns.with_untracked(|cs| {
-            cs.iter()
-                .find(|e| e.conn.get_untracked().is_some())
-                .cloned()
-        }) else {
-            Self::notify("Relationships: connect a database first");
+        let Some(entry) = self.db_active_entry("Relationships") else {
             return;
         };
         let Some(conn) = entry.conn.get_untracked() else {
@@ -942,12 +1011,7 @@ impl AppState {
         if needle.is_empty() {
             return;
         }
-        let Some(entry) = self.db.conns.with_untracked(|cs| {
-            cs.iter()
-                .find(|e| e.conn.get_untracked().is_some())
-                .cloned()
-        }) else {
-            Self::notify("Search: connect a database first");
+        let Some(entry) = self.db_active_entry("Search") else {
             return;
         };
         let Some(conn) = entry.conn.get_untracked() else {
@@ -955,7 +1019,6 @@ impl AppState {
         };
         let engine = entry.config.engine.clone();
         let key = entry.key();
-        self.db.result_key.set(Some(key.clone()));
         self.db.result_title.set(format!(
             "{} · search “{needle}”",
             entry.config.display_name()
@@ -981,15 +1044,14 @@ impl AppState {
     }
 
     /// Show cross-table search hits as read-only result tabs (one per table).
+    /// With no hits, whatever was shown stays.
     fn db_show_search_results(&self, key: String, hits: Vec<(String, e_db::QueryResult)>) {
         self.db.result_loading.set(false);
         if hits.is_empty() {
-            self.db.result_tabs.set(Vec::new());
-            self.db.result.set(None);
             Self::notify("No matches in any table");
             return;
         }
-        let tabs: Vec<crate::state::ResultTab> = hits
+        let tabs = hits
             .into_iter()
             .map(|(table, res)| crate::state::ResultTab {
                 title: table,
@@ -997,12 +1059,47 @@ impl AppState {
                 error: None,
                 pinned: false,
                 key: Some(key.clone()),
+                explain: Vec::new(),
+                sql: None,
             })
             .collect();
-        self.db.result_table.set(None);
-        self.db.columns.set(Vec::new());
-        self.db.result_tabs.set(tabs);
-        self.db_activate_tab(0);
+        self.db_show_new_tabs(tabs);
+    }
+
+    /// The connection the panel works with: the one its results come from,
+    /// or, if that isn't connected, the only connected one. With several
+    /// connected and none chosen, says so (as `what`) and returns `None`
+    /// rather than guess.
+    pub(crate) fn db_active_entry(&self, what: &str) -> Option<DbEntry> {
+        let key = self.db.result_key.get_untracked();
+        let found = self.db.conns.with_untracked(|cs| {
+            let connected: Vec<&DbEntry> = cs
+                .iter()
+                .filter(|e| e.conn.get_untracked().is_some())
+                .collect();
+            pick_active(
+                key.as_deref(),
+                &connected.iter().map(|e| e.key()).collect::<Vec<_>>(),
+            )
+            .map(|i| connected[i].clone())
+            .ok_or(connected.len())
+        });
+        match found {
+            Ok(entry) => Some(entry),
+            Err(0) => {
+                Self::notify(&format!(
+                    "{what}: connect a database in the Database panel (⌘3) first"
+                ));
+                None
+            }
+            Err(_) => {
+                Self::notify(&format!(
+                    "{what}: several databases are connected — open a table in the one you \
+                     mean first"
+                ));
+                None
+            }
+        }
     }
 
     /// Generate a Laravel migration scaffold for structure changes to the
@@ -1408,35 +1505,40 @@ impl AppState {
         });
     }
 
-    /// Build console result tabs from a multi-statement run: keep pinned tabs,
-    /// replace unpinned ones with the new results, and activate the first new tab.
+    /// Build console result tabs from a multi-statement run (see
+    /// `db_show_new_tabs`).
     fn db_build_console_tabs(&self, key: String, results: Vec<Result<e_db::QueryResult, String>>) {
         self.db.result_loading.set(false);
-        let mut tabs: Vec<crate::state::ResultTab> = self
-            .db
-            .result_tabs
-            .get_untracked()
+        let tabs = results
             .into_iter()
-            .filter(|t| t.pinned)
+            .enumerate()
+            .map(|(i, res)| {
+                let (result, error) = match res {
+                    Ok(r) => (Some(r), None),
+                    Err(e) => (None, Some(e)),
+                };
+                crate::state::ResultTab {
+                    title: format!("Result {}", i + 1),
+                    result,
+                    error,
+                    pinned: false,
+                    key: Some(key.clone()),
+                    explain: Vec::new(),
+                    sql: None,
+                }
+            })
             .collect();
+        self.db_show_new_tabs(tabs);
+    }
+
+    /// Put new result tabs in place of the unpinned ones (pinned tabs stay)
+    /// and show the first of them.
+    fn db_show_new_tabs(&self, new: Vec<crate::state::ResultTab>) {
+        let mut tabs = self.db.result_tabs.get_untracked();
+        tabs.retain(|t| t.pinned);
         let first_new = tabs.len();
-        for (i, res) in results.into_iter().enumerate() {
-            let (result, error) = match res {
-                Ok(r) => (Some(r), None),
-                Err(e) => (None, Some(e)),
-            };
-            tabs.push(crate::state::ResultTab {
-                title: format!("Result {}", i + 1),
-                result,
-                error,
-                pinned: false,
-                key: Some(key.clone()),
-            });
-        }
+        tabs.extend(new);
         self.db.result_tabs.set(tabs);
-        // Console results aren't tied to a table, so they're read-only.
-        self.db.result_table.set(None);
-        self.db.columns.set(Vec::new());
         self.db_activate_tab(first_new);
     }
 
@@ -1475,18 +1577,57 @@ impl AppState {
         std::thread::spawn(move || send(e_db::cancel(&conn)));
     }
 
-    /// Show the result stored in tab `i` in the grid.
+    /// Show the result stored in tab `i` in the grid. It isn't the browsed
+    /// table's rows, so the grid stops editing that table (its tab brings it
+    /// back), and a page of it still on its way is dropped.
     pub fn db_activate_tab(&self, i: usize) {
         let tabs = self.db.result_tabs.get_untracked();
         let Some(tab) = tabs.get(i) else {
             return;
         };
-        self.db.active_tab.set(i);
+        self.db_next_browse();
+        self.db.edit.set(None);
+        self.db.result_table.set(None);
+        self.db.columns.set(Vec::new());
+        self.db.active_tab.set(Some(i));
         self.db.result_key.set(tab.key.clone());
         self.db.result.set(tab.result.clone());
         self.db.result_error.set(tab.error.clone());
+        self.db.explain_issues.set(tab.explain.clone());
         self.db.selected_cell.set(None);
         self.db.pending_view.set(Default::default());
+    }
+
+    /// Go back from a result tab to the table browsed before it, at the
+    /// same page, sort and filter.
+    pub fn db_show_browsed(&self) {
+        let Some((key, table)) = self.db.browsed.get_untracked() else {
+            return;
+        };
+        if self.db.active_tab.get_untracked().is_none() && self.db_showing(&key, &table) {
+            return;
+        }
+        let entry = self.db.conns.with_untracked(|c| {
+            c.iter()
+                .find(|e| e.key() == key && e.conn.get_untracked().is_some())
+                .cloned()
+        });
+        let Some(entry) = entry else {
+            Self::notify(&format!("{table}: its database is no longer connected"));
+            return;
+        };
+        self.db.edit.set(None);
+        self.db.active_tab.set(None);
+        self.db.result_key.set(Some(key));
+        self.db.result_table.set(Some(table.clone()));
+        self.db
+            .result_title
+            .set(format!("{} · {}", entry.config.display_name(), table));
+        self.db.subview.set("data".into());
+        self.db.columns.set(Vec::new());
+        self.db.explain_issues.set(Vec::new());
+        self.db_load_columns(entry, table);
+        self.db_reload_table();
     }
 
     /// Toggle whether tab `i` is pinned (survives the next run).
@@ -1498,21 +1639,28 @@ impl AppState {
         });
     }
 
-    /// Close result tab `i`.
+    /// Close result tab `i`. Closing the one shown shows its neighbour, or
+    /// the browsed table when it was the last.
     pub fn db_close_tab(&self, i: usize) {
-        self.db.result_tabs.update(|tabs| {
-            if i < tabs.len() {
-                tabs.remove(i);
-            }
-        });
         let len = self.db.result_tabs.with_untracked(|t| t.len());
-        if len == 0 {
-            self.db.result.set(None);
-            self.db.result_error.set(None);
-            self.db.active_tab.set(0);
-        } else {
-            let active = self.db.active_tab.get_untracked().min(len - 1);
-            self.db_activate_tab(active);
+        if i >= len {
+            return;
+        }
+        self.db.result_tabs.update(|tabs| {
+            tabs.remove(i);
+        });
+        let active = self.db.active_tab.get_untracked();
+        match active_after_close(active, i, len - 1) {
+            Some(next) if active == Some(i) => self.db_activate_tab(next),
+            Some(next) => self.db.active_tab.set(Some(next)),
+            None if active.is_none() => {}
+            None => {
+                self.db.active_tab.set(None);
+                self.db.result.set(None);
+                self.db.result_error.set(None);
+                self.db.explain_issues.set(Vec::new());
+                self.db_show_browsed();
+            }
         }
     }
 
@@ -1540,14 +1688,7 @@ impl AppState {
         if sql.is_empty() {
             return None;
         }
-        let Some(entry) = self.db.conns.with_untracked(|cs| {
-            cs.iter()
-                .find(|e| e.conn.get_untracked().is_some())
-                .cloned()
-        }) else {
-            Self::notify("Run SQL: no connected database — connect one in the Database panel (⌘3)");
-            return None;
-        };
+        let entry = self.db_active_entry("Run SQL")?;
         Some((entry, sql))
     }
 
@@ -1588,34 +1729,46 @@ impl AppState {
         self.db
             .result_title
             .set(format!("{} · EXPLAIN", entry.config.display_name()));
-        self.db.result.set(None);
-        self.db.result_error.set(None);
         self.db.result_loading.set(true);
         self.db.open.set(true);
         self.db.result_open.set(true);
+        self.db.run_gen.update(|g| *g += 1);
+        let gen = self.db.run_gen.get_untracked();
+        let key = entry.key();
+        let sql_for_tab = sql.clone();
         let state = *self;
+        // The plan is a result of its own, in a tab, with its findings as a
+        // banner over it; it isn't rows of the browsed table.
         let send = create_ext_action(self.cx, move |res: Result<e_db::QueryResult, String>| {
-            let issues = match &res {
+            if state.db.run_gen.get_untracked() != gen {
+                return;
+            }
+            state.db.result_loading.set(false);
+            let explain = match &res {
                 Ok(plan) => e_db::analyze_explain(&engine, plan),
                 Err(_) => Vec::new(),
             };
-            state.db_apply_result(res);
-            // Show the findings as a persistent banner (db_apply_result cleared it).
-            state.db.explain_issues.set(issues);
+            let (result, error) = match res {
+                Ok(r) => (Some(r), None),
+                Err(e) => (None, Some(e)),
+            };
+            state.db_show_new_tabs(vec![crate::state::ResultTab {
+                title: "EXPLAIN".into(),
+                result,
+                error,
+                pinned: false,
+                key: Some(key.clone()),
+                explain,
+                sql: Some(sql_for_tab.clone()),
+            }]);
         });
         std::thread::spawn(move || send(e_db::explain(&conn, &sql)));
     }
 
-    /// EXPLAIN a query observed in the runtime panel: pick the first connected
-    /// database and show its plan in the DB panel (DB-604).
+    /// EXPLAIN a query observed in the runtime panel against the panel's
+    /// active database and show its plan in the DB panel (DB-604).
     pub fn db_explain_from_runtime(&self, sql: String) {
-        let entry = self.db.conns.with_untracked(|cs| {
-            cs.iter()
-                .find(|e| e.conn.get_untracked().is_some())
-                .cloned()
-        });
-        let Some(entry) = entry else {
-            Self::notify("EXPLAIN: connect a database in the Database panel (⌘3) first");
+        let Some(entry) = self.db_active_entry("EXPLAIN") else {
             return;
         };
         self.db_explain_sql(entry, sql);
@@ -1638,12 +1791,7 @@ impl AppState {
                 Self::notify("EXPLAIN found no full scans — no index needed");
                 return;
             }
-            state.send_to_agent(&format!(
-                "This SQL query has a performance problem. Propose a Laravel migration that adds \
-                 the missing index(es), then briefly explain why.\n\nQuery:\n{sql}\n\nEXPLAIN \
-                 findings:\n- {}",
-                issues.join("\n- ")
-            ));
+            state.send_to_agent(&index_prompt(&sql, &issues));
         });
         std::thread::spawn(move || {
             let issues = e_db::explain(&conn, &sql_for_explain)
@@ -1653,11 +1801,33 @@ impl AppState {
         });
     }
 
+    /// Ask the agent for an index migration for the plan in the shown tab
+    /// (the EXPLAIN banner's "Suggest Index").
+    pub fn db_suggest_index_for_plan(&self) {
+        let tab = self
+            .db
+            .active_tab
+            .get_untracked()
+            .and_then(|i| self.db.result_tabs.with_untracked(|t| t.get(i).cloned()));
+        let Some((sql, issues)) = tab.and_then(|t| Some((t.sql?, t.explain))) else {
+            return;
+        };
+        if !issues.is_empty() {
+            self.send_to_agent(&index_prompt(&sql, &issues));
+        }
+    }
+
     fn db_apply_result(&self, res: Result<e_db::QueryResult, String>) {
         self.db.result_loading.set(false);
         self.db.selected_cell.set(None);
-        // Browsing a table is a single result; drop any console result tabs.
-        self.db.result_tabs.set(Vec::new());
+        // The table is shown in its own tab; result tabs stay beside it.
+        self.db.active_tab.set(None);
+        if let (Some(key), Some(table)) = (
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
+        ) {
+            self.db.browsed.set(Some((key, table)));
+        }
         self.db.explain_issues.set(Vec::new());
         // Staged changes are keyed by primary key, so they outlive the rows
         // they were made on; place them on the new ones.
@@ -2345,6 +2515,71 @@ fn insert_pk(pk: &[String], values: &[(String, Option<String>)]) -> Option<RowPk
     pk.iter()
         .map(|n| values.iter().find(|(c, v)| c == n && v.is_some()).cloned())
         .collect()
+}
+
+/// What the agent is asked to fix a slow query's plan with.
+fn index_prompt(sql: &str, issues: &[String]) -> String {
+    format!(
+        "This SQL query has a performance problem. Propose a Laravel migration that adds the \
+         missing index(es), then briefly explain why.\n\nQuery:\n{sql}\n\nEXPLAIN \
+         findings:\n- {}",
+        issues.join("\n- ")
+    )
+}
+
+/// Which of the `connected` connections (by key) the panel means: the one
+/// its results come from (`current`), else the only one there is.
+fn pick_active(current: Option<&str>, connected: &[String]) -> Option<usize> {
+    current
+        .and_then(|k| connected.iter().position(|c| c == k))
+        .or(if connected.len() == 1 { Some(0) } else { None })
+}
+
+/// The result tab shown after closing tab `closed`, leaving `len_after` tabs,
+/// when `active` was shown (`None`: the browsed table, which stays).
+fn active_after_close(active: Option<usize>, closed: usize, len_after: usize) -> Option<usize> {
+    let a = active?;
+    if a > closed {
+        Some(a - 1)
+    } else if a < closed {
+        Some(a)
+    } else if len_after == 0 {
+        None
+    } else {
+        Some(closed.min(len_after - 1))
+    }
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::*;
+
+    #[test]
+    fn the_active_database_is_the_shown_one_or_the_only_one() {
+        let two = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(pick_active(Some("b"), &two), Some(1));
+        // Not the first connected one when there are several to choose from.
+        assert_eq!(pick_active(None, &two), None);
+        assert_eq!(pick_active(Some("gone"), &two), None);
+        let one = vec!["a".to_string()];
+        assert_eq!(pick_active(None, &one), Some(0));
+        assert_eq!(pick_active(Some("gone"), &one), Some(0));
+        assert_eq!(pick_active(Some("a"), &[]), None);
+    }
+
+    #[test]
+    fn closing_a_tab_keeps_the_shown_one_shown() {
+        // The table stays shown whatever tab is closed.
+        assert_eq!(active_after_close(None, 0, 2), None);
+        // A tab before the shown one moves it left; one after leaves it.
+        assert_eq!(active_after_close(Some(2), 0, 2), Some(1));
+        assert_eq!(active_after_close(Some(0), 1, 1), Some(0));
+        // Closing the shown tab shows the next one, or the one before at the end.
+        assert_eq!(active_after_close(Some(1), 1, 2), Some(1));
+        assert_eq!(active_after_close(Some(2), 2, 2), Some(1));
+        // Closing the last tab goes back to the table.
+        assert_eq!(active_after_close(Some(0), 0, 0), None);
+    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Opening a table closed every result tab**, pinned ones too. Result tabs
+  now stay; the table has a tab of its own at the start of the strip that
+  brings it back at the page, sort and filter it was left at. A result tab's
+  rows are read-only even while a table is open beside it.
+- **Search all data, EXPLAIN from the runtime panel, Run/Explain SQL under
+  cursor and schema relationships used the first connected database**, not
+  the one the panel is showing. They now use the shown one, or the only one
+  connected, and ask you to open a table rather than guess when several are.
+- **SQL console completion offered the `.env` database's tables**, whatever
+  database the console ran against. It now reads the schema of the
+  console's own connection, and again after a refresh or reconnect.
+- **An EXPLAIN plan opened in the grid as rows of the table last shown**, so
+  its cells could be edited as that table's. The plan now has a read-only
+  **EXPLAIN** tab, and **Suggest Index → ask the agent** on its banner is a
+  button; it was only a label.
+- **Result tabs could keep the title of the tab that had been there before**
+  after a new run or search.
+- **The Database guide promised more than the panel does.** It no longer
+  mentions keyword completion in the console, and says that only console
+  queries stop at 1000 rows, since tables are read a page at a time.
+
 ## [0.20.1] - 2026-11-14
 
 ### Security

@@ -8,9 +8,11 @@
 mod affected;
 mod classify;
 pub mod history;
+mod plan;
 
 pub use affected::{affects, Affects, Counted, COUNT_CAP};
 pub use classify::{is_destructive, is_read_only};
+pub use plan::PlanNode;
 
 /// How many rows a write statement will touch, asked of the database
 /// before it runs (see [`affects`]); `None` when that can't be told.
@@ -3178,6 +3180,27 @@ pub fn explain(conn: &Conn, sql: &str) -> Result<QueryResult, String> {
     query(conn, &prefixed, MAX_ROWS)
 }
 
+/// The plan for `sql` as a tree (DB-602), from the engine's structured
+/// plan: `None` where it gives none (ClickHouse) or it can't be read.
+pub fn explain_tree(conn: &Conn, sql: &str) -> Result<Option<PlanNode>, String> {
+    let sql = sql.trim().trim_end_matches(';');
+    let first_cell = |r: QueryResult| r.rows.into_iter().next()?.into_iter().next()?;
+    match backend_engine(conn) {
+        "sqlite" => Ok(plan::from_sqlite(
+            &query(conn, &format!("EXPLAIN QUERY PLAN {sql}"), MAX_ROWS)?.rows,
+        )),
+        "mysql" => Ok(
+            first_cell(query(conn, &format!("EXPLAIN FORMAT=JSON {sql}"), 1)?)
+                .and_then(|j| plan::from_mysql(&j)),
+        ),
+        "postgres" => Ok(
+            first_cell(query(conn, &format!("EXPLAIN (FORMAT JSON) {sql}"), 1)?)
+                .and_then(|j| plan::from_postgres(&j)),
+        ),
+        _ => Ok(None),
+    }
+}
+
 /// Inspect an EXPLAIN result for performance red flags (full table scans /
 /// unused indexes), returning human-readable issues. Pure — unit-tested.
 pub fn analyze_explain(engine: &str, plan: &QueryResult) -> Vec<String> {
@@ -3892,6 +3915,65 @@ mod pg_live_tests {
             0,
         )
         .unwrap();
+    }
+
+    /// `--ignored`, with `E_MYSQL_SCRATCH_PORT`: MySQL's own JSON plan
+    /// reads as a tree, its full scan marked.
+    #[test]
+    #[ignore]
+    fn mysql_plan_reads_as_a_tree() {
+        let Some(port) = std::env::var("E_MYSQL_SCRATCH_PORT").ok() else {
+            return;
+        };
+        let cfg = |database: &str| DbConfig {
+            engine: "mysql".into(),
+            host: "127.0.0.1".into(),
+            port: port.parse().unwrap(),
+            username: "root".into(),
+            database: database.into(),
+            ..Default::default()
+        };
+        let admin = connect(&cfg("mysql")).unwrap();
+        query(&admin, "DROP DATABASE IF EXISTS e_plan_test", 0).unwrap();
+        query(&admin, "CREATE DATABASE e_plan_test", 0).unwrap();
+        let conn = connect(&cfg("e_plan_test")).unwrap();
+        for sql in [
+            "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(20))",
+            "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT, status VARCHAR(10), \
+             created_at DATETIME, KEY orders_user_id (user_id))",
+            "INSERT INTO users VALUES (1, 'ada'), (2, 'bob')",
+            "INSERT INTO orders VALUES (1, 1, 'paid', NOW()), (2, 2, 'new', NOW()), \
+             (3, 1, 'paid', NOW())",
+            "ANALYZE TABLE users, orders",
+        ] {
+            query(&conn, sql, 10).unwrap();
+        }
+        let plan = explain_tree(
+            &conn,
+            "SELECT * FROM orders o JOIN users u ON u.id = o.user_id \
+             WHERE o.status = 'paid' ORDER BY o.created_at DESC",
+        )
+        .unwrap()
+        .unwrap();
+        for (depth, n) in plan.flatten() {
+            eprintln!(
+                "{}{} {:?} {:?} {:?}",
+                "  ".repeat(depth),
+                n.label,
+                n.cost,
+                n.rows,
+                n.details
+            );
+        }
+        let scan = plan
+            .flatten()
+            .into_iter()
+            .map(|(_, n)| n)
+            .find(|n| n.full_scan)
+            .expect("a full scan");
+        assert!(scan.table.is_some(), "{scan:?}");
+        assert!(plan.cost.is_some_and(|c| c > 0.0), "{plan:?}");
+        query(&admin, "DROP DATABASE e_plan_test", 0).unwrap();
     }
 
     /// `--ignored`, with `E_MYSQL_SCRATCH_PORT`: a throwaway server (user
@@ -5612,6 +5694,44 @@ mod tests {
             check_sql("sqlite", &gone),
             "SELECT 1 FROM `users` WHERE `id` = '5'"
         );
+    }
+
+    #[test]
+    fn sqlite_plan_reads_as_a_tree() {
+        let dir = std::env::temp_dir().join("e_db_plan_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("plan.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\
+                 CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INT, status TEXT);",
+            )
+            .unwrap();
+        }
+        let conn = connect(&DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        })
+        .unwrap();
+        let plan = explain_tree(
+            &conn,
+            "SELECT * FROM orders o JOIN users u ON u.id = o.user_id \
+             WHERE o.status = 'paid' ORDER BY o.id DESC;",
+        )
+        .unwrap()
+        .unwrap();
+        let steps: Vec<(bool, Option<String>)> = plan
+            .flatten()
+            .into_iter()
+            .skip(1)
+            .map(|(_, n)| (n.full_scan, n.table.clone()))
+            .collect();
+        assert!(steps.contains(&(true, Some("o".into()))), "{plan:?}");
+        assert!(steps.contains(&(false, Some("u".into()))), "{plan:?}");
+        let _ = std::fs::remove_file(&dbfile);
     }
 
     #[test]

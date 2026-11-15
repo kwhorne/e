@@ -137,7 +137,10 @@ connected:
   at the caret.
 - **⌥⌘↵** — **Explain SQL under cursor**: runs the engine's `EXPLAIN`, shows
   the plan in an **EXPLAIN** result tab and flags full table scans / missing
-  indexes. When one index would cover the query (its `=` columns first, then
+  indexes. The plan shows as a **tree**: each step under the one it feeds,
+  with its conditions, full scans in red, and, on MySQL and PostgreSQL, the
+  cost and rows the engine estimates, the step that costs most on its own
+  marked. **Show as table** shows the rows `EXPLAIN` gave instead. When one index would cover the query (its `=` columns first, then
   its range or sort column), the banner offers **+ Index on table (columns) →
   migration**, which writes that Laravel migration and opens it; **Ask the
   agent** asks the AI agent instead. No index is offered that the table

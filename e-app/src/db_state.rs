@@ -1205,6 +1205,7 @@ impl AppState {
                 explain: Vec::new(),
                 sql: None,
                 advice: None,
+                plan: None,
             })
             .collect();
         self.db_show_new_tabs(tabs);
@@ -1823,6 +1824,7 @@ impl AppState {
                     explain: Vec::new(),
                     sql: Some(stmt),
                     advice: None,
+                    plan: None,
                 }
             })
             .collect();
@@ -2051,7 +2053,7 @@ impl AppState {
         // banner over it; it isn't rows of the browsed table.
         let engine_for_advice = engine.clone();
         let sql_for_advice = sql.clone();
-        let send = create_ext_action(self.cx, move |(res, advice): ExplainedPlan| {
+        let send = create_ext_action(self.cx, move |(res, advice, plan): ExplainedPlan| {
             if state.db.run_gen.get_untracked() != gen {
                 return;
             }
@@ -2073,6 +2075,7 @@ impl AppState {
                 explain,
                 sql: Some(sql_for_tab.clone()),
                 advice,
+                plan,
             }]);
         });
         std::thread::spawn(move || {
@@ -2081,7 +2084,12 @@ impl AppState {
                 .as_ref()
                 .ok()
                 .and_then(|plan| index_advice(&conn, &engine_for_advice, &sql_for_advice, plan));
-            send((res, advice))
+            // The tree is a second EXPLAIN, in the engine's structured form.
+            let plan = res
+                .is_ok()
+                .then(|| e_db::explain_tree(&conn, &sql_for_advice).ok().flatten())
+                .flatten();
+            send((res, advice, plan))
         });
     }
 
@@ -3180,10 +3188,11 @@ fn json_problem(data_type: &str, value: &str) -> Option<String> {
         .map(|e| format!("not valid JSON ({e})"))
 }
 
-/// A plan, and the index it asks for.
+/// A plan, the index it asks for, and the plan as a tree.
 type ExplainedPlan = (
     Result<e_db::QueryResult, String>,
     Option<e_laravel::query_advice::Advice>,
+    Option<e_db::PlanNode>,
 );
 
 /// The index `plan` (of `sql`, on `engine`) asks for, unless the table

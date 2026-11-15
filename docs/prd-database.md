@@ -228,7 +228,7 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-601 | ✅ EXPLAIN med agent-indeksforslag; indeksvisning i Structure | — | ✅ |
-| DB-602 | Strukturert EXPLAIN-visning: plan som tre/tabell med markering av full table scans og manglende indekser (ikke bare råtekst) | P1 | ◐ Rå plan i grid + banner som lister full scans. Mangler: tre, kostnad per node |
+| DB-602 | Strukturert EXPLAIN-visning: plan som tre/tabell med markering av full table scans og manglende indekser (ikke bare råtekst) | P1 | ✅ Planen som tre fra motorens strukturerte plan (SQLite `EXPLAIN QUERY PLAN`, MySQL `EXPLAIN FORMAT=JSON` i begge JSON-utgavene, PostgreSQL `EXPLAIN (FORMAT JSON)`), med betingelser, full scans i rødt, kostnad og rader per node (MySQL, PostgreSQL) og det dyreste steget markert; «Show as table» viser radene. ClickHouse: bare tabellen. PostgreSQL-delen er testet mot JSON-planer, ikke mot en server |
 | DB-603 | «Foreslå indeks → generer migrasjon»: agent-indeksforslaget skrives som ferdig Laravel-migrasjonsfil (gjenbruk kodegen) | P1 | ✅ EXPLAIN-banneret og «Suggest Index» skriver migrasjonen selv (samme regel som for Eloquent: `=`-kolonner, så range/sortering) og åpner den; ingen indeks som allerede finnes. Agenten når ingen enkeltindeks passer, eller på forespørsel. Utenfor Laravel: `CREATE INDEX` til utklippstavlen |
 | DB-604 | Kobling fra runtime-panelet (⌘⌥I): «EXPLAIN denne queryen» på enhver observert query, med hopp til DB-panelet | P1 | ✅ Mot databasen panelet viser, eller den eneste tilkoblede |
 | DB-605 | Varighet og radantall vises for hver kjøring i konsoll og historikk | P0 | ✅ |
@@ -468,10 +468,10 @@ fase 4–5 er forspranget.
 | 1 — Konsollen | 401, 402, 403, 404, 405, 409, 605 | — | — |
 | 2 — Trygg redigering | 102, 104, 302, 305, 702, 703 | 303, 304 | — |
 | 3 — Data inn/ut | 202, 205, 502, 503, 505 | — | — |
-| 4 — Kraftbruker | 204, 308, 408, 603, 604, 802 | 602 | — |
+| 4 — Kraftbruker | 204, 308, 408, 602, 603, 604, 802 | — | — |
 | 5 — Forbi | — | 206, 207, 704, 705, 803, 805 | — |
 
-Fase 1 og 3 er ferdige. Krav utenfor faseplanen som mangler helt: 203,
+Fase 1, 3 og 4 er ferdige. Krav utenfor faseplanen som mangler helt: 203,
 306, 307, 310, 407, 410, 504, 804.
 
 ### Neste steg
@@ -484,11 +484,11 @@ Fase 1 er ferdig. I fase 2 står to ting igjen, og begge er større enn de
 ser ut: opt-in direkte-skriv (303) og fold i verdi-editoren (304), som
 krever kodefolding i editoren, noe `e` ikke har.
 
-Fase 3 er ferdig, og i fase 4 står bare 602 igjen.
+Fase 1, 3 og 4 er ferdige.
 
-1. Strukturert EXPLAIN (602): planen som tre med kostnad per node.
-2. Kapabilitetsflagg per driver (§9), så en motor sier hva den ikke kan i
+1. Kapabilitetsflagg per driver (§9), så en motor sier hva den ikke kan i
    stedet for å feile stille.
+2. Fase 5 (forbi PhpStorm): det som er delvis gjort der.
 3. Kodefolding i editoren, som også gir fold i verdi-editoren (304).
 
 ## 8. Suksessmetrikker

@@ -80,6 +80,11 @@ pub struct DbConfig {
     /// server whose certificate a private CA signed (RDS, Cloud SQL, …).
     #[serde(default)]
     pub tls_ca: String,
+    /// The environment set by hand: `local`, `staging` or `production`, or
+    /// empty to guess it from the names and host (see
+    /// [`DbConfig::environment`]).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub env_label: String,
 }
 
 /// How a connection uses TLS.
@@ -137,7 +142,13 @@ impl DbConfig {
     /// the editor can default them to read-only and warn before writes.
     /// Classify the connection's environment for labelling and write guards.
     /// Production name hints win; then staging hints; then locality of the host.
+    /// The connection's environment: the one set by hand, else the guess.
     pub fn environment(&self) -> Environment {
+        Environment::parse(&self.env_label).unwrap_or_else(|| self.guessed_environment())
+    }
+
+    /// The environment guessed from the label, database, host and path.
+    pub fn guessed_environment(&self) -> Environment {
         if name_hints_prod(&self.label)
             || name_hints_prod(&self.database)
             || name_hints_prod(&self.host)
@@ -176,6 +187,12 @@ impl DbConfig {
     }
 
     pub fn looks_like_prod(&self) -> bool {
+        // Set by hand, production or local settles it.
+        match Environment::parse(&self.env_label) {
+            Some(Environment::Production) => return true,
+            Some(Environment::Local) => return false,
+            _ => {}
+        }
         if self.engine == "sqlite" {
             return name_hints_prod(&self.path) || name_hints_prod(&self.label);
         }
@@ -3363,6 +3380,15 @@ impl Environment {
     pub fn is_local(self) -> bool {
         self == Environment::Local
     }
+    /// The environment named `s` (as [`Environment::label`] gives it).
+    pub fn parse(s: &str) -> Option<Environment> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "local" => Some(Environment::Local),
+            "staging" => Some(Environment::Staging),
+            "production" => Some(Environment::Production),
+            _ => None,
+        }
+    }
 }
 
 // ---- Snapshot restore (DB-704, the reversible half of the verify-fix loop) ----
@@ -4489,6 +4515,38 @@ mod tests {
             ),
             "SELECT * FROM `t` WHERE `name` = 'O''x' ORDER BY `id` DESC LIMIT 10 OFFSET 20"
         );
+    }
+
+    #[test]
+    fn an_environment_set_by_hand_wins_over_the_guess() {
+        let mut prod = cfg("mysql", "prod-db.internal");
+        assert_eq!(prod.environment(), Environment::Production);
+        assert!(prod.looks_like_prod());
+        prod.env_label = "staging".into();
+        assert_eq!(prod.environment(), Environment::Staging);
+        assert_eq!(prod.guessed_environment(), Environment::Production);
+        prod.env_label = "local".into();
+        assert!(!prod.looks_like_prod());
+
+        let mut local = cfg("mysql", "127.0.0.1");
+        assert_eq!(local.environment(), Environment::Local);
+        local.env_label = "production".into();
+        assert_eq!(local.environment(), Environment::Production);
+        assert!(local.looks_like_prod());
+        // Anything else is no setting: the guess stands.
+        local.env_label = "prod".into();
+        assert_eq!(local.environment(), Environment::Local);
+    }
+
+    #[test]
+    fn an_environment_set_by_hand_is_saved_and_read_back() {
+        let mut c = cfg("mysql", "127.0.0.1");
+        let json = serde_json::to_string(&c).unwrap();
+        // Unset, it isn't written at all.
+        assert!(!json.contains("env_label"));
+        c.env_label = "production".into();
+        let back: DbConfig = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.environment(), Environment::Production);
     }
 
     #[test]

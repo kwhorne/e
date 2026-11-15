@@ -417,6 +417,7 @@ fn add_form(state: AppState) -> impl IntoView {
     let ssh_passphrase = create_rw_signal(f.ssh_passphrase.clone());
     let tls = create_rw_signal(f.tls.clone());
     let tls_ca = create_rw_signal(f.tls_ca.clone());
+    let env_label = create_rw_signal(f.env_label.clone());
 
     // Identity isn't edited in the dialog, but it has to survive the round trip
     // or the connection would be re-keyed in the credential store on every save.
@@ -448,6 +449,7 @@ fn add_form(state: AppState) -> impl IntoView {
             ssh_passphrase: ssh_passphrase.get_untracked(),
             tls: tls.get_untracked(),
             tls_ca: tls_ca.get_untracked(),
+            env_label: env_label.get_untracked(),
         });
     });
     let sync_test = sync.clone();
@@ -616,6 +618,80 @@ fn add_form(state: AppState) -> impl IntoView {
         }
     });
 
+    // Environment: guessed from the names and host, or set by hand (DB-102).
+    // It decides the colour, the read-only default and which writes ask first.
+    let guessed = {
+        let form_label = f.label.clone();
+        move || {
+            e_db::DbConfig {
+                engine: engine.get(),
+                host: host.get(),
+                database: database.get(),
+                path: path.get(),
+                label: form_label.clone(),
+                use_ssh: use_ssh.get(),
+                ssh_host: ssh_host.get(),
+                ..Default::default()
+            }
+            .guessed_environment()
+        }
+    };
+    let env_chip = {
+        let guessed = guessed.clone();
+        move |id: &'static str| {
+            let guessed = guessed.clone();
+            label(move || match e_db::Environment::parse(id) {
+                Some(env) => env.label().to_string(),
+                None => format!("Auto ({})", guessed().label()),
+            })
+            .style(move |s| {
+                let active = env_label.get() == id;
+                let s = s
+                    .padding_horiz(8.0)
+                    .padding_vert(2.0)
+                    .border_radius(5.0)
+                    .font_size(11.0)
+                    .cursor(floem::style::CursorStyle::Pointer);
+                if active {
+                    s.background(theme::accent()).color(theme::on_accent())
+                } else {
+                    s.border(1.0)
+                        .border_color(theme::border())
+                        .color(theme::fg())
+                }
+            })
+            .on_click_stop(move |_| env_label.set(id.to_string()))
+        }
+    };
+    let env_hint = move || {
+        let set = e_db::Environment::parse(&env_label.get());
+        let guess = guessed();
+        match set {
+            Some(e_db::Environment::Local) if guess != e_db::Environment::Local => format!(
+                "Treated as local: writes run without asking, though it looks like {}",
+                guess.label()
+            ),
+            Some(env) => format!("Set by hand: {}", env.label()),
+            None => "Guessed from the name, database and host".to_string(),
+        }
+    };
+    let env_fields = stack((
+        label(|| "Environment".to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        stack((
+            env_chip(""),
+            env_chip("local"),
+            env_chip("staging"),
+            env_chip("production"),
+        ))
+        .style(|s| {
+            s.flex_row()
+                .gap(5.0)
+                .flex_wrap(floem::style::FlexWrap::Wrap)
+        }),
+        label(env_hint).style(|s| s.font_size(11.0).color(theme::fg_dim())),
+    ))
+    .style(|s| s.flex_col().gap(4.0).width_full());
+
     // SSH tunnel toggle + fields (hidden for sqlite).
     let ssh_toggle = label(move || {
         if use_ssh.get() {
@@ -776,6 +852,7 @@ fn add_form(state: AppState) -> impl IntoView {
         engines,
         net_fields,
         tls_fields,
+        env_fields,
         ssh_toggle,
         ssh_fields,
         form_field("Group", group, "(optional)", false),
@@ -833,6 +910,18 @@ pub fn database_panel(state: AppState) -> impl IntoView {
             .padding_bottom(6.0)
             .width_full()
     });
+    let active_row = stack((active_conn_chip(state),)).style(move |s| {
+        let s = s
+            .flex_row()
+            .padding_horiz(12.0)
+            .margin_bottom(6.0)
+            .width_full();
+        if state.db.conns.with(|c| c.is_empty()) {
+            s.hide()
+        } else {
+            s
+        }
+    });
     // Search across all tables' text columns (DB-805); Enter runs it.
     let search_all = text_input(state.db.search_query)
         .placeholder("Search all data…")
@@ -887,12 +976,88 @@ pub fn database_panel(state: AppState) -> impl IntoView {
         }
     });
 
-    stack((header, search_all, form, empty_hint, list)).style(|s| {
+    stack((header, active_row, search_all, form, empty_hint, list)).style(|s| {
         s.flex_col()
             .height_full()
             .width_full()
             .background(theme::bg())
     })
+}
+
+/// The active connection, in its environment's colour, with a menu to
+/// switch to another (DB-104). Everything the panel runs — the console,
+/// search, EXPLAIN, relationships — goes to this one.
+fn active_conn_chip(state: AppState) -> impl IntoView {
+    let active = move || {
+        state.db.result_key.get().and_then(|key| {
+            state
+                .db
+                .conns
+                .with(|c| c.iter().find(|e| e.key() == key).cloned())
+        })
+    };
+    let dot = label(|| "●".to_string()).style(move |s| match active() {
+        Some(e) => s.font_size(10.0).color(env_color(e.config.environment())),
+        None => s.hide(),
+    });
+    let name = label(move || match active() {
+        Some(e) => format!(
+            "{} · {} ▾",
+            e.config.display_name(),
+            e.config.environment().label()
+        ),
+        None => "No database ▾".to_string(),
+    })
+    .style(move |s| {
+        let s = s.font_size(11.0).text_ellipsis().min_width(0.0);
+        match active() {
+            Some(e) => s.color(env_color(e.config.environment())),
+            None => s.color(theme::fg_dim()),
+        }
+    });
+    stack((dot, name))
+        .style(|s| {
+            s.flex_row()
+                .items_center()
+                .gap(5.0)
+                .min_width(0.0)
+                .padding_horiz(8.0)
+                .padding_vert(2.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(6.0)
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .popout_menu(move || {
+            use floem::menu::{Menu, MenuItem};
+            let conns = state.db.conns.get_untracked();
+            if conns.is_empty() {
+                return Menu::new("").entry(MenuItem::new("(no connections)"));
+            }
+            let current = state.db.result_key.get_untracked();
+            let mut menu = Menu::new("");
+            for e in conns {
+                let mark = if current.as_deref() == Some(e.key().as_str()) {
+                    "✓ "
+                } else {
+                    "   "
+                };
+                let closed = if e.conn.get_untracked().is_none() {
+                    " (connect)"
+                } else {
+                    ""
+                };
+                let text = format!(
+                    "{mark}{} — {}{closed}",
+                    e.config.display_name(),
+                    e.config.environment().label()
+                );
+                menu = menu
+                    .entry(MenuItem::new(text).action(move || state.db_choose_active(e.clone())));
+            }
+            menu
+        })
 }
 
 // ---- Results overlay ------------------------------------------------------
@@ -912,22 +1077,10 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.close_db_result());
-    // Environment dot for the active connection (green/amber/red), so it's always
-    // clear which database's data you're looking at (DB-104).
-    let env_dot = label(|| "●".to_string()).style(move |s| {
-        let env = state.db.result_key.get().and_then(|key| {
-            state.db.conns.with(|c| {
-                c.iter()
-                    .find(|e| e.key() == key)
-                    .map(|e| e.config.environment())
-            })
-        });
-        match env {
-            Some(env) => s.font_size(10.0).color(env_color(env)),
-            None => s.hide(),
-        }
-    });
-    let header = stack((env_dot, title, close)).style(|s| {
+    // The active connection in its environment's colour, so it's always
+    // clear which database's data you're looking at, and a switch (DB-104).
+    let env_chip = active_conn_chip(state);
+    let header = stack((env_chip, title, close)).style(|s| {
         s.flex_row()
             .items_center()
             .gap(6.0)
@@ -2929,7 +3082,9 @@ fn result_grid(state: AppState) -> impl IntoView {
                 .map(|r| r.rows.into_iter().enumerate().collect::<Vec<_>>())
                 .unwrap_or_default()
         },
-        |(i, _)| *i,
+        // By content too: a row's cells are drawn once, so a new result (a
+        // tab, a page) with a row at the same place must make a new row.
+        |(i, row)| (*i, row.clone()),
         move |(ri, row)| {
             dyn_stack(
                 move || row.clone().into_iter().enumerate().collect::<Vec<_>>(),
@@ -3223,6 +3378,19 @@ mod tests {
             unlabelled.to_config().environment(),
             e_db::Environment::Local
         );
+    }
+
+    #[test]
+    fn db_form_keeps_an_environment_set_by_hand() {
+        let form = crate::state::DbForm {
+            host: "127.0.0.1".into(),
+            env_label: "production".into(),
+            ..Default::default()
+        };
+        let cfg = form.to_config();
+        assert_eq!(cfg.environment(), e_db::Environment::Production);
+        // A local host set to production starts read-only, like a guessed one.
+        assert!(cfg.looks_like_prod());
     }
 
     #[test]

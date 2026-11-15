@@ -286,6 +286,15 @@ impl AppState {
                     conn.set_read_only(entry.read_only.get_untracked());
                     entry.schema.set(None);
                     entry.conn.set(Some(conn));
+                    // The first one connected is the active one until
+                    // another is chosen.
+                    if state.db.result_key.with_untracked(|k| k.is_none()) {
+                        state.db.result_key.set(Some(entry.key()));
+                        state
+                            .db
+                            .result_title
+                            .set(format!("{} · query", entry.config.display_name()));
+                    }
                     entry.tables.set(tables);
                     entry.views.set(views);
                     entry.expanded.set(true);
@@ -837,6 +846,7 @@ impl AppState {
             ssh_passphrase: c.ssh_passphrase.clone(),
             tls: c.tls.clone(),
             tls_ca: c.tls_ca.clone(),
+            env_label: c.env_label.clone(),
         });
         self.db.editing_key.set(Some(entry.key()));
         self.db.test_state.set(String::new());
@@ -1248,19 +1258,53 @@ impl AppState {
 
     /// Open a blank query editor for a connection.
     pub fn db_new_query(&self, entry: DbEntry) {
+        self.db_set_active(entry);
+        if self.db.query_text.with_untracked(|q| q.trim().is_empty()) {
+            self.set_console_sql("SELECT 1".into());
+        }
+        self.db.result_open.set(true);
+    }
+
+    /// Pick the active connection from the header's switcher: nothing
+    /// changes if it already is (a table open on it stays).
+    pub fn db_choose_active(&self, entry: DbEntry) {
+        let same = self
+            .db
+            .result_key
+            .with_untracked(|k| k.as_deref() == Some(entry.key().as_str()));
+        if same {
+            if entry.conn.get_untracked().is_none() {
+                self.db_connect(entry);
+            }
+            return;
+        }
+        self.db_set_active(entry);
+    }
+
+    /// Make `entry` the connection the panel works with (DB-104): the
+    /// console runs against it, and search, EXPLAIN and relationships use
+    /// it. Connects it if need be. A table open on another connection is
+    /// left (its tab brings it back), so the grid never shows one
+    /// connection's rows under another's name; result tabs stay.
+    pub fn db_set_active(&self, entry: DbEntry) {
         if entry.conn.get_untracked().is_none() {
             self.db_connect(entry.clone());
         }
-        self.db.result_key.set(Some(entry.key()));
+        let key = entry.key();
+        self.db_next_browse();
+        self.db.edit.set(None);
+        self.db.active_tab.set(None);
+        self.db.result_table.set(None);
+        self.db.columns.set(Vec::new());
+        self.db.result_key.set(Some(key));
         self.db
             .result_title
             .set(format!("{} · query", entry.config.display_name()));
         self.db.result.set(None);
         self.db.result_error.set(None);
-        if self.db.query_text.with_untracked(|q| q.trim().is_empty()) {
-            self.set_console_sql("SELECT 1".into());
-        }
-        self.db.result_open.set(true);
+        self.db.explain_issues.set(Vec::new());
+        self.db.selected_cell.set(None);
+        self.db.pending_view.set(Default::default());
     }
 
     /// Run the SQL currently in the query editor against the bound connection.
@@ -1590,6 +1634,18 @@ impl AppState {
         self.db.result_table.set(None);
         self.db.columns.set(Vec::new());
         self.db.active_tab.set(Some(i));
+        // Name what's shown: the tab, not the table left behind.
+        let db_name = tab.key.as_ref().and_then(|k| {
+            self.db.conns.with_untracked(|c| {
+                c.iter()
+                    .find(|e| &e.key() == k)
+                    .map(|e| e.config.display_name())
+            })
+        });
+        self.db.result_title.set(match db_name {
+            Some(name) => format!("{name} · {}", tab.title),
+            None => tab.title.clone(),
+        });
         self.db.result_key.set(tab.key.clone());
         self.db.result.set(tab.result.clone());
         self.db.result_error.set(tab.error.clone());

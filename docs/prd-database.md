@@ -163,9 +163,9 @@ på manuell testing.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-101 | ✅ Auto-tilkobling fra `.env`, manuelle tilkoblinger, SSH-tunnel | — | ✅ |
-| DB-102 | Miljø-etikett per tilkobling: `local` / `staging` / `production`, med farge (grønn/gul/rød) synlig i panel-header, datagrid og konsoll. Auto-gjettes (hostname, `.env` vs manuell) men kan overstyres | P0 | ◐ Gjettes fra navn og vert; prikk + badge i tilkoblingslisten, prikk i resultat-header, farget tittel i bekreftelsen. Etiketten beholdes nå når en tilkobling redigeres. Mangler: manuell overstyring, badge i grid/konsoll, farget grid-ramme, miljø i agent-consent |
+| DB-102 | Miljø-etikett per tilkobling: `local` / `staging` / `production`, med farge (grønn/gul/rød) synlig i panel-header, datagrid og konsoll. Auto-gjettes (hostname, `.env` vs manuell) men kan overstyres | P0 | ◐ Gjettes fra navn og vert; prikk + badge i tilkoblingslisten, prikk i resultat-header, farget tittel i bekreftelsen. Etiketten beholdes nå når en tilkobling redigeres, og kan settes manuelt i skjemaet (Auto viser gjetningen); aktiv tilkobling vises med miljøfarge i panel- og resultat-header. Mangler: badge i grid/konsoll, farget grid-ramme, miljø i agent-consent |
 | DB-103 | ✅ Read-only-flagg per tilkobling; produksjon read-only som standard | — | ✅ Alle ikke-lokale verter og SSH starter read-only. Bryteren lagres ikke. ClickHouse bruker `readonly=2` (radgrensen virker) |
-| DB-104 | Flere samtidige tilkoblinger åpne, med rask bytte (dropdown i panel-header); aktiv tilkobling alltid synlig med miljøfarge | P0 | ◐ Flere tilkoblinger kan være åpne samtidig. Mangler: dropdown i header for å bytte aktiv tilkobling |
+| DB-104 | Flere samtidige tilkoblinger åpne, med rask bytte (dropdown i panel-header); aktiv tilkobling alltid synlig med miljøfarge | P0 | ✅ Flere tilkoblinger kan være åpne samtidig. Velger for aktiv tilkobling i panel- og resultat-header, med miljøfarge; den styrer konsoll, søk, EXPLAIN og relasjoner |
 | DB-105 | Tilkoblingstest med tydelig feilmelding (DNS, auth, tunnel, driver) | P1 | ◐ Test-knapp viser driverens rå feil. Mangler: kategorier (DNS, auth, tunnel, driver) |
 | DB-106 | Keychain-lagring av passord (macOS Keychain / Secret Service på Linux) i stedet for klartekst i prosjektfil | P1 | ✅ Faller tilbake til `databases.json` (0600) uten keyring |
 
@@ -466,7 +466,7 @@ fase 4–5 er forspranget.
 | Fase | Levert | Delvis | Mangler |
 | --- | --- | --- | --- |
 | 1 — Konsollen | 401, 403, 405, 409, 605 | 402, 404 | — |
-| 2 — Trygg redigering | 302, 305, 702 | 102, 104, 303, 304, 703 | — |
+| 2 — Trygg redigering | 104, 302, 305, 702 | 102, 303, 304, 703 | — |
 | 3 — Data inn/ut | 205 | 202, 502, 503, 505 | — |
 | 4 — Kraftbruker | 408, 604 | 204, 308, 602, 603, 802 | — |
 | 5 — Forbi | — | 206, 207, 704, 705, 803, 805 | — |
@@ -481,7 +481,7 @@ Feilene i §3 og dokumentasjonen som lovet for mye, er tatt.
 1. **Fullføre fase 1 og 2** («paritet i praksis»): completion med alias og
    nøkkelord (402); query som tooltip på fanene (404); nye rader i
    endringssettet og radantall i bekreftelsen (303, 703); verdi-editor (304);
-   manuell miljøetikett og tilkoblingsbytte i header (102, 104).
+   farget grid-ramme og miljø i agent-consent (102).
 2. Deretter fase 3: CSV-import med mapping-dialog (503), views med definisjon
    (202), kopier-som i alle formater (505).
 

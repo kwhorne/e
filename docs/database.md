@@ -79,7 +79,10 @@ saving.
   - Click a **column header** to sort (ascending → descending → off).
   - Page through rows with **‹ Prev** / **Next ›**, or pan with the arrow keys.
   - **💾** saves the current SQL as a named query; **Saved ▾** loads it back.
-  - **⬇ CSV** exports the current result to a file.
+  - **⬇ Export ▾** saves the current result to a file, and **⧉ Copy ▾**
+    puts it on the clipboard, each as CSV, TSV, JSON, a Markdown table or
+    SQL `INSERT` statements. JSON keeps the columns in their order; the
+    `INSERT`s are quoted for the connection's database.
 - Click **⌗** on a connection to open a blank **query editor**. Type SQL and
   press **⌘↵** (or **Run**) to execute. `SELECT`/`SHOW`/`EXPLAIN` show a grid;
   other statements report the number of affected rows.
@@ -182,7 +185,7 @@ after **⟳** or a reconnect. SQL inside PHP strings completes the same way.
   click one to load it back into the console.
 - Long queries show a **✕ Cancel** while running. In a run of several
   statements, Cancel stops the one running and runs none of the rest.
-- Export the result as **CSV / JSON / SQL**, or copy it as **TSV / Markdown**.
+- Export or copy the result in any of the formats above.
 
 ## Environments & safety
 
@@ -235,13 +238,16 @@ The label drives the safety rails:
 - The **Structure** tab lists columns and indexes; **Copy DDL** copies the
   `CREATE TABLE`, and **+ Migration** scaffolds a Laravel migration for the table
   and opens it (instead of running DDL directly).
+- **Views** (◉ in the tree) open like tables. Their **Structure** shows the
+  `CREATE VIEW` definition, and **Copy definition** copies it. ClickHouse
+  views and materialized views are listed with the views, not the tables.
 - The **⇄** button in the panel header shows **schema relationships** (every
   foreign key as `table.column → ref_table.ref_column`) of the active
   connection.
 - The cell dialog can **Follow FK →** (jump to the referenced row) and show
   **Related →** rows (reverse foreign keys).
 - **Seed 10** (local tables) creates rows via the Eloquent factory through
-  Tinker; **⬆ CSV** imports a CSV into the table.
+  Tinker; **⬆ CSV** imports a CSV file into the table (see below).
 - **Search all data…** in the panel header scans every table's text columns of
   the active connection for a value, and shows one result tab per
   matching table. **✕ Cancel** stops it
@@ -255,6 +261,30 @@ The label drives the safety rails:
   - **SQLite** counts each table.
 
   Opening a table counts its rows exactly.
+
+## Importing CSV
+
+**⬆ CSV** on a table's toolbar picks a CSV file and opens the import dialog:
+
+- The **delimiter** is read from the header line: `,`, `;` (what Excel
+  writes where `,` is the decimal mark) or tab. A byte-order mark is
+  ignored.
+- Each **CSV column** is mapped to the table column of the same name,
+  ignoring case, spaces, `_` and `-` (`First Name` finds `first_name`).
+  Click its **→ column ▾** to map it to another, or to skip it. A few of its
+  values are shown beside it.
+- **Empty fields** go in as `NULL`, or are left out so the column's
+  default applies.
+- A **preview** shows the first five rows as they'll go in.
+- Before importing, the dialog points out what won't fit: values that
+  aren't whole numbers, numbers, true/false or JSON where the column's type
+  wants one, empty values headed for a `NOT NULL` column, and rows with a
+  different number of fields than the header, each with the lines they're
+  on. A table column mapped twice must be fixed before importing.
+
+**Import N rows…** goes through the confirmation dialog, and the rows are
+inserted in **one transaction**: if the database refuses one, none are
+inserted.
 
 ## The active connection
 

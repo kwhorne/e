@@ -174,7 +174,7 @@ på manuell testing.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-201 | ✅ Tabelliste med kolonner og indekser | — | ✅ |
-| DB-202 | Views i objekttreet: liste, åpne definisjon (SQL), browse som tabell | P0 | ◐ Views listes, filtreres og kan browses. Mangler: vis definisjon (`e_db::view_definition` finnes, men brukes ikke); ClickHouse-views vises ikke |
+| DB-202 | Views i objekttreet: liste, åpne definisjon (SQL), browse som tabell | P0 | ✅ Views listes, filtreres og kan browses; Structure viser `CREATE VIEW`-definisjonen, og «Copy definition» kopierer den. ClickHouse-views (også materialiserte) listes fra `system.tables` og ikke lenger blant tabellene; ikke testet mot en ClickHouse-server |
 | DB-203 | Triggere og prosedyrer/funksjoner: liste + vis definisjon (read-only) | P1 | ✗ |
 | DB-204 | «Generate DDL» på tabell/view/indeks: vis `CREATE …`-setningen, kopier til utklippstavle | P1 | ◐ «Copy DDL» for tabeller til utklippstavlen; PostgreSQL uten indekser og FK-er. Mangler: views og indekser, visning i skuff |
 | DB-205 | Søk/filter i objekttreet (skriv for å filtrere tabellnavn) | P0 | ✅ |
@@ -218,10 +218,10 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-501 | ✅ CSV-eksport av resultatsett | — | ✅ |
-| DB-502 | Eksportformater: JSON, `INSERT`-setninger, Markdown-tabell, TSV — fra både grid og konsollresultat | P0 | ◐ Fil: CSV, JSON, INSERT. TSV og Markdown bare til utklippstavlen |
-| DB-503 | CSV-import til eksisterende tabell: kolonnemapping-dialog med forhåndsvisning av de første radene, typevalidering, og alt-eller-ingenting-transaksjon | P0 | ◐ Kolonner mappes automatisk på navn, én transaksjon via bekreftelsen. Mangler: mapping-dialog, forhåndsvisning, typevalidering, oppsummering, progresjon |
+| DB-502 | Eksportformater: JSON, `INSERT`-setninger, Markdown-tabell, TSV — fra både grid og konsollresultat | P0 | ✅ «Export ▾» og «Copy ▾» med CSV, TSV, JSON, Markdown og `INSERT`. JSON beholder kolonnerekkefølgen (og like kolonnenavn fra en join); `INSERT` siteres for tilkoblingens motor |
+| DB-503 | CSV-import til eksisterende tabell: kolonnemapping-dialog med forhåndsvisning av de første radene, typevalidering, og alt-eller-ingenting-transaksjon | P0 | ✅ Importdialog: skilletegn (`,` `;` tab) og BOM oppdages; kolonner mappes på navn (uten hensyn til store bokstaver, mellomrom, `_`, `-`) og kan endres eller hoppes over; tomme felt som NULL eller standardverdi; forhåndsvisning av fem rader; advarsler for verdier som ikke passer typen (heltall, tall, boolsk, JSON), tomme verdier til NOT NULL og rader med feil antall felt, med linjenummer. Én transaksjon via bekreftelsen. Ingen fremdriftsvisning |
 | DB-504 | Eksporter hel tabell (ikke bare synlig resultat), med progresjon og avbrudd | P1 | ✗ |
-| DB-505 | Kopier resultat til utklippstavle i valgt format uten å gå via fil | P1 | ◐ TSV og Markdown. Mangler: CSV, JSON, INSERT |
+| DB-505 | Kopier resultat til utklippstavle i valgt format uten å gå via fil | P1 | ✅ Alle fem formatene, via «Copy ▾» |
 
 ### 4.6 Ytelse og diagnose
 
@@ -467,11 +467,11 @@ fase 4–5 er forspranget.
 | --- | --- | --- | --- |
 | 1 — Konsollen | 401, 402, 403, 404, 405, 409, 605 | — | — |
 | 2 — Trygg redigering | 102, 104, 302, 305, 702, 703 | 303, 304 | — |
-| 3 — Data inn/ut | 205 | 202, 502, 503, 505 | — |
+| 3 — Data inn/ut | 202, 205, 502, 503, 505 | — | — |
 | 4 — Kraftbruker | 408, 604 | 204, 308, 602, 603, 802 | — |
 | 5 — Forbi | — | 206, 207, 704, 705, 803, 805 | — |
 
-Fase 1 er ferdig. Krav utenfor faseplanen som mangler helt: 203,
+Fase 1 og 3 er ferdige. Krav utenfor faseplanen som mangler helt: 203,
 306, 307, 310, 407, 410, 504, 804.
 
 ### Neste steg
@@ -484,10 +484,12 @@ Fase 1 er ferdig. I fase 2 står to ting igjen, og begge er større enn de
 ser ut: opt-in direkte-skriv (303) og fold i verdi-editoren (304), som
 krever kodefolding i editoren, noe `e` ikke har.
 
-1. Fase 3: CSV-import med mapping-dialog (503), views med definisjon (202),
-   kopier-som i alle formater (505).
-2. Kapabilitetsflagg per driver (§9), så ClickHouse sier hva den ikke kan i
-   stedet for å vise tomme views.
+Fase 3 er ferdig.
+
+1. Kapabilitetsflagg per driver (§9), så en motor sier hva den ikke kan i
+   stedet for å feile stille.
+2. Fase 4 (kraftbruker): det som er delvis gjort der (204, 308, 602, 603,
+   802).
 3. Kodefolding i editoren, som også gir fold i verdi-editoren (304).
 
 ## 8. Suksessmetrikker

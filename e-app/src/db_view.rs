@@ -1442,40 +1442,36 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         .request_focus(move || {
             state.db.saving_query.get();
         });
-    let export_csv = toolbar_btn(
-        "CSV",
-        Box::new(move || state.db_export(crate::db_export::Format::Csv)),
-    );
-    let export_json = toolbar_btn(
-        "JSON",
-        Box::new(move || state.db_export(crate::db_export::Format::Json)),
-    );
-    let export_sql = toolbar_btn(
-        "SQL",
-        Box::new(move || state.db_export(crate::db_export::Format::SqlInserts)),
-    );
-    let export = stack((
-        label(|| "⬇".to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
-        export_csv,
-        export_json,
-        export_sql,
-    ))
-    .style(|s| s.flex_row().items_center().gap(2.0));
-    // Copy to clipboard: TSV (spreadsheet-friendly) or a Markdown table.
-    let copy_tsv = toolbar_btn(
-        "TSV",
-        Box::new(move || state.db_copy_result(crate::db_export::Format::Tsv)),
-    );
-    let copy_md = toolbar_btn(
-        "MD",
-        Box::new(move || state.db_copy_result(crate::db_export::Format::Markdown)),
-    );
-    let copy = stack((
-        label(|| "⧉".to_string()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
-        copy_tsv,
-        copy_md,
-    ))
-    .style(|s| s.flex_row().items_center().gap(2.0));
+    // Export to a file and copy to the clipboard, each in every format
+    // (DB-502/505).
+    let format_menu = |glyph: &'static str, copy: bool| {
+        label(move || format!("{glyph} ▾"))
+            .style(|s| {
+                s.padding_horiz(8.0)
+                    .padding_vert(2.0)
+                    .border_radius(4.0)
+                    .font_size(11.0)
+                    .color(theme::fg_dim())
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
+            })
+            .popout_menu(move || {
+                use floem::menu::{Menu, MenuItem};
+                let mut menu = Menu::new("");
+                for fmt in crate::db_export::Format::ALL {
+                    menu = menu.entry(MenuItem::new(fmt.name()).action(move || {
+                        if copy {
+                            state.db_copy_result(fmt)
+                        } else {
+                            state.db_export(fmt)
+                        }
+                    }));
+                }
+                menu
+            })
+    };
+    let export = format_menu("⬇ Export", false);
+    let copy = format_menu("⧉ Copy", true);
     let write_log = toolbar_btn("Log", Box::new(move || state.db_open_write_log()));
     let add_row = label(|| "+ Row".to_string())
         .style(move |s| {
@@ -1630,6 +1626,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         db_value_viewer(state),
         db_edit_popup(state),
         db_insert_popup(state),
+        db_import_popup(state),
         db_history_panel(state),
         db_write_log_panel(state),
     ))
@@ -2501,6 +2498,341 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
         } else {
             s.hide()
         }
+    })
+}
+
+/// The CSV import dialog (DB-503): where each CSV column goes, a preview of
+/// the first rows as they'll go in, and what doesn't fit the table.
+fn db_import_popup(state: AppState) -> impl IntoView {
+    let card = dyn_container(
+        move || state.db.import.get(),
+        move |imp| match imp {
+            Some(imp) => import_card(state, imp).into_any(),
+            None => empty().into_any(),
+        },
+    );
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 120));
+        if state.db.import.with(Option::is_some) {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
+fn import_card(state: AppState, imp: crate::state::DbImport) -> impl IntoView {
+    let crate::state::DbImport {
+        table,
+        file,
+        delimiter,
+        header,
+        rows,
+        columns,
+        mapping,
+        empty_default,
+        ..
+    } = imp;
+    let n = rows.len();
+    let title = label(move || format!("Import “{file}” into {table}")).style(|s| {
+        s.font_size(13.0)
+            .font_bold()
+            .color(theme::fg())
+            .text_ellipsis()
+    });
+    let delim_name = match delimiter {
+        ';' => "semicolons",
+        '\t' => "tabs",
+        _ => "commas",
+    };
+    let subtitle = label(move || {
+        format!(
+            "{} row{} · fields separated by {delim_name} · line 1 is the header",
+            group_digits(n as u64),
+            if n == 1 { "" } else { "s" }
+        )
+    })
+    .style(|s| s.font_size(11.0).color(theme::fg_dim()).margin_bottom(10.0));
+
+    // One line per CSV column: its name, where it goes, a few of its values.
+    let map_rows = header
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let name = name.clone();
+            let samples = rows
+                .iter()
+                .filter_map(|r| r.get(i).filter(|v| !v.is_empty()))
+                .take(3)
+                .map(|v| v.chars().take(24).collect::<String>())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let cols = columns.clone();
+            let target = label(
+                move || match mapping.with(|m| m.get(i).cloned().flatten()) {
+                    Some(c) => format!("→ {c} ▾"),
+                    None => "skip ▾".to_string(),
+                },
+            )
+            .style(move |s| {
+                let mapped = mapping.with(|m| m.get(i).is_some_and(Option::is_some));
+                s.width(190.0)
+                    .flex_shrink(0.0_f32)
+                    .padding_horiz(8.0)
+                    .padding_vert(3.0)
+                    .font_size(12.0)
+                    .text_ellipsis()
+                    .border(1.0)
+                    .border_radius(5.0)
+                    .border_color(theme::border())
+                    .color(if mapped { theme::fg() } else { theme::fg_dim() })
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.background(theme::bg_hover()))
+            })
+            .popout_menu(move || {
+                use floem::menu::{Menu, MenuItem};
+                let mut menu = Menu::new("").entry(
+                    MenuItem::new("Skip this column")
+                        .action(move || mapping.update(|m| m[i] = None)),
+                );
+                for c in &cols {
+                    let col = c.name.clone();
+                    menu = menu.entry(
+                        MenuItem::new(format!("{}  ·  {}", c.name, c.data_type))
+                            .action(move || mapping.update(|m| m[i] = Some(col.clone()))),
+                    );
+                }
+                menu
+            });
+            stack((
+                label(move || name.clone()).style(|s| {
+                    s.width(170.0)
+                        .flex_shrink(0.0_f32)
+                        .font_size(12.0)
+                        .font_family(theme::mono_family())
+                        .color(theme::fg())
+                        .text_ellipsis()
+                }),
+                target,
+                label(move || samples.clone()).style(|s| {
+                    s.flex_grow(1.0_f32)
+                        .min_width(0.0)
+                        .font_size(11.0)
+                        .color(theme::fg_dim())
+                        .text_ellipsis()
+                }),
+            ))
+            .style(|s| s.flex_row().items_center().gap(10.0).padding_vert(3.0))
+            .into_any()
+        })
+        .collect::<Vec<_>>();
+    let map_list = scroll(floem::views::v_stack_from_iter(map_rows).style(|s| s.width_full()))
+        .style(|s| s.width_full().max_height(220.0));
+
+    // Empty fields: NULL, or the column's default.
+    let choice = move |text: &'static str, default: bool| {
+        label(move || text.to_string())
+            .style(move |s| {
+                let on = empty_default.get() == default;
+                let s = s
+                    .padding_horiz(10.0)
+                    .padding_vert(3.0)
+                    .font_size(11.0)
+                    .border(1.0)
+                    .border_radius(5.0)
+                    .cursor(floem::style::CursorStyle::Pointer);
+                if on {
+                    s.border_color(theme::accent()).color(theme::fg())
+                } else {
+                    s.border_color(theme::border()).color(theme::fg_dim())
+                }
+            })
+            .on_click_stop(move |_| empty_default.set(default))
+    };
+    let empties = stack((
+        label(|| "Empty fields go in as".to_string())
+            .style(|s| s.font_size(11.0).color(theme::fg_dim())),
+        choice("NULL", false),
+        choice("the column's default", true),
+    ))
+    .style(|s| s.flex_row().items_center().gap(8.0).margin_top(10.0));
+
+    // The first rows as they'll go in, under the columns they go into.
+    let preview_rows = rows.clone();
+    let preview = dyn_container(
+        move || (mapping.get(), empty_default.get()),
+        move |(m, empty_default)| {
+            let cols: Vec<(usize, String)> = m
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| c.clone().map(|c| (i, c)))
+                .collect();
+            if cols.is_empty() {
+                return label(|| "Nothing is mapped yet.".to_string())
+                    .style(|s| s.font_size(11.0).color(theme::fg_dim()))
+                    .into_any();
+            }
+            let cell = |text: String, dim: bool, head: bool| {
+                label(move || text.clone()).style(move |s| {
+                    let s = s
+                        .width(130.0)
+                        .flex_shrink(0.0_f32)
+                        .padding_horiz(6.0)
+                        .padding_vert(2.0)
+                        .font_size(11.0)
+                        .text_ellipsis()
+                        .border_right(1.0)
+                        .border_color(theme::border());
+                    let s = if head { s.font_bold() } else { s };
+                    s.color(if dim { theme::fg_dim() } else { theme::fg() })
+                })
+            };
+            let head = floem::views::h_stack_from_iter(
+                cols.iter().map(|(_, c)| cell(c.clone(), false, true)),
+            )
+            .style(|s| {
+                s.border_bottom(1.0)
+                    .border_color(theme::border())
+                    .background(theme::bg_hover())
+            });
+            let body = preview_rows.iter().take(5).map(|r| {
+                floem::views::h_stack_from_iter(cols.iter().map(|(i, _)| {
+                    match r.get(*i).filter(|v| !v.is_empty()) {
+                        Some(v) => cell(v.clone(), false, false),
+                        None if empty_default => cell("default".into(), true, false),
+                        None => cell("NULL".into(), true, false),
+                    }
+                }))
+                .style(|s| s.border_bottom(1.0).border_color(theme::border()))
+            });
+            scroll(
+                floem::views::v_stack_from_iter(
+                    std::iter::once(head.into_any()).chain(body.map(|r| r.into_any())),
+                )
+                .style(|s| s.border(1.0).border_color(theme::border())),
+            )
+            .style(|s| s.width_full().max_height(150.0))
+            .into_any()
+        },
+    )
+    .style(|s| s.width_full());
+    let preview_title = label(|| "Preview".to_string()).style(|s| {
+        s.font_size(11.0)
+            .font_bold()
+            .color(theme::fg_dim())
+            .margin_top(12.0)
+            .margin_bottom(4.0)
+    });
+
+    // What doesn't fit, worked out again as the mapping changes.
+    let check_rows = rows.clone();
+    let check_cols = columns.clone();
+    let width = header.len();
+    let problems = move || {
+        crate::db_import::problems(
+            &check_rows,
+            width,
+            &mapping.get(),
+            &check_cols,
+            empty_default.get(),
+        )
+    };
+    let problems = std::rc::Rc::new(problems);
+    let shown = problems.clone();
+    let problem_list = label(move || {
+        shown()
+            .iter()
+            .map(|p| format!("{} {}", if p.blocking { "✕" } else { "⚠" }, p.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+    .style(move |s| {
+        s.font_size(11.0)
+            .color(theme::warning())
+            .margin_top(10.0)
+            .width_full()
+    });
+    let blocked = {
+        let problems = problems.clone();
+        move || {
+            mapping.with(|m| m.iter().all(Option::is_none)) || problems().iter().any(|p| p.blocking)
+        }
+    };
+    let blocked_for_style = blocked.clone();
+
+    let cancel = label(|| "Cancel".to_string())
+        .style(|s| {
+            s.padding_horiz(14.0)
+                .height(28.0)
+                .items_center()
+                .border_radius(5.0)
+                .font_size(12.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .color(theme::fg())
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg_hover()))
+        })
+        .on_click_stop(move |_| state.db_cancel_import());
+    let import = label(move || {
+        format!(
+            "Import {} row{}…",
+            group_digits(n as u64),
+            if n == 1 { "" } else { "s" }
+        )
+    })
+    .style(move |s| {
+        let s = s
+            .padding_horiz(14.0)
+            .height(28.0)
+            .items_center()
+            .border_radius(5.0)
+            .font_size(12.0)
+            .background(theme::accent())
+            .color(theme::on_accent());
+        if blocked_for_style() {
+            s.background(theme::bg_hover()).color(theme::fg_dim())
+        } else {
+            s.cursor(floem::style::CursorStyle::Pointer)
+        }
+    })
+    .on_click_stop(move |_| {
+        if !blocked() {
+            state.db_commit_import()
+        }
+    });
+    let buttons = stack((empty().style(|s| s.flex_grow(1.0_f32)), cancel, import)).style(|s| {
+        s.flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .margin_top(14.0)
+    });
+
+    stack((
+        title,
+        subtitle,
+        map_list,
+        empties,
+        preview_title,
+        preview,
+        problem_list,
+        buttons,
+    ))
+    .style(|s| {
+        s.flex_col()
+            .width(760.0)
+            .padding(16.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(10.0)
+            .background(theme::bg())
     })
 }
 
@@ -3559,7 +3891,16 @@ fn structure_grid(state: AppState) -> impl IntoView {
                 .enumerate()
                 .collect::<Vec<_>>()
         },
-        |(i, _)| *i,
+        // By content too: another table's column at the same place is a new row.
+        |(i, c)| {
+            (
+                *i,
+                c.name.clone(),
+                c.data_type.clone(),
+                c.nullable,
+                c.key.clone(),
+            )
+        },
         move |(_, c)| {
             let cell = |t: String, w: f64, dim: bool| {
                 label(move || t.clone()).style(move |s| {
@@ -3602,6 +3943,44 @@ fn structure_grid(state: AppState) -> impl IntoView {
         },
     )
     .style(|s| s.flex_col());
+
+    // A view's definition (DB-202), below its columns.
+    let def_title = label(|| "Definition".to_string()).style(move |s| {
+        let s = s
+            .font_size(11.0)
+            .font_bold()
+            .color(theme::fg_dim())
+            .padding_horiz(8.0)
+            .padding_top(12.0)
+            .padding_bottom(4.0);
+        if state.db.view_def.with(Option::is_some) {
+            s
+        } else {
+            s.hide()
+        }
+    });
+    let def_text = label(move || match state.db.view_def.get() {
+        Some(d) if !d.trim().is_empty() => d.trim().to_string(),
+        _ => "(the database gave no definition)".to_string(),
+    })
+    .style(move |s| {
+        let s = s
+            .font_size(12.0)
+            .font_family(theme::mono_family())
+            .color(theme::fg())
+            .padding(8.0)
+            .margin_horiz(8.0)
+            .border(1.0)
+            .border_radius(4.0)
+            .border_color(theme::border())
+            .background(theme::bg_panel())
+            .width(760.0);
+        if state.db.view_def.with(Option::is_some) {
+            s
+        } else {
+            s.hide()
+        }
+    });
 
     // Indexes section (below the columns grid).
     let idx_title = label(|| "Indexes".to_string()).style(move |s| {
@@ -3675,22 +4054,34 @@ fn structure_grid(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col());
 
-    let copy_ddl = label(|| "⧉ Copy DDL".to_string())
-        .style(|s| {
-            s.font_size(11.0)
-                .padding_horiz(8.0)
-                .padding_vert(3.0)
-                .margin_vert(6.0)
-                .border_radius(4.0)
-                .border(1.0)
-                .border_color(theme::border())
-                .color(theme::fg_dim())
-                .cursor(floem::style::CursorStyle::Pointer)
-                .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
-        })
-        .on_click_stop(move |_| state.db_copy_ddl());
+    let copy_ddl = label(move || {
+        if state.db.view_def.with(Option::is_some) {
+            "⧉ Copy definition".to_string()
+        } else {
+            "⧉ Copy DDL".to_string()
+        }
+    })
+    .style(|s| {
+        s.font_size(11.0)
+            .padding_horiz(8.0)
+            .padding_vert(3.0)
+            .margin_vert(6.0)
+            .border_radius(4.0)
+            .border(1.0)
+            .border_color(theme::border())
+            .color(theme::fg_dim())
+            .cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.background(theme::bg_hover()).color(theme::fg()))
+    })
+    .on_click_stop(move |_| state.db_copy_ddl());
     let new_migration = label(|| "+ Migration".to_string())
-        .style(|s| {
+        .style(move |s| {
+            // A migration that creates the table means nothing for a view.
+            let s = if state.db.view_def.with(Option::is_some) {
+                s.hide()
+            } else {
+                s
+            };
             s.font_size(11.0)
                 .padding_horiz(8.0)
                 .padding_vert(3.0)
@@ -3706,7 +4097,10 @@ fn structure_grid(state: AppState) -> impl IntoView {
         .on_click_stop(move |_| state.db_new_migration_for_table());
     let ddl_row = stack((copy_ddl, new_migration)).style(|s| s.flex_row().items_center());
 
-    stack((header, rows, idx_title, idx_rows, ddl_row)).style(|s| s.flex_col().width(520.0))
+    stack((
+        header, rows, def_title, def_text, idx_title, idx_rows, ddl_row,
+    ))
+    .style(|s| s.flex_col().width(520.0))
 }
 
 #[cfg(test)]

@@ -279,6 +279,19 @@ pub struct DbImport {
     pub empty_default: RwSignal<bool>,
 }
 
+/// The tables that point at a row, for Related to choose from (DB-308).
+#[derive(Clone)]
+pub struct RelatedChoice {
+    pub key: String,
+    /// The row, as `users id=5`.
+    pub row: String,
+    /// Its key's value, which the chosen table is filtered to.
+    pub value: String,
+    /// `(table, column, rows pointing here)`; the count is `None` when it
+    /// couldn't be read.
+    pub refs: Vec<(String, String, Option<u64>)>,
+}
+
 /// A staged change, by its key in the pending sets.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Staged {
@@ -390,6 +403,9 @@ pub struct ResultTab {
     /// The statement the tab is the result of, shown on hovering the tab;
     /// on a plan's tab, the query it explains, for "Suggest Index".
     pub sql: Option<String>,
+    /// On a plan's tab, the index the plan asks for, unless the table has
+    /// one that starts with its columns (DB-603).
+    pub advice: Option<e_laravel::query_advice::Advice>,
 }
 
 /// One editable field in the "insert row" dialog, bound to its own signals.
@@ -755,11 +771,15 @@ pub struct DbPanel {
     pub columns: RwSignal<Vec<e_db::ColumnInfo>>,
     /// Indexes of the currently-inspected table (Structure subview).
     pub indexes: RwSignal<Vec<e_db::IndexInfo>>,
-    /// The shown table's `CREATE VIEW`, when it is a view (DB-202); empty
-    /// when the engine gave none.
-    pub view_def: RwSignal<Option<String>>,
+    /// The shown table's `CREATE TABLE`, or a view's `CREATE VIEW`
+    /// (DB-202/204), once read; empty when the engine gave none.
+    pub ddl: RwSignal<Option<String>>,
+    /// Whether the shown table is a view.
+    pub is_view: RwSignal<bool>,
     /// The CSV file the import dialog is open for.
     pub import: RwSignal<Option<DbImport>>,
+    /// The tables Related offers, when more than one points at the row.
+    pub related: RwSignal<Option<RelatedChoice>>,
     /// Active sort: `(column, ascending)`.
     pub sort: RwSignal<Option<(String, bool)>>,
     /// Active data-view filter: `(column, Some(value) | None for IS NULL)`.
@@ -847,8 +867,10 @@ impl DbPanel {
             subview: RwSignal::new("data".into()),
             columns: RwSignal::new(Vec::new()),
             indexes: RwSignal::new(Vec::new()),
-            view_def: RwSignal::new(None),
+            ddl: RwSignal::new(None),
+            is_view: RwSignal::new(false),
             import: RwSignal::new(None),
+            related: RwSignal::new(None),
             sort: RwSignal::new(None),
             filter: RwSignal::new(None),
             page: RwSignal::new(0),

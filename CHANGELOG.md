@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An index from EXPLAIN, as a migration.** When one index would cover a
+  query, the EXPLAIN banner offers **+ Index on … → migration**, and
+  **Suggest Index** writes it too: the `=` columns first, then the range or
+  sort column, never one the table already has. Outside a Laravel project
+  its `CREATE INDEX` is copied. The agent is asked when no single index
+  fits.
+- **Generate a factory from a table.** **Seed ▾** offers *Generate
+  …Factory* when the table has none: each column filled by its name or
+  type, a foreign key by its model's factory. It also seeds 10, 100 or
+  1,000 rows.
+- **Related → lists every table** that points at a row, with how many of its
+  rows do, instead of opening the first.
+- **Structure shows the DDL**, with its indexes, and **⧉** copies an index's
+  `CREATE INDEX`.
+
+### Fixed
+
+- **PostgreSQL's Copy DDL** was rebuilt from the column list: no defaults,
+  constraints or indexes, and a composite primary key marked on each of its
+  columns. It now comes from the catalog.
+- **SQLite's DDL** left out the table's indexes.
+
 ## [0.25.0] - 2026-11-15
 
 ### Added

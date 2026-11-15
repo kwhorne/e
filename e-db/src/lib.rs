@@ -1272,12 +1272,27 @@ pub fn table_ddl(conn: &Conn, table: &str) -> Result<String, String> {
         }
         Backend::Sqlite(path) => {
             let c = conn.sqlite(path)?;
-            c.query_row(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?1",
-                [table],
-                |r| r.get::<_, String>(0),
-            )
-            .map_err(|e| e.to_string())
+            let create: String = c
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            // Its indexes are kept apart (those a constraint makes have no SQL).
+            let mut stmt = c
+                .prepare(
+                    "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name = ?1 \
+                     AND sql IS NOT NULL ORDER BY name",
+                )
+                .map_err(|e| e.to_string())?;
+            let indexes = stmt
+                .query_map([table], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .filter_map(Result::ok)
+                .map(|sql| format!("\n{sql};"))
+                .collect::<String>();
+            Ok(format!("{create};{indexes}"))
         }
         Backend::Clickhouse { .. } => {
             let q = format!("SHOW CREATE TABLE `{}`", table.replace('`', "``"));
@@ -1289,28 +1304,94 @@ pub fn table_ddl(conn: &Conn, table: &str) -> Result<String, String> {
                 .and_then(|r| r.into_iter().next().flatten())
                 .unwrap_or_default())
         }
-        Backend::Postgres(_) => {
-            // Reconstruct a basic CREATE TABLE from the column list.
-            let cols = columns(conn, table)?;
-            let mut lines = Vec::new();
-            for c in &cols {
-                let null = if c.nullable { "" } else { " NOT NULL" };
-                let pk = if c.key == "PRI" { " PRIMARY KEY" } else { "" };
-                lines.push(format!(
-                    "    {} {}{}{}",
-                    quote_ident("postgres", &c.name),
-                    c.data_type,
-                    null,
-                    pk
-                ));
-            }
-            Ok(format!(
-                "CREATE TABLE {} (\n{}\n);",
-                quote_ident("postgres", table),
-                lines.join(",\n")
-            ))
+        Backend::Postgres(m) => {
+            // PostgreSQL has no SHOW CREATE TABLE: put it together from the
+            // catalog, with the types, defaults and constraints as the server
+            // prints them, and the indexes no constraint makes.
+            let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
+            let name = quote_ident("postgres", table);
+            let rel = format!("{}::regclass", quote_literal("postgres", &name));
+            let cols = pg_query(
+                &mut client,
+                &format!(
+                    "SELECT a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull, \
+                     pg_get_expr(d.adbin, d.adrelid), a.attidentity, a.attgenerated \
+                     FROM pg_attribute a LEFT JOIN pg_attrdef d \
+                     ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
+                     WHERE a.attrelid = {rel} AND a.attnum > 0 AND NOT a.attisdropped \
+                     ORDER BY a.attnum"
+                ),
+                MAX_ROWS,
+            )?;
+            let cons = pg_query(
+                &mut client,
+                &format!(
+                    "SELECT conname, pg_get_constraintdef(oid, true) FROM pg_constraint \
+                     WHERE conrelid = {rel} AND contype IN ('p', 'u', 'c', 'x', 'f') \
+                     ORDER BY CASE contype WHEN 'p' THEN 0 WHEN 'u' THEN 1 WHEN 'c' THEN 2 \
+                     WHEN 'x' THEN 3 ELSE 4 END, conname"
+                ),
+                MAX_ROWS,
+            )?;
+            let idx = pg_query(
+                &mut client,
+                &format!(
+                    "SELECT pg_get_indexdef(i.indexrelid) FROM pg_index i \
+                     WHERE i.indrelid = {rel} AND NOT EXISTS (SELECT 1 FROM pg_constraint c \
+                     WHERE c.conindid = i.indexrelid AND c.conrelid = i.indrelid) \
+                     ORDER BY 1"
+                ),
+                MAX_ROWS,
+            )?;
+            Ok(pg_ddl(&name, &cols.rows, &cons.rows, &idx.rows))
         }
     }
+}
+
+/// A PostgreSQL `CREATE TABLE` from catalog rows: per column its name,
+/// type, `t` when NOT NULL, default (or generation) expression, identity
+/// kind (`a`/`d`) and `s` when generated; per constraint its name and
+/// definition; per index made apart from a constraint, its definition.
+fn pg_ddl(
+    name: &str,
+    cols: &[Vec<Option<String>>],
+    cons: &[Vec<Option<String>>],
+    idx: &[Vec<Option<String>>],
+) -> String {
+    let field = |r: &[Option<String>], i: usize| r.get(i).cloned().flatten().unwrap_or_default();
+    let mut lines: Vec<String> = cols
+        .iter()
+        .map(|r| {
+            let (col, ty, not_null) = (field(r, 0), field(r, 1), field(r, 2) == "t");
+            let (default, identity, generated) = (field(r, 3), field(r, 4), field(r, 5));
+            let mut line = format!("    {} {ty}", quote_ident("postgres", &col));
+            if generated == "s" {
+                line.push_str(&format!(" GENERATED ALWAYS AS ({default}) STORED"));
+            } else if identity == "a" {
+                line.push_str(" GENERATED ALWAYS AS IDENTITY");
+            } else if identity == "d" {
+                line.push_str(" GENERATED BY DEFAULT AS IDENTITY");
+            } else if !default.is_empty() {
+                line.push_str(&format!(" DEFAULT {default}"));
+            }
+            if not_null {
+                line.push_str(" NOT NULL");
+            }
+            line
+        })
+        .collect();
+    lines.extend(cons.iter().map(|r| {
+        format!(
+            "    CONSTRAINT {} {}",
+            quote_ident("postgres", &field(r, 0)),
+            field(r, 1)
+        )
+    }));
+    let mut out = format!("CREATE TABLE {name} (\n{}\n);", lines.join(",\n"));
+    for r in idx {
+        out.push_str(&format!("\n{};", field(r, 0)));
+    }
+    out
 }
 
 /// The `CREATE VIEW` statement for a view (read-only display and copy).
@@ -3750,6 +3831,69 @@ mod pg_live_tests {
         assert!(query(&conn, "SELECT 1", 10).is_ok());
     }
 
+    /// `--ignored`, with `E_PG_PORT` (+ `E_PG_PASSWORD`): the DDL read back
+    /// from the catalog makes the same table again.
+    #[test]
+    #[ignore]
+    fn postgres_ddl_round_trips() {
+        let Some(port) = std::env::var("E_PG_PORT").ok() else {
+            return;
+        };
+        let conn = connect(&DbConfig {
+            engine: "postgres".into(),
+            host: "127.0.0.1".into(),
+            port: port.parse().unwrap(),
+            username: "postgres".into(),
+            password: std::env::var("E_PG_PASSWORD").unwrap_or_default(),
+            database: "postgres".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        for sql in [
+            "DROP TABLE IF EXISTS e_ddl_items, e_ddl_items_again, e_ddl_orders",
+            "CREATE TABLE e_ddl_orders (id bigint PRIMARY KEY)",
+            "CREATE TABLE e_ddl_items (\
+             id bigint GENERATED BY DEFAULT AS IDENTITY, \
+             order_id bigint NOT NULL REFERENCES e_ddl_orders(id) ON DELETE CASCADE, \
+             sku varchar(64) UNIQUE, qty integer NOT NULL DEFAULT 1 CHECK (qty > 0), \
+             total numeric(10,2) GENERATED ALWAYS AS (qty * 2) STORED, \
+             PRIMARY KEY (id, order_id))",
+            "CREATE INDEX e_ddl_items_qty_index ON e_ddl_items (qty)",
+        ] {
+            query(&conn, sql, 0).unwrap();
+        }
+        let ddl = table_ddl(&conn, "e_ddl_items").unwrap();
+        eprintln!("{ddl}");
+        assert!(ddl.contains("GENERATED BY DEFAULT AS IDENTITY"), "{ddl}");
+        assert!(ddl.contains("PRIMARY KEY (id, order_id)"), "{ddl}");
+        assert!(
+            ddl.contains("REFERENCES e_ddl_orders(id) ON DELETE CASCADE"),
+            "{ddl}"
+        );
+        assert!(ddl.contains("CREATE INDEX e_ddl_items_qty_index"), "{ddl}");
+        // Run under another name, it makes the same table.
+        let again = ddl
+            .replace("e_ddl_items", "e_ddl_items_again")
+            .replace("CONSTRAINT \"", "CONSTRAINT \"again_");
+        for stmt in again.split(";\n") {
+            query(&conn, stmt.trim_end_matches(';'), 0).unwrap();
+        }
+        let shape = |t: &str| {
+            columns(&conn, t)
+                .unwrap()
+                .into_iter()
+                .map(|c| (c.name, c.data_type, c.nullable, c.key))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shape("e_ddl_items_again"), shape("e_ddl_items"));
+        query(
+            &conn,
+            "DROP TABLE e_ddl_items, e_ddl_items_again, e_ddl_orders",
+            0,
+        )
+        .unwrap();
+    }
+
     /// `--ignored`, with `E_MYSQL_SCRATCH_PORT`: a throwaway server (user
     /// root, no password) — this one writes, in a database of its own.
     #[test]
@@ -5060,6 +5204,13 @@ mod tests {
             ..Default::default()
         };
         let conn = connect(&cfg).unwrap();
+        // The DDL carries the indexes, which SQLite keeps apart.
+        assert_eq!(
+            table_ddl(&conn, "posts").unwrap(),
+            "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, slug TEXT);\n\
+             CREATE UNIQUE INDEX posts_slug_unique ON posts (slug);\n\
+             CREATE INDEX posts_user_id_index ON posts (user_id);"
+        );
         let mut idx = indexes(&conn, "posts").unwrap();
         idx.sort_by(|a, b| a.name.cmp(&b.name));
         let unique = idx.iter().find(|i| i.name == "posts_slug_unique").unwrap();
@@ -5388,6 +5539,54 @@ mod tests {
         .unwrap();
         assert_eq!(n, 1);
         let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn a_postgres_ddl_comes_from_the_catalog() {
+        let row = |v: &[&str]| -> Vec<Option<String>> {
+            v.iter()
+                .map(|s| (!s.is_empty()).then(|| s.to_string()))
+                .collect()
+        };
+        let ddl = pg_ddl(
+            "\"order_items\"",
+            &[
+                row(&["id", "bigint", "t", "", "d", ""]),
+                row(&["order_id", "bigint", "t", "", "", ""]),
+                row(&["sku", "character varying(64)", "f", "", "", ""]),
+                row(&["qty", "integer", "t", "1", "", ""]),
+                row(&["total", "numeric(10,2)", "f", "(qty * 2)", "", "s"]),
+                row(&["created_at", "timestamp(0) without time zone", "f", "now()", "", ""]),
+            ],
+            &[
+                row(&["order_items_pkey", "PRIMARY KEY (id)"]),
+                row(&["order_items_sku_unique", "UNIQUE (sku)"]),
+                row(&["qty_positive", "CHECK (qty > 0)"]),
+                row(&[
+                    "order_items_order_id_foreign",
+                    "FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE",
+                ]),
+            ],
+            &[row(&[
+                "CREATE INDEX order_items_order_id_index ON public.order_items USING btree (order_id)",
+            ])],
+        );
+        assert_eq!(
+            ddl,
+            "CREATE TABLE \"order_items\" (\n\
+             \x20   \"id\" bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL,\n\
+             \x20   \"order_id\" bigint NOT NULL,\n\
+             \x20   \"sku\" character varying(64),\n\
+             \x20   \"qty\" integer DEFAULT 1 NOT NULL,\n\
+             \x20   \"total\" numeric(10,2) GENERATED ALWAYS AS ((qty * 2)) STORED,\n\
+             \x20   \"created_at\" timestamp(0) without time zone DEFAULT now(),\n\
+             \x20   CONSTRAINT \"order_items_pkey\" PRIMARY KEY (id),\n\
+             \x20   CONSTRAINT \"order_items_sku_unique\" UNIQUE (sku),\n\
+             \x20   CONSTRAINT \"qty_positive\" CHECK (qty > 0),\n\
+             \x20   CONSTRAINT \"order_items_order_id_foreign\" FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE\n\
+             );\n\
+             CREATE INDEX order_items_order_id_index ON public.order_items USING btree (order_id);"
+        );
     }
 
     #[test]

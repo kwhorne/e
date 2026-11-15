@@ -109,7 +109,8 @@ In the **Data** view of a table that has a primary key:
   - **Follow FK →** — if the column is a foreign key, jumps to the referenced
     table filtered to the linked value.
   - **Related →** — shows rows in other tables that reference this row (reverse
-    foreign keys).
+    foreign keys). With one such table it opens straight away; with more, it
+    lists each with how many of its rows point here, to pick from.
   - **Filter to value** — restricts the current table to rows matching that
     cell (`WHERE col = value` / `IS NULL`), composing with sort and pagination.
     An active filter appears as a chip in the toolbar — click it to clear.
@@ -136,13 +137,17 @@ connected:
   at the caret.
 - **⌥⌘↵** — **Explain SQL under cursor**: runs the engine's `EXPLAIN`, shows
   the plan in an **EXPLAIN** result tab and flags full table scans / missing
-  indexes; **Suggest Index → ask the agent** on that banner asks the AI agent
-  for a migration that adds the index. On an Eloquent chain outside a SQL
-  string, it [explains the queries the chain runs](laravel.md#explain-the-query)
-  and offers the missing index as a migration.
+  indexes. When one index would cover the query (its `=` columns first, then
+  its range or sort column), the banner offers **+ Index on table (columns) →
+  migration**, which writes that Laravel migration and opens it; **Ask the
+  agent** asks the AI agent instead. No index is offered that the table
+  already has. On an Eloquent chain outside a SQL string, it
+  [explains the queries the chain runs](laravel.md#explain-the-query) and
+  offers the missing index as a migration.
 - **Suggest Index for SQL under cursor** (command palette) — runs `EXPLAIN`,
-  and if it finds a problem, asks the AI agent to propose a Laravel migration
-  that adds the missing index.
+  and writes the migration for the index the query needs; when no single
+  index fits, it asks the AI agent. Outside a Laravel project the index's
+  `CREATE INDEX` goes to the clipboard instead.
 
 Both run against the panel's **active connection** (see
 [below](#the-active-connection)), or, if none is chosen and only one is
@@ -235,9 +240,14 @@ The label drives the safety rails:
 
 ## Structure, relationships & tooling
 
-- The **Structure** tab lists columns and indexes; **Copy DDL** copies the
-  `CREATE TABLE`, and **+ Migration** scaffolds a Laravel migration for the table
-  and opens it (instead of running DDL directly).
+- The **Structure** tab lists columns and indexes, and shows the table's
+  **DDL**: its `CREATE TABLE` with its indexes. On PostgreSQL, which has no
+  `SHOW CREATE TABLE`, it's put together from the catalog: types, defaults,
+  identity and generated columns, primary key, unique, check and foreign
+  key constraints, and the indexes no constraint makes. **⧉** beside an
+  index copies its `CREATE INDEX`. **Copy DDL** copies the whole, and
+  **+ Migration** scaffolds a Laravel migration for the table and opens it
+  (instead of running DDL directly).
 - **Views** (◉ in the tree) open like tables. Their **Structure** shows the
   `CREATE VIEW` definition, and **Copy definition** copies it. ClickHouse
   views and materialized views are listed with the views, not the tables.
@@ -246,8 +256,13 @@ The label drives the safety rails:
   connection.
 - The cell dialog can **Follow FK →** (jump to the referenced row) and show
   **Related →** rows (reverse foreign keys).
-- **Seed 10** (local tables) creates rows via the Eloquent factory through
-  Tinker; **⬆ CSV** imports a CSV file into the table (see below).
+- **Seed ▾** creates 10, 100 or 1,000 rows through the table's Eloquent
+  factory, via Tinker (local tables only). When the table has no factory,
+  it offers **Generate *Model*Factory from the table** instead: each column
+  filled by its name (`email`, `title`, `price`, `password`…) or type, a
+  foreign key by its model's factory, the key and timestamps left out. The
+  model needs `use HasFactory;` to seed with it.
+- **⬆ CSV** imports a CSV file into the table (see below).
 - **Search all data…** in the panel header scans every table's text columns of
   the active connection for a value, and shows one result tab per
   matching table. **✕ Cancel** stops it

@@ -1507,7 +1507,8 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             }
         })
         .on_click_stop(move |_| state.db_import_csv());
-    let seed = label(|| "Seed 10".to_string())
+    // Seed rows through the table's factory, or make the factory (DB-802).
+    let seed = label(|| "Seed ▾".to_string())
         .style(move |s| {
             let s = s
                 .padding_horiz(8.0)
@@ -1517,21 +1518,48 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                 .color(theme::fg_dim())
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
-            // Local tables only (factory seeding runs through Tinker/the app DB).
-            let local = state.db.result_key.get().and_then(|key| {
-                state.db.conns.with(|c| {
-                    c.iter()
-                        .find(|e| e.key() == key)
-                        .map(|e| e.config.environment().is_local())
-                })
-            });
-            if local == Some(true) && state.db.subview.get() == "data" {
+            if state.db.result_table.get().is_some() && state.db.subview.get() == "data" {
                 s
             } else {
                 s.hide()
             }
         })
-        .on_click_stop(move |_| state.db_seed_table(10));
+        .popout_menu(move || {
+            use floem::menu::{Menu, MenuItem};
+            let factory = state.db_factory_path();
+            let local = state.db_table_is_local();
+            let mut menu = Menu::new("");
+            match factory {
+                Some((model, path)) if path.is_file() => {
+                    for n in [10usize, 100, 1000] {
+                        let text = format!("Seed {} rows", group_digits(n as u64));
+                        let item = MenuItem::new(text).action(move || state.db_seed_table(n));
+                        menu = menu.entry(if local { item } else { item.enabled(false) });
+                    }
+                    if !local {
+                        menu = menu.entry(
+                            MenuItem::new("Seeding runs on local databases only").enabled(false),
+                        );
+                    }
+                    menu = menu.separator().entry(
+                        MenuItem::new(format!("Open {model}Factory"))
+                            .action(move || state.open_path(path.clone())),
+                    );
+                }
+                Some((model, _)) => {
+                    menu = menu
+                        .entry(
+                            MenuItem::new(format!("Generate {model}Factory from the table"))
+                                .action(move || state.db_generate_factory()),
+                        )
+                        .entry(MenuItem::new("Seeding needs a factory").enabled(false));
+                }
+                None => {
+                    menu = menu.entry(MenuItem::new("Not a Laravel project").enabled(false));
+                }
+            }
+            menu
+        });
 
     let toolbar = stack((
         subview_chips,
@@ -1627,6 +1655,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         db_edit_popup(state),
         db_insert_popup(state),
         db_import_popup(state),
+        db_related_popup(state),
         db_history_panel(state),
         db_write_log_panel(state),
     ))
@@ -2494,6 +2523,111 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 120));
         if state.db.insert_open.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
+/// Related's choice, when more than one table points at the row (DB-308):
+/// each with how many of its rows do. A click opens it filtered to them.
+fn db_related_popup(state: AppState) -> impl IntoView {
+    let card = dyn_container(
+        move || state.db.related.get(),
+        move |choice| {
+            let Some(choice) = choice else {
+                return empty().into_any();
+            };
+            let row = choice.row.clone();
+            let title = label(move || format!("Rows that point at {row}")).style(|s| {
+                s.font_size(13.0)
+                    .font_bold()
+                    .color(theme::fg())
+                    .margin_bottom(10.0)
+            });
+            let items = choice
+                .refs
+                .iter()
+                .cloned()
+                .map(|(table, col, n)| {
+                    let (key, value) = (choice.key.clone(), choice.value.clone());
+                    let none = n == Some(0);
+                    let count = match n {
+                        Some(n) => {
+                            format!("{} row{}", group_digits(n), if n == 1 { "" } else { "s" })
+                        }
+                        None => "?".to_string(),
+                    };
+                    let name = format!("{table}.{col}");
+                    stack((
+                        label(move || name.clone()).style(|s| {
+                            s.flex_grow(1.0_f32)
+                                .font_size(12.0)
+                                .font_family(theme::mono_family())
+                                .text_ellipsis()
+                        }),
+                        label(move || count.clone())
+                            .style(|s| s.font_size(11.0).color(theme::fg_dim())),
+                    ))
+                    .style(move |s| {
+                        s.flex_row()
+                            .items_center()
+                            .gap(12.0)
+                            .width_full()
+                            .padding_horiz(10.0)
+                            .padding_vert(6.0)
+                            .border_radius(5.0)
+                            .color(if none { theme::fg_dim() } else { theme::fg() })
+                            .cursor(floem::style::CursorStyle::Pointer)
+                            .hover(|s| s.background(theme::bg_hover()))
+                    })
+                    .on_click_stop(move |_| {
+                        state.db_open_related(&key, table.clone(), col.clone(), value.clone())
+                    })
+                    .into_any()
+                })
+                .collect::<Vec<_>>();
+            let list = scroll(floem::views::v_stack_from_iter(items).style(|s| s.width_full()))
+                .style(|s| s.width_full().max_height(320.0));
+            let cancel = label(|| "Cancel".to_string())
+                .style(|s| {
+                    s.padding_horiz(14.0)
+                        .height(28.0)
+                        .items_center()
+                        .border_radius(5.0)
+                        .font_size(12.0)
+                        .border(1.0)
+                        .border_color(theme::border())
+                        .color(theme::fg())
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.background(theme::bg_hover()))
+                })
+                .on_click_stop(move |_| state.db.related.set(None));
+            let buttons = stack((empty().style(|s| s.flex_grow(1.0_f32)), cancel))
+                .style(|s| s.flex_row().width_full().margin_top(12.0));
+            stack((title, list, buttons))
+                .style(|s| {
+                    s.flex_col()
+                        .width(440.0)
+                        .padding(16.0)
+                        .border(1.0)
+                        .border_color(theme::border())
+                        .border_radius(10.0)
+                        .background(theme::bg())
+                })
+                .into_any()
+        },
+    );
+    container(card).style(move |s| {
+        let s = s
+            .absolute()
+            .inset(0.0)
+            .size_full()
+            .items_center()
+            .justify_center()
+            .background(Color::from_rgba8(0, 0, 0, 120));
+        if state.db.related.with(Option::is_some) {
             s
         } else {
             s.hide()
@@ -3437,8 +3571,8 @@ fn pending_bar(state: AppState) -> impl IntoView {
 }
 
 /// A banner listing EXPLAIN findings (full scans / missing indexes) for the
-/// current plan, with a button that asks the agent for an index migration
-/// (DB-602).
+/// current plan, with the index that would help as a migration (DB-603),
+/// and a way to ask the agent instead (DB-602).
 fn explain_banner(state: AppState) -> impl IntoView {
     let issues = label(move || {
         let list = state.db.explain_issues.get();
@@ -3454,7 +3588,38 @@ fn explain_banner(state: AppState) -> impl IntoView {
             .color(theme::error())
             .text_ellipsis()
     });
-    let hint = label(|| "Suggest Index → ask the agent".to_string())
+    // The index the plan asks for, when one would do (DB-603).
+    let advice = move || {
+        state
+            .db
+            .active_tab
+            .get()
+            .and_then(|i| state.db.result_tabs.with(|t| t.get(i)?.advice.clone()))
+    };
+    let add = label(move || match advice() {
+        Some(a) => format!("+ Index on {} → migration", a.describe()),
+        None => String::new(),
+    })
+    .style(move |s| {
+        let s = s
+            .font_size(10.5)
+            .padding_horiz(8.0)
+            .padding_vert(2.0)
+            .border(1.0)
+            .border_radius(4.0)
+            .border_color(theme::border())
+            .color(theme::fg())
+            .flex_shrink(0.0_f32)
+            .cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.background(theme::bg_hover()));
+        if advice().is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+    .on_click_stop(move |_| state.db_suggest_index_for_plan());
+    let hint = label(|| "Ask the agent".to_string())
         .style(|s| {
             s.font_size(10.5)
                 .color(theme::fg_dim())
@@ -3462,8 +3627,8 @@ fn explain_banner(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.db_suggest_index_for_plan());
-    stack((issues, hint)).style(move |s| {
+        .on_click_stop(move |_| state.db_ask_agent_for_index());
+    stack((issues, add, hint)).style(move |s| {
         let s = s
             .flex_row()
             .items_center()
@@ -3944,8 +4109,15 @@ fn structure_grid(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col());
 
-    // A view's definition (DB-202), below its columns.
-    let def_title = label(|| "Definition".to_string()).style(move |s| {
+    // The table's DDL, or a view's definition (DB-202/204).
+    let def_title = label(move || {
+        if state.db.is_view.get() {
+            "Definition".to_string()
+        } else {
+            "DDL".to_string()
+        }
+    })
+    .style(move |s| {
         let s = s
             .font_size(11.0)
             .font_bold()
@@ -3953,15 +4125,15 @@ fn structure_grid(state: AppState) -> impl IntoView {
             .padding_horiz(8.0)
             .padding_top(12.0)
             .padding_bottom(4.0);
-        if state.db.view_def.with(Option::is_some) {
+        if state.db.ddl.with(Option::is_some) {
             s
         } else {
             s.hide()
         }
     });
-    let def_text = label(move || match state.db.view_def.get() {
+    let def_text = label(move || match state.db.ddl.get() {
         Some(d) if !d.trim().is_empty() => d.trim().to_string(),
-        _ => "(the database gave no definition)".to_string(),
+        _ => "(the database gave none)".to_string(),
     })
     .style(move |s| {
         let s = s
@@ -3975,7 +4147,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
             .border_color(theme::border())
             .background(theme::bg_panel())
             .width(760.0);
-        if state.db.view_def.with(Option::is_some) {
+        if state.db.ddl.with(Option::is_some) {
             s
         } else {
             s.hide()
@@ -4007,11 +4179,30 @@ fn structure_grid(state: AppState) -> impl IntoView {
                 .enumerate()
                 .collect::<Vec<_>>()
         },
-        |(i, _)| *i,
+        // By content too: another table's index at the same place is a new row.
+        |(i, ix)| (*i, ix.name.clone(), ix.columns.clone(), ix.unique),
         move |(_, ix)| {
             let cols = ix.columns.join(", ");
             let name = ix.name.clone();
             let badge = if ix.unique { "UNIQUE" } else { "INDEX" };
+            let copyable = !crate::db_state::is_key_index(&ix.name);
+            let to_copy = ix.clone();
+            let copy = label(|| "⧉".to_string())
+                .style(move |s| {
+                    let s = s
+                        .padding_horiz(8.0)
+                        .padding_vert(4.0)
+                        .font_size(11.0)
+                        .color(theme::fg_dim())
+                        .cursor(floem::style::CursorStyle::Pointer)
+                        .hover(|s| s.color(theme::fg()));
+                    if copyable {
+                        s
+                    } else {
+                        s.hide()
+                    }
+                })
+                .on_click_stop(move |_| state.db_copy_index(&to_copy));
             stack((
                 label(move || badge.to_string()).style(move |s| {
                     s.width(70.0)
@@ -4043,6 +4234,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
                         .color(theme::fg_dim())
                         .text_ellipsis()
                 }),
+                copy,
             ))
             .style(|s| {
                 s.flex_row()
@@ -4055,7 +4247,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col());
 
     let copy_ddl = label(move || {
-        if state.db.view_def.with(Option::is_some) {
+        if state.db.is_view.get() {
             "⧉ Copy definition".to_string()
         } else {
             "⧉ Copy DDL".to_string()
@@ -4077,11 +4269,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
     let new_migration = label(|| "+ Migration".to_string())
         .style(move |s| {
             // A migration that creates the table means nothing for a view.
-            let s = if state.db.view_def.with(Option::is_some) {
-                s.hide()
-            } else {
-                s
-            };
+            let s = if state.db.is_view.get() { s.hide() } else { s };
             s.font_size(11.0)
                 .padding_horiz(8.0)
                 .padding_vert(3.0)
@@ -4098,7 +4286,7 @@ fn structure_grid(state: AppState) -> impl IntoView {
     let ddl_row = stack((copy_ddl, new_migration)).style(|s| s.flex_row().items_center());
 
     stack((
-        header, rows, def_title, def_text, idx_title, idx_rows, ddl_row,
+        header, rows, idx_title, idx_rows, def_title, def_text, ddl_row,
     ))
     .style(|s| s.flex_col().width(520.0))
 }

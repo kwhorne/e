@@ -265,9 +265,13 @@ impl AppState {
     /// Add the index the plan on `line` asks for, as a new migration, and
     /// open it — where the migration check shows the SQL it will run.
     pub(crate) fn add_advised_index(&self, line: usize) {
-        let Some(advice) = self.eval_at(line).and_then(|e| e.advice) else {
-            return;
-        };
+        if let Some(advice) = self.eval_at(line).and_then(|e| e.advice) {
+            self.write_index_migration(&advice);
+        }
+    }
+
+    /// Write the migration that adds `advice`'s index, and open it.
+    pub(crate) fn write_index_migration(&self, advice: &Advice) {
         let root = self.root.get_untracked();
         let path = root
             .join("database/migrations")

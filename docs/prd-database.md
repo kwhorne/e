@@ -176,7 +176,7 @@ på manuell testing.
 | DB-201 | ✅ Tabelliste med kolonner og indekser | — | ✅ |
 | DB-202 | Views i objekttreet: liste, åpne definisjon (SQL), browse som tabell | P0 | ✅ Views listes, filtreres og kan browses; Structure viser `CREATE VIEW`-definisjonen, og «Copy definition» kopierer den. ClickHouse-views (også materialiserte) listes fra `system.tables` og ikke lenger blant tabellene; ikke testet mot en ClickHouse-server |
 | DB-203 | Triggere og prosedyrer/funksjoner: liste + vis definisjon (read-only) | P1 | ✗ |
-| DB-204 | «Generate DDL» på tabell/view/indeks: vis `CREATE …`-setningen, kopier til utklippstavle | P1 | ◐ «Copy DDL» for tabeller til utklippstavlen; PostgreSQL uten indekser og FK-er. Mangler: views og indekser, visning i skuff |
+| DB-204 | «Generate DDL» på tabell/view/indeks: vis `CREATE …`-setningen, kopier til utklippstavle | P1 | ✅ Structure viser DDL-en (views: definisjonen) med indeksene; PostgreSQL bygges fra katalogen med typer, standardverdier, identity/genererte kolonner, alle constraints og indekser. «⧉» per indeks kopierer `CREATE INDEX`. PostgreSQL-delen er enhetstestet og har en live-test (`E_PG_PORT`), men er ikke kjørt mot en server |
 | DB-205 | Søk/filter i objekttreet (skriv for å filtrere tabellnavn) | P0 | ✅ |
 | DB-206 | Radantall per tabell (lazy, ca-verdi) og tabellstørrelse i treet | P2 | ◐ Radantall (≈ fra katalogen). Mangler: tabellstørrelse |
 | DB-207 | ERD-visning: FK-graf over valgte tabeller (gjenbruk relasjonsgraf-motoren fra ⌘⌥R, men på DB-nivå — også for tabeller uten Eloquent-modell) | P2 | ◐ «⇄» lister alle FK-er som tekst. Mangler: graf og valg av tabeller |
@@ -192,7 +192,7 @@ på manuell testing.
 | DB-305 | NULL håndteres eksplisitt: vis `NULL` distinkt fra tom streng; sett-til-NULL-handling | P0 | ✅ Dim `NULL` (ikke kursiv), NULL-avkrysning i rediger- og ny rad-dialog |
 | DB-306 | Kopier celle / rad (som CSV, JSON eller `INSERT`-setning) fra kontekstmeny | P1 | ✗ |
 | DB-307 | Dupliser rad som utgangspunkt for ny | P1 | ✗ |
-| DB-308 | «Relaterte rader»-oppslag: fra en rad, vis rader i andre tabeller som peker hit (reverse FK) | P1 | ◐ «Related →» åpner første tabell som peker hit; flere vises bare som antall |
+| DB-308 | «Relaterte rader»-oppslag: fra en rad, vis rader i andre tabeller som peker hit (reverse FK) | P1 | ✅ Én tabell åpnes direkte; flere listes med antall rader som peker hit, og et klikk åpner den filtrert |
 | DB-309 | Binær-/blob-kolonner: vis størrelse + hex-preview i stedet for rå bytes | P2 | ◐ SQLite viser `<N bytes>`; MySQL viser bytes som UTF-8, PostgreSQL serverens tekstform. Mangler: hex-preview |
 | DB-310 | Cell-rendering av vanlige Laravel-typer: timestamps med relativ tid på hover, boolske kolonner som ✓/✗ | P2 | ✗ |
 
@@ -229,7 +229,7 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | --- | --- | --- | --- |
 | DB-601 | ✅ EXPLAIN med agent-indeksforslag; indeksvisning i Structure | — | ✅ |
 | DB-602 | Strukturert EXPLAIN-visning: plan som tre/tabell med markering av full table scans og manglende indekser (ikke bare råtekst) | P1 | ◐ Rå plan i grid + banner som lister full scans. Mangler: tre, kostnad per node |
-| DB-603 | «Foreslå indeks → generer migrasjon»: agent-indeksforslaget skrives som ferdig Laravel-migrasjonsfil (gjenbruk kodegen) | P1 | ◐ Fra SQL bare en prompt til agenten (fra palett eller banner-knappen). Deterministisk migrasjon finnes for Eloquent (⌥⌘⏎) |
+| DB-603 | «Foreslå indeks → generer migrasjon»: agent-indeksforslaget skrives som ferdig Laravel-migrasjonsfil (gjenbruk kodegen) | P1 | ✅ EXPLAIN-banneret og «Suggest Index» skriver migrasjonen selv (samme regel som for Eloquent: `=`-kolonner, så range/sortering) og åpner den; ingen indeks som allerede finnes. Agenten når ingen enkeltindeks passer, eller på forespørsel. Utenfor Laravel: `CREATE INDEX` til utklippstavlen |
 | DB-604 | Kobling fra runtime-panelet (⌘⌥I): «EXPLAIN denne queryen» på enhver observert query, med hopp til DB-panelet | P1 | ✅ Mot databasen panelet viser, eller den eneste tilkoblede |
 | DB-605 | Varighet og radantall vises for hver kjøring i konsoll og historikk | P0 | ✅ |
 
@@ -248,7 +248,7 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-801 | ✅ Skjema-diff, modellgenerering, Eloquent-/query-completion, validation-rules fra skjema, inline SQL i PHP | — | ✅ |
-| DB-802 | Factory-integrasjon: «Seed N rader» på tabell (kjører factory via Tinker); «Generer factory fra skjema» der factory mangler | P1 | ◐ «Seed 10» via factory (fast antall, lokalt, krever trust). Mangler: valgt N, factory fra skjema |
+| DB-802 | Factory-integrasjon: «Seed N rader» på tabell (kjører factory via Tinker); «Generer factory fra skjema» der factory mangler | P1 | ✅ «Seed ▾»: 10, 100 eller 1 000 rader (lokalt). Mangler factory, lager «Generate …Factory» den fra kolonnene (navn, så type; FK → `Model::factory()`) |
 | DB-803 | Migrasjonsgenerering fra strukturendringer: endrer man kolonner/indekser i Structure-fanen, tilbys en generert migrasjon i stedet for direkte DDL (direkte DDL kun på lokale miljøer) | P2 | ◐ «+ Migration» lager tomt `Schema::table`-skjelett. Structure kan ikke redigeres |
 | DB-804 | Agent-socket utvides: `db_explain` (fritt, read-only) og `db_snapshot` (consent) | P2 | ✗ Socketen har `db_schema` og `db_query` |
 | DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 | ◐ LIKE over tekstkolonner, 200 rader per tabell. Cancel stopper før neste tabell. Søker i databasen panelet viser. Mangler: skiller store/små bokstaver på PostgreSQL |
@@ -468,7 +468,7 @@ fase 4–5 er forspranget.
 | 1 — Konsollen | 401, 402, 403, 404, 405, 409, 605 | — | — |
 | 2 — Trygg redigering | 102, 104, 302, 305, 702, 703 | 303, 304 | — |
 | 3 — Data inn/ut | 202, 205, 502, 503, 505 | — | — |
-| 4 — Kraftbruker | 408, 604 | 204, 308, 602, 603, 802 | — |
+| 4 — Kraftbruker | 204, 308, 408, 603, 604, 802 | 602 | — |
 | 5 — Forbi | — | 206, 207, 704, 705, 803, 805 | — |
 
 Fase 1 og 3 er ferdige. Krav utenfor faseplanen som mangler helt: 203,
@@ -484,12 +484,11 @@ Fase 1 er ferdig. I fase 2 står to ting igjen, og begge er større enn de
 ser ut: opt-in direkte-skriv (303) og fold i verdi-editoren (304), som
 krever kodefolding i editoren, noe `e` ikke har.
 
-Fase 3 er ferdig.
+Fase 3 er ferdig, og i fase 4 står bare 602 igjen.
 
-1. Kapabilitetsflagg per driver (§9), så en motor sier hva den ikke kan i
+1. Strukturert EXPLAIN (602): planen som tre med kostnad per node.
+2. Kapabilitetsflagg per driver (§9), så en motor sier hva den ikke kan i
    stedet for å feile stille.
-2. Fase 4 (kraftbruker): det som er delvis gjort der (204, 308, 602, 603,
-   802).
 3. Kodefolding i editoren, som også gir fold i verdi-editoren (304).
 
 ## 8. Suksessmetrikker

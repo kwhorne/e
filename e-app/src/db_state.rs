@@ -452,7 +452,7 @@ impl AppState {
         self.db.page.set(0);
         self.db.total_rows.set(None);
         self.db.columns.set(Vec::new());
-        self.db.view_def.set(None);
+        self.db.ddl.set(None);
         self.db.result_open.set(true);
         self.db_load_columns(entry.clone(), table.clone());
         self.db_reload_table();
@@ -760,11 +760,7 @@ impl AppState {
         let send = create_ext_action(self.cx, {
             let state = *self;
             let (key, table) = (entry.key(), table.clone());
-            move |(cols, idx, def): (
-                Vec<e_db::ColumnInfo>,
-                Vec<e_db::IndexInfo>,
-                Option<String>,
-            )| {
+            move |(cols, idx): (Vec<e_db::ColumnInfo>, Vec<e_db::IndexInfo>)| {
                 // The columns (and with them the primary key edits are made
                 // by) of a table no longer shown must not land on the one
                 // that is.
@@ -773,17 +769,36 @@ impl AppState {
                 }
                 state.db.columns.set(cols);
                 state.db.indexes.set(idx);
-                state.db.view_def.set(def);
                 // The first page may have come before the primary key was known.
                 state.db_load_pending_view();
             }
         });
         let is_view = entry.views.with_untracked(|v| v.contains(&table));
+        self.db.is_view.set(is_view);
+        // Its DDL apart, so the columns (which editing needs) don't wait.
+        let show_ddl = create_ext_action(self.cx, {
+            let state = *self;
+            let (key, table) = (entry.key(), table.clone());
+            move |ddl: String| {
+                if state.db_showing(&key, &table) {
+                    state.db.ddl.set(Some(ddl));
+                }
+            }
+        });
+        let ddl_conn = conn.clone();
+        let ddl_table = table.clone();
         std::thread::spawn(move || {
             let cols = e_db::columns(&conn, &table).unwrap_or_default();
             let idx = e_db::indexes(&conn, &table).unwrap_or_default();
-            let def = is_view.then(|| e_db::view_definition(&conn, &table).unwrap_or_default());
-            send((cols, idx, def));
+            send((cols, idx));
+        });
+        std::thread::spawn(move || {
+            let ddl = if is_view {
+                e_db::view_definition(&ddl_conn, &ddl_table)
+            } else {
+                e_db::table_ddl(&ddl_conn, &ddl_table)
+            };
+            show_ddl(ddl.unwrap_or_default());
         });
     }
 
@@ -1025,6 +1040,96 @@ impl AppState {
         });
     }
 
+    /// The shown table's model, and where its factory is or would be:
+    /// `database/factories/{Model}Factory.php`. `None` outside a Laravel
+    /// project.
+    pub(crate) fn db_factory_path(&self) -> Option<(String, std::path::PathBuf)> {
+        let table = self.db.result_table.get_untracked()?;
+        let root = self.root.get_untracked();
+        if !root.join("artisan").is_file() {
+            return None;
+        }
+        let model = e_laravel::codegen::model_name(&table);
+        let path = root
+            .join("database/factories")
+            .join(format!("{model}Factory.php"));
+        Some((model, path))
+    }
+
+    /// Whether the shown table's connection is local.
+    pub(crate) fn db_table_is_local(&self) -> bool {
+        let Some(key) = self.db.result_key.get_untracked() else {
+            return false;
+        };
+        self.db.conns.with_untracked(|c| {
+            c.iter()
+                .find(|e| e.key() == key)
+                .is_some_and(|e| e.config.environment().is_local())
+        })
+    }
+
+    /// Write a factory for the shown table from its columns and foreign
+    /// keys, and open it (DB-802). An existing factory is opened, not
+    /// replaced.
+    pub fn db_generate_factory(&self) {
+        let Some((model, path)) = self.db_factory_path() else {
+            Self::notify("Generate factory: not a Laravel project");
+            return;
+        };
+        if path.is_file() {
+            self.open_path(path);
+            return;
+        }
+        let (Some(key), Some(table)) = (
+            self.db.result_key.get_untracked(),
+            self.db.result_table.get_untracked(),
+        ) else {
+            return;
+        };
+        let Some(conn) = self
+            .db
+            .conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+            .and_then(|e| e.conn.get_untracked())
+        else {
+            return;
+        };
+        let root = self.root.get_untracked();
+        let state = *self;
+        let send = create_ext_action(self.cx, move |written: Result<(), String>| match written {
+            Ok(()) => {
+                state.fs_rev.update(|r| *r += 1);
+                state.open_path(path.clone());
+                let model_file = root.join("app/Models").join(format!("{model}.php"));
+                let has_factory = std::fs::read_to_string(&model_file)
+                    .map(|m| m.contains("HasFactory"))
+                    .unwrap_or(false);
+                Self::notify(&if has_factory {
+                    format!("{model}Factory written — Seed ▾ can use it now")
+                } else {
+                    format!(
+                        "{model}Factory written — add `use HasFactory;` to {model} to seed with it"
+                    )
+                });
+            }
+            Err(e) => Self::notify(&format!("Generate factory: {e}")),
+        });
+        let factory_path = self.db_factory_path().map(|(_, p)| p);
+        std::thread::spawn(move || {
+            let written = (|| {
+                let cols = e_db::columns(&conn, &table)?;
+                let fks = e_db::foreign_keys(&conn).unwrap_or_default();
+                let code = e_laravel::codegen::generate_factory(&table, &cols, &fks);
+                let path = factory_path.ok_or("not a Laravel project")?;
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+                }
+                std::fs::write(&path, code).map_err(|e| e.to_string())
+            })();
+            send(written);
+        });
+    }
+
     /// Load the active database's foreign-key relationships and open the schema-
     /// relationships (ERD) panel (DB-207). Works for tables without models.
     pub fn db_show_erd(&self) {
@@ -1099,6 +1204,7 @@ impl AppState {
                 key: Some(key.clone()),
                 explain: Vec::new(),
                 sql: None,
+                advice: None,
             })
             .collect();
         self.db_show_new_tabs(tabs);
@@ -1201,14 +1307,14 @@ impl AppState {
 
     /// Copy the current table's CREATE DDL to the clipboard (DB-204).
     pub fn db_copy_ddl(&self) {
-        // A view's is its definition, read with its columns.
-        if let Some(def) = self.db.view_def.get_untracked() {
-            if def.is_empty() {
-                Self::notify("No definition available");
+        // Read with the columns, if it has come.
+        if let Some(ddl) = self.db.ddl.get_untracked().filter(|d| !d.trim().is_empty()) {
+            let _ = floem::Clipboard::set_contents(ddl);
+            Self::notify(if self.db.is_view.get_untracked() {
+                "View definition copied to clipboard"
             } else {
-                let _ = floem::Clipboard::set_contents(def);
-                Self::notify("View definition copied to clipboard");
-            }
+                "DDL copied to clipboard"
+            });
             return;
         }
         let (Some(key), Some(table)) = (
@@ -1238,6 +1344,15 @@ impl AppState {
         std::thread::spawn(move || {
             send(e_db::table_ddl(&conn, &table).unwrap_or_default());
         });
+    }
+
+    /// Copy the `CREATE INDEX` that makes `ix` on the shown table (DB-204).
+    pub fn db_copy_index(&self, ix: &e_db::IndexInfo) {
+        let Some(table) = self.db.result_table.get_untracked() else {
+            return;
+        };
+        let _ = floem::Clipboard::set_contents(index_ddl(&self.db_result_engine(), &table, ix));
+        Self::notify(&format!("CREATE INDEX {} copied to clipboard", ix.name));
     }
 
     /// Pick a CSV file to import into the current table, and open the
@@ -1707,6 +1822,7 @@ impl AppState {
                     key: Some(key.clone()),
                     explain: Vec::new(),
                     sql: Some(stmt),
+                    advice: None,
                 }
             })
             .collect();
@@ -1933,7 +2049,9 @@ impl AppState {
         let state = *self;
         // The plan is a result of its own, in a tab, with its findings as a
         // banner over it; it isn't rows of the browsed table.
-        let send = create_ext_action(self.cx, move |res: Result<e_db::QueryResult, String>| {
+        let engine_for_advice = engine.clone();
+        let sql_for_advice = sql.clone();
+        let send = create_ext_action(self.cx, move |(res, advice): ExplainedPlan| {
             if state.db.run_gen.get_untracked() != gen {
                 return;
             }
@@ -1954,9 +2072,17 @@ impl AppState {
                 key: Some(key.clone()),
                 explain,
                 sql: Some(sql_for_tab.clone()),
+                advice,
             }]);
         });
-        std::thread::spawn(move || send(e_db::explain(&conn, &sql)));
+        std::thread::spawn(move || {
+            let res = e_db::explain(&conn, &sql);
+            let advice = res
+                .as_ref()
+                .ok()
+                .and_then(|plan| index_advice(&conn, &engine_for_advice, &sql_for_advice, plan));
+            send((res, advice))
+        });
     }
 
     /// EXPLAIN a query observed in the runtime panel against the panel's
@@ -1968,8 +2094,9 @@ impl AppState {
         self.db_explain_sql(entry, sql);
     }
 
-    /// Run EXPLAIN on the SQL under the cursor and, if it has performance red
-    /// flags, ask the agent to propose an index migration.
+    /// Run EXPLAIN on the SQL under the cursor and, if it scans where an
+    /// index would help, add that index: as a migration in a Laravel
+    /// project (DB-603). When no single index fits, ask the agent.
     pub fn suggest_index_under_cursor(&self) {
         let Some((entry, sql)) = self.sql_and_conn_under_cursor() else {
             return;
@@ -1978,36 +2105,79 @@ impl AppState {
             return;
         };
         let engine = entry.config.engine.clone();
+        let engine_for_plan = engine.clone();
         let sql_for_explain = sql.clone();
         let state = *self;
-        let ask = create_ext_action(self.cx, move |issues: Vec<String>| {
-            if issues.is_empty() {
-                Self::notify("EXPLAIN found no full scans — no index needed");
-                return;
-            }
-            state.send_to_agent(&index_prompt(&sql, &issues));
-        });
+        let ask = create_ext_action(
+            self.cx,
+            move |(issues, advice): (Vec<String>, Option<e_laravel::query_advice::Advice>)| {
+                match advice {
+                    Some(advice) => state.db_add_index(&advice, &engine),
+                    None if issues.is_empty() => {
+                        Self::notify("EXPLAIN found no full scans — no index needed")
+                    }
+                    None => state.send_to_agent(&index_prompt(&sql, &issues)),
+                }
+            },
+        );
         std::thread::spawn(move || {
-            let issues = e_db::explain(&conn, &sql_for_explain)
-                .map(|plan| e_db::analyze_explain(&engine, &plan))
-                .unwrap_or_default();
-            ask(issues);
+            let Ok(plan) = e_db::explain(&conn, &sql_for_explain) else {
+                ask((Vec::new(), None));
+                return;
+            };
+            let issues = e_db::analyze_explain(&engine_for_plan, &plan);
+            let advice = index_advice(&conn, &engine_for_plan, &sql_for_explain, &plan);
+            ask((issues, advice));
         });
     }
 
-    /// Ask the agent for an index migration for the plan in the shown tab
-    /// (the EXPLAIN banner's "Suggest Index").
+    /// The EXPLAIN banner's button: add the index the shown plan asks for,
+    /// or, when no single index fits, ask the agent.
     pub fn db_suggest_index_for_plan(&self) {
         let tab = self
             .db
             .active_tab
             .get_untracked()
             .and_then(|i| self.db.result_tabs.with_untracked(|t| t.get(i).cloned()));
-        let Some((sql, issues)) = tab.and_then(|t| Some((t.sql?, t.explain))) else {
+        let Some(tab) = tab else {
             return;
         };
-        if !issues.is_empty() {
+        if let Some(advice) = &tab.advice {
+            self.db_add_index(advice, &self.db_result_engine());
+            return;
+        }
+        if let Some(sql) = &tab.sql {
+            if !tab.explain.is_empty() {
+                self.send_to_agent(&index_prompt(sql, &tab.explain));
+            }
+        }
+    }
+
+    /// The banner's other way: ask the agent, even when the index is known.
+    pub fn db_ask_agent_for_index(&self) {
+        let tab = self
+            .db
+            .active_tab
+            .get_untracked()
+            .and_then(|i| self.db.result_tabs.with_untracked(|t| t.get(i).cloned()));
+        if let Some((sql, issues)) = tab.and_then(|t| Some((t.sql?, t.explain))) {
             self.send_to_agent(&index_prompt(&sql, &issues));
+        }
+    }
+
+    /// Add `advice`'s index: a migration, opened, in a Laravel project (so
+    /// it goes through version control like any change); elsewhere its
+    /// `CREATE INDEX`, for `engine`, on the clipboard.
+    pub(crate) fn db_add_index(&self, advice: &e_laravel::query_advice::Advice, engine: &str) {
+        let root = self.root.get_untracked();
+        if root.join("artisan").is_file() {
+            self.write_index_migration(advice);
+        } else {
+            let _ = floem::Clipboard::set_contents(create_index_sql(engine, advice));
+            Self::notify(&format!(
+                "Not a Laravel project: CREATE INDEX on {} copied to the clipboard",
+                advice.describe()
+            ));
         }
     }
 
@@ -2724,35 +2894,79 @@ impl AppState {
         let Some((pk_col, Some(pk_val))) = pk.into_iter().next() else {
             return;
         };
-        let disp = entry.config.display_name();
+        let pk_val_for_count = pk_val.clone();
+        let engine = entry.config.engine.clone();
+        let row_label = format!("{table} {pk_col}={pk_val}");
         let state = *self;
-        let send = create_ext_action(self.cx, move |refs: Vec<(String, String)>| {
-            let Some((child_table, child_col)) = refs.first().cloned() else {
-                Self::notify("No tables reference this row");
-                return;
-            };
-            state.db.edit.set(None);
-            state.db.result_key.set(Some(key.clone()));
-            state.db.result_table.set(Some(child_table.clone()));
-            state.db.result_title.set(format!("{disp} · {child_table}"));
-            state.db.subview.set("data".into());
-            state.db.sort.set(None);
-            state.db.filter.set(Some((child_col, Some(pk_val.clone()))));
-            state.db.page.set(0);
-            state.db.total_rows.set(None);
-            state.db.columns.set(Vec::new());
-            state.db_load_columns(entry.clone(), child_table);
-            state.db_reload_table();
-            if refs.len() > 1 {
-                Self::notify(&format!(
-                    "{} tables reference this row; showing the first",
-                    refs.len()
-                ));
-            }
-        });
+        // Each table that points here, with how many of its rows do.
+        let send =
+            create_ext_action(
+                self.cx,
+                move |refs: Vec<(String, String, Option<u64>)>| match refs.as_slice() {
+                    [] => Self::notify("No tables reference this row"),
+                    [(child, col, _)] => {
+                        state.db_open_related(&key, child.clone(), col.clone(), pk_val.clone())
+                    }
+                    _ => {
+                        state.db.edit.set(None);
+                        state.db.related.set(Some(crate::state::RelatedChoice {
+                            key: key.clone(),
+                            row: row_label.clone(),
+                            value: pk_val.clone(),
+                            refs,
+                        }));
+                    }
+                },
+            );
         std::thread::spawn(move || {
-            send(e_db::referencing(&conn, &table, &pk_col).unwrap_or_default());
+            let refs = e_db::referencing(&conn, &table, &pk_col)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(child, col)| {
+                    let sql = format!(
+                        "SELECT COUNT(*) FROM {} WHERE {} = {}",
+                        e_db::quote_ident(&engine, &child),
+                        e_db::quote_ident(&engine, &col),
+                        e_db::quote_literal(&engine, &pk_val_for_count)
+                    );
+                    let n = e_db::query(&conn, &sql, 1)
+                        .ok()
+                        .and_then(|r| r.rows.into_iter().next())
+                        .and_then(|r| r.into_iter().next().flatten())
+                        .and_then(|n| n.trim().parse().ok());
+                    (child, col, n)
+                })
+                .collect();
+            send(refs);
         });
+    }
+
+    /// Open `table` on connection `key` filtered to the rows whose `column`
+    /// is `value`: the rows that point at the one Related was asked from.
+    pub fn db_open_related(&self, key: &str, table: String, column: String, value: String) {
+        let Some(entry) = self
+            .db
+            .conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            return;
+        };
+        self.db.edit.set(None);
+        self.db.related.set(None);
+        self.db.result_key.set(Some(key.to_string()));
+        self.db.result_table.set(Some(table.clone()));
+        self.db
+            .result_title
+            .set(format!("{} · {table}", entry.config.display_name()));
+        self.db.subview.set("data".into());
+        self.db.sort.set(None);
+        self.db.filter.set(Some((column, Some(value))));
+        self.db.page.set(0);
+        self.db.total_rows.set(None);
+        self.db.columns.set(Vec::new());
+        self.db.ddl.set(None);
+        self.db_load_columns(entry, table);
+        self.db_reload_table();
     }
 
     /// Hop to the foreign-key target of the column open in the edit overlay,
@@ -2966,6 +3180,76 @@ fn json_problem(data_type: &str, value: &str) -> Option<String> {
         .map(|e| format!("not valid JSON ({e})"))
 }
 
+/// A plan, and the index it asks for.
+type ExplainedPlan = (
+    Result<e_db::QueryResult, String>,
+    Option<e_laravel::query_advice::Advice>,
+);
+
+/// The index `plan` (of `sql`, on `engine`) asks for, unless the table
+/// already has one that starts with its columns. Reads the table's indexes.
+fn index_advice(
+    conn: &e_db::Conn,
+    engine: &str,
+    sql: &str,
+    plan: &e_db::QueryResult,
+) -> Option<e_laravel::query_advice::Advice> {
+    use e_laravel::query_advice::{index_for, verdict, Explained};
+    let table = index_for(sql)?.table;
+    let indexes = e_db::indexes(conn, &table)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| (table.clone(), i.columns))
+        .collect();
+    verdict(&[Explained {
+        sql: sql.to_string(),
+        engine: engine.to_string(),
+        columns: plan.columns.clone(),
+        rows: plan.rows.clone(),
+        error: None,
+        indexes,
+    }])
+    .advice
+}
+
+/// Whether an index is the one behind a primary key, which `CREATE INDEX`
+/// doesn't make (MySQL's `PRIMARY`, PostgreSQL's `…_pkey`, SQLite's own).
+pub(crate) fn is_key_index(name: &str) -> bool {
+    name == "PRIMARY" || name.ends_with("_pkey") || name.starts_with("sqlite_autoindex_")
+}
+
+/// The `CREATE INDEX` that makes `ix` on `table`, quoted for `engine`.
+fn index_ddl(engine: &str, table: &str, ix: &e_db::IndexInfo) -> String {
+    let cols = ix
+        .columns
+        .iter()
+        .map(|c| e_db::quote_ident(engine, c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "CREATE {}INDEX {} ON {} ({cols});",
+        if ix.unique { "UNIQUE " } else { "" },
+        e_db::quote_ident(engine, &ix.name),
+        e_db::quote_ident(engine, table)
+    )
+}
+
+/// `CREATE INDEX` for `advice`, named the way Laravel names it.
+fn create_index_sql(engine: &str, advice: &e_laravel::query_advice::Advice) -> String {
+    let name = format!("{}_{}_index", advice.table, advice.columns.join("_"));
+    let cols = advice
+        .columns
+        .iter()
+        .map(|c| e_db::quote_ident(engine, c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "CREATE INDEX {} ON {} ({cols});",
+        e_db::quote_ident(engine, &name),
+        e_db::quote_ident(engine, &advice.table)
+    )
+}
+
 /// What the agent is asked to fix a slow query's plan with.
 fn index_prompt(sql: &str, issues: &[String]) -> String {
     format!(
@@ -3067,6 +3351,38 @@ mod tab_tests {
         let tight = r#"{"b":1}"#;
         let edited = crate::json_layout::pretty(tight).unwrap().replace('1', "2");
         assert_eq!(json_saved(tight, edited), r#"{"b":2}"#);
+    }
+
+    #[test]
+    fn indexes_and_advice_become_create_index() {
+        let ix = e_db::IndexInfo {
+            name: "orders_status_created_at_index".into(),
+            unique: false,
+            columns: vec!["status".into(), "created_at".into()],
+        };
+        assert_eq!(
+            index_ddl("postgres", "orders", &ix),
+            "CREATE INDEX \"orders_status_created_at_index\" ON \"orders\" (\"status\", \"created_at\");"
+        );
+        let unique = e_db::IndexInfo {
+            unique: true,
+            name: "users_email_unique".into(),
+            columns: vec!["email".into()],
+        };
+        assert_eq!(
+            index_ddl("mysql", "users", &unique),
+            "CREATE UNIQUE INDEX `users_email_unique` ON `users` (`email`);"
+        );
+        assert!(is_key_index("PRIMARY") && is_key_index("users_pkey"));
+        assert!(!is_key_index("users_email_unique"));
+        let advice = e_laravel::query_advice::Advice {
+            table: "orders".into(),
+            columns: vec!["status".into(), "created_at".into()],
+        };
+        assert_eq!(
+            create_index_sql("mysql", &advice),
+            "CREATE INDEX `orders_status_created_at_index` ON `orders` (`status`, `created_at`);"
+        );
     }
 
     #[test]

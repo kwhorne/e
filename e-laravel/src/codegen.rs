@@ -136,6 +136,129 @@ pub fn generate_model(table: &str, cols: &[ColumnInfo], fks: &[ForeignKey]) -> S
     out
 }
 
+/// What a factory fills a column with: a relation's factory for a foreign
+/// key, else a guess from its name, else from its type. `None` leaves the
+/// column out (the key, timestamps, soft deletes).
+fn fake_for(col: &ColumnInfo, fk: Option<&ForeignKey>) -> Option<String> {
+    let name = col.name.to_ascii_lowercase();
+    let t = col.data_type.to_ascii_lowercase();
+    let auto_key =
+        col.key == "PRI" && (t.contains("int") || t.contains("serial")) && !name.ends_with("_id");
+    if auto_key || matches!(name.as_str(), "created_at" | "updated_at" | "deleted_at") {
+        return None;
+    }
+    if let Some(fk) = fk {
+        return Some(format!("{}::factory()", model_name(&fk.ref_table)));
+    }
+    // MySQL's enum('draft','published'): one of its values.
+    if let Some(list) = t.strip_prefix("enum(").and_then(|r| r.strip_suffix(')')) {
+        return Some(format!("fake()->randomElement([{list}])"));
+    }
+    let by_name = match name.as_str() {
+        "email" | "email_address" => Some("fake()->unique()->safeEmail()"),
+        "name" | "full_name" => Some("fake()->name()"),
+        "first_name" | "firstname" => Some("fake()->firstName()"),
+        "last_name" | "lastname" | "surname" => Some("fake()->lastName()"),
+        "username" | "user_name" | "login" => Some("fake()->unique()->userName()"),
+        "title" | "subject" | "headline" => Some("fake()->sentence(4)"),
+        "slug" => Some("fake()->unique()->slug()"),
+        "status" | "state" | "type" | "kind" | "role" | "category" | "level" => {
+            Some("fake()->word()")
+        }
+        "description" | "body" | "content" | "bio" | "notes" | "summary" | "excerpt"
+        | "message" | "comment" => Some("fake()->paragraph()"),
+        "phone" | "phone_number" | "mobile" | "telephone" => Some("fake()->phoneNumber()"),
+        "address" | "street" | "street_address" => Some("fake()->streetAddress()"),
+        "city" | "town" => Some("fake()->city()"),
+        "country" => Some("fake()->country()"),
+        "country_code" => Some("fake()->countryCode()"),
+        "zip" | "zipcode" | "zip_code" | "postal_code" | "postcode" => Some("fake()->postcode()"),
+        "url" | "website" | "homepage" | "link" => Some("fake()->url()"),
+        "uuid" => Some("fake()->uuid()"),
+        "ip" | "ip_address" => Some("fake()->ipv4()"),
+        "color" | "colour" => Some("fake()->hexColor()"),
+        "company" | "company_name" => Some("fake()->company()"),
+        "job_title" => Some("fake()->jobTitle()"),
+        "latitude" | "lat" => Some("fake()->latitude()"),
+        "longitude" | "lng" | "lon" => Some("fake()->longitude()"),
+        "price" | "amount" | "total" | "cost" | "subtotal" | "balance" => {
+            Some("fake()->randomFloat(2, 1, 1000)")
+        }
+        "quantity" | "qty" | "stock" => Some("fake()->numberBetween(1, 100)"),
+        "image" | "avatar" | "photo" | "picture" | "image_url" | "avatar_url" => {
+            Some("fake()->imageUrl()")
+        }
+        "password" => Some("Hash::make('password')"),
+        "remember_token" => Some("Str::random(10)"),
+        "email_verified_at" => Some("now()"),
+        _ => None,
+    };
+    if let Some(f) = by_name {
+        return Some(f.to_string());
+    }
+    let word = t
+        .split(|c: char| c == '(' || c.is_whitespace())
+        .next()
+        .unwrap_or("");
+    Some(
+        match word {
+            _ if t == "tinyint(1)" || word.starts_with("bool") => "fake()->boolean()",
+            "int" | "integer" | "bigint" | "smallint" | "mediumint" | "tinyint" | "int2"
+            | "int4" | "int8" => "fake()->numberBetween(0, 1000)",
+            "decimal" | "numeric" | "float" | "double" | "real" | "float4" | "float8" => {
+                "fake()->randomFloat(2, 0, 1000)"
+            }
+            "date" => "fake()->date()",
+            "datetime" | "timestamp" | "timestamptz" => "fake()->dateTime()",
+            "time" => "fake()->time()",
+            "year" => "fake()->year()",
+            "json" | "jsonb" => "[]",
+            "uuid" => "fake()->uuid()",
+            "text" | "mediumtext" | "longtext" => "fake()->paragraph()",
+            _ => "fake()->word()",
+        }
+        .to_string(),
+    )
+}
+
+/// A model factory for `table` from its columns and foreign keys, for
+/// `database/factories/{Model}Factory.php`: each column filled by name or
+/// type, each foreign key by its model's factory.
+pub fn generate_factory(table: &str, cols: &[ColumnInfo], fks: &[ForeignKey]) -> String {
+    let model = model_name(table);
+    let mut uses: Vec<String> = vec![
+        format!("App\\Models\\{model}"),
+        "Illuminate\\Database\\Eloquent\\Factories\\Factory".into(),
+    ];
+    let mut fields = Vec::new();
+    for c in cols {
+        let fk = fks.iter().find(|f| f.table == table && f.column == c.name);
+        let Some(value) = fake_for(c, fk) else {
+            continue;
+        };
+        if let Some(fk) = fk {
+            let related = format!("App\\Models\\{}", model_name(&fk.ref_table));
+            if related != uses[0] {
+                uses.push(related);
+            }
+        }
+        if value.starts_with("Hash::") {
+            uses.push("Illuminate\\Support\\Facades\\Hash".into());
+        }
+        if value.starts_with("Str::") {
+            uses.push("Illuminate\\Support\\Str".into());
+        }
+        fields.push(format!("            '{}' => {value},", c.name));
+    }
+    uses.sort();
+    uses.dedup();
+    let uses: String = uses.iter().map(|u| format!("use {u};\n")).collect();
+    format!(
+        "<?php\n\nnamespace Database\\Factories;\n\n{uses}\n/**\n * @extends Factory<{model}>\n */\nclass {model}Factory extends Factory\n{{\n    /**\n     * Define the model's default state.\n     *\n     * @return array<string, mixed>\n     */\n    public function definition(): array\n    {{\n        return [\n{}\n        ];\n    }}\n}}\n",
+        fields.join("\n")
+    )
+}
+
 /// Whether a string is a plausible table identifier (guards the command).
 pub fn valid_table(t: &str) -> bool {
     !t.is_empty() && t.chars().all(is_ident)
@@ -198,6 +321,64 @@ pub fn change_table_migration(table: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_factory_fills_columns_by_name_type_and_relation() {
+        let col = |name: &str, ty: &str, key: &str| ColumnInfo {
+            name: name.into(),
+            data_type: ty.into(),
+            nullable: false,
+            key: key.into(),
+        };
+        let cols = vec![
+            col("id", "bigint unsigned", "PRI"),
+            col("user_id", "bigint unsigned", ""),
+            col("title", "varchar(255)", ""),
+            col("status", "enum('draft','published')", ""),
+            col("is_pinned", "tinyint(1)", ""),
+            col("views", "int", ""),
+            col("meta", "json", ""),
+            col("published_at", "timestamp", ""),
+            col("created_at", "timestamp", ""),
+            col("updated_at", "timestamp", ""),
+        ];
+        let fks = vec![ForeignKey {
+            table: "blog_posts".into(),
+            column: "user_id".into(),
+            ref_table: "users".into(),
+            ref_column: "id".into(),
+        }];
+        assert_eq!(
+            generate_factory("blog_posts", &cols, &fks),
+            "<?php\n\nnamespace Database\\Factories;\n\nuse App\\Models\\BlogPost;\nuse App\\Models\\User;\nuse Illuminate\\Database\\Eloquent\\Factories\\Factory;\n\n/**\n * @extends Factory<BlogPost>\n */\nclass BlogPostFactory extends Factory\n{\n    /**\n     * Define the model's default state.\n     *\n     * @return array<string, mixed>\n     */\n    public function definition(): array\n    {\n        return [\n            'user_id' => User::factory(),\n            'title' => fake()->sentence(4),\n            'status' => fake()->randomElement(['draft','published']),\n            'is_pinned' => fake()->boolean(),\n            'views' => fake()->numberBetween(0, 1000),\n            'meta' => [],\n            'published_at' => fake()->dateTime(),\n        ];\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn a_users_factory_hashes_its_password() {
+        let col = |name: &str, ty: &str| ColumnInfo {
+            name: name.into(),
+            data_type: ty.into(),
+            nullable: true,
+            key: String::new(),
+        };
+        let f = generate_factory(
+            "users",
+            &[
+                col("email", "varchar(255)"),
+                col("password", "varchar(255)"),
+                col("remember_token", "varchar(100)"),
+            ],
+            &[],
+        );
+        assert!(
+            f.contains("use Illuminate\\Support\\Facades\\Hash;\nuse Illuminate\\Support\\Str;\n")
+        );
+        assert!(f.contains("'email' => fake()->unique()->safeEmail(),"));
+        assert!(f.contains("'password' => Hash::make('password'),"));
+        assert!(f.contains("'remember_token' => Str::random(10),"));
+    }
+
     use super::*;
 
     fn col(name: &str, ty: &str, nullable: bool) -> ColumnInfo {

@@ -983,11 +983,16 @@ const SNAPSHOT_MAX_UNTRACKED: u64 = 10 * 1024 * 1024;
 pub fn snapshot_tree(root: &Path) -> Result<String, String> {
     let index = git_out(root, &["rev-parse", "--git-path", "index"])?;
     let index = root.join(index);
+    // The clock alone isn't enough: macOS gives it to the microsecond, so two
+    // snapshots at once (tests in parallel, two turns) got the same index,
+    // and the second failed on the first one's lock.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let tmp = std::env::temp_dir().join(format!("e-turn-index-{}-{nanos}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("e-turn-index-{}-{nanos}-{n}", std::process::id()));
     // A copy of the real index carries its stat cache: only files that changed
     // are hashed again.
     if index.is_file() {

@@ -113,7 +113,9 @@ pub fn completion_popup(state: AppState) -> impl IntoView {
                 .enumerate()
                 .collect::<Vec<_>>()
         },
-        |(i, _)| *i,
+        // By content too: a row is drawn once, so a new list with an item at
+        // the same place must make a new row, not keep the old one's text.
+        |(i, item)| (*i, item.label.clone(), item.detail.clone()),
         move |(i, item)| {
             let (icon, color) = kind_icon(item.kind);
             let lbl = item.label.clone();

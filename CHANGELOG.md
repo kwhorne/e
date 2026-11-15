@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **SQL completion knows aliases and keywords.** After `u.` it offers the
+  columns of the table `u` stands for, wherever in the statement the alias
+  is defined. Elsewhere it offers the columns of the tables the statement
+  names, and SQL keywords, those that fit the clause first. Nothing pops up
+  inside strings and comments. The console and SQL in PHP strings share it.
+- **A result tab shows its statement** when hovered.
+- **Rows staged for deletion are struck through.**
+- **JSON opens laid out in the value editor**, keys in their own order and
+  numbers as written. Saved unchanged it stays as it was; edited, it goes
+  back on one line in the style it was read in. The value viewer no longer
+  sorts an object's keys.
+
+### Fixed
+
+- **The completion list showed old items.** Its rows were kept by position,
+  so a new list could show the text of the one before it. This affected
+  completion everywhere, not only SQL.
+- **Console completion ran a keystroke behind**: it read the text before
+  the key was applied, so `u.` offered what fit `u`. A space after `FROM`
+  now offers the tables too.
+
 ## [0.23.0] - 2026-11-15
 
 ### Added

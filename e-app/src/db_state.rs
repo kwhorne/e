@@ -1526,7 +1526,7 @@ impl AppState {
         let key = entry.key();
         let send = create_ext_action(self.cx, {
             let state = *self;
-            move |results: Vec<Result<e_db::QueryResult, String>>| {
+            move |results: Vec<(String, Result<e_db::QueryResult, String>)>| {
                 // Discard if cancelled or superseded by a newer run.
                 if state.db.run_gen.get_untracked() != gen {
                     return;
@@ -1567,7 +1567,7 @@ impl AppState {
                         err.as_deref(),
                     );
                 }
-                out.push(res);
+                out.push((stmt.clone(), res));
             }
             send(out);
         });
@@ -1575,12 +1575,16 @@ impl AppState {
 
     /// Build console result tabs from a multi-statement run (see
     /// `db_show_new_tabs`).
-    fn db_build_console_tabs(&self, key: String, results: Vec<Result<e_db::QueryResult, String>>) {
+    fn db_build_console_tabs(
+        &self,
+        key: String,
+        results: Vec<(String, Result<e_db::QueryResult, String>)>,
+    ) {
         self.db.result_loading.set(false);
         let tabs = results
             .into_iter()
             .enumerate()
-            .map(|(i, res)| {
+            .map(|(i, (stmt, res))| {
                 let (result, error) = match res {
                     Ok(r) => (Some(r), None),
                     Err(e) => (None, Some(e)),
@@ -1592,7 +1596,7 @@ impl AppState {
                     pinned: false,
                     key: Some(key.clone()),
                     explain: Vec::new(),
-                    sql: None,
+                    sql: Some(stmt),
                 }
             })
             .collect();
@@ -1985,8 +1989,20 @@ impl AppState {
             return;
         };
         let column = result.columns.get(col).cloned().unwrap_or_default();
+        // A one-line value of a JSON column opens laid out (DB-304).
+        let is_json_col = self.db.columns.with_untracked(|cols| {
+            cols.iter()
+                .any(|c| c.name == column && c.data_type.to_ascii_lowercase().contains("json"))
+        });
+        let laid_out = cell
+            .as_deref()
+            .filter(|v| is_json_col && !v.contains('\n'))
+            .and_then(crate::json_layout::pretty);
+        self.db.edit_json.set(laid_out.as_ref().and(cell.clone()));
         self.db.edit_null.set(cell.is_none());
-        self.db.edit_value.set(cell.clone().unwrap_or_default());
+        self.db
+            .edit_value
+            .set(laid_out.or_else(|| cell.clone()).unwrap_or_default());
         self.db.edit.set(Some((row, col, column)));
     }
 
@@ -2051,6 +2067,10 @@ impl AppState {
                 return;
             }
         }
+        let value = match self.db.edit_json.get_untracked() {
+            Some(read) if !is_null => json_saved(&read, value),
+            _ => value,
+        };
         let new = if is_null { None } else { Some(value) };
         let shown = self.db.result.with_untracked(|r| {
             r.as_ref()
@@ -2813,6 +2833,18 @@ fn shown_value(v: &Option<String>) -> String {
     }
 }
 
+/// What to save for a JSON cell that was `read` on one line and edited
+/// laid out as `edited`: what was read if nothing changed, else `edited`
+/// on one line again, spaced as `read` was.
+fn json_saved(read: &str, edited: String) -> String {
+    use crate::json_layout::{compact, pretty};
+    if pretty(read).as_deref() == Some(edited.as_str()) {
+        return read.to_string();
+    }
+    let spaced = compact(read, true) == read;
+    compact(&edited, spaced)
+}
+
 /// Why `value` can't go in a column of `data_type`, when that is JSON and
 /// the value isn't.
 fn json_problem(data_type: &str, value: &str) -> Option<String> {
@@ -2911,6 +2943,20 @@ mod tab_tests {
             format!("“{}…”", "x".repeat(40))
         );
         assert_eq!(shown_value(&Some("one\ntwo".into())), "“one…”");
+    }
+
+    #[test]
+    fn a_json_cell_is_saved_on_one_line_as_it_was_read() {
+        let read = r#"{"b": [1, 2], "a": "x"}"#;
+        let shown = crate::json_layout::pretty(read).unwrap();
+        // Unchanged: exactly what was read.
+        assert_eq!(json_saved(read, shown.clone()), read);
+        // Changed: one line again, in the same style, key order kept.
+        let edited = shown.replace("\"x\"", "\"y\"");
+        assert_eq!(json_saved(read, edited), r#"{"b": [1, 2], "a": "y"}"#);
+        let tight = r#"{"b":1}"#;
+        let edited = crate::json_layout::pretty(tight).unwrap().replace('1', "2");
+        assert_eq!(json_saved(tight, edited), r#"{"b":2}"#);
     }
 
     #[test]

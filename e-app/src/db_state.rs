@@ -1250,6 +1250,7 @@ impl AppState {
                             statements: stmts,
                             log: Vec::new(),
                             submits_pending: false,
+                            checks: Vec::new(),
                             done: "Imported",
                         }),
                         counts: state.cx.create_rw_signal(Vec::new()),
@@ -2279,6 +2280,7 @@ impl AppState {
 
     /// Drop all staged changes, and show the table's real values again.
     pub fn db_revert_changes(&self) {
+        self.db.conflicts.set(Vec::new());
         let showing = self.db_showing_pending_target();
         self.db_clear_pending();
         if showing {
@@ -2325,8 +2327,19 @@ impl AppState {
         let engine = entry.config.engine.clone();
         let mut stmts: Vec<String> = Vec::new();
         let mut log: Vec<crate::state::WriteLogEntry> = Vec::new();
+        // Each edit and delete is checked against the row as it was read,
+        // so a change made meanwhile isn't overwritten.
+        let mut checks: Vec<(e_db::RowCheck, crate::state::Staged)> = Vec::new();
         self.db.pending_edits.with_untracked(|edits| {
             for e in edits.values() {
+                checks.push((
+                    e_db::RowCheck {
+                        table: table.clone(),
+                        pk: e.pk.clone(),
+                        column: Some((e.column.clone(), e.old.clone())),
+                    },
+                    crate::state::Staged::Edit(e.pk.clone(), e.column.clone()),
+                ));
                 let fwd = e_db::update_sql(&engine, &table, &e.column, e.new.as_deref(), &e.pk);
                 // Reverse: set the column back to its old value.
                 let rev = e_db::update_sql(&engine, &table, &e.column, e.old.as_deref(), &e.pk);
@@ -2339,6 +2352,14 @@ impl AppState {
         });
         self.db.pending_deletes.with_untracked(|dels| {
             for pk in dels {
+                checks.push((
+                    e_db::RowCheck {
+                        table: table.clone(),
+                        pk: pk.clone(),
+                        column: None,
+                    },
+                    crate::state::Staged::Delete(pk.clone()),
+                ));
                 let fwd = e_db::delete_sql(&engine, &table, pk);
                 stmts.push(fwd.clone());
                 // A delete's reverse (re-insert) needs the full row; not tracked.
@@ -2372,6 +2393,7 @@ impl AppState {
                 statements: stmts,
                 log,
                 submits_pending: true,
+                checks,
                 done: "Submitted",
             }),
             counts: self.cx.create_rw_signal(Vec::new()),
@@ -2462,9 +2484,13 @@ impl AppState {
             statements,
             log,
             submits_pending,
+            checks,
             done,
         } = tx;
-        let send = create_ext_action(self.cx, move |res: Result<u64, String>| {
+        let (row_checks, staged): (Vec<_>, Vec<_>) = checks.into_iter().unzip();
+        let checked = row_checks.clone();
+        self.db.conflicts.set(Vec::new());
+        let send = create_ext_action(self.cx, move |res: Result<u64, e_db::TxError>| {
             state.db.result_loading.set(false);
             match res {
                 Ok(n) => {
@@ -2480,12 +2506,59 @@ impl AppState {
                         state.db_reload_table();
                     }
                 }
-                Err(e) => state.db.result_error.set(Some(e)),
+                Err(e_db::TxError::Conflicts(found)) => {
+                    state.db_take_conflicts(&key, &checked, &staged, &found)
+                }
+                Err(e_db::TxError::Failed(e)) => state.db.result_error.set(Some(e)),
             }
         });
         std::thread::spawn(move || {
-            send(e_db::execute_transaction(&conn, &statements));
+            send(e_db::execute_checked(&conn, &row_checks, &statements));
         });
+    }
+
+    /// After a Submit that found rows changed since they were read: take
+    /// the staged changes they guard off (the rest stay staged), say what
+    /// each row holds now, and read the table again so it shows that.
+    fn db_take_conflicts(
+        &self,
+        key: &str,
+        checks: &[e_db::RowCheck],
+        staged: &[crate::state::Staged],
+        found: &[e_db::Conflict],
+    ) {
+        use crate::state::Staged;
+        let edits = self.db.pending_edits.get_untracked();
+        let lines = found
+            .iter()
+            .filter_map(|c| {
+                let check = checks.get(c.check)?;
+                let staged = staged.get(c.check)?;
+                let pending = match staged {
+                    Staged::Edit(pk, col) => edits.get(&(pk.clone(), col.clone())),
+                    Staged::Delete(_) => None,
+                };
+                Some(conflict_line(check, staged, pending, &c.found))
+            })
+            .collect::<Vec<_>>();
+        for c in found {
+            match staged.get(c.check) {
+                Some(Staged::Edit(pk, col)) => self
+                    .db
+                    .pending_edits
+                    .update(|m| _ = m.remove(&(pk.clone(), col.clone()))),
+                Some(Staged::Delete(pk)) => self.db.pending_deletes.update(|m| _ = m.remove(pk)),
+                None => {}
+            }
+        }
+        self.db_release_pending_target_if_empty();
+        self.db_mark_pending();
+        self.db.conflicts.set(lines);
+        if self.db.result_key.get_untracked().as_deref() == Some(key)
+            && self.db.result_table.get_untracked().is_some()
+        {
+            self.db_reload_table();
+        }
     }
 
     /// Show rows in other tables that reference the current row (reverse FK).
@@ -2685,6 +2758,61 @@ fn insert_pk(pk: &[String], values: &[(String, Option<String>)]) -> Option<RowPk
         .collect()
 }
 
+/// What a failed check found, as one line for the conflict banner, e.g.
+/// `id=5: email is now “b@x” (you read “a@x”) — your “c@x” is no longer staged`.
+fn conflict_line(
+    check: &e_db::RowCheck,
+    staged: &crate::state::Staged,
+    pending: Option<&crate::state::PendingEdit>,
+    found: &e_db::Found,
+) -> String {
+    use crate::state::Staged;
+    use e_db::Found;
+    let row = check
+        .pk
+        .iter()
+        .map(|(c, v)| format!("{c}={}", v.as_deref().unwrap_or("NULL")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match (staged, found) {
+        (Staged::Edit(_, col), Found::Gone) => {
+            format!("{row}: the row is gone — your edit of {col} is no longer staged")
+        }
+        (Staged::Delete(_), Found::Gone) => {
+            format!("{row}: the row is already gone — its delete is no longer staged")
+        }
+        (Staged::Edit(_, col), Found::Now(now)) => {
+            let read = check.column.as_ref().and_then(|(_, v)| v.clone());
+            let mine = pending
+                .map(|p| format!("your {}", shown_value(&p.new)))
+                .unwrap_or_else(|| "your edit".into());
+            format!(
+                "{row}: {col} is now {} (you read {}) — {mine} is no longer staged",
+                shown_value(&now.clone()),
+                shown_value(&read)
+            )
+        }
+        (Staged::Delete(_), Found::Now(_)) => format!("{row}: the row has changed"),
+    }
+}
+
+/// A value for a message: quoted and cut to a line, or `NULL`.
+fn shown_value(v: &Option<String>) -> String {
+    const MAX: usize = 40;
+    match v {
+        None => "NULL".into(),
+        Some(s) => {
+            let line = s.lines().next().unwrap_or("");
+            let cut: String = line.chars().take(MAX).collect();
+            if cut.len() < s.len() {
+                format!("“{cut}…”")
+            } else {
+                format!("“{cut}”")
+            }
+        }
+    }
+}
+
 /// Why `value` can't go in a column of `data_type`, when that is JSON and
 /// the value isn't.
 fn json_problem(data_type: &str, value: &str) -> Option<String> {
@@ -2744,6 +2872,45 @@ mod tab_tests {
         assert_eq!(pick_active(None, &one), Some(0));
         assert_eq!(pick_active(Some("gone"), &one), Some(0));
         assert_eq!(pick_active(Some("a"), &[]), None);
+    }
+
+    #[test]
+    fn a_conflict_says_what_the_row_holds_now() {
+        use crate::state::{PendingEdit, Staged};
+        let pk = vec![("id".to_string(), Some("5".to_string()))];
+        let check = e_db::RowCheck {
+            table: "users".into(),
+            pk: pk.clone(),
+            column: Some(("email".into(), Some("a@x".into()))),
+        };
+        let edit = Staged::Edit(pk.clone(), "email".into());
+        let mine = PendingEdit {
+            column: "email".into(),
+            pk: pk.clone(),
+            new: Some("c@x".into()),
+            old: Some("a@x".into()),
+        };
+        assert_eq!(
+            conflict_line(&check, &edit, Some(&mine), &e_db::Found::Now(None)),
+            "id=5: email is now NULL (you read “a@x”) — your “c@x” is no longer staged"
+        );
+        assert_eq!(
+            conflict_line(&check, &edit, Some(&mine), &e_db::Found::Gone),
+            "id=5: the row is gone — your edit of email is no longer staged"
+        );
+        let delete = e_db::RowCheck {
+            column: None,
+            ..check
+        };
+        assert_eq!(
+            conflict_line(&delete, &Staged::Delete(pk), None, &e_db::Found::Gone),
+            "id=5: the row is already gone — its delete is no longer staged"
+        );
+        assert_eq!(
+            shown_value(&Some("x".repeat(50))),
+            format!("“{}…”", "x".repeat(40))
+        );
+        assert_eq!(shown_value(&Some("one\ntwo".into())), "“one…”");
     }
 
     #[test]

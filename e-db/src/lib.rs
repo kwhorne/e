@@ -1913,6 +1913,125 @@ fn group_indexes(rows: impl Iterator<Item = (String, bool, String)>) -> Vec<Inde
 /// back. ClickHouse has no transactions, so statements run sequentially
 /// (best-effort) — a mid-way failure leaves earlier statements applied.
 pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, String> {
+    execute_checked(conn, &[], statements).map_err(|e| e.to_string())
+}
+
+/// What a staged change expects to find when it is written: its row, by
+/// primary key, and for an edit the value the edited column had when the
+/// grid read it. Checking that before writing is the optimistic lock that
+/// keeps a Submit from overwriting a change someone else made meanwhile.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RowCheck {
+    pub table: String,
+    pub pk: Vec<(String, Option<String>)>,
+    /// For an edit, the column and the value it must still hold; `None`
+    /// (a delete) only needs the row to still be there.
+    pub column: Option<(String, Option<String>)>,
+}
+
+/// What a [`RowCheck`] found instead of what it expected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Found {
+    /// The row is gone.
+    Gone,
+    /// The column holds this value now.
+    Now(Option<String>),
+}
+
+/// A check that failed: its index in the checks given, and what it found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Conflict {
+    pub check: usize,
+    pub found: Found,
+}
+
+/// Why [`execute_checked`] wrote nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TxError {
+    /// Rows changed since they were read; nothing was written.
+    Conflicts(Vec<Conflict>),
+    /// The database refused (a statement, the connection); rolled back.
+    Failed(String),
+}
+
+impl std::fmt::Display for TxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TxError::Failed(e) => f.write_str(e),
+            TxError::Conflicts(c) => write!(
+                f,
+                "{} row{} changed since {} read; nothing was written",
+                c.len(),
+                if c.len() == 1 { "" } else { "s" },
+                if c.len() == 1 { "it was" } else { "they were" },
+            ),
+        }
+    }
+}
+
+impl From<String> for TxError {
+    fn from(e: String) -> Self {
+        TxError::Failed(e)
+    }
+}
+
+/// The `SELECT` that reads what `check` looks at: the edited column (or `1`)
+/// of its row, locked for the rest of the transaction where the engine can.
+pub fn check_sql(engine: &str, check: &RowCheck) -> String {
+    let what = match &check.column {
+        Some((col, _)) => quote_ident(engine, col),
+        None => "1".into(),
+    };
+    let lock = match engine {
+        "sqlite" | "clickhouse" | "ch" => "",
+        _ => " FOR UPDATE",
+    };
+    format!(
+        "SELECT {what} FROM {} WHERE {}{lock}",
+        quote_ident(engine, &check.table),
+        pk_conds(engine, &check.pk)
+    )
+}
+
+/// What's wrong with `row` (the first row [`check_sql`] read, if any — its
+/// one value as the grid would show it) for `check`, if anything.
+fn check_row(check: &RowCheck, row: Option<Option<String>>) -> Option<Found> {
+    match (row, &check.column) {
+        (None, _) => Some(Found::Gone),
+        (Some(_), None) => None,
+        (Some(now), Some((_, want))) => (now != *want).then_some(Found::Now(now)),
+    }
+}
+
+/// Collect the failed checks, reading each row with `read`.
+fn run_checks(
+    engine: &str,
+    checks: &[RowCheck],
+    mut read: impl FnMut(&str) -> Result<Option<Option<String>>, String>,
+) -> Result<Vec<Conflict>, String> {
+    let mut conflicts = Vec::new();
+    for (i, check) in checks.iter().enumerate() {
+        if let Some(found) = check_row(check, read(&check_sql(engine, check))?) {
+            conflicts.push(Conflict { check: i, found });
+        }
+    }
+    Ok(conflicts)
+}
+
+/// [`execute_transaction`], after checking in the same transaction that the
+/// rows `checks` name still hold what they held when read. Each row is read
+/// the way the grid read it, so the values compare as the text the grid
+/// showed, and locked (`FOR UPDATE`; SQLite takes the write lock up front)
+/// so nothing changes it between the check and the write. If any check
+/// fails, nothing is written and every failed check is returned.
+///
+/// ClickHouse has no transactions: its checks run first, but a change made
+/// between them and the writes isn't caught.
+pub fn execute_checked(
+    conn: &Conn,
+    checks: &[RowCheck],
+    statements: &[String],
+) -> Result<u64, TxError> {
     if statements.is_empty() {
         return Ok(0);
     }
@@ -1926,6 +2045,20 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
             let mut tx = c
                 .start_transaction(mysql::TxOpts::default())
                 .map_err(|e| e.to_string())?;
+            let conflicts = run_checks("mysql", checks, |sql| {
+                let mut first = None;
+                for row in tx.query_iter(sql).map_err(|e| e.to_string())? {
+                    let row = row.map_err(|e| e.to_string())?;
+                    if first.is_none() {
+                        first = Some(row.as_ref(0).and_then(mysql_value_to_string));
+                    }
+                }
+                Ok(first)
+            })?;
+            if !conflicts.is_empty() {
+                tx.rollback().map_err(|e| e.to_string())?;
+                return Err(TxError::Conflicts(conflicts));
+            }
             let mut affected = 0u64;
             for s in statements {
                 tx.query_drop(s.as_str()).map_err(|e| e.to_string())?;
@@ -1937,7 +2070,24 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
         Backend::Sqlite(path) => {
             let mut c = conn.sqlite(path)?;
             let _running = conn.sqlite_running(&c);
-            let tx = c.transaction().map_err(|e| e.to_string())?;
+            // Immediate: take the write lock before the checks read, so no
+            // other writer gets in between.
+            let tx = c
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
+            let conflicts = run_checks("sqlite", checks, |sql| {
+                let mut stmt = tx.prepare(sql).map_err(|e| e.to_string())?;
+                let mut q = stmt.query([]).map_err(|e| e.to_string())?;
+                match q.next().map_err(|e| e.to_string())? {
+                    Some(row) => Ok(Some(sqlite_cell(
+                        row.get_ref(0).map_err(|e| e.to_string())?,
+                    ))),
+                    None => Ok(None),
+                }
+            })?;
+            if !conflicts.is_empty() {
+                return Err(TxError::Conflicts(conflicts));
+            }
             let mut affected = 0u64;
             for s in statements {
                 affected += tx.execute(s.as_str(), []).map_err(|e| e.to_string())? as u64;
@@ -1949,6 +2099,21 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
             let mut client = m.lock().unwrap_or_else(|e| e.into_inner());
             conn.sync_pg_session(&mut client)?;
             let mut tx = client.transaction().map_err(pg_err)?;
+            let conflicts = run_checks("postgres", checks, |sql| {
+                use postgres::SimpleQueryMessage::Row;
+                Ok(tx
+                    .simple_query(sql)
+                    .map_err(pg_err)?
+                    .into_iter()
+                    .find_map(|m| match m {
+                        Row(row) => Some(row.get(0).map(str::to_string)),
+                        _ => None,
+                    }))
+            })?;
+            if !conflicts.is_empty() {
+                tx.rollback().map_err(pg_err)?;
+                return Err(TxError::Conflicts(conflicts));
+            }
             let mut affected = 0u64;
             for s in statements {
                 affected += tx.execute(s.as_str(), &[]).map_err(pg_err)?;
@@ -1957,6 +2122,16 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
             Ok(affected)
         }
         Backend::Clickhouse { .. } => {
+            let conflicts = run_checks("clickhouse", checks, |sql| {
+                Ok(query(conn, sql, 1)?
+                    .rows
+                    .into_iter()
+                    .next()
+                    .map(|r| r.into_iter().next().flatten()))
+            })?;
+            if !conflicts.is_empty() {
+                return Err(TxError::Conflicts(conflicts));
+            }
             for s in statements {
                 let running = conn.ch_running();
                 ch_query_as(
@@ -1969,6 +2144,18 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
             }
             Ok(0)
         }
+    }
+}
+
+/// A SQLite value as the grid shows it.
+fn sqlite_cell(v: rusqlite::types::ValueRef<'_>) -> Option<String> {
+    use rusqlite::types::ValueRef::*;
+    match v {
+        Null => None,
+        Integer(n) => Some(n.to_string()),
+        Real(f) => Some(f.to_string()),
+        Text(t) => Some(String::from_utf8_lossy(t).to_string()),
+        Blob(b) => Some(format!("<{} bytes>", b.len())),
     }
 }
 
@@ -2759,15 +2946,7 @@ pub fn query(conn: &Conn, sql: &str, max: usize) -> Result<QueryResult, String> 
                     }
                     let mut vals = Vec::with_capacity(ncols);
                     for i in 0..ncols {
-                        use rusqlite::types::ValueRef::*;
-                        let v = match row.get_ref(i).map_err(|e| e.to_string())? {
-                            Null => None,
-                            Integer(n) => Some(n.to_string()),
-                            Real(f) => Some(f.to_string()),
-                            Text(t) => Some(String::from_utf8_lossy(t).to_string()),
-                            Blob(b) => Some(format!("<{} bytes>", b.len())),
-                        };
-                        vals.push(v);
+                        vals.push(sqlite_cell(row.get_ref(i).map_err(|e| e.to_string())?));
                     }
                     rows.push(vals);
                 }
@@ -3525,6 +3704,94 @@ mod pg_live_tests {
         eprintln!("clickhouse: cancelled after {:?}", t.elapsed());
         assert!(conn.ch_running.lock().unwrap().is_empty());
         assert!(query(&conn, "SELECT 1", 10).is_ok());
+    }
+
+    /// `--ignored`, with `E_MYSQL_SCRATCH_PORT`: a throwaway server (user
+    /// root, no password) — this one writes, in a database of its own.
+    #[test]
+    #[ignore]
+    fn mysql_checks_rows_as_the_grid_read_them() {
+        let Some(port) = std::env::var("E_MYSQL_SCRATCH_PORT").ok() else {
+            return;
+        };
+        let cfg = |database: &str| DbConfig {
+            engine: "mysql".into(),
+            host: "127.0.0.1".into(),
+            port: port.parse().unwrap(),
+            username: "root".into(),
+            database: database.into(),
+            ..Default::default()
+        };
+        let admin = connect(&cfg("mysql")).unwrap();
+        query(&admin, "DROP DATABASE IF EXISTS e_lock_test", 0).unwrap();
+        query(&admin, "CREATE DATABASE e_lock_test", 0).unwrap();
+        let conn = connect(&cfg("e_lock_test")).unwrap();
+        query(
+            &conn,
+            "CREATE TABLE t (id INT PRIMARY KEY, f FLOAT, j JSON, d DATETIME(3), \
+             name VARCHAR(20) COLLATE utf8mb4_0900_ai_ci)",
+            0,
+        )
+        .unwrap();
+        query(
+            &conn,
+            "INSERT INTO t VALUES (1, 0.1, '{\"b\": 1, \"a\": [1, 2.50]}', \
+             '2026-01-02 03:04:05.678', 'Ål')",
+            0,
+        )
+        .unwrap();
+        let page = table_data(&conn, "mysql", "t", 10).unwrap();
+        let pk = vec![("id".to_string(), Some("1".to_string()))];
+        // Every value as the grid read it — a FLOAT that isn't exactly 0.1,
+        // JSON the server normalised, fractional seconds — checks out.
+        let checks: Vec<RowCheck> = page.columns[1..]
+            .iter()
+            .zip(&page.rows[0][1..])
+            .map(|(col, v)| RowCheck {
+                table: "t".into(),
+                pk: pk.clone(),
+                column: Some((col.clone(), v.clone())),
+            })
+            .collect();
+        assert_eq!(
+            execute_checked(
+                &conn,
+                &checks,
+                &["UPDATE t SET name = 'Ola' WHERE id = 1".into()]
+            ),
+            Ok(1),
+            "{page:?}"
+        );
+        // A value the collation calls equal is still a change.
+        let err = execute_checked(
+            &conn,
+            &[RowCheck {
+                table: "t".into(),
+                pk: pk.clone(),
+                column: Some(("name".into(), Some("ola".into()))),
+            }],
+            &["UPDATE t SET name = 'x' WHERE id = 1".into()],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            TxError::Conflicts(vec![Conflict {
+                check: 0,
+                found: Found::Now(Some("Ola".into())),
+            }])
+        );
+        let gone = RowCheck {
+            table: "t".into(),
+            pk: vec![("id".to_string(), Some("2".to_string()))],
+            column: None,
+        };
+        assert!(matches!(
+            execute_checked(&conn, &[gone], &["DELETE FROM t WHERE id = 2".into()]),
+            Err(TxError::Conflicts(_))
+        ));
+        let now = query(&conn, "SELECT name FROM t", 10).unwrap().rows;
+        assert_eq!(now, vec![vec![Some("Ola".to_string())]]);
+        query(&admin, "DROP DATABASE e_lock_test", 0).unwrap();
     }
 
     /// `--ignored`, with `E_MYSQL_PORT` (user root, no password; reads only).
@@ -4979,6 +5246,129 @@ mod tests {
             "failed transaction must not add rows"
         );
         let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn a_checked_transaction_writes_nothing_when_a_row_changed() {
+        let dir = std::env::temp_dir().join("e_db_checked_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("checked.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT, f REAL);
+                 INSERT INTO t VALUES (1, 'a', 0.1), (2, 'b', NULL), (3, 'c', 2.5);",
+            )
+            .unwrap();
+        }
+        let cfg = DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let conn = connect(&cfg).unwrap();
+        let pk = |id: &str| vec![("id".to_string(), Some(id.to_string()))];
+        let edit = |id: &str, col: &str, was: Option<&str>| RowCheck {
+            table: "t".into(),
+            pk: pk(id),
+            column: Some((col.into(), was.map(str::to_string))),
+        };
+        let shown = |sql: &str| query(&conn, sql, 10).unwrap().rows;
+
+        // Values as the grid read them, a float and a NULL among them, pass.
+        let n = execute_checked(
+            &conn,
+            &[edit("1", "f", Some("0.1")), edit("2", "f", None)],
+            &[
+                "UPDATE t SET f = 0.2 WHERE id = 1".into(),
+                "UPDATE t SET f = 1 WHERE id = 2".into(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(n, 2);
+
+        // Row 1's v is no longer what was read, and row 9 is gone: both are
+        // reported, and the write that was fine isn't made either.
+        let err = execute_checked(
+            &conn,
+            &[
+                edit("1", "v", Some("stale")),
+                edit("3", "v", Some("c")),
+                RowCheck {
+                    table: "t".into(),
+                    pk: pk("9"),
+                    column: None,
+                },
+            ],
+            &[
+                "UPDATE t SET v = 'x' WHERE id = 1".into(),
+                "UPDATE t SET v = 'y' WHERE id = 3".into(),
+                "DELETE FROM t WHERE id = 9".into(),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            TxError::Conflicts(vec![
+                Conflict {
+                    check: 0,
+                    found: Found::Now(Some("a".into())),
+                },
+                Conflict {
+                    check: 2,
+                    found: Found::Gone,
+                },
+            ])
+        );
+        assert_eq!(
+            shown("SELECT v FROM t ORDER BY id"),
+            vec![
+                vec![Some("a".to_string())],
+                vec![Some("b".to_string())],
+                vec![Some("c".to_string())],
+            ],
+            "a conflict must write nothing"
+        );
+
+        // A delete only needs the row to be there.
+        let n = execute_checked(
+            &conn,
+            &[RowCheck {
+                table: "t".into(),
+                pk: pk("3"),
+                column: None,
+            }],
+            &["DELETE FROM t WHERE id = 3".into()],
+        )
+        .unwrap();
+        assert_eq!(n, 1);
+        let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn a_check_reads_the_column_and_locks_the_row() {
+        let check = RowCheck {
+            table: "users".into(),
+            pk: vec![("id".into(), Some("5".into()))],
+            column: Some(("email".into(), Some("a@b".into()))),
+        };
+        assert_eq!(
+            check_sql("mysql", &check),
+            "SELECT `email` FROM `users` WHERE `id` = '5' FOR UPDATE"
+        );
+        assert_eq!(
+            check_sql("postgres", &check),
+            "SELECT \"email\" FROM \"users\" WHERE \"id\" = '5' FOR UPDATE"
+        );
+        let gone = RowCheck {
+            column: None,
+            ..check
+        };
+        assert_eq!(
+            check_sql("sqlite", &gone),
+            "SELECT 1 FROM `users` WHERE `id` = '5'"
+        );
     }
 
     #[test]

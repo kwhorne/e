@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-11-15
+
 ### Fixed
 
 - **Opening a table closed every result tab**, pinned ones too. Result tabs
@@ -2571,7 +2573,8 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.20.2...HEAD
+[0.20.2]: https://github.com/kwhorne/e/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/kwhorne/e/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/kwhorne/e/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/kwhorne/e/compare/v0.19.0...v0.19.1

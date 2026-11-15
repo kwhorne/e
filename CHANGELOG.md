@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The confirmation says how many rows a write touches.** Each statement
+  shows its rows, counted on the database while the dialog is open (up to
+  10,000), and the dialog sums them up. An `UPDATE` or `DELETE` is counted
+  by running its `WHERE` as a `SELECT`, which is checked to only read first;
+  forms it can't read safely say *rows not counted*.
+- **A multi-line value editor.** Double-clicking a cell opens its value in a
+  multi-line editor (⌘↵ to stage, Esc to cancel), and a JSON column only
+  takes valid JSON.
+- **An agent's query names its environment.** The consent dialog shows the
+  database's environment in its colour.
+
+### Changed
+
+- **+ Row stages the new row** with the table's other changes instead of
+  inserting it at once. It shows in green above the table's rows and is
+  inserted on Submit, in the same transaction, or dropped on Revert.
+- **The agent socket's `db_schema` and `db_query` use the active
+  connection** when none is named, instead of the first one connected; with
+  several connected and none active they say so.
+
+### Fixed
+
+- **The connection form showed an empty SSH box** for SQLite and when the
+  tunnel was off.
+- **The confirmation for a console run said only the flagged statements
+  would run** ("Run 1 statement(s)") when the others run with them. It now
+  says how many run in all and which need a look.
+
 ## [0.21.0] - 2026-11-15
 
 ### Added

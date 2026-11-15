@@ -5,10 +5,26 @@
 //! [`DbConfig`], opened into a live [`Conn`], and queried into a [`QueryResult`]
 //! whose cells are all stringified for display in a grid.
 
+mod affected;
 mod classify;
 pub mod history;
 
+pub use affected::{affects, Affects, Counted, COUNT_CAP};
 pub use classify::{is_destructive, is_read_only};
+
+/// How many rows a write statement will touch, asked of the database
+/// before it runs (see [`affects`]); `None` when that can't be told.
+pub fn count_affected(conn: &Conn, engine: &str, sql: &str) -> Option<Counted> {
+    match affects(engine, sql) {
+        Affects::Rows(n) => Some(Counted::Exactly(n)),
+        Affects::Count(q) => {
+            let r = query(conn, &q, 1).ok()?;
+            let n = r.rows.first()?.first()?.as_deref()?.trim().parse().ok()?;
+            Some(Counted::from_count(n))
+        }
+        Affects::Unknown => None,
+    }
+}
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -4633,6 +4649,53 @@ mod tests {
         assert_eq!(res.rows.len(), 2);
         assert_eq!(res.rows[0][1], Some("Alice".to_string()));
         let _ = std::fs::remove_file(&dbfile);
+    }
+
+    #[test]
+    fn sqlite_counts_the_rows_a_write_will_touch() {
+        let dir = std::env::temp_dir().join(format!("e_db_affected_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("affected.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch(
+                "CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT);\
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 10050)\
+                 INSERT INTO orders (status) SELECT CASE WHEN i % 10 = 0 THEN 'old' ELSE 'new' END FROM n;",
+            )
+            .unwrap();
+        }
+        let conn = connect(&DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        })
+        .unwrap();
+        let count = |sql: &str| count_affected(&conn, "sqlite", sql);
+        assert_eq!(
+            count("DELETE FROM orders WHERE status = 'old'"),
+            Some(Counted::Exactly(1005))
+        );
+        assert_eq!(
+            count("UPDATE orders SET status = 'x' WHERE id = 7"),
+            Some(Counted::Exactly(1))
+        );
+        assert_eq!(
+            count("UPDATE orders SET status = 'x' WHERE id = -1"),
+            Some(Counted::Exactly(0))
+        );
+        assert_eq!(count("DELETE FROM orders"), Some(Counted::Over));
+        assert_eq!(
+            count("INSERT INTO orders (status) VALUES ('a'), ('b')"),
+            Some(Counted::Exactly(2))
+        );
+        // Counting wrote nothing.
+        assert_eq!(
+            count("DELETE FROM orders WHERE status = 'old'"),
+            Some(Counted::Exactly(1005))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

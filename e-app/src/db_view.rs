@@ -770,15 +770,22 @@ fn add_form(state: AppState) -> impl IntoView {
             _ => empty().into_any(),
         },
     )
-    .style(|s| {
-        s.flex_col()
+    .style(move |s| {
+        let s = s
+            .flex_col()
             .gap(6.0)
             .width_full()
             .padding(8.0)
             .border(1.0)
             .border_color(theme::border())
             .border_radius(8.0)
-            .background(theme::bg_hover())
+            .background(theme::bg_hover());
+        // An empty box when there's no tunnel (or SQLite) to fill in.
+        if use_ssh.get() && engine.get() != "sqlite" {
+            s
+        } else {
+            s.hide()
+        }
     });
 
     // Test connection + status.
@@ -1867,10 +1874,26 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
             .margin_bottom(6.0)
     });
     let subtitle = label(move || match state.db.confirm.get() {
-        Some(c) => format!(
-            "{} statement(s) will run on this database. Review them:",
-            c.statements.len()
-        ),
+        Some(c) => {
+            // A console run lists only the statements that need a look;
+            // the others run with them.
+            let all = match &c.run {
+                crate::state::ConfirmRun::Console(sql) => e_db::split_statements(sql).len(),
+                crate::state::ConfirmRun::Transaction(_) => c.statements.len(),
+            };
+            let shown = c.statements.len();
+            let rows = rows_summary(&c.counts.get());
+            if all > shown {
+                let these = if shown == 1 {
+                    "this one needs".to_string()
+                } else {
+                    format!("these {shown} need")
+                };
+                format!("{all} statements will run on this database; {these} a look{rows}:")
+            } else {
+                format!("{shown} statement(s) will run on this database{rows}. Review them:")
+            }
+        }
         None => String::new(),
     })
     .style(|s| s.font_size(12.0).color(theme::fg_dim()).margin_bottom(10.0));
@@ -1881,21 +1904,40 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
                 .db
                 .confirm
                 .get()
-                .map(|c| c.statements)
+                .map(|c| {
+                    c.statements
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, s)| (i, s, c.counts))
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default()
-                .into_iter()
-                .enumerate()
-                .collect::<Vec<_>>()
         },
-        |(i, _)| *i,
-        move |(_, stmt)| {
-            label(move || stmt.clone()).style(|s| {
+        |(i, stmt, _)| (*i, stmt.clone()),
+        move |(i, stmt, counts)| {
+            let text = label(move || stmt.clone()).style(|s| {
                 s.font_family(theme::mono_family())
                     .font_size(12.0)
                     .color(theme::error())
+                    .flex_grow(1.0_f32)
+                    .min_width(0.0)
+                    .text_ellipsis()
+            });
+            // The rows this one touches (DB-703), right-aligned.
+            let rows = label(move || {
+                counts.with(|c| c.get(i).copied().map(estimate_label).unwrap_or_default())
+            })
+            .style(|s| {
+                s.font_size(11.0)
+                    .color(theme::fg_dim())
+                    .flex_shrink(0.0_f32)
+            });
+            stack((text, rows)).style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .gap(10.0)
                     .padding_vert(2.0)
                     .width_full()
-                    .text_ellipsis()
             })
         },
     )
@@ -1955,7 +1997,14 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
         })
         .on_click_stop(move |_| state.db_confirm_cancel());
     let confirm = label(move || match state.db.confirm.get() {
-        Some(c) => format!("{} {} statement(s)", c.verb, c.statements.len()),
+        // Every statement that runs, not just the ones listed.
+        Some(c) => {
+            let all = match &c.run {
+                crate::state::ConfirmRun::Console(sql) => e_db::split_statements(sql).len(),
+                crate::state::ConfirmRun::Transaction(_) => c.statements.len(),
+            };
+            format!("{} {all} statement(s)", c.verb)
+        }
         None => "Run".to_string(),
     })
     .style(move |s| {
@@ -2011,11 +2060,24 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
 pub fn db_consent_dialog(state: AppState) -> impl IntoView {
     let title = label(|| "Agent wants to run a query".to_string())
         .style(|s| s.font_size(14.0).font_bold().color(theme::fg()));
+    // Which database, in its environment's colour: an agent's query on
+    // production should look like one.
     let subtitle = label(move || match state.db.consent.get() {
-        Some(c) => format!("on “{}” — allow?", c.db_name),
+        Some(c) => format!(
+            "on “{}” · {} — allow?",
+            c.db_name,
+            c.env.label().to_uppercase()
+        ),
         None => String::new(),
     })
-    .style(|s| s.font_size(12.0).color(theme::fg_dim()).margin_bottom(8.0));
+    .style(move |s| {
+        let color = state
+            .db
+            .consent
+            .with(|c| c.as_ref().map(|c| env_color(c.env)))
+            .unwrap_or(theme::fg_dim());
+        s.font_size(12.0).color(color).margin_bottom(8.0)
+    });
 
     let sql = label(move || state.db.consent.get().map(|c| c.sql).unwrap_or_default()).style(|s| {
         theme::input_colors(s)
@@ -2094,35 +2156,65 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             .margin_bottom(8.0)
     });
 
-    let input = text_input(state.db.edit_value)
-        .placeholder("value")
-        .style(move |s| {
-            let s = theme::input_colors(s)
-                .width_full()
-                .min_height(34.0)
-                .font_family(theme::mono_family())
-                .font_size(13.0)
-                .padding_horiz(8.0)
-                .padding_vert(6.0);
-            if state.db.edit_null.get() {
-                s.color(theme::fg_dim())
-            } else {
-                s
+    // A multi-line editor for the value (DB-304), made afresh for each cell
+    // opened: ⌘↵ stages it, Esc cancels. Long text and JSON fit.
+    let input = dyn_container(
+        move || state.db.edit.get().map(|(r, c, _)| (r, c)),
+        move |at| {
+            if at.is_none() {
+                return empty().into_any();
             }
-        })
-        .on_key_down(
-            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Enter),
-            |m| m.meta() || m.control(),
-            move |_| state.db_commit_edit(),
-        )
-        .on_key_down(
-            floem::keyboard::Key::Named(floem::keyboard::NamedKey::Escape),
-            |_| true,
-            move |_| state.db_cancel_edit(),
-        )
-        .request_focus(move || {
-            state.db.edit.get();
-        });
+            use floem::views::editor::command::CommandExecuted;
+            use floem::views::editor::keypress::{default_key_handler, key::KeyInput};
+            // ⌘↵ and Esc are the dialog's, taken before the editor would
+            // make them a new line or a cleared selection.
+            let editor = floem::views::text_editor_keys(
+                state.db.edit_value.get_untracked(),
+                move |editor_sig, kp, mods| {
+                    use floem::keyboard::{Key, NamedKey};
+                    if let KeyInput::Keyboard(key, _) = &kp.key {
+                        if matches!(key, Key::Named(NamedKey::Enter))
+                            && (mods.meta() || mods.control())
+                        {
+                            state.db_commit_edit();
+                            return CommandExecuted::Yes;
+                        }
+                        if matches!(key, Key::Named(NamedKey::Escape)) {
+                            state.db_cancel_edit();
+                            return CommandExecuted::Yes;
+                        }
+                    }
+                    default_key_handler(editor_sig)(kp, mods)
+                },
+            );
+            let doc = editor.doc();
+            editor
+                .update(move |_| state.db.edit_value.set(doc.text().to_string()))
+                .style(|s| {
+                    s.width_full()
+                        .height(180.0)
+                        .font_family(theme::mono_family())
+                        .font_size(13.0)
+                        .padding(6.0)
+                })
+                .into_any()
+        },
+    )
+    .style(move |s| {
+        let s = s
+            .width_full()
+            .border(1.0)
+            .border_color(theme::border())
+            .border_radius(5.0)
+            .background(theme::bg_panel());
+        // NULL wins over the text, which is kept in case it's unticked.
+        if state.db.edit_null.get() {
+            s.border_color(theme::fg_dim())
+                .background(theme::bg_hover())
+        } else {
+            s
+        }
+    });
 
     let null_toggle = label(move || {
         if state.db.edit_null.get() {
@@ -2247,7 +2339,7 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
 
     let card = stack((title, input, row_actions, buttons)).style(|s| {
         s.flex_col()
-            .width(420.0)
+            .width(560.0)
             .padding(16.0)
             .border(1.0)
             .border_color(theme::border())
@@ -2365,7 +2457,7 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
                 .hover(|s| s.background(theme::bg_hover()))
         })
         .on_click_stop(move |_| state.db_cancel_insert());
-    let save = label(|| "Insert".to_string())
+    let save = label(|| "Add row".to_string())
         .style(|s| {
             s.padding_horiz(14.0)
                 .height(28.0)
@@ -2413,6 +2505,87 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
 
 /// Pretty-print a cell value for the viewer: JSON objects/arrays are
 /// re-indented; everything else is shown verbatim.
+/// A cell of a row staged for inserting.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum NewCell {
+    Value(String),
+    Null,
+    /// Left out: the database fills it in.
+    Default,
+}
+
+/// The cells of a staged row under the grid's `columns`.
+fn new_row_cells(columns: &[String], values: &[(String, Option<String>)]) -> Vec<NewCell> {
+    columns
+        .iter()
+        .map(|c| match values.iter().find(|(n, _)| n == c) {
+            Some((_, Some(v))) => NewCell::Value(v.clone()),
+            Some((_, None)) => NewCell::Null,
+            None => NewCell::Default,
+        })
+        .collect()
+}
+
+/// One statement's rows in the confirmation dialog.
+fn estimate_label(e: crate::state::RowEstimate) -> String {
+    use crate::state::RowEstimate;
+    match e {
+        RowEstimate::Counting => "counting…".into(),
+        RowEstimate::Known(e_db::Counted::Exactly(1)) => "1 row".into(),
+        RowEstimate::Known(e_db::Counted::Exactly(n)) => format!("{} rows", group_digits(n)),
+        RowEstimate::Known(e_db::Counted::Over) => {
+            format!("{}+ rows", group_digits(e_db::COUNT_CAP))
+        }
+        RowEstimate::Unknown => "rows not counted".into(),
+    }
+}
+
+/// The rows all the statements touch, for the dialog's subtitle: empty
+/// until something is known.
+fn rows_summary(counts: &[crate::state::RowEstimate]) -> String {
+    use crate::state::RowEstimate;
+    let mut total = 0u64;
+    let (mut over, mut unknown, mut known) = (false, false, false);
+    for c in counts {
+        match c {
+            RowEstimate::Known(e_db::Counted::Exactly(n)) => {
+                total += n;
+                known = true;
+            }
+            RowEstimate::Known(e_db::Counted::Over) => {
+                total += e_db::COUNT_CAP;
+                over = true;
+                known = true;
+            }
+            RowEstimate::Counting => return ", counting the rows it touches…".into(),
+            RowEstimate::Unknown => unknown = true,
+        }
+    }
+    if !known {
+        return String::new();
+    }
+    let n = group_digits(total);
+    let rows = if total == 1 && !over { "row" } else { "rows" };
+    match (over, unknown) {
+        (true, _) => format!(", touching over {n} rows"),
+        (false, true) => format!(", touching at least {n} {rows} (some not counted)"),
+        (false, false) => format!(", touching {n} {rows}"),
+    }
+}
+
+/// `12345` as `12,345`.
+fn group_digits(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 pub(crate) fn pretty_value(s: &str) -> String {
     let t = s.trim_start();
     if t.starts_with('{') || t.starts_with('[') {
@@ -2796,7 +2969,8 @@ fn pending_bar(state: AppState) -> impl IntoView {
     let summary = label(move || {
         let e = state.db.pending_edits.with(|m| m.len());
         let d = state.db.pending_deletes.with(|m| m.len());
-        let total = e + d;
+        let n = state.db.pending_inserts.with(|v| v.len());
+        let total = e + d + n;
         // The changes stay staged while another table or a console result is
         // shown, so say which table they are for.
         let table = state
@@ -2805,9 +2979,10 @@ fn pending_bar(state: AppState) -> impl IntoView {
             .with(|t| t.as_ref().map(|(_, t)| t.clone()))
             .unwrap_or_default();
         format!(
-            "⚠ {total} pending change{} to {table}  ·  {e} update{}, {d} delete{}",
+            "⚠ {total} pending change{} to {table}  ·  {e} update{}, {n} new row{}, {d} delete{}",
             if total == 1 { "" } else { "s" },
             if e == 1 { "" } else { "s" },
+            if n == 1 { "" } else { "s" },
             if d == 1 { "" } else { "s" },
         )
     })
@@ -2850,7 +3025,8 @@ fn pending_bar(state: AppState) -> impl IntoView {
             .border_color(theme::border())
             .background(theme::bg_panel());
         let any = state.db.pending_edits.with(|m| !m.is_empty())
-            || state.db.pending_deletes.with(|m| !m.is_empty());
+            || state.db.pending_deletes.with(|m| !m.is_empty())
+            || state.db.pending_inserts.with(|v| !v.is_empty());
         if any {
             s
         } else {
@@ -3151,7 +3327,72 @@ fn result_grid(state: AppState) -> impl IntoView {
     )
     .style(|s| s.flex_col());
 
-    stack((header, rows)).style(move |s| {
+    // Rows staged with "+ Row" (DB-303), above the table's own, until
+    // Submit inserts them or Revert drops them. A column left out shows the
+    // database's default.
+    let new_rows = dyn_stack(
+        move || {
+            let showing = state.db.active_tab.get().is_none()
+                && state.db.result_key.get().zip(state.db.result_table.get())
+                    == state.db.pending_target.get();
+            if !showing {
+                return Vec::new();
+            }
+            let columns = state
+                .db
+                .result
+                .with(|r| r.as_ref().map(|r| r.columns.clone()).unwrap_or_default());
+            state.db.pending_inserts.with(|rows| {
+                rows.iter()
+                    .enumerate()
+                    .map(|(i, row)| (i, new_row_cells(&columns, &row.values)))
+                    .collect::<Vec<_>>()
+            })
+        },
+        |(i, cells)| (*i, cells.clone()),
+        move |(_, cells)| {
+            dyn_stack(
+                move || cells.clone().into_iter().enumerate().collect::<Vec<_>>(),
+                |(i, _)| *i,
+                move |(_, cell)| {
+                    let (text, given) = match cell {
+                        NewCell::Value(v) => (sanitize_cell(&v), true),
+                        NewCell::Null => ("NULL".to_string(), false),
+                        NewCell::Default => ("default".to_string(), false),
+                    };
+                    label(move || text.clone()).style(move |s| {
+                        let s = s
+                            .width(180.0)
+                            .flex_shrink(0.0_f32)
+                            .height(26.0)
+                            .padding_horiz(8.0)
+                            .padding_vert(4.0)
+                            .font_size(12.0)
+                            .text_ellipsis()
+                            .border_right(1.0)
+                            .border_color(theme::border());
+                        if given {
+                            s.color(theme::fg())
+                        } else {
+                            s.color(theme::fg_dim())
+                                .font_style(floem::text::Style::Italic)
+                        }
+                    })
+                },
+            )
+            .style(|s| {
+                s.flex_row()
+                    .items_center()
+                    .height(26.0)
+                    .border_bottom(1.0)
+                    .border_color(theme::border())
+                    .background(Color::from_rgba8(0x98, 0xc3, 0x79, 36))
+            })
+        },
+    )
+    .style(|s| s.flex_col());
+
+    stack((header, new_rows, rows)).style(move |s| {
         let n = state
             .db
             .result
@@ -3350,7 +3591,52 @@ fn structure_grid(state: AppState) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::pretty_value;
+    use super::*;
+
+    #[test]
+    fn a_staged_row_shows_its_values_nulls_and_defaults() {
+        let cols = vec!["id".to_string(), "name".to_string(), "note".to_string()];
+        let values = vec![
+            ("name".to_string(), Some("ada".to_string())),
+            ("note".to_string(), None),
+        ];
+        assert_eq!(
+            new_row_cells(&cols, &values),
+            vec![
+                NewCell::Default,
+                NewCell::Value("ada".into()),
+                NewCell::Null
+            ]
+        );
+    }
+
+    #[test]
+    fn the_confirmation_says_how_many_rows_it_touches() {
+        use crate::state::RowEstimate::*;
+        use e_db::Counted::*;
+        assert_eq!(rows_summary(&[]), "");
+        assert_eq!(rows_summary(&[Unknown]), "");
+        assert_eq!(
+            rows_summary(&[Known(Exactly(1)), Counting]),
+            ", counting the rows it touches…"
+        );
+        assert_eq!(rows_summary(&[Known(Exactly(1))]), ", touching 1 row");
+        assert_eq!(
+            rows_summary(&[Known(Exactly(1200)), Known(Exactly(3))]),
+            ", touching 1,203 rows"
+        );
+        assert_eq!(
+            rows_summary(&[Known(Exactly(2)), Unknown]),
+            ", touching at least 2 rows (some not counted)"
+        );
+        assert_eq!(
+            rows_summary(&[Known(Over), Known(Exactly(5))]),
+            ", touching over 10,005 rows"
+        );
+        assert_eq!(estimate_label(Known(Over)), "10,000+ rows");
+        assert_eq!(estimate_label(Known(Exactly(0))), "0 rows");
+        assert_eq!(group_digits(1234567), "1,234,567");
+    }
 
     #[test]
     fn pretty_value_formats_json_objects_and_arrays() {

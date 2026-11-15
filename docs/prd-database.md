@@ -163,7 +163,7 @@ på manuell testing.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-101 | ✅ Auto-tilkobling fra `.env`, manuelle tilkoblinger, SSH-tunnel | — | ✅ |
-| DB-102 | Miljø-etikett per tilkobling: `local` / `staging` / `production`, med farge (grønn/gul/rød) synlig i panel-header, datagrid og konsoll. Auto-gjettes (hostname, `.env` vs manuell) men kan overstyres | P0 | ◐ Gjettes fra navn og vert; prikk + badge i tilkoblingslisten, prikk i resultat-header, farget tittel i bekreftelsen. Etiketten beholdes nå når en tilkobling redigeres, og kan settes manuelt i skjemaet (Auto viser gjetningen); aktiv tilkobling vises med miljøfarge i panel- og resultat-header. Mangler: badge i grid/konsoll, farget grid-ramme, miljø i agent-consent |
+| DB-102 | Miljø-etikett per tilkobling: `local` / `staging` / `production`, med farge (grønn/gul/rød) synlig i panel-header, datagrid og konsoll. Auto-gjettes (hostname, `.env` vs manuell) men kan overstyres | P0 | ✅ Gjettes fra navn og vert, eller settes manuelt i skjemaet (Auto viser gjetningen); prikk + badge i tilkoblingslisten; aktiv tilkobling med miljøfarge i panel-header og øverst i resultatpanelet (over konsoll og grid); farget tittel i bekreftelsen og i agent-consent. Ikke gjort: farget ramme rundt selve grid-en |
 | DB-103 | ✅ Read-only-flagg per tilkobling; produksjon read-only som standard | — | ✅ Alle ikke-lokale verter og SSH starter read-only. Bryteren lagres ikke. ClickHouse bruker `readonly=2` (radgrensen virker) |
 | DB-104 | Flere samtidige tilkoblinger åpne, med rask bytte (dropdown i panel-header); aktiv tilkobling alltid synlig med miljøfarge | P0 | ✅ Flere tilkoblinger kan være åpne samtidig. Velger for aktiv tilkobling i panel- og resultat-header, med miljøfarge; den styrer konsoll, søk, EXPLAIN og relasjoner |
 | DB-105 | Tilkoblingstest med tydelig feilmelding (DNS, auth, tunnel, driver) | P1 | ◐ Test-knapp viser driverens rå feil. Mangler: kategorier (DNS, auth, tunnel, driver) |
@@ -187,8 +187,8 @@ på manuell testing.
 | --- | --- | --- | --- |
 | DB-301 | ✅ Sortering, kolonnefiltre, celle-redigering, ny rad, slett rad, FK-hopping | — | ✅ Kolonnefilter er ett likhetsfilter fra en celle (chip), ikke en filterrad |
 | DB-302 | Paginering: «neste/forrige side» + hopp til side, med totalantall; rad-cap erstattes av ekte sider | P0 | ✅ 200 rader per side, hopp til side, totalantall. Sidestørrelsen er ikke en innstilling; konsollen kappes fortsatt ved 1000 |
-| DB-303 | Transaksjonell redigering: endringer (celler, nye rader, slettinger) samles lokalt og markeres visuelt; egen **Submit**-knapp kjører alt i én transaksjon, **Revert** forkaster. Direkte-skriv beholdes som opt-in for lokal utvikling | P0 | ◐ Celleendringer og slettinger samles per primærnøkkel og overlever bla, sortering, filter og tabellbytte; Submit/Revert i én transaksjon. Mangler: nye rader i endringssettet (lokalt skrives de direkte, ellers via bekreftelse), gjennomstreking, opt-in direkte-skriv |
-| DB-304 | Verdi-editor: åpne celleverdi i eget felt/modal for lange tekster; JSON-kolonner vises formatert (pretty-print) med fold, og valideres før lagring | P0 | ◐ Skrivebeskyttet verdivisning med JSON pretty-print. Mangler: flerlinjers editor, fold, valider-før-lagre, ⌘Enter |
+| DB-303 | Transaksjonell redigering: endringer (celler, nye rader, slettinger) samles lokalt og markeres visuelt; egen **Submit**-knapp kjører alt i én transaksjon, **Revert** forkaster. Direkte-skriv beholdes som opt-in for lokal utvikling | P0 | ◐ Celleendringer og slettinger samles per primærnøkkel og overlever bla, sortering, filter og tabellbytte; Submit/Revert i én transaksjon. Nye rader («+ Row») samles også, vises grønt øverst i grid-en og settes inn ved Submit. Mangler: gjennomstreking av slettede rader, opt-in direkte-skriv |
+| DB-304 | Verdi-editor: åpne celleverdi i eget felt/modal for lange tekster; JSON-kolonner vises formatert (pretty-print) med fold, og valideres før lagring | P0 | ◐ Flerlinjers editor i redigeringsdialogen (⌘↵ lagrer, Esc avbryter); JSON-kolonner valideres før endringen samles. Verdivisningen viser JSON pretty-printet. Mangler: fold, og formatering i editoren (serde_json sorterer nøklene, så den ville endre data) |
 | DB-305 | NULL håndteres eksplisitt: vis `NULL` distinkt fra tom streng; sett-til-NULL-handling | P0 | ✅ Dim `NULL` (ikke kursiv), NULL-avkrysning i rediger- og ny rad-dialog |
 | DB-306 | Kopier celle / rad (som CSV, JSON eller `INSERT`-setning) fra kontekstmeny | P1 | ✗ |
 | DB-307 | Dupliser rad som utgangspunkt for ny | P1 | ✗ |
@@ -239,7 +239,7 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | --- | --- | --- | --- |
 | DB-701 | ✅ Prod-deteksjon med read-only som standard; consent-dialog for agent-queries | — | ✅ |
 | DB-702 | Destruktive setninger (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` uten `WHERE`) krever eksplisitt bekreftelse med setningen gjengitt — på *alle* miljøer, ikke bare prod | P0 | ✅ |
-| DB-703 | Ved skriv mot ikke-lokal tilkobling: bekreftelsesdialog viser miljøetikett i farge + antall rader som påvirkes | P0 | ◐ Miljøfarget tittel, setningene, avkrysning når ikke-lokal. «+ Row» går også via dialogen. Mangler: antall rader som påvirkes |
+| DB-703 | Ved skriv mot ikke-lokal tilkobling: bekreftelsesdialog viser miljøetikett i farge + antall rader som påvirkes | P0 | ✅ Miljøfarget tittel, setningene, avkrysning når ikke-lokal, og rader per setning med sum: UPDATE/DELETE telles med sin WHERE som SELECT (sjekket som ren lesing, stopper ved 10 000), INSERT … VALUES teller seg selv; joins o.l. vises som «rows not counted» |
 | DB-704 | Databasesnapshots: ta snapshot (mysqldump/pg_dump/SQLite-kopi) og tilbakestill, én knapp per tilkobling (kun lokale miljøer). Integreres med agent-flyter («ta snapshot før migrasjon») | P2 | ◐ Snapshot lokalt (SQLite, MySQL, PostgreSQL). Mangler: gjenoppretting i UI (`restore_snapshot` finnes), agent-flyt, ClickHouse |
 | DB-705 | Angre-logg for datagrid-endringer i økten: liste over utførte skriv med generert motsatt setning der det er mulig | P2 | ◐ Angre-logg for celleendringer og innsettinger i økten (Undo for innsetting når primærnøkkelen ble oppgitt). Mangler: slettinger |
 
@@ -466,7 +466,7 @@ fase 4–5 er forspranget.
 | Fase | Levert | Delvis | Mangler |
 | --- | --- | --- | --- |
 | 1 — Konsollen | 401, 403, 405, 409, 605 | 402, 404 | — |
-| 2 — Trygg redigering | 104, 302, 305, 702 | 102, 303, 304, 703 | — |
+| 2 — Trygg redigering | 102, 104, 302, 305, 702, 703 | 303, 304 | — |
 | 3 — Data inn/ut | 205 | 202, 502, 503, 505 | — |
 | 4 — Kraftbruker | 408, 604 | 204, 308, 602, 603, 802 | — |
 | 5 — Forbi | — | 206, 207, 704, 705, 803, 805 | — |
@@ -476,13 +476,14 @@ Ingen fase er helt ferdig. Krav utenfor faseplanen som mangler helt: 203,
 
 ### Neste steg
 
-Feilene i §3 og dokumentasjonen som lovet for mye, er tatt.
+Feilene i §3 og dokumentasjonen som lovet for mye, er tatt, og fase 2 er
+nesten ferdig.
 
-1. **Fullføre fase 1 og 2** («paritet i praksis»): completion med alias og
-   nøkkelord (402); query som tooltip på fanene (404); nye rader i
-   endringssettet og radantall i bekreftelsen (303, 703); verdi-editor (304);
-   farget grid-ramme og miljø i agent-consent (102).
-2. Deretter fase 3: CSV-import med mapping-dialog (503), views med definisjon
+1. **Fullføre fase 1** («paritet i praksis»): completion med alias og
+   nøkkelord (402); query som tooltip på fanene (404).
+2. Restene av fase 2: gjennomstreking av slettede rader (303), fold i
+   verdi-editoren (304).
+3. Deretter fase 3: CSV-import med mapping-dialog (503), views med definisjon
    (202), kopier-som i alle formater (505).
 
 ## 8. Suksessmetrikker

@@ -897,14 +897,14 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
         // ---- Database schema (async, read-only) ---------------------------
         "db_schema" => {
             let name = req.get("connection").and_then(|c| c.as_str());
-            let picked = state.db.conns.with_untracked(|conns| {
-                conns
-                    .iter()
-                    .filter(|e| e.conn.get_untracked().is_some())
-                    .find(|e| name.is_none_or(|n| e.config.display_name() == n))
-                    .and_then(|e| e.conn.get_untracked())
-            });
-            let Some(conn) = picked else {
+            let conn = match state.db_for_agent(name) {
+                Ok(e) => e.conn.get_untracked(),
+                Err(error) => {
+                    let _ = reply.send(json!({"ok": false, "error": error}));
+                    return;
+                }
+            };
+            let Some(conn) = conn else {
                 let _ = reply.send(json!({"ok": false, "error": "no connected database"}));
                 return;
             };
@@ -921,21 +921,23 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
                 return;
             };
             let name = req.get("connection").and_then(|c| c.as_str());
-            let picked = state.db.conns.with_untracked(|conns| {
-                conns
-                    .iter()
-                    .filter(|e| e.conn.get_untracked().is_some())
-                    .find(|e| name.is_none_or(|n| e.config.display_name() == n))
-                    .map(|e| (e.config.display_name(), e.conn.get_untracked()))
-            });
-            let Some((db_name, Some(conn))) = picked else {
+            let entry = match state.db_for_agent(name) {
+                Ok(e) => e,
+                Err(error) => {
+                    let _ = reply.send(json!({"ok": false, "error": error}));
+                    return;
+                }
+            };
+            let Some(conn) = entry.conn.get_untracked() else {
                 let _ = reply.send(json!({"ok": false, "error": "no connected database"}));
                 return;
             };
-            // Ask the user before touching their database.
+            // Ask the user before touching their database, saying which
+            // environment it is.
             state.db.consent.set(Some(crate::state::DbConsent {
                 sql,
-                db_name,
+                db_name: entry.config.display_name(),
+                env: entry.config.environment(),
                 conn,
                 reply,
             }));

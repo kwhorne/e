@@ -84,7 +84,8 @@ saving.
   press **⌘↵** (or **Run**) to execute. `SELECT`/`SHOW`/`EXPLAIN` show a grid;
   other statements report the number of affected rows.
 
-Results are capped at 1000 rows.
+A table is read a page at a time, so it has no row limit. A query in the
+console shows at most 1000 rows; the result says so when it was cut there.
 
 ## Editing data
 
@@ -121,25 +122,40 @@ connected:
   Outside a SQL string in a Laravel project, `⌘↵` instead
   [evaluates the PHP expression](laravel.md#evaluate-an-expression-where-it-is-written)
   at the caret.
-- **⌥⌘↵** — **Explain SQL under cursor**: runs the engine's `EXPLAIN` and flags
-  full table scans / missing indexes. On an Eloquent chain outside a SQL
+- **⌥⌘↵** — **Explain SQL under cursor**: runs the engine's `EXPLAIN`, shows
+  the plan in an **EXPLAIN** result tab and flags full table scans / missing
+  indexes; **Suggest Index → ask the agent** on that banner asks the AI agent
+  for a migration that adds the index. On an Eloquent chain outside a SQL
   string, it [explains the queries the chain runs](laravel.md#explain-the-query)
   and offers the missing index as a migration.
 - **Suggest Index for SQL under cursor** (command palette) — runs `EXPLAIN`,
   and if it finds a problem, asks the AI agent to propose a Laravel migration
   that adds the missing index.
 
-Schema-aware completion suggests table and column names as you type SQL.
+Both run against the database the Database panel is showing — the one whose
+table or result is open — or, if only one is connected, that one. With several
+connected and none open, `e` asks you to open a table in the one you mean
+rather than guess.
+
+Schema-aware completion suggests table and column names as you type SQL,
+from the project's `.env` database.
 
 ## The SQL console
 
 The query box in the results panel is a full SQL editor: syntax highlighting,
-schema-aware completion (tables, columns, keywords) as you type, and a draggable
-handle below it to resize.
+schema-aware completion as you type, and a draggable handle below it to
+resize. Completion offers table names after `FROM`, `JOIN`, `INTO`, `UPDATE`
+and `TABLE`, and column names (with their types) elsewhere. They come from the
+database the console runs against, read the first time you type and again
+after **⟳** or a reconnect. SQL keywords aren't completed.
 
 - **⌘↵** runs the **selection**, or the **statement under the cursor**;
   **⌘⇧↵** (or **Run**) runs the whole console. Each statement gets its own
   **result tab** — pin one (★) to keep it across runs.
+- Result tabs stay when you open a table. The table has a tab of its own
+  (**▦ name**) at the start of the strip: click it to go back to the table at
+  the page, sort and filter you left it. Rows in a result tab are read-only;
+  only the table's tab edits.
 - **`:param`** placeholders prompt for values before running (remembered).
 - **○ History** opens a searchable log of every query you've run in this project;
   click one to load it back into the console.
@@ -175,13 +191,15 @@ label is guessed from the host and name and drives the safety rails:
   `CREATE TABLE`, and **+ Migration** scaffolds a Laravel migration for the table
   and opens it (instead of running DDL directly).
 - The **⇄** button in the panel header shows **schema relationships** (every
-  foreign key as `table.column → ref_table.ref_column`).
+  foreign key as `table.column → ref_table.ref_column`) of the database the
+  panel is showing.
 - The cell dialog can **Follow FK →** (jump to the referenced row) and show
   **Related →** rows (reverse foreign keys).
 - **Seed 10** (local tables) creates rows via the Eloquent factory through
   Tinker; **⬆ CSV** imports a CSV into the table.
-- **Search all data…** in the panel header scans every table's text columns for
-  a value and shows one result tab per matching table. **✕ Cancel** stops it
+- **Search all data…** in the panel header scans every table's text columns of
+  the database the panel is showing for a value, and shows one result tab per
+  matching table. **✕ Cancel** stops it
   before the next table.
 - Row counts appear next to each table in the tree. They come from the
   server's catalog in one query rather than a count of every table:

@@ -160,11 +160,12 @@ impl AppState {
             close_if_ours();
             return;
         }
-        let schema = self.db.schema_cache.get_untracked();
-        if schema.is_empty() {
+        // The schema of the database the console runs against, not the
+        // project's `.env` one.
+        let Some(schema) = self.db_console_schema().filter(|s| !s.is_empty()) else {
             close_if_ours();
             return;
-        }
+        };
         let items = sql_completion_items(&schema, &prefix, wants_tables);
         if items.is_empty() {
             close_if_ours();

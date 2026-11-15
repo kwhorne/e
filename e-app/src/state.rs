@@ -225,6 +225,7 @@ impl DbForm {
 pub struct DbConsent {
     pub sql: String,
     pub db_name: String,
+    pub env: e_db::Environment,
     pub conn: Arc<e_db::Conn>,
     pub reply: std::sync::mpsc::Sender<serde_json::Value>,
 }
@@ -266,6 +267,17 @@ pub struct DbConfirm {
     pub needs_ack: bool,
     pub ack: RwSignal<bool>,
     pub run: ConfirmRun,
+    /// How many rows each statement touches, as far as is known; filled in
+    /// while the dialog is open (DB-703).
+    pub counts: RwSignal<Vec<RowEstimate>>,
+}
+
+/// The rows one statement in the confirmation dialog will touch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowEstimate {
+    Counting,
+    Known(e_db::Counted),
+    Unknown,
 }
 
 /// A `:param` prompt awaiting values before a console run.
@@ -279,6 +291,16 @@ pub struct DbParams {
 
 /// A row's primary key as `(column, value)` predicates.
 pub type RowPk = Vec<(String, Option<String>)>;
+
+/// A row staged for inserting: the values given (columns left out take the
+/// database's default), the INSERT, and the DELETE that undoes it when the
+/// key was given.
+#[derive(Clone)]
+pub struct PendingInsert {
+    pub values: RowPk,
+    pub sql: String,
+    pub reverse: Option<String>,
+}
 
 /// A staged (not-yet-committed) cell edit in the data grid.
 #[derive(Clone)]
@@ -683,6 +705,8 @@ pub struct DbPanel {
     /// belong to one table, `pending_target` (connection key, table).
     pub pending_edits: RwSignal<HashMap<(RowPk, String), PendingEdit>>,
     pub pending_deletes: RwSignal<HashSet<RowPk>>,
+    /// Rows staged with "+ Row", inserted on Submit with the rest.
+    pub pending_inserts: RwSignal<Vec<PendingInsert>>,
     pub pending_target: RwSignal<Option<(String, String)>>,
     /// Where the staged changes fall in the grid on screen.
     pub pending_view: RwSignal<PendingView>,
@@ -769,6 +793,7 @@ impl DbPanel {
             param_last: RwSignal::new(HashMap::new()),
             pending_edits: RwSignal::new(HashMap::new()),
             pending_deletes: RwSignal::new(HashSet::new()),
+            pending_inserts: RwSignal::new(Vec::new()),
             pending_target: RwSignal::new(None),
             pending_view: RwSignal::new(PendingView::default()),
             result_table: RwSignal::new(None),

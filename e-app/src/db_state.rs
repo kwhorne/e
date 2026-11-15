@@ -624,8 +624,9 @@ impl AppState {
         self.db.insert_open.set(false);
     }
 
-    /// Insert the row built in the dialog. Columns left blank (and not marked
-    /// NULL) are omitted so database defaults / auto-increment apply.
+    /// Stage the row built in the dialog, to be inserted on Submit. Columns
+    /// left blank (and not marked NULL) are omitted so database defaults /
+    /// auto-increment apply.
     pub fn db_commit_insert(&self) {
         let Some((entry, _, table, engine)) = self.db_edit_target() else {
             return;
@@ -667,32 +668,19 @@ impl AppState {
         });
         let reverse =
             insert_pk(&pk_names, &values).map(|pk| e_db::delete_sql(&engine, &table, &pk));
-        self.db.insert_open.set(false);
-        let env = entry.config.environment();
-        let tx = crate::state::DbTransaction {
-            key: entry.key(),
-            statements: vec![sql.clone()],
-            log: vec![crate::state::WriteLogEntry {
-                forward: sql.clone(),
-                reverse,
-            }],
-            submits_pending: false,
-            done: "Inserted",
-        };
-        // A write to another machine is confirmed, as in the console and on
-        // Submit (DB-703); a local one runs at once.
-        if env.is_local() {
-            self.execute_submit(tx);
-        } else {
-            self.db.confirm.set(Some(crate::state::DbConfirm {
-                verb: "Insert".into(),
-                statements: vec![sql],
-                env,
-                needs_ack: true,
-                ack: self.cx.create_rw_signal(false),
-                run: crate::state::ConfirmRun::Transaction(tx),
-            }));
+        // Staged with the table's other changes, and inserted with them on
+        // Submit — in one transaction, through the confirmation (DB-303).
+        if !self.db_claim_pending_target(&entry.key(), &table) {
+            return;
         }
+        self.db.insert_open.set(false);
+        self.db.pending_inserts.update(|v| {
+            v.push(crate::state::PendingInsert {
+                values,
+                sql,
+                reverse,
+            })
+        });
     }
 
     /// Toggle the sort on a column (asc → desc → off) and reload.
@@ -1076,6 +1064,39 @@ impl AppState {
         self.db_show_new_tabs(tabs);
     }
 
+    /// The connected database an agent asks for: the one it names, or else
+    /// the panel's active one (or the only one connected). With several and
+    /// none chosen, an error that says to name one rather than a guess.
+    pub(crate) fn db_for_agent(&self, name: Option<&str>) -> Result<DbEntry, String> {
+        let connected: Vec<DbEntry> = self.db.conns.with_untracked(|cs| {
+            cs.iter()
+                .filter(|e| e.conn.get_untracked().is_some())
+                .cloned()
+                .collect()
+        });
+        if let Some(n) = name {
+            return connected
+                .into_iter()
+                .find(|e| e.config.display_name() == n)
+                .ok_or_else(|| format!("no connected database named {n}"));
+        }
+        let key = self.db.result_key.get_untracked();
+        let keys: Vec<String> = connected.iter().map(|e| e.key()).collect();
+        match pick_active(key.as_deref(), &keys) {
+            Some(i) => Ok(connected[i].clone()),
+            None if connected.is_empty() => Err("no connected database".into()),
+            None => Err(format!(
+                "several databases are connected and none is active; name one in \
+                 \"connection\": {}",
+                connected
+                    .iter()
+                    .map(|e| e.config.display_name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
+
     /// The connection the panel works with: the one its results come from,
     /// or, if that isn't connected, the only connected one. With several
     /// connected and none chosen, says so (as `what`) and returns `None`
@@ -1218,7 +1239,7 @@ impl AppState {
             let rows = crate::db_import::parse_csv(&text);
             match crate::db_import::build_inserts(&engine, &table, &rows, &columns) {
                 Ok(stmts) => {
-                    state.db.confirm.set(Some(crate::state::DbConfirm {
+                    state.db_ask_confirm(crate::state::DbConfirm {
                         verb: "Import".into(),
                         statements: stmts.clone(),
                         env,
@@ -1231,7 +1252,8 @@ impl AppState {
                             submits_pending: false,
                             done: "Imported",
                         }),
-                    }));
+                        counts: state.cx.create_rw_signal(Vec::new()),
+                    });
                 }
                 Err(e) => Self::notify(&format!("Import: {e}")),
             }
@@ -1396,14 +1418,15 @@ impl AppState {
         if flagged.is_empty() {
             self.execute_console_sql(sql);
         } else {
-            self.db.confirm.set(Some(crate::state::DbConfirm {
+            self.db_ask_confirm(crate::state::DbConfirm {
                 verb: "Run".into(),
                 statements: flagged,
                 env,
                 needs_ack: non_local,
                 ack: self.cx.create_rw_signal(false),
                 run: crate::state::ConfirmRun::Console(sql),
-            }));
+                counts: self.cx.create_rw_signal(Vec::new()),
+            });
         }
     }
 
@@ -2013,6 +2036,20 @@ impl AppState {
         }
         let is_null = self.db.edit_null.get_untracked();
         let value = self.db.edit_value.get_untracked();
+        // A JSON column takes only JSON: say what's wrong and keep the
+        // editor open, rather than let the database refuse the whole Submit.
+        let data_type = self.db.columns.with_untracked(|cols| {
+            cols.iter()
+                .find(|c| c.name == column)
+                .map(|c| c.data_type.clone())
+                .unwrap_or_default()
+        });
+        if !is_null {
+            if let Some(problem) = json_problem(&data_type, &value) {
+                Self::notify(&format!("{column} is {data_type}: {problem}"));
+                return;
+            }
+        }
         let new = if is_null { None } else { Some(value) };
         let shown = self.db.result.with_untracked(|r| {
             r.as_ref()
@@ -2143,6 +2180,7 @@ impl AppState {
     fn db_pending_count(&self) -> usize {
         self.db.pending_edits.with_untracked(|m| m.len())
             + self.db.pending_deletes.with_untracked(|m| m.len())
+            + self.db.pending_inserts.with_untracked(|v| v.len())
     }
 
     fn db_release_pending_target_if_empty(&self) {
@@ -2251,6 +2289,7 @@ impl AppState {
     fn db_clear_pending(&self) {
         self.db.pending_edits.update(|m| m.clear());
         self.db.pending_deletes.update(|m| m.clear());
+        self.db.pending_inserts.update(|v| v.clear());
         self.db.pending_target.set(None);
         self.db_mark_pending();
     }
@@ -2309,11 +2348,20 @@ impl AppState {
                 });
             }
         });
+        self.db.pending_inserts.with_untracked(|rows| {
+            for row in rows {
+                stmts.push(row.sql.clone());
+                log.push(crate::state::WriteLogEntry {
+                    forward: row.sql.clone(),
+                    reverse: row.reverse.clone(),
+                });
+            }
+        });
         if stmts.is_empty() {
             return;
         }
         let env = entry.config.environment();
-        self.db.confirm.set(Some(crate::state::DbConfirm {
+        self.db_ask_confirm(crate::state::DbConfirm {
             verb: "Submit".into(),
             statements: stmts.clone(),
             env,
@@ -2326,7 +2374,71 @@ impl AppState {
                 submits_pending: true,
                 done: "Submitted",
             }),
-        }));
+            counts: self.cx.create_rw_signal(Vec::new()),
+        });
+    }
+
+    /// Open the confirmation dialog for `c`, and count the rows each of
+    /// its statements will touch while it is open (DB-703). What a
+    /// statement says itself (`INSERT … VALUES`) is shown at once; the
+    /// rest are counted on the database, off the UI thread, for the first
+    /// `MAX_COUNTED` statements.
+    fn db_ask_confirm(&self, c: crate::state::DbConfirm) {
+        use crate::state::RowEstimate;
+        const MAX_COUNTED: usize = 50;
+        let key = match &c.run {
+            crate::state::ConfirmRun::Transaction(tx) => Some(tx.key.clone()),
+            crate::state::ConfirmRun::Console(_) => self.db.result_key.get_untracked(),
+        };
+        let entry = key.and_then(|k| {
+            self.db
+                .conns
+                .with_untracked(|cs| cs.iter().find(|e| e.key() == k).cloned())
+        });
+        let engine = entry
+            .as_ref()
+            .map(|e| e.config.engine.clone())
+            .unwrap_or_default();
+        let conn = entry.and_then(|e| e.conn.get_untracked());
+        let mut queries = Vec::new();
+        let estimates: Vec<RowEstimate> = c
+            .statements
+            .iter()
+            .enumerate()
+            .map(|(i, stmt)| match e_db::affects(&engine, stmt) {
+                e_db::Affects::Rows(n) => RowEstimate::Known(e_db::Counted::from_count(n)),
+                e_db::Affects::Count(_) if conn.is_some() && queries.len() < MAX_COUNTED => {
+                    queries.push((i, stmt.clone()));
+                    RowEstimate::Counting
+                }
+                _ => RowEstimate::Unknown,
+            })
+            .collect();
+        let counts = c.counts;
+        counts.set(estimates);
+        self.db.confirm.set(Some(c));
+        let Some(conn) = conn.filter(|_| !queries.is_empty()) else {
+            return;
+        };
+        let send = create_ext_action(
+            self.cx,
+            move |found: Vec<(usize, Option<e_db::Counted>)>| {
+                counts.update(|v| {
+                    for (i, n) in found {
+                        if let Some(slot) = v.get_mut(i) {
+                            *slot = n.map_or(RowEstimate::Unknown, RowEstimate::Known);
+                        }
+                    }
+                });
+            },
+        );
+        std::thread::spawn(move || {
+            let found = queries
+                .into_iter()
+                .map(|(i, stmt)| (i, e_db::count_affected(&conn, &engine, &stmt)))
+                .collect();
+            send(found);
+        });
     }
 
     /// Run confirmed statements as one transaction, log them, and refresh the
@@ -2573,6 +2685,17 @@ fn insert_pk(pk: &[String], values: &[(String, Option<String>)]) -> Option<RowPk
         .collect()
 }
 
+/// Why `value` can't go in a column of `data_type`, when that is JSON and
+/// the value isn't.
+fn json_problem(data_type: &str, value: &str) -> Option<String> {
+    if !data_type.to_ascii_lowercase().contains("json") {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(value)
+        .err()
+        .map(|e| format!("not valid JSON ({e})"))
+}
+
 /// What the agent is asked to fix a slow query's plan with.
 fn index_prompt(sql: &str, issues: &[String]) -> String {
     format!(
@@ -2621,6 +2744,16 @@ mod tab_tests {
         assert_eq!(pick_active(None, &one), Some(0));
         assert_eq!(pick_active(Some("gone"), &one), Some(0));
         assert_eq!(pick_active(Some("a"), &[]), None);
+    }
+
+    #[test]
+    fn a_json_column_takes_only_json() {
+        assert_eq!(json_problem("text", "{oops"), None);
+        assert_eq!(json_problem("jsonb", "{\"a\": [1, 2]}"), None);
+        assert_eq!(json_problem("JSON", "\"just a string\""), None);
+        let p = json_problem("json", "{\"a\": }").unwrap();
+        assert!(p.starts_with("not valid JSON"), "{p}");
+        assert!(json_problem("jsonb", "").is_some());
     }
 
     #[test]

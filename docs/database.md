@@ -91,8 +91,11 @@ console shows at most 1000 rows; the result says so when it was cut there.
 
 In the **Data** view of a table that has a primary key:
 
-- **Double-click a cell** to open the edit dialog. Change the value (or tick
-  **NULL**) and press **⌘↵**. Edits are **staged**, not written immediately — see
+- **Double-click a cell** to open the edit dialog. The value opens in a
+  multi-line editor, for long text and JSON alike; change it (or tick
+  **NULL**) and press **⌘↵**, or **Esc** to cancel. A `json`/`jsonb` column
+  only takes valid JSON: the dialog says what's wrong and stays open. Edits
+  are **staged**, not written immediately — see
   [Environments & safety](#environments--safety) for Submit/Revert.
 - The dialog also offers:
   - **Delete row** — stages a deletion (requires a primary key).
@@ -103,11 +106,13 @@ In the **Data** view of a table that has a primary key:
   - **Filter to value** — restricts the current table to rows matching that
     cell (`WHERE col = value` / `IS NULL`), composing with sort and pagination.
     An active filter appears as a chip in the toolbar — click it to clear.
-- **+ Row** on the toolbar opens an insert dialog with one field per column
-  (each with a NULL toggle). Columns left blank (and not marked NULL) are
-  omitted, so database defaults and auto-increment apply. On a database that
-  isn't local, **Insert** opens the confirmation dialog first; every insert is
-  in the **Log**, with an **Undo** when the dialog gave the primary key.
+- **+ Row** on the toolbar opens a dialog with one field per column (each
+  with a NULL toggle). Columns left blank (and not marked NULL) are omitted,
+  so database defaults and auto-increment apply. **Add row** stages it like
+  an edit: it shows in green above the table's rows (a left-out column reads
+  *default*) and is inserted on **Submit** with the other changes. Every
+  insert is in the **Log**, with an **Undo** when the dialog gave the
+  primary key.
 
 A connection that looks like **production** defaults to **read-only** (a
 🔒 / 🔓 badge toggles it); see below.
@@ -180,10 +185,15 @@ The label drives the safety rails:
 
 - **Destructive statements** (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` without a
   `WHERE`) and **any write to a non-local database** open a confirmation dialog
-  that lists the exact statements; non-local writes require an explicit
-  acknowledgement.
-- **Transactional editing:** cell edits and row deletes are *staged* (edited
-  cells turn amber, deleted rows red). They stay staged while you page, sort,
+  that lists the exact statements and **how many rows each touches**;
+  non-local writes require an explicit acknowledgement. The rows are counted
+  on the database while the dialog is open, by running the statement's
+  `WHERE` as a `SELECT` (stopping at 10,000, shown as `10,000+`); an
+  `INSERT … VALUES` counts its own rows. Statements it can't read safely —
+  joins, `UPDATE … FROM`, `DELETE … USING`, a `WHERE` that calls a function
+  that writes — say *rows not counted* rather than guess.
+- **Transactional editing:** cell edits, new rows and row deletes are
+  *staged* (edited cells turn amber, new rows green, deleted rows red). They stay staged while you page, sort,
   filter, open another table or run a query, until you submit or revert them.
   A **N pending changes to `table`** bar offers **Submit** (all in one
   transaction, via the confirmation dialog) and **Revert**. Staged changes

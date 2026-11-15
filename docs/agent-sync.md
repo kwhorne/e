@@ -83,9 +83,12 @@ once with what is already known.
 printf '{"method":"db_schema"}\n' | nc -U "$E_EDITOR_SOCK"
 ```
 
-Returns the tables and columns of a connected database (optionally
-`"connection":"<name>"`), using the editor's existing, credential-safe
-connection — the agent never sees the password.
+Returns the tables and columns of a connected database, using the editor's
+existing, credential-safe connection — the agent never sees the password.
+Name one with `"connection":"<name>"`; otherwise it is the Database panel's
+[active connection](database.md#the-active-connection), or the only one
+connected. With several connected and none active, the answer is an error
+listing their names.
 
 The agent can also **propose a query**:
 
@@ -93,7 +96,8 @@ The agent can also **propose a query**:
 printf '{"method":"db_query","sql":"SELECT count(*) FROM users"}\n' | nc -U "$E_EDITOR_SOCK"
 ```
 
-The editor shows a consent dialog with the SQL and the target connection. If you
+The editor shows a consent dialog with the SQL and the target connection, in
+its environment's colour (a query on production says PRODUCTION). If you
 **Allow**, the query runs and the response contains `{columns, rows,
 rows_affected, elapsed_ms}`; if you **Deny**, it returns an error. The agent
 never gets direct database access.

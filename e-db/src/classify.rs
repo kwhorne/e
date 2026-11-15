@@ -22,7 +22,7 @@
 /// A word, a quoted identifier, or one of the punctuation marks the rules
 /// care about.
 #[derive(Debug, PartialEq)]
-enum Tok {
+pub(crate) enum Tok {
     Word(String),
     /// A `"…"` or `` `…` `` name, lowercased. (To MySQL `"…"` is a string,
     /// but taking it for a name only ever finds more writes.)
@@ -30,10 +30,13 @@ enum Tok {
     Open,
     Close,
     Eq,
+    /// A `'…'` string or `$$ … $$` body. Only [`spans`] gives these; the
+    /// rules here never see them.
+    Str,
 }
 
 #[derive(Clone, Copy)]
-struct Dialect {
+pub(crate) struct Dialect {
     /// `\` escapes the next character inside `'…'` / `"…"`.
     backslash_escapes: bool,
     /// `#` starts a line comment.
@@ -46,13 +49,13 @@ struct Dialect {
     dollar_quotes: bool,
 }
 
-const MYSQLISH: Dialect = Dialect {
+pub(crate) const MYSQLISH: Dialect = Dialect {
     backslash_escapes: true,
     hash_comments: true,
     mysql_comments: true,
     dollar_quotes: false,
 };
-const STANDARD: Dialect = Dialect {
+pub(crate) const STANDARD: Dialect = Dialect {
     backslash_escapes: false,
     hash_comments: false,
     mysql_comments: false,
@@ -77,7 +80,24 @@ fn dollar_tag(chars: &[char], i: usize) -> Option<usize> {
 }
 
 fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
+    spans(sql, d)
+        .into_iter()
+        .map(|(t, _)| t)
+        .filter(|t| *t != Tok::Str)
+        .collect()
+}
+
+/// The tokens with where each one is in `sql`, as a byte range (a quoted
+/// name's includes its quotes).
+pub(crate) fn spans(sql: &str, d: Dialect) -> Vec<(Tok, std::ops::Range<usize>)> {
     let chars: Vec<char> = sql.chars().collect();
+    // The byte offset of each char, and of the end.
+    let at: Vec<usize> = sql
+        .char_indices()
+        .map(|(b, _)| b)
+        .chain(std::iter::once(sql.len()))
+        .collect();
+    let byte = |i: usize| at[i.min(chars.len())];
     let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
@@ -103,7 +123,9 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
                 }
                 if c != '\'' {
                     let name: String = chars[i + 1..j.min(chars.len())].iter().collect();
-                    out.push(Tok::Quoted(name.to_lowercase()));
+                    out.push((Tok::Quoted(name.to_lowercase()), byte(i)..byte(j + 1)));
+                } else {
+                    out.push((Tok::Str, byte(i)..byte(j + 1)));
                 }
                 i = j + 1;
             }
@@ -114,6 +136,7 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
                 while j < chars.len() && !chars[j..].starts_with(tag) {
                     j += 1;
                 }
+                out.push((Tok::Str, byte(i)..byte(j + len)));
                 i = j + len;
             }
             // (MySQL wants a space after `--`; both readings take `--x` for a
@@ -152,15 +175,15 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
                 }
             }
             '(' => {
-                out.push(Tok::Open);
+                out.push((Tok::Open, byte(i)..byte(i + 1)));
                 i += 1;
             }
             ')' => {
-                out.push(Tok::Close);
+                out.push((Tok::Close, byte(i)..byte(i + 1)));
                 i += 1;
             }
             '=' => {
-                out.push(Tok::Eq);
+                out.push((Tok::Eq, byte(i)..byte(i + 1)));
                 i += 1;
             }
             c if c.is_alphanumeric() || c == '_' => {
@@ -170,8 +193,9 @@ fn tokens(sql: &str, d: Dialect) -> Vec<Tok> {
                 {
                     i += 1;
                 }
-                out.push(Tok::Word(
-                    chars[start..i].iter().collect::<String>().to_lowercase(),
+                out.push((
+                    Tok::Word(chars[start..i].iter().collect::<String>().to_lowercase()),
+                    byte(start)..byte(i),
                 ));
             }
             _ => i += 1,

@@ -105,18 +105,18 @@ impl AppState {
         let cursor = editor.cursor.get_untracked();
         let offset = cursor.offset();
         let text = buf.doc.text().to_string();
-        let Some((rs, _re)) = e_core::syntax::php_sql_range_at(&text, offset) else {
+        let Some((rs, re)) = e_core::syntax::php_sql_range_at(&text, offset) else {
             return false;
         };
-        if offset < rs || offset > text.len() {
+        if offset < rs || offset > re || re > text.len() {
             return false;
         }
-        let (prefix, wants_tables) = sql_prefix_and_context(&text[rs..offset]);
-        let start = offset - prefix.len();
-        let items = sql_completion_items(&schema, &prefix, wants_tables);
-        if items.is_empty() {
+        let Some((typed, items)) =
+            crate::sql_complete::complete(&text[rs..re], offset - rs, &schema)
+        else {
             return false;
-        }
+        };
+        let start = offset - typed;
 
         let (_, below) = editor.points_of_offset(start, cursor.affinity);
         let vp = editor.viewport.get_untracked();
@@ -155,23 +155,17 @@ impl AppState {
             close_if_ours();
             return;
         }
-        let (prefix, wants_tables) = sql_prefix_and_context(&text[..offset]);
-        if prefix.is_empty() && !wants_tables {
-            close_if_ours();
-            return;
-        }
         // The schema of the database the console runs against, not the
         // project's `.env` one.
         let Some(schema) = self.db_console_schema().filter(|s| !s.is_empty()) else {
             close_if_ours();
             return;
         };
-        let items = sql_completion_items(&schema, &prefix, wants_tables);
-        if items.is_empty() {
+        let Some((typed, items)) = crate::sql_complete::complete(&text, offset, &schema) else {
             close_if_ours();
             return;
-        }
-        let start = offset - prefix.len();
+        };
+        let start = offset - typed;
         let (_, below) = editor.points_of_offset(start, cursor.affinity);
         let vp = editor.viewport.get_untracked();
         let win = self.db.console_win.get_untracked();
@@ -1141,100 +1135,6 @@ impl AppState {
                 .find_map(|c| c.definition(&uri, line as u32, col as u32).ok().flatten());
             send(loc);
         });
-    }
-}
-
-/// Given the SQL text before the cursor, return the identifier prefix being
-/// typed and whether the context wants table names (after FROM/JOIN/INTO/…)
-/// rather than columns.
-/// Build SQL completion items (columns then tables, or tables-only after
-/// `FROM`/`JOIN`/…) from the cached schema, filtered by `prefix`. Shared by the
-/// inline-SQL (PHP) and console completion paths.
-fn sql_completion_items(
-    schema: &std::collections::HashMap<String, Vec<e_db::ColumnInfo>>,
-    prefix: &str,
-    wants_tables: bool,
-) -> Vec<lsp_types::CompletionItem> {
-    let lower = prefix.to_lowercase();
-    let mut items: Vec<lsp_types::CompletionItem> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut push = |name: &str, kind: lsp_types::CompletionItemKind, detail: String| {
-        if !name.to_lowercase().contains(&lower) {
-            return;
-        }
-        if !seen.insert(name.to_string()) {
-            return;
-        }
-        items.push(lsp_types::CompletionItem {
-            label: name.to_string(),
-            insert_text: Some(name.to_string()),
-            kind: Some(kind),
-            detail: Some(detail),
-            ..Default::default()
-        });
-    };
-    let mut tables: Vec<&String> = schema.keys().collect();
-    tables.sort();
-    if !wants_tables {
-        let mut cols: Vec<&e_db::ColumnInfo> = schema.values().flatten().collect();
-        cols.sort_by(|a, b| a.name.cmp(&b.name));
-        for c in cols {
-            push(
-                &c.name,
-                lsp_types::CompletionItemKind::FIELD,
-                format!("column · {}", c.data_type),
-            );
-        }
-    }
-    for t in tables {
-        push(t, lsp_types::CompletionItemKind::CLASS, "table".to_string());
-    }
-    items
-}
-
-fn sql_prefix_and_context(sql_before: &str) -> (String, bool) {
-    let bytes = sql_before.as_bytes();
-    let mut i = bytes.len();
-    while i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_') {
-        i -= 1;
-    }
-    let prefix = sql_before[i..].to_string();
-    // The whitespace-delimited word right before the prefix decides the context.
-    let last_word = sql_before[..i]
-        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .rfind(|w| !w.is_empty())
-        .unwrap_or("")
-        .to_ascii_uppercase();
-    let wants_tables = matches!(
-        last_word.as_str(),
-        "FROM" | "JOIN" | "INTO" | "UPDATE" | "TABLE"
-    );
-    (prefix, wants_tables)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::sql_prefix_and_context;
-
-    #[test]
-    fn sql_context_tables_after_from() {
-        assert_eq!(
-            sql_prefix_and_context("SELECT * FROM us"),
-            ("us".into(), true)
-        );
-        assert_eq!(
-            sql_prefix_and_context("SELECT id FROM users JOIN po"),
-            ("po".into(), true)
-        );
-    }
-
-    #[test]
-    fn sql_context_columns_elsewhere() {
-        assert_eq!(sql_prefix_and_context("SELECT i"), ("i".into(), false));
-        assert_eq!(
-            sql_prefix_and_context("SELECT id FROM users WHERE ac"),
-            ("ac".into(), false)
-        );
     }
 }
 

@@ -187,8 +187,8 @@ på manuell testing.
 | --- | --- | --- | --- |
 | DB-301 | ✅ Sortering, kolonnefiltre, celle-redigering, ny rad, slett rad, FK-hopping | — | ✅ Kolonnefilter er ett likhetsfilter fra en celle (chip), ikke en filterrad |
 | DB-302 | Paginering: «neste/forrige side» + hopp til side, med totalantall; rad-cap erstattes av ekte sider | P0 | ✅ 200 rader per side, hopp til side, totalantall. Sidestørrelsen er ikke en innstilling; konsollen kappes fortsatt ved 1000 |
-| DB-303 | Transaksjonell redigering: endringer (celler, nye rader, slettinger) samles lokalt og markeres visuelt; egen **Submit**-knapp kjører alt i én transaksjon, **Revert** forkaster. Direkte-skriv beholdes som opt-in for lokal utvikling | P0 | ◐ Celleendringer og slettinger samles per primærnøkkel og overlever bla, sortering, filter og tabellbytte; Submit/Revert i én transaksjon. Nye rader («+ Row») samles også, vises grønt øverst i grid-en og settes inn ved Submit. Mangler: gjennomstreking av slettede rader, opt-in direkte-skriv |
-| DB-304 | Verdi-editor: åpne celleverdi i eget felt/modal for lange tekster; JSON-kolonner vises formatert (pretty-print) med fold, og valideres før lagring | P0 | ◐ Flerlinjers editor i redigeringsdialogen (⌘↵ lagrer, Esc avbryter); JSON-kolonner valideres før endringen samles. Verdivisningen viser JSON pretty-printet. Mangler: fold, og formatering i editoren (serde_json sorterer nøklene, så den ville endre data) |
+| DB-303 | Transaksjonell redigering: endringer (celler, nye rader, slettinger) samles lokalt og markeres visuelt; egen **Submit**-knapp kjører alt i én transaksjon, **Revert** forkaster. Direkte-skriv beholdes som opt-in for lokal utvikling | P0 | ◐ Celleendringer og slettinger samles per primærnøkkel og overlever bla, sortering, filter og tabellbytte; Submit/Revert i én transaksjon. Nye rader («+ Row») samles også, vises grønt øverst i grid-en og settes inn ved Submit. Slettede rader er røde og gjennomstreket. Mangler: opt-in direkte-skriv |
+| DB-304 | Verdi-editor: åpne celleverdi i eget felt/modal for lange tekster; JSON-kolonner vises formatert (pretty-print) med fold, og valideres før lagring | P0 | ◐ Flerlinjers editor i redigeringsdialogen (⌘↵ lagrer, Esc avbryter); JSON-kolonner valideres før endringen samles. JSON på én linje åpnes formatert i editoren og i verdivisningen, uten å gå via serde_json: nøkkelrekkefølge og tall beholdes. Uendret lagres verdien som den var; endret legges den på én linje igjen, med samme mellomrom som den ble lest med. Mangler: fold — editoren har ingen kodefolding |
 | DB-305 | NULL håndteres eksplisitt: vis `NULL` distinkt fra tom streng; sett-til-NULL-handling | P0 | ✅ Dim `NULL` (ikke kursiv), NULL-avkrysning i rediger- og ny rad-dialog |
 | DB-306 | Kopier celle / rad (som CSV, JSON eller `INSERT`-setning) fra kontekstmeny | P1 | ✗ |
 | DB-307 | Dupliser rad som utgangspunkt for ny | P1 | ✗ |
@@ -203,9 +203,9 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | ID | Krav | Prioritet | Status v0.20.0 |
 | --- | --- | --- | --- |
 | DB-401 | Syntax-highlighting i konsollen (gjenbruk tree-sitter-SQL fra inline-SQL-arbeidet) | P0 | ✅ |
-| DB-402 | Skjema-bevisst completion: tabellnavn, kolonnenavn (alias-bevisst: `o.` foreslår `orders`-kolonner), nøkkelord, funksjoner (gjenbruk completion-motoren fra inline SQL) | P0 | ◐ Tabeller etter FROM/JOIN/…, kolonner med type. Skjema fra konsollens egen tilkobling. Mangler: alias, nøkkelord, funksjoner, kolonner avgrenset til setningens tabeller |
+| DB-402 | Skjema-bevisst completion: tabellnavn, kolonnenavn (alias-bevisst: `o.` foreslår `orders`-kolonner), nøkkelord, funksjoner (gjenbruk completion-motoren fra inline SQL) | P0 | ✅ Tabeller etter FROM/JOIN/… og komma i FROM-lista; `alias.`/`tabell.` gir den tabellens kolonner (alias lest fra hele setningen); ellers kolonnene til tabellene setningen nevner, og nøkkelord sortert etter klausulen markøren står i, i den bokstavstørrelsen som skrives. Ikke i strenger og kommentarer. Felles for konsollen og SQL i PHP-strenger. Funksjoner: bare de vanligste (COUNT, SUM, AVG, MIN, MAX, COALESCE) |
 | DB-403 | Multi-statement: kjør hele konsollen, kjør valgt tekst, eller kjør setningen under markøren (⌘⏎); hver setning får eget resultat | P0 | ✅ |
-| DB-404 | Flere resultat-faner: hver kjøring får en fane (med queryen som tooltip); faner kan pinnes; ikke-pinnede gjenbrukes | P0 | ◐ Pin (★) og gjenbruk; fanene overlever tabellbytte, og tabellen har egen fane. Mangler: query som tooltip |
+| DB-404 | Flere resultat-faner: hver kjøring får en fane (med queryen som tooltip); faner kan pinnes; ikke-pinnede gjenbrukes | P0 | ✅ Pin (★) og gjenbruk; fanene overlever tabellbytte, og tabellen har egen fane. Setningen vises som tooltip på fanen |
 | DB-405 | Query-historikk: alle kjørte queries logges per prosjekt (tid, tilkobling, radantall, varighet); søkbar liste, klikk for å gjenåpne i konsollen | P0 | ✅ Bare konsoll-kjøringer logges |
 | DB-406 | ✅ Lagrede queries per prosjekt | — | ✅ Ingen UI for å slette en lagret query |
 | DB-407 | Feilposisjonering: syntaksfeil fra serveren markerer riktig posisjon i konsollen der driveren oppgir den; «✨ Explain with agent» beholdes | P1 | ✗ Feilen vises som tekst; «Explain with agent» finnes |
@@ -465,13 +465,13 @@ fase 4–5 er forspranget.
 
 | Fase | Levert | Delvis | Mangler |
 | --- | --- | --- | --- |
-| 1 — Konsollen | 401, 403, 405, 409, 605 | 402, 404 | — |
+| 1 — Konsollen | 401, 402, 403, 404, 405, 409, 605 | — | — |
 | 2 — Trygg redigering | 102, 104, 302, 305, 702, 703 | 303, 304 | — |
 | 3 — Data inn/ut | 205 | 202, 502, 503, 505 | — |
 | 4 — Kraftbruker | 408, 604 | 204, 308, 602, 603, 802 | — |
 | 5 — Forbi | — | 206, 207, 704, 705, 803, 805 | — |
 
-Ingen fase er helt ferdig. Krav utenfor faseplanen som mangler helt: 203,
+Fase 1 er ferdig. Krav utenfor faseplanen som mangler helt: 203,
 306, 307, 310, 407, 410, 504, 804.
 
 ### Neste steg
@@ -480,12 +480,15 @@ Feilene i §3 og dokumentasjonen som lovet for mye, er tatt, og fase 2 er
 nesten ferdig. Submit sjekker nå at radene ikke er endret siden de ble lest
 (optimistisk låsing, se §9).
 
-1. **Fullføre fase 1** («paritet i praksis»): completion med alias og
-   nøkkelord (402); query som tooltip på fanene (404).
-2. Restene av fase 2: gjennomstreking av slettede rader (303), fold i
-   verdi-editoren (304).
-3. Deretter fase 3: CSV-import med mapping-dialog (503), views med definisjon
-   (202), kopier-som i alle formater (505).
+Fase 1 er ferdig. I fase 2 står to ting igjen, og begge er større enn de
+ser ut: opt-in direkte-skriv (303) og fold i verdi-editoren (304), som
+krever kodefolding i editoren, noe `e` ikke har.
+
+1. Fase 3: CSV-import med mapping-dialog (503), views med definisjon (202),
+   kopier-som i alle formater (505).
+2. Kapabilitetsflagg per driver (§9), så ClickHouse sier hva den ikke kan i
+   stedet for å vise tomme views.
+3. Kodefolding i editoren, som også gir fold i verdi-editoren (304).
 
 ## 8. Suksessmetrikker
 

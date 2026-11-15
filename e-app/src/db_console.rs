@@ -59,6 +59,8 @@ pub fn sql_console(state: AppState) -> impl IntoView {
 
     let hl = highlights.clone();
     let doc_for_update = doc.clone();
+    let typed = Rc::new(std::cell::Cell::new(false));
+    let typed_key = typed.clone();
 
     let te = text_editor_keys("", move |editor_sig, kp, mods| {
         let comp = state.completion;
@@ -86,17 +88,24 @@ pub fn sql_console(state: AppState) -> impl IntoView {
                 return CommandExecuted::Yes;
             }
         }
-        let res = default_key_handler(editor_sig)(kp, mods);
-        // After a character or backspace, (re)compute schema completion. Doing
-        // it here (not in `.update`) means programmatic edits (browse queries)
-        // never pop the completion list.
+        // A typed character or backspace asks for schema completion once the
+        // edit is in the document and the cursor past it: the key arrives
+        // before either, so working it out here would see the text a
+        // keystroke behind (no columns after `u.`). Only typing asks, so
+        // programmatic edits (browse queries) never pop the list.
         if let KeyInput::Keyboard(key, _) = &kp.key {
             use floem::keyboard::{Key, NamedKey};
-            if matches!(key, Key::Character(_) | Key::Named(NamedKey::Backspace)) {
-                state.console_sql_completion();
-            }
+            typed_key.set(
+                !(mods.meta() || mods.control())
+                    && matches!(
+                        key,
+                        Key::Character(_)
+                            | Key::Named(NamedKey::Space)
+                            | Key::Named(NamedKey::Backspace)
+                    ),
+            );
         }
-        res
+        default_key_handler(editor_sig)(kp, mods)
     })
     .use_doc(doc.clone() as Rc<dyn Document>)
     .styling(styling)
@@ -107,6 +116,12 @@ pub fn sql_console(state: AppState) -> impl IntoView {
         *hl.borrow_mut() = e_core::syntax::highlight_lines(Language::Sql, &text);
         doc_for_update.cache_rev().update(|r| *r += 1);
         state.db.query_text.set(text);
+        if typed.replace(false) {
+            // Once the cursor has moved past the edit too.
+            floem::action::exec_after(std::time::Duration::ZERO, move |_| {
+                state.console_sql_completion()
+            });
+        }
     })
     .pre_command(move |pre| {
         let comp = state.completion;

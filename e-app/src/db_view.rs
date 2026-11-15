@@ -2587,16 +2587,9 @@ fn group_digits(n: u64) -> String {
     out
 }
 
+/// A value as the viewer shows it: JSON laid out, keys in their own order.
 pub(crate) fn pretty_value(s: &str) -> String {
-    let t = s.trim_start();
-    if t.starts_with('{') || t.starts_with('[') {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
-            if let Ok(p) = serde_json::to_string_pretty(&v) {
-                return p;
-            }
-        }
-    }
-    s.to_string()
+    crate::json_layout::pretty(s).unwrap_or_else(|| s.to_string())
 }
 
 /// A read-only inspector for the selected cell (full value, pretty-printed JSON)
@@ -2966,6 +2959,29 @@ fn db_history_panel(state: AppState) -> impl IntoView {
 /// The transactional "pending changes" bar: shown at the bottom of the grid
 /// while there are staged edits/deletes, with Submit (one transaction, via the
 /// confirmation dialog) and Revert.
+/// A statement as a tab's tooltip: trimmed, at most a dozen lines of up to
+/// 120 characters each.
+fn tab_tooltip(sql: &str) -> String {
+    const LINES: usize = 12;
+    const WIDTH: usize = 120;
+    let lines: Vec<&str> = sql.trim().lines().collect();
+    let mut out: Vec<String> = lines
+        .iter()
+        .take(LINES)
+        .map(|l| {
+            if l.chars().count() > WIDTH {
+                format!("{}…", l.chars().take(WIDTH).collect::<String>())
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    if lines.len() > LINES {
+        out.push(format!("… {} more lines", lines.len() - LINES));
+    }
+    out.join("\n")
+}
+
 /// What the last Submit found changed in the database since the grid read
 /// it: nothing was written, and the changes it names are no longer staged.
 fn conflict_bar(state: AppState) -> impl IntoView {
@@ -3179,9 +3195,19 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
                 .enumerate()
                 .collect::<Vec<_>>()
         },
-        |(i, t)| (*i, t.title.clone(), t.pinned, t.error.is_some()),
+        // The statement is in the key: a new run's "Result 1" is a new tab.
+        |(i, t)| {
+            (
+                *i,
+                t.title.clone(),
+                t.pinned,
+                t.error.is_some(),
+                t.sql.clone(),
+            )
+        },
         move |(i, t)| {
             let title = t.title.clone();
+            let sql = t.sql.clone();
             let pinned = t.pinned;
             let is_err = t.error.is_some();
             let pin = label(move || if pinned { "★" } else { "☆" }.to_string())
@@ -3208,7 +3234,7 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
                         .hover(|s| s.color(theme::fg()))
                 })
                 .on_click_stop(move |_| state.db_close_tab(i));
-            stack((pin, name, close))
+            let tab = stack((pin, name, close))
                 .style(move |s| {
                     let active = state.db.active_tab.get() == Some(i);
                     let s = s
@@ -3226,7 +3252,30 @@ fn result_tabs_strip(state: AppState) -> impl IntoView {
                         s.hover(|s| s.background(theme::bg_hover()))
                     }
                 })
-                .on_click_stop(move |_| state.db_activate_tab(i))
+                .on_click_stop(move |_| state.db_activate_tab(i));
+            // Hovering a tab shows the statement it is the result of (DB-404).
+            match sql.as_deref().map(tab_tooltip) {
+                Some(text) => floem::views::tooltip(tab, move || {
+                    let text = text.clone();
+                    label(move || text.clone())
+                })
+                .style(|s| {
+                    s.class(floem::views::TooltipClass, |s| {
+                        s.font_size(12.0)
+                            .font_family(theme::mono_family())
+                            .color(theme::fg())
+                            .padding_horiz(10.0)
+                            .padding_vert(6.0)
+                            .max_width(640.0)
+                            .border(1.0)
+                            .border_radius(5.0)
+                            .border_color(theme::border())
+                            .background(theme::bg_panel())
+                    })
+                })
+                .into_any(),
+                None => tab.into_any(),
+            }
         },
     )
     .style(|s| s.flex_row().items_center());
@@ -3315,7 +3364,7 @@ fn result_grid(state: AppState) -> impl IntoView {
         // tab, a page) with a row at the same place must make a new row.
         |(i, row)| (*i, row.clone()),
         move |(ri, row)| {
-            dyn_stack(
+            let cells = dyn_stack(
                 move || row.clone().into_iter().enumerate().collect::<Vec<_>>(),
                 |(i, _)| *i,
                 move |(ci, cell)| {
@@ -3368,7 +3417,25 @@ fn result_grid(state: AppState) -> impl IntoView {
                         .on_double_click_stop(move |_| state.db_begin_edit(ri, ci))
                 },
             )
-            .style(|s| {
+            .style(|s| s.flex_row().items_center().height(26.0));
+            // A row staged for deletion is struck through, across all its
+            // cells (DB-303); clicks go through to the cells beneath.
+            let strike = empty().style(move |s| {
+                let s = s
+                    .absolute()
+                    .inset_left(4.0)
+                    .inset_right(4.0)
+                    .inset_top(12.5)
+                    .height(1.0)
+                    .background(theme::error())
+                    .pointer_events_none();
+                if state.db.pending_view.with(|v| v.rows.contains(&ri)) {
+                    s
+                } else {
+                    s.hide()
+                }
+            });
+            stack((cells, strike)).style(|s| {
                 s.flex_row()
                     .items_center()
                     .height(26.0)

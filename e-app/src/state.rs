@@ -366,7 +366,8 @@ pub struct ResultTab {
     pub key: Option<String>,
     /// EXPLAIN findings shown over the result (a plan's tab only).
     pub explain: Vec<String>,
-    /// The query a plan's tab explains, for "Suggest Index".
+    /// The statement the tab is the result of, shown on hovering the tab;
+    /// on a plan's tab, the query it explains, for "Suggest Index".
     pub sql: Option<String>,
 }
 
@@ -754,6 +755,10 @@ pub struct DbPanel {
     /// The cell currently being edited `(row, col, column_name)`.
     pub edit: RwSignal<Option<(usize, usize, String)>>,
     pub edit_value: RwSignal<String>,
+    /// A JSON cell's value as read, when the editor shows it laid out over
+    /// several lines: saved back as it was if left unchanged, else on one
+    /// line again, in its style.
+    pub edit_json: RwSignal<Option<String>>,
     pub edit_null: RwSignal<bool>,
     /// The cell (row, col) selected in the data grid, shown in the value viewer.
     pub selected_cell: RwSignal<Option<(usize, usize)>>,
@@ -826,6 +831,7 @@ impl DbPanel {
             schema_cache: RwSignal::new(Arc::new(std::collections::HashMap::new())),
             edit: RwSignal::new(None),
             edit_value: RwSignal::new(String::new()),
+            edit_json: RwSignal::new(None),
             edit_null: RwSignal::new(false),
             selected_cell: RwSignal::new(None),
             insert_open: RwSignal::new(false),

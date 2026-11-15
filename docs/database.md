@@ -94,7 +94,11 @@ In the **Data** view of a table that has a primary key:
 - **Double-click a cell** to open the edit dialog. The value opens in a
   multi-line editor, for long text and JSON alike; change it (or tick
   **NULL**) and press **⌘↵**, or **Esc** to cancel. A `json`/`jsonb` column
-  only takes valid JSON: the dialog says what's wrong and stays open. Edits
+  only takes valid JSON: the dialog says what's wrong and stays open. A JSON
+  value on one line opens laid out over several, keys in their own order and
+  numbers as written; saved unchanged it stays exactly as it was, and edited
+  it goes back on one line, spaced the way it was read. The value viewer
+  lays JSON out the same way. Edits
   are **staged**, not written immediately — see
   [Environments & safety](#environments--safety) for Submit/Revert.
 - The dialog also offers:
@@ -149,14 +153,26 @@ from the project's `.env` database.
 
 The query box in the results panel is a full SQL editor: syntax highlighting,
 schema-aware completion as you type, and a draggable handle below it to
-resize. Completion offers table names after `FROM`, `JOIN`, `INTO`, `UPDATE`
-and `TABLE`, and column names (with their types) elsewhere. They come from the
+resize. Completion offers:
+
+- **tables** after `FROM`, `JOIN`, `INTO`, `UPDATE` and `TABLE`, and after a
+  comma in a `FROM` list;
+- after **`alias.`** or **`table.`**, the columns of that table. The alias
+  can be defined anywhere in the statement, so `SELECT u.| FROM users u`
+  works;
+- elsewhere, the **columns of the tables the statement names** (every
+  table's while it names none), and **SQL keywords** — those that fit the
+  clause you're in first (`AND`, `IS NULL`, `LIKE` in a `WHERE`; `ASC`,
+  `DESC` after `ORDER BY`), in the case you type.
+
+Nothing is offered inside a string or a comment. Names come from the
 database the console runs against, read the first time you type and again
-after **⟳** or a reconnect. SQL keywords aren't completed.
+after **⟳** or a reconnect. SQL inside PHP strings completes the same way.
 
 - **⌘↵** runs the **selection**, or the **statement under the cursor**;
   **⌘⇧↵** (or **Run**) runs the whole console. Each statement gets its own
-  **result tab** — pin one (★) to keep it across runs.
+  **result tab** — pin one (★) to keep it across runs. Hover a tab to see
+  the statement it came from.
 - Result tabs stay when you open a table. The table has a tab of its own
   (**▦ name**) at the start of the strip: click it to go back to the table at
   the page, sort and filter you left it. Rows in a result tab are read-only;
@@ -193,7 +209,8 @@ The label drives the safety rails:
   joins, `UPDATE … FROM`, `DELETE … USING`, a `WHERE` that calls a function
   that writes — say *rows not counted* rather than guess.
 - **Transactional editing:** cell edits, new rows and row deletes are
-  *staged* (edited cells turn amber, new rows green, deleted rows red). They stay staged while you page, sort,
+  *staged* (edited cells turn amber, new rows green, deleted rows red and
+  struck through). They stay staged while you page, sort,
   filter, open another table or run a query, until you submit or revert them.
   A **N pending changes to `table`** bar offers **Submit** (all in one
   transaction, via the confirmation dialog) and **Revert**. Staged changes

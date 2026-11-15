@@ -31,6 +31,8 @@ mod completion;
 mod completion_state;
 mod config;
 mod contract_heal;
+mod json_layout;
+mod sql_complete;
 use e_laravel::contract;
 mod contract_view;
 mod db_console;

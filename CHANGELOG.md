@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both of its layouts) and PostgreSQL's JSON. **Show as table** shows the
   rows `EXPLAIN` gave instead.
 
+### Fixed
+
+- **Two snapshots at once could fail.** The temporary index a turn's
+  snapshot is built in was named by the clock, which macOS gives to the
+  microsecond, so two in the same microsecond collided on its lock.
+
 ## [0.26.0] - 2026-11-15
 
 ### Added

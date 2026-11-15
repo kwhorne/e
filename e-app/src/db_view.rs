@@ -1561,8 +1561,34 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
             menu
         });
 
+    // A plan shows as a tree, or as the rows the engine gave (DB-602).
+    let plan_toggle = label(move || {
+        if state.db.plan_as_table.get() {
+            "Show as tree".to_string()
+        } else {
+            "Show as table".to_string()
+        }
+    })
+    .style(move |s| {
+        let s = s
+            .padding_horiz(8.0)
+            .padding_vert(2.0)
+            .border_radius(4.0)
+            .font_size(11.0)
+            .color(theme::fg_dim())
+            .cursor(floem::style::CursorStyle::Pointer)
+            .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
+        if active_plan(state).is_some() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+    .on_click_stop(move |_| state.db.plan_as_table.update(|t| *t = !*t));
+
     let toolbar = stack((
         subview_chips,
+        plan_toggle,
         pager,
         filter_chip,
         spacer,
@@ -1589,17 +1615,17 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
 
     let grid = scroll(
         dyn_container(
-            move || state.db.subview.get(),
-            move |v| {
-                if v == "structure" {
-                    structure_grid(state).into_any()
-                } else {
-                    result_grid(state).into_any()
-                }
+            move || (state.db.subview.get(), shown_plan(state)),
+            move |(v, plan)| match plan {
+                Some(plan) => plan_tree(plan).into_any(),
+                None if v == "structure" => structure_grid(state).into_any(),
+                None => result_grid(state).into_any(),
             },
         )
         .style(move |s| {
-            let w = if state.db.subview.get() == "structure" {
+            let w = if shown_plan(state).is_some() {
+                900.0
+            } else if state.db.subview.get() == "structure" {
                 520.0
             } else {
                 let n = state
@@ -3568,6 +3594,116 @@ fn pending_bar(state: AppState) -> impl IntoView {
             s.hide()
         }
     })
+}
+
+/// The plan of the shown tab, as a tree, if it has one.
+fn active_plan(state: AppState) -> Option<e_db::PlanNode> {
+    let i = state.db.active_tab.get()?;
+    state.db.result_tabs.with(|t| t.get(i)?.plan.clone())
+}
+
+/// The plan to show as a tree, unless it's to be shown as rows.
+fn shown_plan(state: AppState) -> Option<e_db::PlanNode> {
+    (!state.db.plan_as_table.get())
+        .then(|| active_plan(state))
+        .flatten()
+}
+
+/// A plan as a tree (DB-602): each step under the one it feeds, full scans
+/// in red, the step that costs the most on its own marked, and the cost and
+/// rows the engine estimates.
+fn plan_tree(plan: e_db::PlanNode) -> impl IntoView {
+    let costliest = plan.costliest().map(|n| n as *const e_db::PlanNode);
+    let rows = plan
+        .flatten()
+        .into_iter()
+        .map(|(depth, n)| {
+            let indent = depth as f64 * 18.0;
+            let branch = if depth == 0 { "" } else { "└ " };
+            let title = format!("{branch}{}", n.label);
+            let full_scan = n.full_scan;
+            let costly = costliest == Some(n as *const e_db::PlanNode);
+            let mut marks = Vec::new();
+            if full_scan {
+                marks.push("✖ full scan");
+            }
+            if costly {
+                marks.push("▲ costliest step");
+            }
+            let marks = marks.join("  ");
+            let numbers = [
+                n.cost.map(|c| format!("cost {}", plan_number(c))),
+                n.rows.map(|r| format!("{} rows", plan_number(r))),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+            let details = n.details.join("\n");
+            let head = stack((
+                label(move || title.clone()).style(move |s| {
+                    s.font_size(12.0)
+                        .font_family(theme::mono_family())
+                        .color(if full_scan {
+                            theme::error()
+                        } else {
+                            theme::fg()
+                        })
+                }),
+                label(move || marks.clone()).style(move |s| {
+                    s.font_size(10.5).color(if full_scan {
+                        theme::error()
+                    } else {
+                        theme::warning()
+                    })
+                }),
+                empty().style(|s| s.flex_grow(1.0_f32)),
+                label(move || numbers.clone()).style(|s| s.font_size(11.0).color(theme::fg_dim())),
+            ))
+            .style(|s| s.flex_row().items_center().gap(10.0).width_full());
+            let has_details = !details.is_empty();
+            let detail = label(move || details.clone()).style(move |s| {
+                let s = s
+                    .font_size(11.0)
+                    .font_family(theme::mono_family())
+                    .color(theme::fg_dim())
+                    .padding_left(if depth == 0 { 0.0 } else { 14.0 });
+                if has_details {
+                    s
+                } else {
+                    s.hide()
+                }
+            });
+            stack((head, detail))
+                .style(move |s| {
+                    let s = s
+                        .flex_col()
+                        .gap(2.0)
+                        .width_full()
+                        .padding_left(12.0 + indent)
+                        .padding_right(12.0)
+                        .padding_vert(5.0)
+                        .border_bottom(1.0)
+                        .border_color(theme::border());
+                    if costly {
+                        s.background(Color::from_rgba8(0xe5, 0xc0, 0x7b, 24))
+                    } else {
+                        s
+                    }
+                })
+                .into_any()
+        })
+        .collect::<Vec<_>>();
+    floem::views::v_stack_from_iter(rows).style(|s| s.width(900.0))
+}
+
+/// A plan's estimate: whole when it is, else to two places.
+fn plan_number(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        group_digits(n as u64)
+    } else {
+        format!("{n:.2}")
+    }
 }
 
 /// A banner listing EXPLAIN findings (full scans / missing indexes) for the

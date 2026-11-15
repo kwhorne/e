@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **EXPLAIN shows the plan as a tree.** Each step sits under the one it
+  feeds, with its conditions, and full scans are in red. On MySQL and
+  PostgreSQL each step has the cost and rows the engine estimates, and the
+  step that costs the most on its own is marked. It's read from each
+  engine's structured plan: SQLite's `EXPLAIN QUERY PLAN`, MySQL's JSON (in
+  both of its layouts) and PostgreSQL's JSON. **Show as table** shows the
+  rows `EXPLAIN` gave instead.
+
 ## [0.26.0] - 2026-11-15
 
 ### Added

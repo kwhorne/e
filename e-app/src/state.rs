@@ -406,6 +406,9 @@ pub struct ResultTab {
     /// On a plan's tab, the index the plan asks for, unless the table has
     /// one that starts with its columns (DB-603).
     pub advice: Option<e_laravel::query_advice::Advice>,
+    /// On a plan's tab, the plan as a tree, where the engine gives one
+    /// (DB-602).
+    pub plan: Option<e_db::PlanNode>,
 }
 
 /// One editable field in the "insert row" dialog, bound to its own signals.
@@ -780,6 +783,8 @@ pub struct DbPanel {
     pub import: RwSignal<Option<DbImport>>,
     /// The tables Related offers, when more than one points at the row.
     pub related: RwSignal<Option<RelatedChoice>>,
+    /// Show a plan's rows as the engine gives them, not as a tree.
+    pub plan_as_table: RwSignal<bool>,
     /// Active sort: `(column, ascending)`.
     pub sort: RwSignal<Option<(String, bool)>>,
     /// Active data-view filter: `(column, Some(value) | None for IS NULL)`.
@@ -871,6 +876,7 @@ impl DbPanel {
             is_view: RwSignal::new(false),
             import: RwSignal::new(None),
             related: RwSignal::new(None),
+            plan_as_table: RwSignal::new(false),
             sort: RwSignal::new(None),
             filter: RwSignal::new(None),
             page: RwSignal::new(0),

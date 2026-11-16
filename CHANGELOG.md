@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Restore a snapshot.** **⤓** on a local connection is now a menu: take a
+  snapshot, or restore one of its snapshots. Restoring asks first and takes
+  a snapshot of the database as it is, so it can be undone the same way.
+- **Migrate takes a snapshot first** when Grove isn't there to, and an agent
+  can ask for one with `db_snapshot`.
+- **Undo a deleted row.** The write log's **Undo** now inserts a deleted row
+  again, as it was read.
+- **Table sizes** beside the row counts in the tree.
+
+### Fixed
+
+- **A SQLite snapshot could miss recent writes.** It was a copy of the file,
+  without what's still in the write-ahead log; it's now `VACUUM INTO`, and a
+  restore goes through SQLite's backup API.
+- **A PostgreSQL snapshot couldn't be restored** over its database: the
+  dump didn't drop what it creates. It's now taken with `--clean
+  --if-exists`, and replayed in one transaction that stops at an error.
+- **Snapshots of two databases with the same name** shared a folder. Each
+  database has its own now.
+- **Search all data on PostgreSQL** told case apart, and skipped any table
+  with a `json` or `uuid` column. It now uses `::text ILIKE`.
+
 ## [0.27.0] - 2026-11-15
 
 ### Added

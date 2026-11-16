@@ -102,6 +102,17 @@ its environment's colour (a query on production says PRODUCTION). If you
 rows_affected, elapsed_ms}`; if you **Deny**, it returns an error. The agent
 never gets direct database access.
 
+Before a risky change it can **take a snapshot** of a local database:
+
+```sh
+printf '{"method":"db_snapshot"}\n' | nc -U "$E_EDITOR_SOCK"
+```
+
+It answers with the snapshot's `path` and size in `bytes`. Taking one changes
+nothing, so it isn't asked about; it's refused for a database that isn't
+local. Restoring is yours, from the Database panel's
+[⤓ menu](database.md#environments--safety).
+
 ## The Laravel project in one answer
 
 ```sh

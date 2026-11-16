@@ -227,7 +227,9 @@ The label drives the safety rails:
   transaction, via the confirmation dialog) and **Revert**. Staged changes
   belong to one table at a time: to edit another, submit or revert the first.
   A **Log** button shows the session's writes with an **Undo** where a reverse
-  statement can be generated.
+  statement can be generated: an edit's old value set back, an insert
+  deleted again, and a deleted row inserted again as it was read (not for
+  tables with binary columns, which the grid shows only as their size).
 - **Conflicts:** Submit first reads each edited and deleted row again, in the
   same transaction, and checks that the edited cell still holds the value you
   read (compared as the grid showed it), and that a row to delete is still
@@ -237,9 +239,22 @@ The label drives the safety rails:
   Submit. The rows are locked while they are checked (`FOR UPDATE`; SQLite
   takes its write lock first), so nothing gets in between. ClickHouse has no
   transactions, so there the check runs just before the writes.
-- **Snapshots:** the **⤓** action on a local connection dumps the database
-  (SQLite copy / mysqldump / pg_dump) into `~/.config/e/snapshots/` — handy
-  before a migration.
+- **Snapshots:** the **⤓** menu on a local connection takes a snapshot of
+  the database, and lists its snapshots to restore one:
+  - **SQLite** is copied with `VACUUM INTO` (which takes what's still in the
+    write-ahead log), and restored through SQLite's backup API.
+  - **MySQL** is dumped with `mysqldump` and replayed through `mysql`.
+  - **PostgreSQL** is dumped with `pg_dump --clean --if-exists` and replayed
+    through `psql` in one transaction that stops at the first error, so a
+    restore that fails changes nothing.
+
+  **Restore** asks first, and takes a snapshot of the database as it is
+  before putting the old one back, so a restore can be undone the same way.
+  Each database's snapshots have a folder of their own in
+  `~/.config/e/snapshots/`, named after it and where it lives, so two
+  projects' `app` databases never mix. The Migrations panel's **migrate**
+  takes one first when Grove isn't there to, and an agent can ask for one
+  with `db_snapshot` (see [agent sync](agent-sync.md#database-schema)).
 
 ## Structure, relationships & tooling
 
@@ -267,9 +282,9 @@ The label drives the safety rails:
   model needs `use HasFactory;` to seed with it.
 - **⬆ CSV** imports a CSV file into the table (see below).
 - **Search all data…** in the panel header scans every table's text columns of
-  the active connection for a value, and shows one result tab per
-  matching table. **✕ Cancel** stops it
-  before the next table.
+  the active connection for a value, without regard to case, and shows one
+  result tab per matching table. **✕ Cancel** stops it before the next
+  table.
 - Row counts appear next to each table in the tree. They come from the
   server's catalog in one query rather than a count of every table:
   - **PostgreSQL** shows the planner's estimate, as `≈12.3k`. A table is
@@ -278,7 +293,9 @@ The label drives the safety rails:
   - **ClickHouse** shows its exact counts.
   - **SQLite** counts each table.
 
-  Opening a table counts its rows exactly.
+  Beside the count is the space the table takes with its indexes
+  (`≈12.3k · 4.2 MB`), from the same catalogs; SQLite's comes from its
+  `dbstat` table. Opening a table counts its rows exactly.
 
 ## Importing CSV
 

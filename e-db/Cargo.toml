@@ -25,7 +25,7 @@ mysql = { version = "25", default-features = false, features = [
     "buffer-pool",
 ] }
 postgres   = "0.19"
-rusqlite   = { version = "0.32", features = ["bundled"] }
+rusqlite   = { version = "0.32", features = ["bundled", "backup"] }
 # TLS for PostgreSQL and ClickHouse through the same native stack MySQL uses
 # (the Security framework on macOS, OpenSSL on Linux).
 native-tls          = "0.2"

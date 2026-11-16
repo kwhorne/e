@@ -758,6 +758,9 @@ pub struct DbPanel {
     /// belong to one table, `pending_target` (connection key, table).
     pub pending_edits: RwSignal<HashMap<(RowPk, String), PendingEdit>>,
     pub pending_deletes: RwSignal<HashSet<RowPk>>,
+    /// Each row staged for deletion as the database has it, to put back
+    /// from the write log (DB-705); `None` when it can't be (binary data).
+    pub deleted_rows: RwSignal<HashMap<RowPk, Option<RowPk>>>,
     /// Rows staged with "+ Row", inserted on Submit with the rest.
     pub pending_inserts: RwSignal<Vec<PendingInsert>>,
     pub pending_target: RwSignal<Option<(String, String)>>,
@@ -864,6 +867,7 @@ impl DbPanel {
             param_last: RwSignal::new(HashMap::new()),
             pending_edits: RwSignal::new(HashMap::new()),
             pending_deletes: RwSignal::new(HashSet::new()),
+            deleted_rows: RwSignal::new(HashMap::new()),
             pending_inserts: RwSignal::new(Vec::new()),
             pending_target: RwSignal::new(None),
             conflicts: RwSignal::new(Vec::new()),

@@ -461,6 +461,7 @@ const METHODS: &[&str] = &[
     "click",
     "db_schema",
     "db_query",
+    "db_snapshot",
     "tinker",
     "run",
 ];
@@ -910,6 +911,44 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             };
             std::thread::spawn(move || {
                 let _ = reply.send(db_schema(&conn));
+            });
+            return;
+        }
+
+        // ---- Database snapshot (async, local databases only) -------------
+        // Taking one changes nothing, so it isn't asked about; restoring is
+        // the user's, from the Database panel.
+        "db_snapshot" => {
+            let name = req.get("connection").and_then(|c| c.as_str());
+            let entry = match state.db_for_agent(name) {
+                Ok(e) => e,
+                Err(error) => {
+                    let _ = reply.send(json!({"ok": false, "error": error}));
+                    return;
+                }
+            };
+            if !entry.config.environment().is_local() {
+                let _ = reply.send(json!({
+                    "ok": false,
+                    "error": "snapshots are taken of local databases only"
+                }));
+                return;
+            }
+            let Some(root) = crate::config::snapshot_dir() else {
+                let _ = reply.send(json!({"ok": false, "error": "no snapshot folder"}));
+                return;
+            };
+            let cfg = entry.config.clone();
+            std::thread::spawn(move || {
+                let _ = reply.send(match e_db::take_snapshot(&cfg, &root) {
+                    Ok(path) => json!({
+                        "ok": true,
+                        "connection": cfg.display_name(),
+                        "path": path.to_string_lossy(),
+                        "bytes": std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+                    }),
+                    Err(e) => json!({"ok": false, "error": e}),
+                });
             });
             return;
         }

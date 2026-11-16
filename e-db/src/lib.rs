@@ -9,10 +9,12 @@ mod affected;
 mod classify;
 pub mod history;
 mod plan;
+mod snapshot;
 
 pub use affected::{affects, Affects, Counted, COUNT_CAP};
 pub use classify::{is_destructive, is_read_only};
 pub use plan::PlanNode;
+pub use snapshot::{list_snapshots, restore_snapshot, snapshot_folder, take_snapshot, Snapshot};
 
 /// How many rows a write statement will touch, asked of the database
 /// before it runs (see [`affects`]); `None` when that can't be told.
@@ -2459,6 +2461,19 @@ pub fn referencing(
         .collect())
 }
 
+/// `column` contains `pattern`, without regard to case on every engine:
+/// MySQL's and SQLite's `LIKE` already ignore it; PostgreSQL's doesn't, and
+/// takes no `json` or `uuid`, so it's cast to text and matched with
+/// `ILIKE`; ClickHouse has `ILIKE` too.
+fn search_condition(engine: &str, column: &str, pattern: &str) -> String {
+    let col = quote_ident(engine, column);
+    match engine {
+        "postgres" | "postgresql" | "pgsql" => format!("{col}::text ILIKE {pattern}"),
+        "clickhouse" | "ch" => format!("{col} ILIKE {pattern}"),
+        _ => format!("{col} LIKE {pattern}"),
+    }
+}
+
 /// Whether a column type holds text (searchable with LIKE).
 fn is_texty(data_type: &str) -> bool {
     let t = data_type.to_ascii_lowercase();
@@ -2496,7 +2511,7 @@ pub fn search_all(
         let pattern = quote_literal(engine, &format!("%{needle}%"));
         let conds: Vec<String> = text_cols
             .iter()
-            .map(|c| format!("{} LIKE {}", quote_ident(engine, &c.name), pattern))
+            .map(|c| search_condition(engine, &c.name, &pattern))
             .collect();
         let sql = format!(
             "SELECT * FROM {} WHERE {} LIMIT {}",
@@ -2552,6 +2567,8 @@ pub struct RowCount {
     /// Counted (SQLite, ClickHouse's MergeTree), rather than the server's
     /// estimate (MySQL's `TABLE_ROWS`, PostgreSQL's planner statistics).
     pub exact: bool,
+    /// The space it takes, its indexes with it, where the server says.
+    pub bytes: Option<u64>,
 }
 
 /// Row counts for every table, cheaply: one catalog query where the server
@@ -2561,6 +2578,7 @@ pub struct RowCount {
 /// aren't shared, so its tables are counted. A table the server has no
 /// figure for (PostgreSQL before its first ANALYZE) is left out.
 pub fn row_counts(conn: &Conn, tables: &[String]) -> Result<HashMap<String, RowCount>, String> {
+    // Rows of (name, rows, bytes); bytes may be missing.
     let figures = |sql: &str, exact: bool| -> Result<HashMap<String, RowCount>, String> {
         let res = query(conn, sql, usize::MAX)?;
         Ok(res
@@ -2569,21 +2587,29 @@ pub fn row_counts(conn: &Conn, tables: &[String]) -> Result<HashMap<String, RowC
             .filter_map(|r| {
                 let name = r.first().cloned().flatten()?;
                 let rows = r.get(1).cloned().flatten()?.parse::<f64>().ok()? as i64;
-                (rows >= 0).then_some((name, RowCount { rows, exact }))
+                let bytes = r
+                    .get(2)
+                    .cloned()
+                    .flatten()
+                    .and_then(|b| b.parse::<f64>().ok())
+                    .map(|b| b as u64);
+                (rows >= 0).then_some((name, RowCount { rows, exact, bytes }))
             })
             .collect())
     };
     match &conn.backend {
         Backend::Mysql(_) => figures(
-            "SELECT TABLE_NAME, TABLE_ROWS FROM information_schema.TABLES \
+            "SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH + INDEX_LENGTH \
+             FROM information_schema.TABLES \
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'",
             false,
         ),
         // The same table a bare name means in the panel (see
         // `pg_table_schema`); `reltuples` is -1 until the table is analyzed.
         Backend::Postgres(_) => figures(
-            "SELECT relname, reltuples::bigint FROM ( \
-               SELECT c.relname, c.reltuples, row_number() OVER ( \
+            "SELECT relname, reltuples::bigint, size FROM ( \
+               SELECT c.relname, c.reltuples, pg_total_relation_size(c.oid) AS size, \
+                      row_number() OVER ( \
                         PARTITION BY c.relname \
                         ORDER BY pg_table_is_visible(c.oid) DESC, n.nspname) AS pick \
                  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -2594,17 +2620,65 @@ pub fn row_counts(conn: &Conn, tables: &[String]) -> Result<HashMap<String, RowC
             false,
         ),
         Backend::Clickhouse { .. } => figures(
-            "SELECT name, total_rows FROM system.tables \
+            "SELECT name, total_rows, total_bytes FROM system.tables \
              WHERE database = currentDatabase() AND total_rows IS NOT NULL",
             true,
         ),
-        Backend::Sqlite(_) => Ok(tables
-            .iter()
-            .filter_map(|t| {
-                let rows = count_rows(conn, "sqlite", t, None).ok()?;
-                Some((t.clone(), RowCount { rows, exact: true }))
-            })
-            .collect()),
+        Backend::Sqlite(path) => {
+            // Each table's pages and its indexes', where SQLite was built
+            // with the dbstat table (the bundled one is).
+            let sizes: HashMap<String, u64> = conn
+                .sqlite(path)
+                .ok()
+                .and_then(|c| {
+                    let mut stmt = c
+                        .prepare(
+                            "SELECT m.tbl_name, SUM(d.pgsize) FROM dbstat d \
+                             JOIN sqlite_master m ON m.name = d.name GROUP BY m.tbl_name",
+                        )
+                        .ok()?;
+                    let rows = stmt
+                        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+                        .ok()?;
+                    Some(
+                        rows.filter_map(Result::ok)
+                            .map(|(t, b)| (t, b as u64))
+                            .collect(),
+                    )
+                })
+                .unwrap_or_default();
+            Ok(tables
+                .iter()
+                .filter_map(|t| {
+                    let rows = count_rows(conn, "sqlite", t, None).ok()?;
+                    let bytes = sizes.get(t).copied();
+                    Some((
+                        t.clone(),
+                        RowCount {
+                            rows,
+                            exact: true,
+                            bytes,
+                        },
+                    ))
+                })
+                .collect())
+        }
+    }
+}
+
+/// A size for the table tree: `48 KB`, `4.2 MB`.
+pub fn size_label(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = bytes as f64;
+    let mut unit = 0;
+    while v >= 1024.0 && unit < UNITS.len() - 1 {
+        v /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 || v >= 10.0 {
+        format!("{v:.0} {}", UNITS[unit])
+    } else {
+        format!("{v:.1} {}", UNITS[unit])
     }
 }
 
@@ -3734,85 +3808,6 @@ impl Environment {
     }
 }
 
-// ---- Snapshot restore (DB-704, the reversible half of the verify-fix loop) ----
-
-/// `mysql` client args for replaying a dump into `config`'s database.
-fn mysql_restore_args(config: &DbConfig) -> Vec<String> {
-    vec![
-        format!("--host={}", config.host),
-        format!("--port={}", config.port),
-        format!("--user={}", config.username),
-        config.database.clone(),
-    ]
-}
-
-/// `psql` client args for replaying a dump into `config`'s database.
-fn pg_restore_args(config: &DbConfig) -> Vec<String> {
-    vec![
-        format!("--host={}", config.host),
-        format!("--port={}", config.port),
-        format!("--username={}", config.username),
-        "--dbname".to_string(),
-        config.database.clone(),
-    ]
-}
-
-fn run_sql_file(
-    program: &str,
-    args: &[String],
-    env: &[(&str, &str)],
-    file: &Path,
-) -> Result<(), String> {
-    let input = std::fs::File::open(file).map_err(|e| format!("open snapshot: {e}"))?;
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(args);
-    for (k, v) in env {
-        cmd.env(k, v);
-    }
-    let out = cmd
-        .stdin(std::process::Stdio::from(input))
-        .stdout(std::process::Stdio::null())
-        .output()
-        .map_err(|e| format!("{program}: {e}"))?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
-    Ok(())
-}
-
-/// Restore a snapshot previously written by the editor's snapshot feature: an
-/// SQLite file copy, or a mysqldump / pg_dump `.sql` replayed through the
-/// client. Mirrors the snapshot writer. Local connections only (callers gate on
-/// [`DbConfig::environment`]); this overwrites the target database.
-pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String> {
-    if !snapshot.exists() {
-        return Err(format!("snapshot not found: {}", snapshot.display()));
-    }
-    match config.engine.as_str() {
-        "sqlite" => {
-            if config.path.trim().is_empty() {
-                return Err("sqlite connection has no file path".to_string());
-            }
-            std::fs::copy(snapshot, &config.path)
-                .map(|_| ())
-                .map_err(|e| format!("restore copy failed: {e}"))
-        }
-        "mysql" | "mariadb" => run_sql_file(
-            "mysql",
-            &mysql_restore_args(config),
-            &[("MYSQL_PWD", config.password.as_str())],
-            snapshot,
-        ),
-        "postgres" | "postgresql" | "pgsql" => run_sql_file(
-            "psql",
-            &pg_restore_args(config),
-            &[("PGPASSWORD", config.password.as_str())],
-            snapshot,
-        ),
-        other => Err(format!("restore not supported for {other}")),
-    }
-}
-
 /// Against a real PostgreSQL — `--ignored`, with `E_PG_PORT` (user
 /// `postgres`, password `E_PG_PASSWORD`, a scratch database it may fill).
 #[cfg(test)]
@@ -3915,6 +3910,54 @@ mod pg_live_tests {
             0,
         )
         .unwrap();
+    }
+
+    /// `--ignored`, with `E_MYSQL_SCRATCH_PORT` (and `mysqldump`/`mysql`
+    /// on the PATH): a snapshot taken, the data changed, the snapshot
+    /// restored — the data is back.
+    #[test]
+    #[ignore]
+    fn mysql_snapshot_restores() {
+        let Some(port) = std::env::var("E_MYSQL_SCRATCH_PORT").ok() else {
+            return;
+        };
+        let cfg = |database: &str| DbConfig {
+            engine: "mysql".into(),
+            host: "127.0.0.1".into(),
+            port: port.parse().unwrap(),
+            username: "root".into(),
+            database: database.into(),
+            ..Default::default()
+        };
+        let admin = connect(&cfg("mysql")).unwrap();
+        query(&admin, "DROP DATABASE IF EXISTS e_snap_test", 0).unwrap();
+        query(&admin, "CREATE DATABASE e_snap_test", 0).unwrap();
+        let conn = connect(&cfg("e_snap_test")).unwrap();
+        query(
+            &conn,
+            "CREATE TABLE t (id INT PRIMARY KEY, v VARCHAR(10))",
+            0,
+        )
+        .unwrap();
+        query(&conn, "INSERT INTO t VALUES (1, 'kept'), (2, 'kept')", 0).unwrap();
+        let root = std::env::temp_dir().join(format!("e-snap-mysql-{}", std::process::id()));
+        let snap = take_snapshot(&cfg("e_snap_test"), &root).unwrap();
+        query(&conn, "UPDATE t SET v = 'changed'", 0).unwrap();
+        query(&conn, "DELETE FROM t WHERE id = 2", 0).unwrap();
+        restore_snapshot(&cfg("e_snap_test"), &snap).unwrap();
+        let rows = query(&conn, "SELECT id, v FROM t ORDER BY id", 10)
+            .unwrap()
+            .rows;
+        assert_eq!(
+            rows,
+            vec![
+                vec![Some("1".to_string()), Some("kept".to_string())],
+                vec![Some("2".to_string()), Some("kept".to_string())],
+            ]
+        );
+        assert_eq!(list_snapshots(&root, &cfg("e_snap_test")).len(), 1);
+        query(&admin, "DROP DATABASE e_snap_test", 0).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// `--ignored`, with `E_MYSQL_SCRATCH_PORT`: MySQL's own JSON plan
@@ -4308,7 +4351,13 @@ mod pg_live_tests {
 
     #[test]
     fn row_counts_read_short_and_say_when_they_are_estimates() {
-        let c = |rows, exact| row_count_label(RowCount { rows, exact });
+        let c = |rows, exact| {
+            row_count_label(RowCount {
+                rows,
+                exact,
+                bytes: None,
+            })
+        };
         assert_eq!(c(0, true), "0");
         assert_eq!(c(987, true), "987");
         assert_eq!(c(1_000, true), "1k");
@@ -4346,11 +4395,8 @@ mod pg_live_tests {
             }
             let counts = row_counts(&conn, &[]).unwrap();
             assert_eq!(
-                counts["counted"],
-                RowCount {
-                    rows: 5000,
-                    exact: false
-                }
+                (counts["counted"].rows, counts["counted"].exact),
+                (5000, false)
             );
             assert!(!counts.contains_key("unanalyzed"), "{counts:?}");
             let _ = query(&conn, "DROP TABLE counted, unanalyzed", 0);
@@ -4372,11 +4418,8 @@ mod pg_live_tests {
             }
             let counts = row_counts(&conn, &[]).unwrap();
             assert_eq!(
-                counts["counted"],
-                RowCount {
-                    rows: 1234,
-                    exact: true
-                }
+                (counts["counted"].rows, counts["counted"].exact),
+                (1234, true)
             );
             let _ = query(&conn, "DROP TABLE counted", 0);
         }
@@ -5418,20 +5461,8 @@ mod tests {
 
         // row_counts (the table tree): SQLite counts.
         let counts = row_counts(&conn, &["users".into(), "posts".into()]).unwrap();
-        assert_eq!(
-            counts["users"],
-            RowCount {
-                rows: 1,
-                exact: true
-            }
-        );
-        assert_eq!(
-            counts["posts"],
-            RowCount {
-                rows: 1,
-                exact: true
-            }
-        );
+        assert_eq!((counts["users"].rows, counts["users"].exact), (1, true));
+        assert_eq!((counts["posts"].rows, counts["posts"].exact), (1, true));
 
         // count_rows (pagination totals)
         assert_eq!(count_rows(&conn, "sqlite", "posts", None).unwrap(), 1);
@@ -5672,6 +5703,60 @@ mod tests {
     }
 
     #[test]
+    fn search_ignores_case_and_type_on_every_engine() {
+        assert_eq!(
+            search_condition("postgres", "meta", "'%ada%'"),
+            "\"meta\"::text ILIKE '%ada%'"
+        );
+        assert_eq!(
+            search_condition("mysql", "name", "'%ada%'"),
+            "`name` LIKE '%ada%'"
+        );
+        assert_eq!(
+            search_condition("clickhouse", "name", "'%ada%'"),
+            "`name` ILIKE '%ada%'"
+        );
+        assert_eq!(size_label(900), "900 B");
+        assert_eq!(size_label(48 * 1024), "48 KB");
+        assert_eq!(size_label(4_400_000), "4.2 MB");
+    }
+
+    #[test]
+    fn sqlite_counts_say_how_big_each_table_is() {
+        let dir = std::env::temp_dir().join(format!("e_db_size_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let dbfile = dir.join("size.sqlite");
+        let _ = std::fs::remove_file(&dbfile);
+        {
+            let c = rusqlite::Connection::open(&dbfile).unwrap();
+            c.execute_batch(
+                "CREATE TABLE big (id INTEGER PRIMARY KEY, v TEXT); CREATE INDEX big_v ON big (v);
+                 CREATE TABLE small (id INTEGER PRIMARY KEY);",
+            )
+            .unwrap();
+            for i in 0..2000 {
+                c.execute(
+                    "INSERT INTO big (v) VALUES (?1)",
+                    [format!("value {i:>40}")],
+                )
+                .unwrap();
+            }
+        }
+        let conn = connect(&DbConfig {
+            engine: "sqlite".into(),
+            path: dbfile.to_string_lossy().into_owned(),
+            ..Default::default()
+        })
+        .unwrap();
+        let counts = row_counts(&conn, &["big".into(), "small".into()]).unwrap();
+        let big = counts["big"].bytes.expect("dbstat gives sizes");
+        let small = counts["small"].bytes.unwrap();
+        assert_eq!(counts["big"].rows, 2000);
+        assert!(big > 10 * small, "{big} vs {small}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_check_reads_the_column_and_locks_the_row() {
         let check = RowCheck {
             table: "users".into(),
@@ -5762,70 +5847,6 @@ mod tests {
             "expected a full-scan issue, got {issues:?}"
         );
         let _ = std::fs::remove_file(&dbfile);
-    }
-
-    #[test]
-    fn restore_args_are_built_per_engine() {
-        let mut c = DbConfig {
-            host: "127.0.0.1".into(),
-            port: 3306,
-            username: "root".into(),
-            database: "shop".into(),
-            ..Default::default()
-        };
-        assert_eq!(
-            mysql_restore_args(&c),
-            vec!["--host=127.0.0.1", "--port=3306", "--user=root", "shop"]
-        );
-        c.port = 5432;
-        assert_eq!(
-            pg_restore_args(&c),
-            vec![
-                "--host=127.0.0.1",
-                "--port=5432",
-                "--username=root",
-                "--dbname",
-                "shop"
-            ]
-        );
-    }
-
-    #[test]
-    fn restore_sqlite_copies_the_file_back() {
-        let dir = std::env::temp_dir().join(format!("e-db-restore-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let live = dir.join("live.sqlite");
-        let snap = dir.join("snap.sqlite");
-        std::fs::write(&live, b"CURRENT").unwrap();
-        std::fs::write(&snap, b"SNAPSHOT").unwrap();
-
-        let c = DbConfig {
-            engine: "sqlite".into(),
-            path: live.to_string_lossy().into_owned(),
-            ..Default::default()
-        };
-
-        restore_snapshot(&c, &snap).unwrap();
-        assert_eq!(std::fs::read(&live).unwrap(), b"SNAPSHOT");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn restore_errors_on_missing_snapshot_and_unknown_engine() {
-        let mut c = DbConfig {
-            engine: "sqlite".into(),
-            path: "/tmp/whatever.sqlite".into(),
-            ..Default::default()
-        };
-        assert!(restore_snapshot(&c, Path::new("/no/such/snapshot.sqlite")).is_err());
-
-        let dir = std::env::temp_dir().join(format!("e-db-restore2-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let snap = dir.join("s.dump");
-        std::fs::write(&snap, b"x").unwrap();
-        c.engine = "clickhouse".into();
-        assert!(restore_snapshot(&c, &snap).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

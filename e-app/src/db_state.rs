@@ -935,72 +935,94 @@ impl AppState {
         .unwrap_or_default()
     }
 
-    /// Take a snapshot of a (local) database: an SQLite file copy, or a
-    /// mysqldump / pg_dump into ~/.config/e/snapshots/ (DB-704).
+    /// Take a snapshot of a local database (DB-704): a SQLite copy, or a
+    /// mysqldump / pg_dump, in its own folder under `~/.config/e/snapshots/`.
     pub fn db_snapshot(&self, entry: DbEntry) {
         if !entry.config.environment().is_local() {
             Self::notify("Snapshot: only available on local connections");
             return;
         }
-        let Some(dir) = crate::config::snapshot_dir() else {
+        let Some(root) = crate::config::snapshot_dir() else {
             return;
         };
         let cfg = entry.config.clone();
-        let stamp = crate::state::now_ms_epoch() / 1000;
-        let base = if cfg.label.trim().is_empty() {
-            cfg.database.clone()
-        } else {
-            cfg.label.clone()
+        let name = cfg.display_name();
+        let send =
+            create_ext_action(
+                self.cx,
+                move |res: Result<std::path::PathBuf, String>| match res {
+                    Ok(path) => Self::notify(&format!(
+                        "Snapshot of {name} taken ({})",
+                        file_size(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0))
+                    )),
+                    Err(e) => Self::notify(&format!("Snapshot failed: {e}")),
+                },
+            );
+        std::thread::spawn(move || send(e_db::take_snapshot(&cfg, &root)));
+    }
+
+    /// A local connection's snapshots, newest first.
+    pub(crate) fn db_snapshots(&self, entry: &DbEntry) -> Vec<e_db::Snapshot> {
+        if !entry.config.environment().is_local() {
+            return Vec::new();
+        }
+        crate::config::snapshot_dir()
+            .map(|root| e_db::list_snapshots(&root, &entry.config))
+            .unwrap_or_default()
+    }
+
+    /// Put a local database back as `snap` has it, once confirmed. A
+    /// snapshot of it as it is now is taken first, so the restore can be
+    /// undone the same way.
+    pub fn db_restore_snapshot(&self, entry: DbEntry, snap: e_db::Snapshot) {
+        if !entry.config.environment().is_local() {
+            Self::notify("Restore: only available on local connections");
+            return;
+        }
+        let name = entry.config.display_name();
+        let when = ago(crate::state::now_ms_epoch() / 1000, snap.taken);
+        let state = *self;
+        self.ui.confirm.set(Some(crate::dialogs::Confirm {
+            title: format!("Restore {name} to its snapshot from {when}?"),
+            detail: "The database goes back to how it was then, and what changed since is \
+                     lost. A snapshot of it as it is now is taken first, so this can be \
+                     undone the same way."
+                .into(),
+            action: "Restore",
+            on_confirm: std::rc::Rc::new(move || state.db_run_restore(entry.clone(), snap.clone())),
+        }));
+    }
+
+    fn db_run_restore(&self, entry: DbEntry, snap: e_db::Snapshot) {
+        let Some(root) = crate::config::snapshot_dir() else {
+            return;
         };
-        let base = base.replace(|c: char| !c.is_alphanumeric(), "_");
-        let send = create_ext_action(self.cx, move |res: Result<String, String>| match res {
-            Ok(path) => Self::notify(&format!("Snapshot saved: {path}")),
-            Err(e) => Self::notify(&format!("Snapshot failed: {e}")),
+        let cfg = entry.config.clone();
+        let name = cfg.display_name();
+        let state = *self;
+        let done = create_ext_action(self.cx, move |res: Result<(), String>| match res {
+            Ok(()) => {
+                Self::notify(&format!(
+                    "{name} restored — its state before is in a new snapshot"
+                ));
+                // Its tables and columns may not be what they were.
+                entry.schema.set(None);
+                state.db_refresh_tables(entry.clone());
+                if state.db.result_key.get_untracked().as_deref() == Some(entry.key().as_str())
+                    && state.db.result_table.get_untracked().is_some()
+                {
+                    state.db_reload_table();
+                }
+            }
+            Err(e) => Self::notify(&format!("Restore failed: {e}")),
         });
         std::thread::spawn(move || {
-            let res = (|| -> Result<String, String> {
-                match cfg.engine.as_str() {
-                    "sqlite" => {
-                        let dest = dir.join(format!("{base}-{stamp}.sqlite"));
-                        std::fs::copy(&cfg.path, &dest).map_err(|e| e.to_string())?;
-                        Ok(dest.to_string_lossy().into_owned())
-                    }
-                    "mysql" | "mariadb" => {
-                        let dest = dir.join(format!("{base}-{stamp}.sql"));
-                        let out = std::process::Command::new("mysqldump")
-                            .env("MYSQL_PWD", &cfg.password)
-                            .arg(format!("--host={}", cfg.host))
-                            .arg(format!("--port={}", cfg.port))
-                            .arg(format!("--user={}", cfg.username))
-                            .arg(&cfg.database)
-                            .output()
-                            .map_err(|e| format!("mysqldump: {e}"))?;
-                        if !out.status.success() {
-                            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-                        }
-                        std::fs::write(&dest, out.stdout).map_err(|e| e.to_string())?;
-                        Ok(dest.to_string_lossy().into_owned())
-                    }
-                    "postgres" | "postgresql" | "pgsql" => {
-                        let dest = dir.join(format!("{base}-{stamp}.sql"));
-                        let out = std::process::Command::new("pg_dump")
-                            .env("PGPASSWORD", &cfg.password)
-                            .arg(format!("--host={}", cfg.host))
-                            .arg(format!("--port={}", cfg.port))
-                            .arg(format!("--username={}", cfg.username))
-                            .arg(&cfg.database)
-                            .output()
-                            .map_err(|e| format!("pg_dump: {e}"))?;
-                        if !out.status.success() {
-                            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-                        }
-                        std::fs::write(&dest, out.stdout).map_err(|e| e.to_string())?;
-                        Ok(dest.to_string_lossy().into_owned())
-                    }
-                    other => Err(format!("snapshots not supported for {other}")),
-                }
-            })();
-            send(res);
+            let res = e_db::take_snapshot(&cfg, &root)
+                .map_err(|e| {
+                    format!("couldn't take a snapshot first, so nothing was restored ({e})")
+                })
+                .and_then(|_| e_db::restore_snapshot(&cfg, &snap.path));
+            done(res);
         });
     }
 
@@ -2575,12 +2597,32 @@ impl AppState {
             return;
         }
         // Stage the deletion (transactional): mark the row pending; the DELETE
-        // runs on Submit. Toggling again un-marks it.
-        self.db.pending_deletes.update(|m| {
-            if !m.remove(&pk) {
-                m.insert(pk);
+        // runs on Submit. Toggling again un-marks it. The row as the database
+        // has it is kept, for the write log's Undo.
+        let staged = self.db.pending_deletes.try_update(|m| {
+            if m.remove(&pk) {
+                false
+            } else {
+                m.insert(pk.clone());
+                true
             }
         });
+        if staged == Some(true) {
+            let row_values = self.db.result.with_untracked(|r| {
+                let r = r.as_ref()?;
+                let shown = r.rows.get(row)?;
+                self.db.columns.with_untracked(|cols| {
+                    self.db.pending_edits.with_untracked(|edits| {
+                        Some(row_for_undo(cols, &r.columns, shown, &pk, edits))
+                    })
+                })
+            });
+            self.db
+                .deleted_rows
+                .update(|m| _ = m.insert(pk, row_values.flatten()));
+        } else {
+            self.db.deleted_rows.update(|m| _ = m.remove(&pk));
+        }
         self.db_release_pending_target_if_empty();
         self.db_mark_pending();
         self.db.edit.set(None);
@@ -2599,6 +2641,7 @@ impl AppState {
     fn db_clear_pending(&self) {
         self.db.pending_edits.update(|m| m.clear());
         self.db.pending_deletes.update(|m| m.clear());
+        self.db.deleted_rows.update(|m| m.clear());
         self.db.pending_inserts.update(|v| v.clear());
         self.db.pending_target.set(None);
         self.db_mark_pending();
@@ -2670,10 +2713,16 @@ impl AppState {
                 ));
                 let fwd = e_db::delete_sql(&engine, &table, pk);
                 stmts.push(fwd.clone());
-                // A delete's reverse (re-insert) needs the full row; not tracked.
+                // Its reverse puts the row back as it was read.
+                let reverse = self.db.deleted_rows.with_untracked(|m| {
+                    m.get(pk)
+                        .cloned()
+                        .flatten()
+                        .map(|values| e_db::insert_sql(&engine, &table, &values))
+                });
                 log.push(crate::state::WriteLogEntry {
                     forward: fwd,
-                    reverse: None,
+                    reverse,
                 });
             }
         });
@@ -2855,7 +2904,10 @@ impl AppState {
                     .db
                     .pending_edits
                     .update(|m| _ = m.remove(&(pk.clone(), col.clone()))),
-                Some(Staged::Delete(pk)) => self.db.pending_deletes.update(|m| _ = m.remove(pk)),
+                Some(Staged::Delete(pk)) => {
+                    self.db.pending_deletes.update(|m| _ = m.remove(pk));
+                    self.db.deleted_rows.update(|m| _ = m.remove(pk));
+                }
                 None => {}
             }
         }
@@ -3108,6 +3160,73 @@ fn insert_pk(pk: &[String], values: &[(String, Option<String>)]) -> Option<RowPk
     pk.iter()
         .map(|n| values.iter().find(|(c, v)| c == n && v.is_some()).cloned())
         .collect()
+}
+
+/// A row staged for deletion as the database has it, to insert again: the
+/// shown values, with any staged edit's value put back to what was read.
+/// `None` for a table with binary columns, whose values the grid shows only
+/// as their size.
+fn row_for_undo(
+    columns: &[e_db::ColumnInfo],
+    shown_columns: &[String],
+    shown: &[Option<String>],
+    pk: &RowPk,
+    edits: &PendingEdits,
+) -> Option<RowPk> {
+    let binary = columns.iter().any(|c| {
+        let t = c.data_type.to_ascii_lowercase();
+        ["blob", "binary", "bytea", "image"]
+            .iter()
+            .any(|b| t.contains(b))
+    });
+    if binary {
+        return None;
+    }
+    Some(
+        shown_columns
+            .iter()
+            .zip(shown)
+            .map(|(col, v)| {
+                let v = match edits.get(&(pk.clone(), col.clone())) {
+                    Some(edit) => edit.old.clone(),
+                    None => v.clone(),
+                };
+                (col.clone(), v)
+            })
+            .collect(),
+    )
+}
+
+/// How long ago `then` was, from `now` (both in seconds since the epoch).
+pub(crate) fn ago(now: u64, then: u64) -> String {
+    let s = now.saturating_sub(then);
+    let plural = |n: u64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
+    match s {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{} min ago", s / 60),
+        3600..=86_399 => plural(s / 3600, "hour"),
+        86_400..=172_799 => "yesterday".into(),
+        _ => plural(s / 86_400, "day"),
+    }
+}
+
+/// A file's size, as `12 KB` or `4.2 MB`.
+pub(crate) fn file_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut v = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while v >= 1024.0 && unit < UNITS.len() - 1 {
+        v /= 1024.0;
+        unit += 1;
+    }
+    if v < 10.0 {
+        format!("{v:.1} {}", UNITS[unit])
+    } else {
+        format!("{v:.0} {}", UNITS[unit])
+    }
 }
 
 /// What a failed check found, as one line for the conflict banner, e.g.
@@ -3392,6 +3511,65 @@ mod tab_tests {
             create_index_sql("mysql", &advice),
             "CREATE INDEX `orders_status_created_at_index` ON `orders` (`status`, `created_at`);"
         );
+    }
+
+    #[test]
+    fn a_deleted_row_comes_back_as_it_was_read() {
+        use crate::state::PendingEdit;
+        let col = |name: &str, ty: &str| e_db::ColumnInfo {
+            name: name.into(),
+            data_type: ty.into(),
+            nullable: true,
+            key: String::new(),
+        };
+        let cols = vec![
+            col("id", "integer"),
+            col("name", "text"),
+            col("note", "text"),
+        ];
+        let shown_cols: Vec<String> = ["id", "name", "note"].map(String::from).to_vec();
+        let pk: RowPk = vec![("id".into(), Some("1".into()))];
+        // `name` shows a staged edit; the row goes back with what was read.
+        let mut edits = PendingEdits::default();
+        edits.insert(
+            (pk.clone(), "name".into()),
+            PendingEdit {
+                column: "name".into(),
+                pk: pk.clone(),
+                new: Some("edited".into()),
+                old: Some("ada".into()),
+            },
+        );
+        let shown = vec![Some("1".into()), Some("edited".into()), None];
+        assert_eq!(
+            row_for_undo(&cols, &shown_cols, &shown, &pk, &edits),
+            Some(vec![
+                ("id".into(), Some("1".into())),
+                ("name".into(), Some("ada".into())),
+                ("note".into(), None),
+            ])
+        );
+        let with_blob = vec![col("id", "integer"), col("avatar", "BLOB")];
+        assert_eq!(
+            row_for_undo(&with_blob, &shown_cols, &shown, &pk, &edits),
+            None
+        );
+    }
+
+    #[test]
+    fn times_and_sizes_read_at_a_glance() {
+        let now = 1_000_000;
+        assert_eq!(ago(now, now - 5), "just now");
+        assert_eq!(ago(now, now - 12 * 60), "12 min ago");
+        assert_eq!(ago(now, now - 3600), "1 hour ago");
+        assert_eq!(ago(now, now - 5 * 3600), "5 hours ago");
+        assert_eq!(ago(now, now - 30 * 3600), "yesterday");
+        assert_eq!(ago(now, now - 3 * 86_400), "3 days ago");
+        assert_eq!(ago(now, now + 10), "just now");
+        assert_eq!(file_size(512), "512 B");
+        assert_eq!(file_size(12 * 1024), "12 KB");
+        assert_eq!(file_size(4_400_000), "4.2 MB");
+        assert_eq!(file_size(3 * 1024 * 1024 * 1024), "3.0 GB");
     }
 
     #[test]

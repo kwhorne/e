@@ -158,8 +158,57 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
     let q_btn = action_glyph("⌗", move || state.db_new_query(e_q.clone()));
     let e_r = entry.clone();
     let r_btn = action_glyph("⟳", move || state.db_refresh_tables(e_r.clone()));
+    // Snapshots (DB-704): take one, or put the database back as one has it.
     let e_snap = entry.clone();
-    let snap_btn = action_glyph("⤓", move || state.db_snapshot(e_snap.clone()));
+    let snap_btn = label(|| "⤓".to_string())
+        .style(|s| {
+            s.padding_horiz(5.0)
+                .padding_vert(2.0)
+                .border_radius(4.0)
+                .color(theme::fg_dim())
+                .font_size(12.0)
+                .cursor(floem::style::CursorStyle::Pointer)
+                .hover(|s| s.background(theme::bg()).color(theme::fg()))
+        })
+        .popout_menu(move || {
+            use floem::menu::{Menu, MenuItem};
+            let entry = e_snap.clone();
+            if !entry.config.environment().is_local() {
+                return Menu::new("")
+                    .entry(MenuItem::new("Snapshots are for local databases only").enabled(false));
+            }
+            let take = entry.clone();
+            let mut menu = Menu::new("").entry(
+                MenuItem::new("Take snapshot now").action(move || state.db_snapshot(take.clone())),
+            );
+            let snaps = state.db_snapshots(&entry);
+            let now = crate::state::now_ms_epoch() / 1000;
+            if snaps.is_empty() {
+                menu = menu.entry(MenuItem::new("No snapshots yet").enabled(false));
+            } else {
+                menu = menu.separator();
+                for snap in snaps.into_iter().take(12) {
+                    let text = format!(
+                        "Restore to {} · {}",
+                        crate::db_state::ago(now, snap.taken),
+                        crate::db_state::file_size(snap.bytes)
+                    );
+                    let entry = entry.clone();
+                    menu = menu
+                        .entry(MenuItem::new(text).action(move || {
+                            state.db_restore_snapshot(entry.clone(), snap.clone())
+                        }));
+                }
+                if let Some(dir) = crate::config::snapshot_dir() {
+                    let folder = e_db::snapshot_folder(&dir, &entry.config);
+                    menu = menu.separator().entry(
+                        MenuItem::new("Show snapshots in Finder")
+                            .action(move || crate::platform::reveal(&folder)),
+                    );
+                }
+            }
+            menu
+        });
     let e_d = entry.clone();
     let d_btn = action_glyph("⏏", move || state.db_disconnect(e_d.clone()));
     let e_e = entry.clone();
@@ -237,7 +286,15 @@ fn conn_row(state: AppState, entry: DbEntry) -> impl IntoView {
             let count = label(move || {
                 e_count
                     .table_counts
-                    .with(|m| m.get(&t_count).map(|n| e_db::row_count_label(*n)))
+                    .with(|m| {
+                        m.get(&t_count).map(|n| match n.bytes {
+                            // Rows, and the space the table takes (DB-206).
+                            Some(b) => {
+                                format!("{} · {}", e_db::row_count_label(*n), e_db::size_label(b))
+                            }
+                            None => e_db::row_count_label(*n),
+                        })
+                    })
                     .unwrap_or_default()
             })
             .style(|s| {

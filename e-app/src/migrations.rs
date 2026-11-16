@@ -421,19 +421,38 @@ impl AppState {
         self.migrations.drift.set(None);
     }
 
-    /// `php artisan migrate`, behind a `grove db snapshot` when Grove can take
-    /// one for this database — so a bad migration is one restore from undone.
+    /// `php artisan migrate`, behind a snapshot of the database — so a bad
+    /// migration is one restore from undone: Grove's when Grove can take one,
+    /// else `e`'s own of the local database `.env` names, which the
+    /// Database panel's ⤓ menu can restore.
     pub fn migrations_run(&self) {
         let root = self.root.get_untracked();
-        let command = match crate::tasks::grove_snapshot_engine(&root)
-            .filter(|_| crate::grove::available())
+        if let Some(engine) =
+            crate::tasks::grove_snapshot_engine(&root).filter(|_| crate::grove::available())
         {
-            Some(engine) => format!(
+            let command = format!(
                 "grove db snapshot --engine {engine} --note 'before migrate' && php artisan migrate"
-            ),
-            None => "php artisan migrate".to_string(),
+            );
+            self.run_migration_command("artisan: migrate", &command);
+            return;
+        }
+        let local = e_db::from_env(&root).filter(|c| c.environment().is_local());
+        let (Some(cfg), Some(snapshots)) = (local, crate::config::snapshot_dir()) else {
+            self.run_migration_command("artisan: migrate", "php artisan migrate");
+            return;
         };
-        self.run_migration_command("artisan: migrate", &command);
+        let state = *self;
+        let then_migrate = floem::ext_event::create_ext_action(
+            self.cx,
+            move |taken: Result<std::path::PathBuf, String>| {
+                if let Err(e) = taken {
+                    // Migrating was asked for; say what's missing, and go on.
+                    Self::notify(&format!("No snapshot before migrating: {e}"));
+                }
+                state.run_migration_command("artisan: migrate", "php artisan migrate");
+            },
+        );
+        std::thread::spawn(move || then_migrate(e_db::take_snapshot(&cfg, &snapshots)));
     }
 
     pub fn migrations_rollback(&self) {

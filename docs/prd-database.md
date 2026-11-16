@@ -178,7 +178,7 @@ på manuell testing.
 | DB-203 | Triggere og prosedyrer/funksjoner: liste + vis definisjon (read-only) | P1 | ✗ |
 | DB-204 | «Generate DDL» på tabell/view/indeks: vis `CREATE …`-setningen, kopier til utklippstavle | P1 | ✅ Structure viser DDL-en (views: definisjonen) med indeksene; PostgreSQL bygges fra katalogen med typer, standardverdier, identity/genererte kolonner, alle constraints og indekser. «⧉» per indeks kopierer `CREATE INDEX`. PostgreSQL-delen er enhetstestet og har en live-test (`E_PG_PORT`), men er ikke kjørt mot en server |
 | DB-205 | Søk/filter i objekttreet (skriv for å filtrere tabellnavn) | P0 | ✅ |
-| DB-206 | Radantall per tabell (lazy, ca-verdi) og tabellstørrelse i treet | P2 | ◐ Radantall (≈ fra katalogen). Mangler: tabellstørrelse |
+| DB-206 | Radantall per tabell (lazy, ca-verdi) og tabellstørrelse i treet | P2 | ✅ Radantall (≈ fra katalogen) og størrelse med indekser (MySQL `DATA_LENGTH + INDEX_LENGTH`, PostgreSQL `pg_total_relation_size`, ClickHouse `total_bytes`, SQLite `dbstat`) |
 | DB-207 | ERD-visning: FK-graf over valgte tabeller (gjenbruk relasjonsgraf-motoren fra ⌘⌥R, men på DB-nivå — også for tabeller uten Eloquent-modell) | P2 | ◐ «⇄» lister alle FK-er som tekst. Mangler: graf og valg av tabeller |
 
 ### 4.3 Datagrid
@@ -240,8 +240,8 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | DB-701 | ✅ Prod-deteksjon med read-only som standard; consent-dialog for agent-queries | — | ✅ |
 | DB-702 | Destruktive setninger (`DROP`, `TRUNCATE`, `DELETE`/`UPDATE` uten `WHERE`) krever eksplisitt bekreftelse med setningen gjengitt — på *alle* miljøer, ikke bare prod | P0 | ✅ |
 | DB-703 | Ved skriv mot ikke-lokal tilkobling: bekreftelsesdialog viser miljøetikett i farge + antall rader som påvirkes | P0 | ✅ Miljøfarget tittel, setningene, avkrysning når ikke-lokal, og rader per setning med sum: UPDATE/DELETE telles med sin WHERE som SELECT (sjekket som ren lesing, stopper ved 10 000), INSERT … VALUES teller seg selv; joins o.l. vises som «rows not counted» |
-| DB-704 | Databasesnapshots: ta snapshot (mysqldump/pg_dump/SQLite-kopi) og tilbakestill, én knapp per tilkobling (kun lokale miljøer). Integreres med agent-flyter («ta snapshot før migrasjon») | P2 | ◐ Snapshot lokalt (SQLite, MySQL, PostgreSQL). Mangler: gjenoppretting i UI (`restore_snapshot` finnes), agent-flyt, ClickHouse |
-| DB-705 | Angre-logg for datagrid-endringer i økten: liste over utførte skriv med generert motsatt setning der det er mulig | P2 | ◐ Angre-logg for celleendringer og innsettinger i økten (Undo for innsetting når primærnøkkelen ble oppgitt). Mangler: slettinger |
+| DB-704 | Databasesnapshots: ta snapshot (mysqldump/pg_dump/SQLite-kopi) og tilbakestill, én knapp per tilkobling (kun lokale miljøer). Integreres med agent-flyter («ta snapshot før migrasjon») | P2 | ✅ «⤓»-menyen tar snapshot og gjenoppretter (med bekreftelse og et sikkerhets-snapshot først); SQLite via `VACUUM INTO`/backup-API, PostgreSQL med `--clean` og én transaksjon; én mappe per database. «migrate» tar snapshot når Grove mangler; agenten kan be om ett (`db_snapshot`). ClickHouse støttes ikke. PostgreSQL-delen er ikke kjørt mot en server |
+| DB-705 | Angre-logg for datagrid-endringer i økten: liste over utførte skriv med generert motsatt setning der det er mulig | P2 | ✅ Angre-logg for celleendringer, innsettinger og slettinger (raden settes inn igjen slik den ble lest; ikke for tabeller med binærkolonner) |
 
 ### 4.8 Laravel- og agent-lag (forbi paritet — skal bevares og utvides)
 
@@ -251,7 +251,7 @@ Dagens største gap. Konsollen skal oppleves som en editor, ikke en tekstboks.
 | DB-802 | Factory-integrasjon: «Seed N rader» på tabell (kjører factory via Tinker); «Generer factory fra skjema» der factory mangler | P1 | ✅ «Seed ▾»: 10, 100 eller 1 000 rader (lokalt). Mangler factory, lager «Generate …Factory» den fra kolonnene (navn, så type; FK → `Model::factory()`) |
 | DB-803 | Migrasjonsgenerering fra strukturendringer: endrer man kolonner/indekser i Structure-fanen, tilbys en generert migrasjon i stedet for direkte DDL (direkte DDL kun på lokale miljøer) | P2 | ◐ «+ Migration» lager tomt `Schema::table`-skjelett. Structure kan ikke redigeres |
 | DB-804 | Agent-socket utvides: `db_explain` (fritt, read-only) og `db_snapshot` (consent) | P2 | ✗ Socketen har `db_schema` og `db_query` |
-| DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 | ◐ LIKE over tekstkolonner, 200 rader per tabell. Cancel stopper før neste tabell. Søker i databasen panelet viser. Mangler: skiller store/små bokstaver på PostgreSQL |
+| DB-805 | Søk i data: «finn verdi i alle tabeller» (begrenset til tekstkolonner, med radgrense og avbrudd) | P2 | ✅ Søker uten hensyn til store/små bokstaver overalt: PostgreSQL med `::text ILIKE` (som også tar `json`/`uuid`), ClickHouse med `ILIKE` |
 
 ## 5. Design
 

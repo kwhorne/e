@@ -168,6 +168,7 @@ fn render_item(state: AppState, i: usize) -> impl IntoView {
         Some(ChatItem::Permission(_)) => permission_card(state, i).into_any(),
 
         Some(ChatItem::Notice { error, .. }) => label(move || item_text(state, i))
+            .label_style(|s| s.selectable(true))
             .style(move |s| {
                 let c = if error {
                     theme::error()
@@ -278,6 +279,7 @@ fn receipt_card(state: AppState, i: usize) -> impl IntoView {
         };
         format!("This turn changed {}{flags}", r.summary())
     })
+    .label_style(|s| s.selectable(true))
     .style(move |s| {
         let flagged = receipt().is_some_and(|r| r.flags > 0 && r.undone.is_none());
         s.flex_grow(1.0_f32)
@@ -389,7 +391,8 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
         s.font_family(theme::mono_family())
             .font_size(12.0)
             .color(color)
-    });
+    })
+    .label_style(|s| s.selectable(true));
 
     let result = label(move || {
         state.agent.chat.with(|c| match c.items.get(i) {
@@ -409,6 +412,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
             _ => String::new(),
         })
     })
+    .label_style(|s| s.selectable(true))
     .style(|s| {
         s.font_family(theme::mono_family())
             .font_size(11.0)
@@ -416,17 +420,44 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
             .margin_top(4.0)
     });
 
-    stack((header, result)).style(|s| {
-        s.flex_col()
-            .margin_vert(4.0)
-            .margin_horiz(8.0)
-            .padding(8.0)
-            .border(1.0)
-            .border_color(theme::border())
-            .border_radius(6.0)
-            .background(theme::bg_panel())
-            .min_width(0.0)
-    })
+    // The card shows a few lines; these copy it whole.
+    let full = move |what: fn(&e_agent::ToolCall) -> String| {
+        state.agent.chat.with(|c| match c.items.get(i) {
+            Some(ChatItem::Tool(tc)) => what(tc),
+            _ => String::new(),
+        })
+    };
+    stack((header, result))
+        .context_menu(move || {
+            use floem::menu::{Menu, MenuItem};
+            let summary = full(|tc| tc.summary.clone());
+            let result = full(|tc| tc.result.clone().unwrap_or_default());
+            let mut menu = Menu::new("");
+            if !summary.is_empty() {
+                menu = menu.entry(
+                    MenuItem::new("Copy command")
+                        .action(move || _ = floem::Clipboard::set_contents(summary.clone())),
+                );
+            }
+            if !result.is_empty() {
+                menu = menu.entry(
+                    MenuItem::new("Copy output")
+                        .action(move || _ = floem::Clipboard::set_contents(result.clone())),
+                );
+            }
+            menu
+        })
+        .style(|s| {
+            s.flex_col()
+                .margin_vert(4.0)
+                .margin_horiz(8.0)
+                .padding(8.0)
+                .border(1.0)
+                .border_color(theme::border())
+                .border_radius(6.0)
+                .background(theme::bg_panel())
+                .min_width(0.0)
+        })
 }
 
 /// What waits for the agent, above the composer: messages that will steer the

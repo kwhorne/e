@@ -78,6 +78,10 @@ pub struct Screen {
     cy: usize,
     fg: Option<(u8, u8, u8)>,
     bg: Option<(u8, u8, u8)>,
+    /// The program asked for bracketed paste (`CSI ? 2004 h`): pasted text
+    /// is to come wrapped, so the shell takes it as typed text rather than
+    /// running each line as it arrives.
+    bracketed_paste: bool,
 }
 
 impl Screen {
@@ -92,6 +96,7 @@ impl Screen {
             cy: 0,
             fg: None,
             bg: None,
+            bracketed_paste: false,
         }
     }
 
@@ -306,8 +311,16 @@ impl Perform for Screen {
         }
     }
 
-    fn csi_dispatch(&mut self, params: &Params, _inter: &[u8], _ignore: bool, action: char) {
+    fn csi_dispatch(&mut self, params: &Params, inter: &[u8], _ignore: bool, action: char) {
         let first = params.iter().next().and_then(|p| p.first().copied());
+        // Private modes (`CSI ? n h` / `l`): bracketed paste is the one that
+        // changes what is sent.
+        if inter == b"?" {
+            if matches!(action, 'h' | 'l') && params.iter().any(|p| p.first() == Some(&2004)) {
+                self.bracketed_paste = action == 'h';
+            }
+            return;
+        }
         let n = first.unwrap_or(0).max(1) as usize;
         match action {
             'm' => self.sgr(params),
@@ -336,6 +349,20 @@ impl Perform for Screen {
             'K' => self.erase_in_line(first.unwrap_or(0)),
             _ => {}
         }
+    }
+}
+
+/// What a paste of `text` sends: line breaks as `\r`, as the Enter key
+/// does; with `bracketed`, the text between `ESC [200~` and `ESC [201~`,
+/// with any escape character taken out so the text can't end the bracket
+/// early and have the rest run.
+pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
+    let text = text.replace("\r\n", "\r").replace('\n', "\r");
+    if bracketed {
+        let inner: String = text.chars().filter(|c| *c != '\x1b').collect();
+        format!("\x1b[200~{inner}\x1b[201~").into_bytes()
+    } else {
+        text.into_bytes()
     }
 }
 
@@ -460,6 +487,36 @@ impl Terminal {
     pub fn write(&mut self, bytes: &[u8]) {
         let _ = self.writer.write_all(bytes);
         let _ = self.writer.flush();
+    }
+
+    /// Send pasted `text` to the shell: as typed text, its line breaks as
+    /// Enter (`\r`), and wrapped in bracketed-paste markers when the program
+    /// asked for them, so a pasted block lands at the prompt instead of
+    /// running line by line.
+    pub fn paste(&mut self, text: &str) {
+        let bracketed = self
+            .screen
+            .lock()
+            .map(|s| s.bracketed_paste)
+            .unwrap_or(false);
+        self.write(&paste_bytes(text, bracketed));
+    }
+
+    /// The text on screen, a line each, without trailing blanks.
+    pub fn screen_text(&self) -> String {
+        self.snapshot_runs()
+            .iter()
+            .map(|line| {
+                line.iter()
+                    .map(|(t, _, _)| t.as_str())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_string()
     }
 
     /// Current screen as per-line coloured runs.
@@ -587,6 +644,33 @@ mod scroll_tests {
             r[0].iter().any(|(_, _, bg)| bg.is_some()),
             "no bg run: {:?}",
             r[0]
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_follows_the_program() {
+        let mut s = Screen::new(2, 10);
+        let mut p = Parser::new();
+        assert!(!s.bracketed_paste);
+        feed(&mut s, &mut p, b"\x1b[?2004h");
+        assert!(s.bracketed_paste);
+        // Other private modes leave it be, and draw nothing.
+        feed(&mut s, &mut p, b"\x1b[?25l\x1b[?1h");
+        assert!(s.bracketed_paste);
+        feed(&mut s, &mut p, b"\x1b[?2004l");
+        assert!(!s.bracketed_paste);
+        assert!(s
+            .runs()
+            .iter()
+            .all(|l| l.iter().all(|(t, _, _)| t.trim().is_empty())));
+    }
+
+    #[test]
+    fn a_paste_is_typed_text_and_cannot_end_its_bracket() {
+        assert_eq!(paste_bytes("ls\npwd\r\n", false), b"ls\rpwd\r");
+        assert_eq!(
+            paste_bytes("echo a\nrm x\x1b[201~; reboot", true),
+            b"\x1b[200~echo a\rrm x[201~; reboot\x1b[201~"
         );
     }
 

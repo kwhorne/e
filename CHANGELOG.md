@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Copy from Cascade.** Tool and receipt cards and notices can be selected,
+  and right-clicking a tool card copies its whole command or output (the
+  card shows a few lines).
+- **Copy screen** in the terminal's right-click menu.
+
+### Fixed
+
+- **⌘V didn't paste into the terminal.** It typed a `v`, and other `⌘`
+  chords typed their letter; it now pastes, as does `Ctrl+Shift+V` on Linux
+  and Windows and `Shift+Insert`. The same in an agent's terminal.
+- **A pasted block ran line by line.** The terminal now follows the shell's
+  bracketed-paste mode, so the block lands at the prompt; an escape in the
+  pasted text can't end it early.
+- **⌘C/⌘V in text fields did nothing with Caps Lock on**, or on a layout
+  that puts another letter on those keys.
+- **The test runner's JUnit report path wasn't quoted**, so a temporary
+  folder with a space or quote in it broke the run.
+- **A flaky test of the socket cleanup:** a socket made a moment ago could
+  have a time just ahead of the clock and be kept even with no grace.
+
 ## [0.28.0] - 2026-11-16
 
 ### Added

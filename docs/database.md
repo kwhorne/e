@@ -183,7 +183,8 @@ after **⟳** or a reconnect. SQL inside PHP strings completes the same way.
 - **⌘↵** runs the **selection**, or the **statement under the cursor**;
   **⌘⇧↵** (or **Run**) runs the whole console. Each statement gets its own
   **result tab** — pin one (★) to keep it across runs. Hover a tab to see
-  the statement it came from.
+  the statement it came from. **⌥⌘↵** explains the selection or statement
+  under the cursor.
 - Result tabs stay when you open a table. The table has a tab of its own
   (**▦ name**) at the start of the strip: click it to go back to the table at
   the page, sort and filter you left it. Rows in a result tab are read-only;
@@ -231,12 +232,15 @@ The label drives the safety rails:
   deleted again, and a deleted row inserted again as it was read (not for
   tables with binary columns, which the grid shows only as their size).
 - **Conflicts:** Submit first reads each edited and deleted row again, in the
-  same transaction, and checks that the edited cell still holds the value you
-  read (compared as the grid showed it), and that a row to delete is still
-  there. If someone changed it meanwhile, **nothing is written**: a red banner
-  names each such row and what it holds now, those changes are no longer
-  staged, the table is read again, and the rest stay staged for another
-  Submit. The rows are locked while they are checked (`FOR UPDATE`; SQLite
+  same transaction, and checks that the edited cells still hold the values
+  you read (compared as the grid showed them), and that a row to delete is
+  still as it was read. If someone changed it meanwhile, **nothing is
+  written**: a red banner names each such row and what it holds now, those
+  changes are no longer staged, the table is read again, and the rest stay
+  staged for another Submit. **⧉ Copy mine** on a line copies the values you
+  had written, so they aren't lost. A row's edits are written in one
+  statement, so a change to its key and to another column can't miss each
+  other. The rows are locked while they are checked (`FOR UPDATE`; SQLite
   takes its write lock first), so nothing gets in between. ClickHouse has no
   transactions, so there the check runs just before the writes.
 - **Snapshots:** the **⤓** menu on a local connection takes a snapshot of
@@ -255,6 +259,13 @@ The label drives the safety rails:
   projects' `app` databases never mix. The Migrations panel's **migrate**
   takes one first when Grove isn't there to, and an agent can ask for one
   with `db_snapshot` (see [agent sync](agent-sync.md#database-schema)).
+
+  A restore drops the tables made since the snapshot first (a migration's
+  new table would otherwise stay, and on PostgreSQL its foreign keys stop
+  the dump's own drops). On MySQL that can't be rolled back, which is what
+  the snapshot taken before a restore is for. Snapshots aren't taken of a
+  database behind an SSH tunnel, nor restored on a read-only (🔒)
+  connection.
 
 ## Structure, relationships & tooling
 
@@ -275,7 +286,8 @@ The label drives the safety rails:
 - The cell dialog can **Follow FK →** (jump to the referenced row) and show
   **Related →** rows (reverse foreign keys).
 - **Seed ▾** creates 10, 100 or 1,000 rows through the table's Eloquent
-  factory, via Tinker (local tables only). When the table has no factory,
+  factory, via Tinker — so only on the app's own local database, the one
+  `.env` names. When the table has no factory,
   it offers **Generate *Model*Factory from the table** instead: each column
   filled by its name (`email`, `title`, `price`, `password`…) or type, a
   foreign key by its model's factory, the key and timestamps left out. The

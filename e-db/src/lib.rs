@@ -220,12 +220,10 @@ impl DbConfig {
         if self.use_ssh && !self.ssh_host.is_empty() {
             return true;
         }
-        let host = self.host.trim().to_ascii_lowercase();
-        let local = matches!(
-            host.as_str(),
-            "" | "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "host.docker.internal"
-        );
-        if !local {
+        // The same hosts the environment calls local (Grove's `.test` and
+        // `.localhost` among them), or a Grove database would start
+        // read-only while labelled local.
+        if !is_local_host(&self.host) {
             return true;
         }
         name_hints_prod(&self.host)
@@ -2053,9 +2051,10 @@ pub fn execute_transaction(conn: &Conn, statements: &[String]) -> Result<u64, St
 pub struct RowCheck {
     pub table: String,
     pub pk: Vec<(String, Option<String>)>,
-    /// For an edit, the column and the value it must still hold; `None`
-    /// (a delete) only needs the row to still be there.
-    pub column: Option<(String, Option<String>)>,
+    /// The columns and the values they must still hold: an edit's edited
+    /// columns, a delete's whole row as read. None: only that the row is
+    /// still there.
+    pub columns: Vec<(String, Option<String>)>,
 }
 
 /// What a [`RowCheck`] found instead of what it expected.
@@ -2063,8 +2062,8 @@ pub struct RowCheck {
 pub enum Found {
     /// The row is gone.
     Gone,
-    /// The column holds this value now.
-    Now(Option<String>),
+    /// These columns hold other values now (each with what it holds).
+    Changed(Vec<(String, Option<String>)>),
 }
 
 /// A check that failed: its index in the checks given, and what it found.
@@ -2107,9 +2106,15 @@ impl From<String> for TxError {
 /// The `SELECT` that reads what `check` looks at: the edited column (or `1`)
 /// of its row, locked for the rest of the transaction where the engine can.
 pub fn check_sql(engine: &str, check: &RowCheck) -> String {
-    let what = match &check.column {
-        Some((col, _)) => quote_ident(engine, col),
-        None => "1".into(),
+    let what = if check.columns.is_empty() {
+        "1".to_string()
+    } else {
+        check
+            .columns
+            .iter()
+            .map(|(c, _)| quote_ident(engine, c))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     let lock = match engine {
         "sqlite" | "clickhouse" | "ch" => "",
@@ -2123,24 +2128,35 @@ pub fn check_sql(engine: &str, check: &RowCheck) -> String {
 }
 
 /// What's wrong with `row` (the first row [`check_sql`] read, if any — its
-/// one value as the grid would show it) for `check`, if anything.
-fn check_row(check: &RowCheck, row: Option<Option<String>>) -> Option<Found> {
-    match (row, &check.column) {
-        (None, _) => Some(Found::Gone),
-        (Some(_), None) => None,
-        (Some(now), Some((_, want))) => (now != *want).then_some(Found::Now(now)),
-    }
+/// values as the grid would show them) for `check`, if anything.
+fn check_row(check: &RowCheck, row: Option<Vec<Option<String>>>) -> Option<Found> {
+    let row = row?;
+    let changed: Vec<(String, Option<String>)> = check
+        .columns
+        .iter()
+        .zip(row)
+        .filter(|((_, want), now)| want != now)
+        .map(|((col, _), now)| (col.clone(), now))
+        .collect();
+    (!changed.is_empty()).then_some(Found::Changed(changed))
 }
+
+/// A row read for a check: `None` when it's gone.
+type CheckedRow = Option<Vec<Option<String>>>;
 
 /// Collect the failed checks, reading each row with `read`.
 fn run_checks(
     engine: &str,
     checks: &[RowCheck],
-    mut read: impl FnMut(&str) -> Result<Option<Option<String>>, String>,
+    mut read: impl FnMut(&str) -> Result<CheckedRow, String>,
 ) -> Result<Vec<Conflict>, String> {
     let mut conflicts = Vec::new();
     for (i, check) in checks.iter().enumerate() {
-        if let Some(found) = check_row(check, read(&check_sql(engine, check))?) {
+        let found = match read(&check_sql(engine, check))? {
+            None => Some(Found::Gone),
+            row => check_row(check, row),
+        };
+        if let Some(found) = found {
             conflicts.push(Conflict { check: i, found });
         }
     }
@@ -2179,7 +2195,11 @@ pub fn execute_checked(
                 for row in tx.query_iter(sql).map_err(|e| e.to_string())? {
                     let row = row.map_err(|e| e.to_string())?;
                     if first.is_none() {
-                        first = Some(row.as_ref(0).and_then(mysql_value_to_string));
+                        first = Some(
+                            (0..row.len())
+                                .map(|i| row.as_ref(i).and_then(mysql_value_to_string))
+                                .collect(),
+                        );
                     }
                 }
                 Ok(first)
@@ -2207,10 +2227,13 @@ pub fn execute_checked(
             let conflicts = run_checks("sqlite", checks, |sql| {
                 let mut stmt = tx.prepare(sql).map_err(|e| e.to_string())?;
                 let mut q = stmt.query([]).map_err(|e| e.to_string())?;
+                let width = q.as_ref().map_or(0, |s| s.column_count());
                 match q.next().map_err(|e| e.to_string())? {
-                    Some(row) => Ok(Some(sqlite_cell(
-                        row.get_ref(0).map_err(|e| e.to_string())?,
-                    ))),
+                    Some(row) => Ok(Some(
+                        (0..width)
+                            .map(|i| row.get_ref(i).map(sqlite_cell).map_err(|e| e.to_string()))
+                            .collect::<Result<_, _>>()?,
+                    )),
                     None => Ok(None),
                 }
             })?;
@@ -2235,7 +2258,11 @@ pub fn execute_checked(
                     .map_err(pg_err)?
                     .into_iter()
                     .find_map(|m| match m {
-                        Row(row) => Some(row.get(0).map(str::to_string)),
+                        Row(row) => Some(
+                            (0..row.len())
+                                .map(|i| row.get(i).map(str::to_string))
+                                .collect(),
+                        ),
                         _ => None,
                     }))
             })?;
@@ -2252,11 +2279,7 @@ pub fn execute_checked(
         }
         Backend::Clickhouse { .. } => {
             let conflicts = run_checks("clickhouse", checks, |sql| {
-                Ok(query(conn, sql, 1)?
-                    .rows
-                    .into_iter()
-                    .next()
-                    .map(|r| r.into_iter().next().flatten()))
+                Ok(query(conn, sql, 1)?.rows.into_iter().next())
             })?;
             if !conflicts.is_empty() {
                 return Err(TxError::Conflicts(conflicts));
@@ -2378,6 +2401,33 @@ pub fn update_sql(
     )
 }
 
+/// Build an `UPDATE … SET a = 1, b = 2 WHERE pk…` statement: every change
+/// to one row in one statement, so a change to its key and to another
+/// column can't miss each other.
+pub fn update_row_sql(
+    engine: &str,
+    table: &str,
+    sets: &[(String, Option<String>)],
+    pk: &[(String, Option<String>)],
+) -> String {
+    let sets: Vec<String> = sets
+        .iter()
+        .map(|(c, v)| {
+            format!(
+                "{} = {}",
+                quote_ident(engine, c),
+                sql_literal(engine, v.as_deref())
+            )
+        })
+        .collect();
+    format!(
+        "UPDATE {} SET {} WHERE {}",
+        quote_ident(engine, table),
+        sets.join(", "),
+        pk_conds(engine, pk)
+    )
+}
+
 /// Build a `DELETE FROM table WHERE pk…` statement (no execution).
 pub fn delete_sql(engine: &str, table: &str, pk: &[(String, Option<String>)]) -> String {
     format!(
@@ -2469,7 +2519,8 @@ fn search_condition(engine: &str, column: &str, pattern: &str) -> String {
     let col = quote_ident(engine, column);
     match engine {
         "postgres" | "postgresql" | "pgsql" => format!("{col}::text ILIKE {pattern}"),
-        "clickhouse" | "ch" => format!("{col} ILIKE {pattern}"),
+        // As text: its UUID (and other non-string) columns refuse ILIKE.
+        "clickhouse" | "ch" => format!("toString({col}) ILIKE {pattern}"),
         _ => format!("{col} LIKE {pattern}"),
     }
 }
@@ -3065,7 +3116,9 @@ pub fn split_statement_ranges(sql: &str) -> Vec<(usize, usize)> {
 /// including writable CTEs and `EXPLAIN ANALYZE` of a write. Used to gate
 /// writes to non-local databases.
 pub fn is_write_statement(sql: &str) -> bool {
-    !is_read_only(sql)
+    // A ROLLBACK undoes rather than writes: a read-only connection lets it
+    // through (see `Conn::guard`), and so must whatever asks this first.
+    !is_read_only(sql) && !classify::is_rollback(sql)
 }
 
 /// Percent-encode a URL query value.
@@ -3290,9 +3343,8 @@ pub fn analyze_explain(engine: &str, plan: &QueryResult) -> Vec<String> {
             // full scan, "SEARCH … USING INDEX" when an index is used.
             for row in &plan.rows {
                 if let Some(detail) = row.last().and_then(|c| c.as_deref()) {
-                    let d = detail.trim();
-                    if d.starts_with("SCAN") && !d.contains("USING") {
-                        issues.push(format!("Full scan: {d}"));
+                    if plan::sqlite_full_scan(detail) {
+                        issues.push(format!("Full scan: {}", detail.trim()));
                     }
                 }
             }
@@ -3944,7 +3996,21 @@ mod pg_live_tests {
         let snap = take_snapshot(&cfg("e_snap_test"), &root).unwrap();
         query(&conn, "UPDATE t SET v = 'changed'", 0).unwrap();
         query(&conn, "DELETE FROM t WHERE id = 2", 0).unwrap();
+        // A migration's new table, holding on to one the dump drops.
+        query(
+            &conn,
+            "CREATE TABLE later (id INT PRIMARY KEY, t_id INT, \
+             FOREIGN KEY (t_id) REFERENCES t (id))",
+            0,
+        )
+        .unwrap();
+        query(&conn, "INSERT INTO later VALUES (1, 1)", 0).unwrap();
         restore_snapshot(&cfg("e_snap_test"), &snap).unwrap();
+        assert_eq!(
+            tables(&conn).unwrap(),
+            ["t"],
+            "what came after the snapshot goes"
+        );
         let rows = query(&conn, "SELECT id, v FROM t ORDER BY id", 10)
             .unwrap()
             .rows;
@@ -4063,7 +4129,7 @@ mod pg_live_tests {
             .map(|(col, v)| RowCheck {
                 table: "t".into(),
                 pk: pk.clone(),
-                column: Some((col.clone(), v.clone())),
+                columns: vec![(col.clone(), v.clone())],
             })
             .collect();
         assert_eq!(
@@ -4081,7 +4147,7 @@ mod pg_live_tests {
             &[RowCheck {
                 table: "t".into(),
                 pk: pk.clone(),
-                column: Some(("name".into(), Some("ola".into()))),
+                columns: vec![("name".into(), Some("ola".into()))],
             }],
             &["UPDATE t SET name = 'x' WHERE id = 1".into()],
         )
@@ -4090,13 +4156,13 @@ mod pg_live_tests {
             err,
             TxError::Conflicts(vec![Conflict {
                 check: 0,
-                found: Found::Now(Some("Ola".into())),
+                found: Found::Changed(vec![("name".into(), Some("Ola".into()))]),
             }])
         );
         let gone = RowCheck {
             table: "t".into(),
             pk: vec![("id".to_string(), Some("2".to_string()))],
-            column: None,
+            columns: vec![],
         };
         assert!(matches!(
             execute_checked(&conn, &[gone], &["DELETE FROM t WHERE id = 2".into()]),
@@ -4347,6 +4413,26 @@ mod pg_live_tests {
             let r = query(&conn, "SELECT 1 UNION ALL SELECT 2", 1000).unwrap();
             assert_eq!((r.rows.len(), r.truncated), (2, false));
         }
+    }
+
+    #[test]
+    fn grove_hosts_are_local_to_the_read_only_default_too() {
+        for host in ["shop.test", "db.localhost", "127.0.0.1"] {
+            let c = DbConfig {
+                engine: "mysql".into(),
+                host: host.into(),
+                database: "shop".into(),
+                ..Default::default()
+            };
+            assert!(!c.looks_like_prod(), "{host}");
+            assert!(c.environment().is_local(), "{host}");
+        }
+        let remote = DbConfig {
+            engine: "mysql".into(),
+            host: "db.example.com".into(),
+            ..Default::default()
+        };
+        assert!(remote.looks_like_prod());
     }
 
     #[test]
@@ -5580,7 +5666,7 @@ mod tests {
         let edit = |id: &str, col: &str, was: Option<&str>| RowCheck {
             table: "t".into(),
             pk: pk(id),
-            column: Some((col.into(), was.map(str::to_string))),
+            columns: vec![(col.into(), was.map(str::to_string))],
         };
         let shown = |sql: &str| query(&conn, sql, 10).unwrap().rows;
 
@@ -5606,7 +5692,7 @@ mod tests {
                 RowCheck {
                     table: "t".into(),
                     pk: pk("9"),
-                    column: None,
+                    columns: vec![],
                 },
             ],
             &[
@@ -5621,7 +5707,7 @@ mod tests {
             TxError::Conflicts(vec![
                 Conflict {
                     check: 0,
-                    found: Found::Now(Some("a".into())),
+                    found: Found::Changed(vec![("v".into(), Some("a".into()))]),
                 },
                 Conflict {
                     check: 2,
@@ -5645,7 +5731,7 @@ mod tests {
             &[RowCheck {
                 table: "t".into(),
                 pk: pk("3"),
-                column: None,
+                columns: vec![],
             }],
             &["DELETE FROM t WHERE id = 3".into()],
         )
@@ -5714,7 +5800,7 @@ mod tests {
         );
         assert_eq!(
             search_condition("clickhouse", "name", "'%ada%'"),
-            "`name` ILIKE '%ada%'"
+            "toString(`name`) ILIKE '%ada%'"
         );
         assert_eq!(size_label(900), "900 B");
         assert_eq!(size_label(48 * 1024), "48 KB");
@@ -5757,11 +5843,59 @@ mod tests {
     }
 
     #[test]
+    fn a_check_names_each_column_that_changed() {
+        let check = RowCheck {
+            table: "users".into(),
+            pk: vec![("id".into(), Some("5".into()))],
+            columns: vec![
+                ("name".into(), Some("ada".into())),
+                ("email".into(), Some("a@x".into())),
+                ("note".into(), None),
+            ],
+        };
+        assert_eq!(
+            check_row(
+                &check,
+                Some(vec![
+                    Some("ada".into()),
+                    Some("b@x".into()),
+                    Some("hi".into())
+                ])
+            ),
+            Some(Found::Changed(vec![
+                ("email".into(), Some("b@x".into())),
+                ("note".into(), Some("hi".into())),
+            ]))
+        );
+        assert_eq!(
+            check_row(
+                &check,
+                Some(vec![Some("ada".into()), Some("a@x".into()), None])
+            ),
+            None
+        );
+        assert_eq!(
+            check_sql("mysql", &check),
+            "SELECT `name`, `email`, `note` FROM `users` WHERE `id` = '5' FOR UPDATE"
+        );
+        // A key and another column, in one statement.
+        assert_eq!(
+            update_row_sql(
+                "postgres",
+                "users",
+                &[("id".into(), Some("100".into())), ("name".into(), None)],
+                &[("id".into(), Some("1".into()))]
+            ),
+            "UPDATE \"users\" SET \"id\" = '100', \"name\" = NULL WHERE \"id\" = '1'"
+        );
+    }
+
+    #[test]
     fn a_check_reads_the_column_and_locks_the_row() {
         let check = RowCheck {
             table: "users".into(),
             pk: vec![("id".into(), Some("5".into()))],
-            column: Some(("email".into(), Some("a@b".into()))),
+            columns: vec![("email".into(), Some("a@b".into()))],
         };
         assert_eq!(
             check_sql("mysql", &check),
@@ -5772,7 +5906,7 @@ mod tests {
             "SELECT \"email\" FROM \"users\" WHERE \"id\" = '5' FOR UPDATE"
         );
         let gone = RowCheck {
-            column: None,
+            columns: vec![],
             ..check
         };
         assert_eq!(

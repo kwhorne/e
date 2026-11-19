@@ -100,12 +100,17 @@ pub struct DbEntry {
     /// Loaded on first use and dropped on disconnect or refresh.
     pub schema: RwSignal<Option<Arc<TableColumns>>>,
     pub schema_loading: RwSignal<bool>,
+    /// Which entry this is: a connection edited in place keeps its `key()`
+    /// but is a new entry, and the panel's row must be its, not the last's.
+    pub serial: u64,
 }
 
 impl DbEntry {
     pub fn new(cx: Scope, config: e_db::DbConfig) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let config_read_only = config.looks_like_prod();
         DbEntry {
+            serial: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             config,
             conn: cx.create_rw_signal(None),
             expanded: cx.create_rw_signal(false),
@@ -295,10 +300,19 @@ pub struct RelatedChoice {
 /// A staged change, by its key in the pending sets.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Staged {
-    /// An edit of this row's column.
-    Edit(RowPk, String),
+    /// Edits of these columns of this row, written in one statement.
+    Edits(RowPk, Vec<String>),
     /// Deleting this row.
     Delete(RowPk),
+}
+
+/// One line of the conflict banner: what a row holds now, and the values
+/// of yours that were taken off the staged changes, to copy and not lose.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConflictLine {
+    pub text: String,
+    /// `(column, your value)` for each edit taken off.
+    pub mine: Vec<(String, Option<String>)>,
 }
 
 /// A pending destructive / non-local / submit action awaiting confirmation.
@@ -384,6 +398,8 @@ pub struct ReplaceConfirm {
 /// one can be generated.
 #[derive(Clone)]
 pub struct WriteLogEntry {
+    /// The connection it was written on, which its Undo runs on too.
+    pub key: String,
     pub forward: String,
     pub reverse: Option<String>,
 }
@@ -766,7 +782,7 @@ pub struct DbPanel {
     pub pending_target: RwSignal<Option<(String, String)>>,
     /// What the last Submit found changed in the database since the grid
     /// read it (one line each), shown until dismissed or the next Submit.
-    pub conflicts: RwSignal<Vec<String>>,
+    pub conflicts: RwSignal<Vec<ConflictLine>>,
     /// Where the staged changes fall in the grid on screen.
     pub pending_view: RwSignal<PendingView>,
     /// The table being browsed (None in free-query mode).

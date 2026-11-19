@@ -150,9 +150,16 @@ fn fake_for(col: &ColumnInfo, fk: Option<&ForeignKey>) -> Option<String> {
     if let Some(fk) = fk {
         return Some(format!("{}::factory()", model_name(&fk.ref_table)));
     }
-    // MySQL's enum('draft','published'): one of its values.
-    if let Some(list) = t.strip_prefix("enum(").and_then(|r| r.strip_suffix(')')) {
-        return Some(format!("fake()->randomElement([{list}])"));
+    // MySQL's enum('draft','published'): one of its values, as written —
+    // `ENUM('PENDING')` is `PENDING`, not `pending`.
+    if t.starts_with("enum(") {
+        if let Some(values) = enum_values(col.data_type.trim()) {
+            let php: Vec<String> = values
+                .iter()
+                .map(|v| format!("'{}'", v.replace('\\', "\\\\").replace('\'', "\\'")))
+                .collect();
+            return Some(format!("fake()->randomElement([{}])", php.join(", ")));
+        }
     }
     let by_name = match name.as_str() {
         "email" | "email_address" => Some("fake()->unique()->safeEmail()"),
@@ -221,6 +228,38 @@ fn fake_for(col: &ColumnInfo, fk: Option<&ForeignKey>) -> Option<String> {
     )
 }
 
+/// The values of MySQL's `enum('a','it''s')`, unquoted: `''` is a quote
+/// and `\` escapes, as MySQL writes them in `COLUMN_TYPE`.
+fn enum_values(ty: &str) -> Option<Vec<String>> {
+    let open = ty.find('(')?;
+    let body = ty.get(open + 1..ty.rfind(')')?)?;
+    let mut values = Vec::new();
+    let mut chars = body.chars().peekable();
+    loop {
+        while chars.peek().is_some_and(|c| c.is_whitespace() || *c == ',') {
+            chars.next();
+        }
+        match chars.next() {
+            None => return Some(values),
+            Some('\'') => {}
+            Some(_) => return None,
+        }
+        let mut v = String::new();
+        loop {
+            match chars.next()? {
+                '\\' => v.push(chars.next()?),
+                '\'' if chars.peek() == Some(&'\'') => {
+                    chars.next();
+                    v.push('\'');
+                }
+                '\'' => break,
+                c => v.push(c),
+            }
+        }
+        values.push(v);
+    }
+}
+
 /// A model factory for `table` from its columns and foreign keys, for
 /// `database/factories/{Model}Factory.php`: each column filled by name or
 /// type, each foreign key by its model's factory.
@@ -231,7 +270,9 @@ pub fn generate_factory(table: &str, cols: &[ColumnInfo], fks: &[ForeignKey]) ->
         "Illuminate\\Database\\Eloquent\\Factories\\Factory".into(),
     ];
     let mut fields = Vec::new();
-    for c in cols {
+    // Only plain names go into the PHP: one with a quote in it would end
+    // the string it's written in.
+    for c in cols.iter().filter(|c| valid_table(&c.name)) {
         let fk = fks.iter().find(|f| f.table == table && f.column == c.name);
         let Some(value) = fake_for(c, fk) else {
             continue;
@@ -350,8 +391,36 @@ mod tests {
         }];
         assert_eq!(
             generate_factory("blog_posts", &cols, &fks),
-            "<?php\n\nnamespace Database\\Factories;\n\nuse App\\Models\\BlogPost;\nuse App\\Models\\User;\nuse Illuminate\\Database\\Eloquent\\Factories\\Factory;\n\n/**\n * @extends Factory<BlogPost>\n */\nclass BlogPostFactory extends Factory\n{\n    /**\n     * Define the model's default state.\n     *\n     * @return array<string, mixed>\n     */\n    public function definition(): array\n    {\n        return [\n            'user_id' => User::factory(),\n            'title' => fake()->sentence(4),\n            'status' => fake()->randomElement(['draft','published']),\n            'is_pinned' => fake()->boolean(),\n            'views' => fake()->numberBetween(0, 1000),\n            'meta' => [],\n            'published_at' => fake()->dateTime(),\n        ];\n    }\n}\n"
+            "<?php\n\nnamespace Database\\Factories;\n\nuse App\\Models\\BlogPost;\nuse App\\Models\\User;\nuse Illuminate\\Database\\Eloquent\\Factories\\Factory;\n\n/**\n * @extends Factory<BlogPost>\n */\nclass BlogPostFactory extends Factory\n{\n    /**\n     * Define the model's default state.\n     *\n     * @return array<string, mixed>\n     */\n    public function definition(): array\n    {\n        return [\n            'user_id' => User::factory(),\n            'title' => fake()->sentence(4),\n            'status' => fake()->randomElement(['draft', 'published']),\n            'is_pinned' => fake()->boolean(),\n            'views' => fake()->numberBetween(0, 1000),\n            'meta' => [],\n            'published_at' => fake()->dateTime(),\n        ];\n    }\n}\n"
         );
+    }
+
+    #[test]
+    fn an_enum_keeps_its_values_as_written() {
+        let col = |name: &str, ty: &str| ColumnInfo {
+            name: name.into(),
+            data_type: ty.into(),
+            nullable: false,
+            key: String::new(),
+        };
+        let f = generate_factory(
+            "orders",
+            &[
+                col("state", "ENUM('PENDING','Paid','it''s')"),
+                col("bad'name", "varchar(10)"),
+            ],
+            &[],
+        );
+        assert!(
+            f.contains("'state' => fake()->randomElement(['PENDING', 'Paid', 'it\\'s']),"),
+            "{f}"
+        );
+        assert!(!f.contains("bad'name"), "{f}");
+        assert_eq!(
+            enum_values("enum('a\\'b', 'c')"),
+            Some(vec!["a'b".to_string(), "c".to_string()])
+        );
+        assert_eq!(enum_values("enum(a)"), None);
     }
 
     #[test]

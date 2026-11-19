@@ -89,7 +89,7 @@ pub fn from_sqlite(rows: &[Vec<Option<String>>]) -> Option<PlanNode> {
                 };
                 PlanNode {
                     label: d.to_string(),
-                    full_scan: d.starts_with("SCAN") && !d.contains("USING"),
+                    full_scan: sqlite_full_scan(d),
                     table,
                     children: build(*id, rows),
                     ..Default::default()
@@ -100,6 +100,18 @@ pub fn from_sqlite(rows: &[Vec<Option<String>>]) -> Option<PlanNode> {
     let mut root = PlanNode::new("Query plan");
     root.children = build(0, &parsed);
     Some(root)
+}
+
+/// Whether a SQLite plan step reads a whole table: `SCAN orders`, not
+/// `SCAN orders USING INDEX …`, nor `SCAN CONSTANT ROW` (`SELECT 1`), nor
+/// the rows of a subquery (`SCAN (subquery-1)`).
+pub(crate) fn sqlite_full_scan(detail: &str) -> bool {
+    let d = detail.trim();
+    d.starts_with("SCAN")
+        && !d.contains("USING")
+        && !d.starts_with("SCAN CONSTANT ROW")
+        && !d.starts_with("SCAN (")
+        && !d.contains("SUBQUERY")
 }
 
 /// PostgreSQL's `EXPLAIN (FORMAT JSON)`: `[{"Plan": {…}}]`.
@@ -394,6 +406,18 @@ mod tests {
             .collect();
         assert_eq!(scans, ["orders", "comments"]);
         assert_eq!(plan.costliest(), None);
+    }
+
+    #[test]
+    fn a_constant_row_is_no_full_scan() {
+        assert!(sqlite_full_scan("SCAN orders"));
+        assert!(sqlite_full_scan("SCAN TABLE orders"));
+        assert!(!sqlite_full_scan("SCAN CONSTANT ROW"));
+        assert!(!sqlite_full_scan("SCAN orders USING INDEX orders_status"));
+        assert!(!sqlite_full_scan("SCAN (subquery-1)"));
+        assert!(!sqlite_full_scan(
+            "SEARCH orders USING INTEGER PRIMARY KEY (rowid=?)"
+        ));
     }
 
     #[test]

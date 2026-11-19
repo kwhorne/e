@@ -72,56 +72,125 @@ pub fn snapshot_folder(root: &Path, config: &DbConfig) -> PathBuf {
     root.join(format!("{name}-{:08x}", (fnv1a(&identity) >> 32) as u32))
 }
 
+/// Whether `config` can be dumped and replayed by its client tools here:
+/// not through an SSH tunnel (the tools would reach whatever listens on
+/// the same address here instead), and with a database name that can only
+/// be a name — not a flag (`-…`) nor, to libpq, a connection string
+/// (`host=… dbname=…`), which would point the tools at another server.
+fn check_reachable(config: &DbConfig) -> Result<(), String> {
+    if config.use_ssh {
+        return Err("snapshots of a database behind an SSH tunnel aren't supported".into());
+    }
+    let db = config.database.trim();
+    if engine_family(&config.engine) != "sqlite"
+        && (db.is_empty()
+            || db.starts_with('-')
+            || db.contains('=')
+            || db.contains(char::is_whitespace))
+    {
+        return Err(format!(
+            "“{db}” can't be passed to the dump tools as a database name"
+        ));
+    }
+    Ok(())
+}
+
+/// The `--host`/`--port`/user arguments; no `--port` when none is set, so
+/// the tool's default applies instead of port 0.
+fn server_args(config: &DbConfig, user_flag: &str) -> Vec<String> {
+    let mut args = vec![format!("--host={}", config.host)];
+    if config.port != 0 {
+        args.push(format!("--port={}", config.port));
+    }
+    args.push(format!("{user_flag}={}", config.username));
+    args
+}
+
 /// `mysqldump`'s arguments for `config`'s database.
 fn mysqldump_args(config: &DbConfig) -> Vec<String> {
-    vec![
-        format!("--host={}", config.host),
-        format!("--port={}", config.port),
-        format!("--user={}", config.username),
+    let mut args = server_args(config, "--user");
+    args.extend([
         // One consistent read of InnoDB tables, without locking them.
         "--single-transaction".into(),
         "--routines".into(),
         "--triggers".into(),
         config.database.clone(),
-    ]
+    ]);
+    args
 }
 
 /// `pg_dump`'s arguments: the dump drops each object before making it, so
-/// it can be replayed over the database it came from.
+/// it can be replayed over the database it came from. `--no-password`: a
+/// missing password fails rather than waits on a terminal there isn't.
 fn pg_dump_args(config: &DbConfig) -> Vec<String> {
-    vec![
-        format!("--host={}", config.host),
-        format!("--port={}", config.port),
-        format!("--username={}", config.username),
+    let mut args = server_args(config, "--username");
+    args.extend([
+        "--no-password".into(),
         "--clean".into(),
         "--if-exists".into(),
-        config.database.clone(),
-    ]
+        format!("--dbname={}", config.database),
+    ]);
+    args
 }
 
 /// `mysql`'s arguments for replaying a dump (it stops at the first error).
 fn mysql_restore_args(config: &DbConfig) -> Vec<String> {
-    vec![
-        format!("--host={}", config.host),
-        format!("--port={}", config.port),
-        format!("--user={}", config.username),
-        config.database.clone(),
-    ]
+    let mut args = server_args(config, "--user");
+    args.push(config.database.clone());
+    args
 }
 
 /// `psql`'s arguments for replaying a dump: in one transaction, stopping
 /// at the first error, so a dump that doesn't fit changes nothing.
 fn pg_restore_args(config: &DbConfig) -> Vec<String> {
-    vec![
-        format!("--host={}", config.host),
-        format!("--port={}", config.port),
-        format!("--username={}", config.username),
+    let mut args = server_args(config, "--username");
+    args.extend([
+        "--no-password".into(),
         "--set=ON_ERROR_STOP=1".into(),
         "--single-transaction".into(),
         "--quiet".into(),
-        "--dbname".into(),
-        config.database.clone(),
-    ]
+        format!("--dbname={}", config.database),
+    ]);
+    args
+}
+
+/// What runs before a dump is replayed: the tables (and views) made since
+/// it was taken would otherwise stay — a migration's new table, its
+/// foreign key holding on to one the dump drops — so every one goes first,
+/// and the dump makes those it had. PostgreSQL's in the same transaction
+/// as the dump; MySQL's commit as they go (its DDL can't be rolled back),
+/// which the snapshot taken before a restore is there for.
+fn clear_first(config: &DbConfig) -> Result<String, String> {
+    match engine_family(&config.engine) {
+        "postgres" => Ok("DO $e_clear$ DECLARE r record; BEGIN \
+             FOR r IN SELECT c.relname, c.relkind FROM pg_class c \
+               JOIN pg_namespace n ON n.oid = c.relnamespace \
+              WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p', 'v', 'm', 'f') LOOP \
+               EXECUTE CASE r.relkind \
+                 WHEN 'v' THEN 'DROP VIEW IF EXISTS ' \
+                 WHEN 'm' THEN 'DROP MATERIALIZED VIEW IF EXISTS ' \
+                 WHEN 'f' THEN 'DROP FOREIGN TABLE IF EXISTS ' \
+                 ELSE 'DROP TABLE IF EXISTS ' END || quote_ident(r.relname) || ' CASCADE'; \
+             END LOOP; END $e_clear$;\n"
+            .to_string()),
+        "mysql" => {
+            let conn = crate::connect(config)?;
+            let q = |n: &str| crate::quote_ident("mysql", n);
+            let tables = crate::tables(&conn)?;
+            let views = crate::views(&conn).unwrap_or_default();
+            let mut sql = String::from("SET FOREIGN_KEY_CHECKS=0;\n");
+            if !views.is_empty() {
+                let names: Vec<String> = views.iter().map(|v| q(v)).collect();
+                sql.push_str(&format!("DROP VIEW IF EXISTS {};\n", names.join(", ")));
+            }
+            if !tables.is_empty() {
+                let names: Vec<String> = tables.iter().map(|t| q(t)).collect();
+                sql.push_str(&format!("DROP TABLE IF EXISTS {};\n", names.join(", ")));
+            }
+            Ok(sql)
+        }
+        _ => Ok(String::new()),
+    }
 }
 
 fn now_secs() -> u64 {
@@ -133,6 +202,7 @@ fn now_secs() -> u64 {
 
 /// Take a snapshot of `config`'s database into its folder under `root`.
 pub fn take_snapshot(config: &DbConfig, root: &Path) -> Result<PathBuf, String> {
+    check_reachable(config)?;
     let dir = snapshot_folder(root, config);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let ext = if engine_family(&config.engine) == "sqlite" {
@@ -210,19 +280,32 @@ pub fn list_snapshots(root: &Path, config: &DbConfig) -> Vec<Snapshot> {
     out
 }
 
+/// Run `program` with `prefix` and then the SQL in `file` on its input.
 fn run_sql_file(
     program: &str,
     args: &[String],
     env: (&str, &str),
+    prefix: &str,
     file: &Path,
 ) -> Result<(), String> {
-    let input = std::fs::File::open(file).map_err(|e| format!("open snapshot: {e}"))?;
-    let out = std::process::Command::new(program)
+    use std::io::Write;
+    let mut input = std::fs::File::open(file).map_err(|e| format!("open snapshot: {e}"))?;
+    let mut child = std::process::Command::new(program)
         .args(args)
         .env(env.0, env.1)
-        .stdin(std::process::Stdio::from(input))
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
-        .output()
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{program}: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        // A write error is the tool having stopped; its stderr says why.
+        let _ = stdin
+            .write_all(prefix.as_bytes())
+            .and_then(|_| std::io::copy(&mut input, &mut stdin).map(|_| ()));
+    }
+    let out = child
+        .wait_with_output()
         .map_err(|e| format!("{program}: {e}"))?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
@@ -236,6 +319,7 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
     if !snapshot.is_file() {
         return Err(format!("snapshot not found: {}", snapshot.display()));
     }
+    check_reachable(config)?;
     match engine_family(&config.engine) {
         "sqlite" => {
             if config.path.trim().is_empty() {
@@ -253,12 +337,14 @@ pub fn restore_snapshot(config: &DbConfig, snapshot: &Path) -> Result<(), String
             "mysql",
             &mysql_restore_args(config),
             ("MYSQL_PWD", &config.password),
+            &clear_first(config)?,
             snapshot,
         ),
         "postgres" => run_sql_file(
             "psql",
             &pg_restore_args(config),
             ("PGPASSWORD", &config.password),
+            &clear_first(config)?,
             snapshot,
         ),
         other => Err(format!("restore isn't supported for {other}")),
@@ -320,17 +406,55 @@ mod tests {
             database: "shop".into(),
             ..Default::default()
         };
+        assert!(pg_dump_args(&c).contains(&"--no-password".to_string()));
+        assert!(pg_dump_args(&c).contains(&"--dbname=shop".to_string()));
         assert!(pg_dump_args(&c).contains(&"--clean".to_string()));
         assert!(pg_dump_args(&c).contains(&"--if-exists".to_string()));
         let restore = pg_restore_args(&c);
         assert!(restore.contains(&"--single-transaction".to_string()));
         assert!(restore.contains(&"--set=ON_ERROR_STOP=1".to_string()));
-        assert_eq!(restore.last().map(String::as_str), Some("shop"));
+        assert_eq!(restore.last().map(String::as_str), Some("--dbname=shop"));
+        // No port set: the tool's own default, not port 0.
+        let no_port = DbConfig {
+            port: 0,
+            ..c.clone()
+        };
+        assert!(!mysqldump_args(&no_port)
+            .iter()
+            .any(|a| a.starts_with("--port")));
         assert_eq!(
             mysql_restore_args(&c),
             ["--host=127.0.0.1", "--port=5432", "--user=root", "shop"]
         );
         assert!(mysqldump_args(&c).contains(&"--single-transaction".to_string()));
+    }
+
+    #[test]
+    fn what_the_tools_cant_reach_safely_is_refused() {
+        let base = DbConfig {
+            engine: "postgres".into(),
+            host: "127.0.0.1".into(),
+            port: 5432,
+            database: "shop".into(),
+            ..Default::default()
+        };
+        assert!(check_reachable(&base).is_ok());
+        // Through a tunnel, the tools would reach this machine's server.
+        let tunnel = DbConfig {
+            use_ssh: true,
+            ..base.clone()
+        };
+        assert!(check_reachable(&tunnel).is_err());
+        // A name that is a flag, or to libpq a whole connection string.
+        for db in ["-h evil", "host=prod dbname=shop", "a b", ""] {
+            let c = DbConfig {
+                database: db.into(),
+                ..base.clone()
+            };
+            assert!(check_reachable(&c).is_err(), "{db:?}");
+        }
+        let restored = restore_snapshot(&tunnel, Path::new("/etc/hosts"));
+        assert!(restored.unwrap_err().contains("SSH"));
     }
 
     #[test]

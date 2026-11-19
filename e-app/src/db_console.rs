@@ -72,7 +72,10 @@ pub fn sql_console(state: AppState) -> impl IntoView {
             // add Shift to run the whole console. Intercepted before app shortcuts
             // so it doesn't hit the PHP "run SQL under cursor" binding.
             if matches!(key, Key::Named(NamedKey::Enter)) && (mods.meta() || mods.control()) {
-                if mods.shift() {
+                // ⌥⌘↵ explains the console's statement, not the editor's.
+                if mods.alt() {
+                    state.explain_console_under_cursor();
+                } else if mods.shift() {
                     state.db_run_query();
                 } else {
                     state.run_console_under_cursor();

@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and right-clicking a tool card copies its whole command or output (the
   card shows a few lines).
 - **Copy screen** in the terminal's right-click menu.
+- **⌥⌘↵ in the SQL console** explains its own statement.
+- **Copy mine** on the conflict banner keeps the values a conflict took off
+  the staged changes.
 
 ### Fixed
 
@@ -28,6 +31,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folder with a space or quote in it broke the run.
 - **A flaky test of the socket cleanup:** a socket made a moment ago could
   have a time just ahead of the clock and be kept even with no grace.
+- **Typing into a NULL cell, or a nullable field of a new row, was thrown
+  away** unless NULL was unticked by hand. Typing a value now unticks it.
+- **A read-only check could be read past on PostgreSQL**: with an escape
+  string (`E'\''`) or `standard_conforming_strings` off, a `#` (XOR to
+  PostgreSQL) hid a statement from both readings. A third reading, of such
+  a server, must agree too.
+- **ROLLBACK was refused** on a read-only connection's console.
+- **Restoring a snapshot:** tables made since are dropped first; a database
+  behind an SSH tunnel, a read-only connection and a database name that
+  isn't one are refused; no `--port=0`; `pg_dump`/`psql` no longer wait for
+  a password on a terminal.
+- **Editing a connection** left its row in the panel tied to the old one:
+  its lock and environment label no longer worked.
+- **Changing a row's key and another column** in one Submit lost the other
+  change, and its Undo looked for the row by the old key. A row's edits are
+  now one statement. A delete checks the row is still as read.
+- **A large CSV import froze the editor**: it was read on the UI thread,
+  and the confirmation drew every statement. It reads in the background and
+  lists the first hundred.
+- **Undo ran on whichever connection was active**, not the one written on;
+  and the log's rows could show an older entry's text.
+- **Seeding** went to the app's database whichever table was shown; it's
+  offered there only.
+- **A factory lowercased an enum's values** (`ENUM('PAID')`), and could
+  break on a column name with a quote; such names are left out, and an
+  index migration refuses them.
+- **Grove's `.test` and `.localhost` databases started read-only**, though
+  labelled local.
+- **SQLite's `SCAN CONSTANT ROW`** (and a subquery's scan) showed as a full
+  table scan; **ClickHouse search** skipped tables with a UUID column.
+- **Cancel** reaches a search's connection, a new run stops the one it
+  replaces, and **Follow FK** no longer overrides what was opened while it
+  looked.
 
 ## [0.28.0] - 2026-11-16
 

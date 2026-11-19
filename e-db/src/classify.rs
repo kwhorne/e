@@ -47,6 +47,9 @@ pub(crate) struct Dialect {
     mysql_comments: bool,
     /// `$$ … $$` and `$tag$ … $tag$` are strings.
     dollar_quotes: bool,
+    /// `E'…'` is a string in which `\` escapes (PostgreSQL's escape
+    /// strings), whatever `backslash_escapes` says of plain ones.
+    escape_strings: bool,
 }
 
 pub(crate) const MYSQLISH: Dialect = Dialect {
@@ -54,12 +57,25 @@ pub(crate) const MYSQLISH: Dialect = Dialect {
     hash_comments: true,
     mysql_comments: true,
     dollar_quotes: false,
+    escape_strings: false,
 };
 pub(crate) const STANDARD: Dialect = Dialect {
     backslash_escapes: false,
     hash_comments: false,
     mysql_comments: false,
     dollar_quotes: true,
+    escape_strings: true,
+};
+/// PostgreSQL with `standard_conforming_strings = off`, where `\` escapes
+/// in every string, while `#` is still XOR. Neither of the other readings
+/// is that server's: MySQL's takes `#` for a comment, the standard one
+/// `\'` for the end of a string. Each hid a statement the server ran.
+pub(crate) const BACKSLASH_POSTGRES: Dialect = Dialect {
+    backslash_escapes: true,
+    hash_comments: false,
+    mysql_comments: false,
+    dollar_quotes: true,
+    escape_strings: true,
 };
 
 /// The length of the `$tag$` opening a dollar-quoted string at `i`, if one
@@ -103,6 +119,32 @@ pub(crate) fn spans(sql: &str, d: Dialect) -> Vec<(Tok, std::ops::Range<usize>)>
     while i < chars.len() {
         let c = chars[i];
         let next = chars.get(i + 1).copied();
+        // PostgreSQL's `E'…'`: an escape string, where `\'` is a quote. Only
+        // where `E` starts a word, so `name'…'` stays a name and a string.
+        let escape_string = d.escape_strings
+            && matches!(c, 'E' | 'e')
+            && next == Some('\'')
+            && !(i > 0 && (chars[i - 1].is_alphanumeric() || matches!(chars[i - 1], '_' | '$')));
+        if escape_string {
+            let mut j = i + 2;
+            while j < chars.len() {
+                if chars[j] == '\\' {
+                    j += 2;
+                    continue;
+                }
+                if chars[j] == '\'' {
+                    if chars.get(j + 1) == Some(&'\'') {
+                        j += 2;
+                        continue;
+                    }
+                    break;
+                }
+                j += 1;
+            }
+            out.push((Tok::Str, byte(i)..byte(j + 1)));
+            i = j + 1;
+            continue;
+        }
         match c {
             '\'' | '"' | '`' => {
                 // Skip to the matching quote; a doubled quote stays inside.
@@ -315,7 +357,9 @@ fn read_only_in(sql: &str, d: Dialect) -> bool {
 /// Whether the statement only reads. Conservative: anything it can't vouch for
 /// counts as a write.
 pub fn is_read_only(sql: &str) -> bool {
-    read_only_in(sql, MYSQLISH) && read_only_in(sql, STANDARD)
+    read_only_in(sql, MYSQLISH)
+        && read_only_in(sql, STANDARD)
+        && read_only_in(sql, BACKSLASH_POSTGRES)
 }
 
 fn rollback_in(sql: &str, d: Dialect) -> bool {
@@ -350,7 +394,7 @@ fn rollback_in(sql: &str, d: Dialect) -> bool {
 /// through. (`ROLLBACK PREPARED` throws away another transaction's work and
 /// doesn't count.)
 pub(crate) fn is_rollback(sql: &str) -> bool {
-    rollback_in(sql, MYSQLISH) && rollback_in(sql, STANDARD)
+    rollback_in(sql, MYSQLISH) && rollback_in(sql, STANDARD) && rollback_in(sql, BACKSLASH_POSTGRES)
 }
 
 fn destructive_in(sql: &str, d: Dialect) -> Option<&'static str> {
@@ -420,7 +464,9 @@ fn destructive_in(sql: &str, d: Dialect) -> Option<&'static str> {
 /// don't count, and as with [`is_read_only`] both readings are taken: either
 /// one finding a reason is enough.
 pub fn is_destructive(sql: &str) -> Option<&'static str> {
-    destructive_in(sql, MYSQLISH).or_else(|| destructive_in(sql, STANDARD))
+    destructive_in(sql, MYSQLISH)
+        .or_else(|| destructive_in(sql, STANDARD))
+        .or_else(|| destructive_in(sql, BACKSLASH_POSTGRES))
 }
 
 #[cfg(test)]
@@ -608,6 +654,23 @@ mod tests {
         // `a$b$` is a name and `$1$` no tag, not quotes.
         assert!(!pg("SELECT a$b$ FROM t; DELETE FROM t; SELECT $b$"));
         assert!(!pg("SELECT $1$ FROM t; DELETE FROM t; SELECT $1$"));
+    }
+
+    #[test]
+    fn postgres_escape_strings_and_xor_hide_nothing() {
+        // To PostgreSQL `E'\''` is a quote and `#` is XOR, so the DELETE
+        // runs; MySQL's reading took `#` for a comment, the standard one
+        // `\'` for the end of a string. Each hid it.
+        let sql = "SELECT E'\\'', 1 # 1; DELETE FROM t; --'";
+        assert!(!is_read_only(sql), "{sql}");
+        // With standard_conforming_strings off, a plain string escapes too.
+        let sql = "SELECT 'x\\'', 1 # 1; DELETE FROM t; --'";
+        assert!(!is_read_only(sql), "{sql}");
+        // An escape string reads as a string; a name ending in E doesn't
+        // start one.
+        assert!(read_only_in("SELECT E'it\\'s' AS s", STANDARD));
+        assert!(is_read_only("SELECT name FROM users WHERE note = 'safe'"));
+        assert!(read_only_in("SELECT type'x' FROM t", STANDARD));
     }
 
     #[test]

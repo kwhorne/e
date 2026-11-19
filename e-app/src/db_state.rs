@@ -189,8 +189,21 @@ impl AppState {
     }
 
     /// Run a logged reverse statement to undo a change (gated like any run).
-    pub fn db_undo_write(&self, reverse_sql: String) {
+    /// Undo a logged write: its reverse statement, on the connection it was
+    /// written on — not whichever is active now.
+    pub fn db_undo_write(&self, key: String, reverse_sql: String) {
         self.db.write_log_open.set(false);
+        let Some(entry) = self
+            .db
+            .conns
+            .with_untracked(|c| c.iter().find(|e| e.key() == key).cloned())
+        else {
+            Self::notify("Undo: the connection it was written on is gone");
+            return;
+        };
+        if self.db.result_key.get_untracked().as_deref() != Some(key.as_str()) {
+            self.db_set_active(entry);
+        }
         self.run_console_sql(reverse_sql);
     }
 
@@ -744,6 +757,11 @@ impl AppState {
     /// A fresh stop flag for a console run or search about to start, set by
     /// Cancel (see `DbPanel::run_stop`).
     fn db_new_run_stop(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        // A new run supersedes the last: its statements left (or tables left
+        // to search) aren't wanted any more, so it stops too.
+        self.db
+            .run_stop
+            .with_untracked(|s| s.store(true, std::sync::atomic::Ordering::SeqCst));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.db.run_stop.set(stop.clone());
         stop
@@ -979,6 +997,13 @@ impl AppState {
             Self::notify("Restore: only available on local connections");
             return;
         }
+        if entry.read_only.get_untracked() {
+            Self::notify(
+                "Read-only: this connection is protected from writes. Toggle read-only off \
+                 in the Database panel to restore it.",
+            );
+            return;
+        }
         let name = entry.config.display_name();
         let when = ago(crate::state::now_ms_epoch() / 1000, snap.taken);
         let state = *self;
@@ -1049,6 +1074,10 @@ impl AppState {
             Self::notify("Seed: only available on local connections");
             return;
         }
+        if !self.db_table_is_apps() {
+            Self::notify("Seed: the factory writes to the app's own database (.env), not this one");
+            return;
+        }
         let model = crate::laravel::model_class_from_table(&table);
         let code = format!(
             "\\{model}::factory()->count({count})->create(); \
@@ -1090,6 +1119,22 @@ impl AppState {
         })
     }
 
+    /// Whether the shown table's connection is the app's own database, the
+    /// one `.env` names — where Tinker, and so seeding, writes.
+    pub(crate) fn db_table_is_apps(&self) -> bool {
+        let Some(key) = self.db.result_key.get_untracked() else {
+            return false;
+        };
+        let Some(app) = e_db::from_env(&self.root.get_untracked()) else {
+            return false;
+        };
+        self.db.conns.with_untracked(|c| {
+            c.iter()
+                .find(|e| e.key() == key)
+                .is_some_and(|e| same_database(&e.config, &app))
+        })
+    }
+
     /// Write a factory for the shown table from its columns and foreign
     /// keys, and open it (DB-802). An existing factory is opened, not
     /// replaced.
@@ -1098,6 +1143,15 @@ impl AppState {
             Self::notify("Generate factory: not a Laravel project");
             return;
         };
+        if self
+            .db
+            .result_table
+            .get_untracked()
+            .is_none_or(|t| !e_laravel::codegen::valid_table(&t))
+        {
+            Self::notify("Generate factory: the table's name can't be written into PHP as it is");
+            return;
+        }
         if path.is_file() {
             self.open_path(path);
             return;
@@ -1184,6 +1238,8 @@ impl AppState {
         };
         let engine = entry.config.engine.clone();
         let key = entry.key();
+        // The search's connection is the one Cancel stops it on.
+        self.db.result_key.set(Some(key.clone()));
         self.db.result_title.set(format!(
             "{} · search “{needle}”",
             entry.config.display_name()
@@ -1414,15 +1470,54 @@ impl AppState {
             let Some(path) = info.and_then(|i| i.path.into_iter().next()) else {
                 return;
             };
-            let text = match std::fs::read(&path) {
-                Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            // Read and parsed off the UI thread: a large file would freeze it.
+            let key = key.clone();
+            let table = table.clone();
+            let entry = entry.clone();
+            let columns = columns.clone();
+            let file = path.clone();
+            let opened = create_ext_action(
+                state.cx,
+                move |parsed: Result<(char, Vec<Vec<String>>), String>| {
+                    state.db_open_import(&entry, &key, &table, &columns, path.clone(), parsed)
+                },
+            );
+            std::thread::spawn(move || {
+                opened(
+                    std::fs::read(&file)
+                        .map_err(|e| e.to_string())
+                        .map(|bytes| {
+                            let text = String::from_utf8_lossy(&bytes);
+                            let delimiter = crate::db_import::sniff_delimiter(&text);
+                            (
+                                delimiter,
+                                crate::db_import::parse_csv_with(&text, delimiter),
+                            )
+                        }),
+                );
+            });
+        });
+    }
+
+    /// The import dialog on a CSV file read and parsed.
+    fn db_open_import(
+        &self,
+        entry: &DbEntry,
+        key: &str,
+        table: &str,
+        columns: &[e_db::ColumnInfo],
+        path: std::path::PathBuf,
+        parsed: Result<(char, Vec<Vec<String>>), String>,
+    ) {
+        let state = *self;
+        {
+            let (delimiter, mut rows) = match parsed {
+                Ok(p) => p,
                 Err(e) => {
                     Self::notify(&format!("Import: could not read the file ({e})"));
                     return;
                 }
             };
-            let delimiter = crate::db_import::sniff_delimiter(&text);
-            let mut rows = crate::db_import::parse_csv_with(&text, delimiter);
             if rows.is_empty() {
                 Self::notify("Import: the file is empty");
                 return;
@@ -1431,8 +1526,8 @@ impl AppState {
             let names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
             let mapping = crate::db_import::auto_map(&header, &names);
             state.db.import.set(Some(crate::state::DbImport {
-                key: key.clone(),
-                table: table.clone(),
+                key: key.to_string(),
+                table: table.to_string(),
                 engine: entry.config.engine.clone(),
                 env: entry.config.environment(),
                 file: path
@@ -1442,11 +1537,11 @@ impl AppState {
                 delimiter,
                 header,
                 rows: Arc::new(rows),
-                columns: columns.clone(),
+                columns: columns.to_vec(),
                 mapping: state.cx.create_rw_signal(mapping),
                 empty_default: state.cx.create_rw_signal(false),
             }));
-        });
+        }
     }
 
     pub fn db_cancel_import(&self) {
@@ -1587,6 +1682,25 @@ impl AppState {
     /// Run just the selected text, or — with no selection — the statement under
     /// the cursor. Falls back to the whole console if neither resolves.
     pub fn run_console_under_cursor(&self) {
+        let sql = self.console_sql_under_cursor();
+        self.run_console_sql(sql);
+    }
+
+    /// EXPLAIN the console's selection or statement under the cursor (⌥⌘↵
+    /// there), on the console's connection.
+    pub fn explain_console_under_cursor(&self) {
+        let sql = self.console_sql_under_cursor();
+        if sql.trim().is_empty() {
+            return;
+        }
+        let Some(entry) = self.db_active_entry("EXPLAIN") else {
+            return;
+        };
+        self.db_explain_sql(entry, sql);
+    }
+
+    /// The console's selection, or else the statement the caret is in.
+    fn console_sql_under_cursor(&self) -> String {
         let text = self.db.query_text.get_untracked();
         let sql = self
             .db
@@ -1614,7 +1728,7 @@ impl AppState {
                     .map(|(s, e)| text[*s..*e].to_string())
             })
             .unwrap_or(text);
-        self.run_console_sql(sql);
+        sql
     }
 
     /// Gate a console run: prompt for `:param` values first (DB-408), then
@@ -2681,21 +2795,41 @@ impl AppState {
         // Each edit and delete is checked against the row as it was read,
         // so a change made meanwhile isn't overwritten.
         let mut checks: Vec<(e_db::RowCheck, crate::state::Staged)> = Vec::new();
+        // A row's edits go in one statement, so a change to its key and to
+        // another column can't miss each other; a row also staged for
+        // deletion is deleted, not edited first.
+        let deleting = self.db.pending_deletes.get_untracked();
         self.db.pending_edits.with_untracked(|edits| {
-            for e in edits.values() {
+            for (pk, row) in edits_by_row(edits) {
+                if deleting.contains(&pk) {
+                    continue;
+                }
+                let news: Vec<(String, Option<String>)> = row
+                    .iter()
+                    .map(|e| (e.column.clone(), e.new.clone()))
+                    .collect();
+                let olds: Vec<(String, Option<String>)> = row
+                    .iter()
+                    .map(|e| (e.column.clone(), e.old.clone()))
+                    .collect();
                 checks.push((
                     e_db::RowCheck {
                         table: table.clone(),
-                        pk: e.pk.clone(),
-                        column: Some((e.column.clone(), e.old.clone())),
+                        pk: pk.clone(),
+                        columns: olds.clone(),
                     },
-                    crate::state::Staged::Edit(e.pk.clone(), e.column.clone()),
+                    crate::state::Staged::Edits(
+                        pk.clone(),
+                        row.iter().map(|e| e.column.clone()).collect(),
+                    ),
                 ));
-                let fwd = e_db::update_sql(&engine, &table, &e.column, e.new.as_deref(), &e.pk);
-                // Reverse: set the column back to its old value.
-                let rev = e_db::update_sql(&engine, &table, &e.column, e.old.as_deref(), &e.pk);
+                let fwd = e_db::update_row_sql(&engine, &table, &news, &pk);
+                // Reverse: the old values back, on the row by its key as it
+                // is after the edit.
+                let rev = e_db::update_row_sql(&engine, &table, &olds, &key_after(&pk, &news));
                 stmts.push(fwd.clone());
                 log.push(crate::state::WriteLogEntry {
+                    key: key.clone(),
                     forward: fwd,
                     reverse: Some(rev),
                 });
@@ -2703,11 +2837,18 @@ impl AppState {
         });
         self.db.pending_deletes.with_untracked(|dels| {
             for pk in dels {
+                // The row must still be as it was read, not merely there:
+                // a row someone changed meanwhile isn't the one chosen.
+                let as_read = self
+                    .db
+                    .deleted_rows
+                    .with_untracked(|m| m.get(pk).cloned().flatten())
+                    .unwrap_or_default();
                 checks.push((
                     e_db::RowCheck {
                         table: table.clone(),
                         pk: pk.clone(),
-                        column: None,
+                        columns: as_read,
                     },
                     crate::state::Staged::Delete(pk.clone()),
                 ));
@@ -2721,6 +2862,7 @@ impl AppState {
                         .map(|values| e_db::insert_sql(&engine, &table, &values))
                 });
                 log.push(crate::state::WriteLogEntry {
+                    key: key.clone(),
                     forward: fwd,
                     reverse,
                 });
@@ -2730,6 +2872,7 @@ impl AppState {
             for row in rows {
                 stmts.push(row.sql.clone());
                 log.push(crate::state::WriteLogEntry {
+                    key: key.clone(),
                     forward: row.sql.clone(),
                     reverse: row.reverse.clone(),
                 });
@@ -2891,19 +3034,26 @@ impl AppState {
             .filter_map(|c| {
                 let check = checks.get(c.check)?;
                 let staged = staged.get(c.check)?;
-                let pending = match staged {
-                    Staged::Edit(pk, col) => edits.get(&(pk.clone(), col.clone())),
-                    Staged::Delete(_) => None,
-                };
-                Some(conflict_line(check, staged, pending, &c.found))
+                Some(conflict_line(check, staged, &edits, &c.found))
             })
             .collect::<Vec<_>>();
         for c in found {
             match staged.get(c.check) {
-                Some(Staged::Edit(pk, col)) => self
-                    .db
-                    .pending_edits
-                    .update(|m| _ = m.remove(&(pk.clone(), col.clone()))),
+                Some(Staged::Edits(pk, cols)) => {
+                    // The edits of what changed, or of a row that's gone; the
+                    // rest of the row's stay staged.
+                    let taken: Vec<String> = match &c.found {
+                        e_db::Found::Changed(changed) => {
+                            changed.iter().map(|(col, _)| col.clone()).collect()
+                        }
+                        e_db::Found::Gone => cols.clone(),
+                    };
+                    self.db.pending_edits.update(|m| {
+                        for col in taken {
+                            m.remove(&(pk.clone(), col));
+                        }
+                    });
+                }
                 Some(Staged::Delete(pk)) => {
                     self.db.pending_deletes.update(|m| _ = m.remove(pk));
                     self.db.deleted_rows.update(|m| _ = m.remove(pk));
@@ -3035,7 +3185,7 @@ impl AppState {
         let Some((row, col, column)) = self.db.edit.get_untracked() else {
             return;
         };
-        let Some((entry, conn, table, engine)) = self.db_edit_target() else {
+        let Some((entry, conn, table, _)) = self.db_edit_target() else {
             return;
         };
         let value = self.db.result.with_untracked(|r| {
@@ -3050,46 +3200,33 @@ impl AppState {
         let disp = entry.config.display_name();
         let key = entry.key();
         let state = *self;
+        // Anything opened meanwhile wins over the hop when it comes back.
+        let gen = self.db.browse_gen.get_untracked();
         // `entry` holds non-Send signals, so it stays on the UI thread (in this
-        // closure); only the ref-table name + query result cross the channel.
-        let send = create_ext_action(
-            self.cx,
-            move |out: Option<(String, Result<e_db::QueryResult, String>)>| match out {
-                None => Self::notify("No foreign key on this column"),
-                Some((ref_table, res)) => {
-                    state.db.edit.set(None);
-                    state.db.result_key.set(Some(key.clone()));
-                    state.db.result_table.set(Some(ref_table.clone()));
-                    state.db.result_title.set(format!("{disp} · {ref_table}"));
-                    state.db.subview.set("data".into());
-                    state.db.sort.set(None);
-                    state.db.filter.set(None);
-                    state.db.page.set(0);
-                    state.db.columns.set(Vec::new());
-                    // A page of the table left behind (it may be this one,
-                    // through a self-reference) is no longer wanted.
-                    state.db_next_browse();
-                    state.db_load_columns(entry.clone(), ref_table);
-                    state.db_apply_result(res);
-                }
-            },
-        );
+        // closure); only the target's name crosses the channel.
+        let send = create_ext_action(self.cx, move |out: Option<(String, String)>| match out {
+            None => Self::notify("No foreign key on this column"),
+            Some(_) if state.db.browse_gen.get_untracked() != gen => {}
+            Some((ref_table, ref_col)) => {
+                state.db.edit.set(None);
+                state.db.result_key.set(Some(key.clone()));
+                state.db.result_table.set(Some(ref_table.clone()));
+                state.db.result_title.set(format!("{disp} · {ref_table}"));
+                state.db.subview.set("data".into());
+                state.db.sort.set(None);
+                // The referenced row, as a filter the toolbar shows and
+                // paging keeps.
+                state.db.filter.set(Some((ref_col, value.clone())));
+                state.db.page.set(0);
+                state.db.total_rows.set(None);
+                state.db.columns.set(Vec::new());
+                state.db.ddl.set(None);
+                state.db_load_columns(entry.clone(), ref_table);
+                state.db_reload_table();
+            }
+        });
         std::thread::spawn(move || {
-            let out = match e_db::fk_target(&conn, &table, &column) {
-                Ok(Some((ref_table, ref_col))) => {
-                    let res = e_db::rows_where(
-                        &conn,
-                        &engine,
-                        &ref_table,
-                        &ref_col,
-                        value.as_deref(),
-                        DB_PAGE,
-                    );
-                    Some((ref_table, res))
-                }
-                _ => None,
-            };
-            send(out);
+            send(e_db::fk_target(&conn, &table, &column).ok().flatten());
         });
     }
 }
@@ -3162,6 +3299,28 @@ fn insert_pk(pk: &[String], values: &[(String, Option<String>)]) -> Option<RowPk
         .collect()
 }
 
+/// Whether two configurations are the same database: the engine, and the
+/// file, or the server and the database on it.
+fn same_database(a: &e_db::DbConfig, b: &e_db::DbConfig) -> bool {
+    let family = |e: &str| match e {
+        "mariadb" => "mysql".to_string(),
+        "postgresql" | "pgsql" => "postgres".to_string(),
+        other => other.to_string(),
+    };
+    if family(&a.engine) != family(&b.engine) {
+        return false;
+    }
+    if family(&a.engine) == "sqlite" {
+        let real = |p: &str| std::fs::canonicalize(p).unwrap_or_else(|_| p.into());
+        return real(&a.path) == real(&b.path);
+    }
+    let host = |h: &str| match h {
+        "localhost" | "127.0.0.1" | "::1" => "localhost".to_string(),
+        other => other.to_ascii_lowercase(),
+    };
+    host(&a.host) == host(&b.host) && a.port == b.port && a.database == b.database
+}
+
 /// A row staged for deletion as the database has it, to insert again: the
 /// shown values, with any staged edit's value put back to what was read.
 /// `None` for a table with binary columns, whose values the grid shows only
@@ -3229,15 +3388,45 @@ pub(crate) fn file_size(bytes: u64) -> String {
     }
 }
 
-/// What a failed check found, as one line for the conflict banner, e.g.
-/// `id=5: email is now “b@x” (you read “a@x”) — your “c@x” is no longer staged`.
+/// A row's staged edits, by its key.
+fn edits_by_row(edits: &PendingEdits) -> Vec<(RowPk, Vec<&crate::state::PendingEdit>)> {
+    let mut rows: Vec<(RowPk, Vec<&crate::state::PendingEdit>)> = Vec::new();
+    for e in edits.values() {
+        match rows.iter_mut().find(|(pk, _)| *pk == e.pk) {
+            Some((_, row)) => row.push(e),
+            None => rows.push((e.pk.clone(), vec![e])),
+        }
+    }
+    for (_, row) in &mut rows {
+        row.sort_by(|a, b| a.column.cmp(&b.column));
+    }
+    rows
+}
+
+/// A row's key after `sets` are written: any key column set takes its new
+/// value.
+fn key_after(pk: &RowPk, sets: &[(String, Option<String>)]) -> RowPk {
+    pk.iter()
+        .map(|(col, v)| {
+            let v = sets
+                .iter()
+                .find(|(c, _)| c == col)
+                .map_or_else(|| v.clone(), |(_, new)| new.clone());
+            (col.clone(), v)
+        })
+        .collect()
+}
+
+/// What a failed check found, as one line of the conflict banner, e.g.
+/// `id=5: email is now “b@x” (you read “a@x”) — your edit is no longer
+/// staged`, with the values of yours taken off.
 fn conflict_line(
     check: &e_db::RowCheck,
     staged: &crate::state::Staged,
-    pending: Option<&crate::state::PendingEdit>,
+    edits: &PendingEdits,
     found: &e_db::Found,
-) -> String {
-    use crate::state::Staged;
+) -> crate::state::ConflictLine {
+    use crate::state::{ConflictLine, Staged};
     use e_db::Found;
     let row = check
         .pk
@@ -3245,25 +3434,75 @@ fn conflict_line(
         .map(|(c, v)| format!("{c}={}", v.as_deref().unwrap_or("NULL")))
         .collect::<Vec<_>>()
         .join(", ");
+    let read = |col: &str| {
+        check
+            .columns
+            .iter()
+            .find(|(c, _)| c == col)
+            .and_then(|(_, v)| v.clone())
+    };
+    // `email is now “b@x” (you read “a@x”)`, and how many more changed.
+    let what_changed = |changed: &[(String, Option<String>)]| {
+        let (col, now) = &changed[0];
+        let more = match changed.len() {
+            1 => String::new(),
+            2 => " and 1 more column".into(),
+            n => format!(" and {} more columns", n - 1),
+        };
+        format!(
+            "{col} is now {} (you read {}){more}",
+            shown_value(now),
+            shown_value(&read(col))
+        )
+    };
+    let mine_of = |pk: &RowPk, cols: &[String]| -> Vec<(String, Option<String>)> {
+        cols.iter()
+            .filter_map(|c| {
+                edits
+                    .get(&(pk.clone(), c.clone()))
+                    .map(|e| (c.clone(), e.new.clone()))
+            })
+            .collect()
+    };
     match (staged, found) {
-        (Staged::Edit(_, col), Found::Gone) => {
-            format!("{row}: the row is gone — your edit of {col} is no longer staged")
+        (Staged::Edits(pk, cols), Found::Gone) => ConflictLine {
+            text: format!("{row}: the row is gone — your edit is no longer staged"),
+            mine: mine_of(pk, cols),
+        },
+        (Staged::Delete(_), Found::Gone) => ConflictLine {
+            text: format!("{row}: the row is already gone — its delete is no longer staged"),
+            mine: Vec::new(),
+        },
+        (Staged::Edits(pk, _), Found::Changed(changed)) => {
+            let cols: Vec<String> = changed.iter().map(|(c, _)| c.clone()).collect();
+            ConflictLine {
+                text: format!(
+                    "{row}: {} — your edit of it is no longer staged",
+                    what_changed(changed)
+                ),
+                mine: mine_of(pk, &cols),
+            }
         }
-        (Staged::Delete(_), Found::Gone) => {
-            format!("{row}: the row is already gone — its delete is no longer staged")
-        }
-        (Staged::Edit(_, col), Found::Now(now)) => {
-            let read = check.column.as_ref().and_then(|(_, v)| v.clone());
-            let mine = pending
-                .map(|p| format!("your {}", shown_value(&p.new)))
-                .unwrap_or_else(|| "your edit".into());
-            format!(
-                "{row}: {col} is now {} (you read {}) — {mine} is no longer staged",
-                shown_value(&now.clone()),
-                shown_value(&read)
-            )
-        }
-        (Staged::Delete(_), Found::Now(_)) => format!("{row}: the row has changed"),
+        (Staged::Delete(_), Found::Changed(changed)) => ConflictLine {
+            text: format!(
+                "{row}: {} — its delete is no longer staged",
+                what_changed(changed)
+            ),
+            mine: Vec::new(),
+        },
+    }
+}
+
+/// Yours, to copy from the conflict banner: a value as it is, several as
+/// `column: value` lines.
+pub(crate) fn mine_to_copy(mine: &[(String, Option<String>)]) -> String {
+    match mine {
+        [(_, v)] => v.clone().unwrap_or_else(|| "NULL".into()),
+        _ => mine
+            .iter()
+            .map(|(c, v)| format!("{c}: {}", v.as_deref().unwrap_or("NULL")))
+            .collect::<Vec<_>>()
+            .join("\n"),
     }
 }
 
@@ -3435,36 +3674,98 @@ mod tab_tests {
         let check = e_db::RowCheck {
             table: "users".into(),
             pk: pk.clone(),
-            column: Some(("email".into(), Some("a@x".into()))),
+            columns: vec![
+                ("email".into(), Some("a@x".into())),
+                ("name".into(), Some("ada".into())),
+            ],
         };
-        let edit = Staged::Edit(pk.clone(), "email".into());
-        let mine = PendingEdit {
-            column: "email".into(),
-            pk: pk.clone(),
-            new: Some("c@x".into()),
-            old: Some("a@x".into()),
-        };
-        assert_eq!(
-            conflict_line(&check, &edit, Some(&mine), &e_db::Found::Now(None)),
-            "id=5: email is now NULL (you read “a@x”) — your “c@x” is no longer staged"
+        let mut edits = PendingEdits::default();
+        for (col, new, old) in [("email", "c@x", "a@x"), ("name", "Ada", "ada")] {
+            edits.insert(
+                (pk.clone(), col.into()),
+                PendingEdit {
+                    column: col.into(),
+                    pk: pk.clone(),
+                    new: Some(new.into()),
+                    old: Some(old.into()),
+                },
+            );
+        }
+        let edit = Staged::Edits(pk.clone(), vec!["email".into(), "name".into()]);
+        let line = conflict_line(
+            &check,
+            &edit,
+            &edits,
+            &e_db::Found::Changed(vec![("email".into(), None)]),
         );
         assert_eq!(
-            conflict_line(&check, &edit, Some(&mine), &e_db::Found::Gone),
-            "id=5: the row is gone — your edit of email is no longer staged"
+            line.text,
+            "id=5: email is now NULL (you read “a@x”) — your edit of it is no longer staged"
         );
-        let delete = e_db::RowCheck {
-            column: None,
-            ..check
-        };
+        // What you wrote is kept, to copy.
         assert_eq!(
-            conflict_line(&delete, &Staged::Delete(pk), None, &e_db::Found::Gone),
-            "id=5: the row is already gone — its delete is no longer staged"
+            line.mine,
+            vec![("email".to_string(), Some("c@x".to_string()))]
+        );
+        assert_eq!(mine_to_copy(&line.mine), "c@x");
+        let gone = conflict_line(&check, &edit, &edits, &e_db::Found::Gone);
+        assert_eq!(
+            gone.text,
+            "id=5: the row is gone — your edit is no longer staged"
+        );
+        assert_eq!(mine_to_copy(&gone.mine), "email: c@x\nname: Ada");
+        let both = conflict_line(
+            &check,
+            &Staged::Delete(pk.clone()),
+            &edits,
+            &e_db::Found::Changed(vec![
+                ("email".into(), Some("b@x".into())),
+                ("name".into(), Some("bo".into())),
+            ]),
+        );
+        assert_eq!(
+            both.text,
+            "id=5: email is now “b@x” (you read “a@x”) and 1 more column — its delete is \
+             no longer staged"
         );
         assert_eq!(
             shown_value(&Some("x".repeat(50))),
             format!("“{}…”", "x".repeat(40))
         );
         assert_eq!(shown_value(&Some("one\ntwo".into())), "“one…”");
+    }
+
+    #[test]
+    fn a_rows_edits_are_one_statement_and_its_undo_finds_it_by_its_new_key() {
+        use crate::state::PendingEdit;
+        let pk: RowPk = vec![("id".into(), Some("1".into()))];
+        let mut edits = PendingEdits::default();
+        for (col, new, old) in [("name", "Ada", "ada"), ("id", "100", "1")] {
+            edits.insert(
+                (pk.clone(), col.into()),
+                PendingEdit {
+                    column: col.into(),
+                    pk: pk.clone(),
+                    new: Some(new.into()),
+                    old: Some(old.into()),
+                },
+            );
+        }
+        let rows = edits_by_row(&edits);
+        assert_eq!(rows.len(), 1);
+        let news: Vec<(String, Option<String>)> = rows[0]
+            .1
+            .iter()
+            .map(|e| (e.column.clone(), e.new.clone()))
+            .collect();
+        assert_eq!(
+            e_db::update_row_sql("sqlite", "users", &news, &pk),
+            "UPDATE `users` SET `id` = '100', `name` = 'Ada' WHERE `id` = '1'"
+        );
+        assert_eq!(
+            key_after(&pk, &news),
+            vec![("id".to_string(), Some("100".to_string()))]
+        );
     }
 
     #[test]

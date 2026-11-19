@@ -272,6 +272,14 @@ impl AppState {
 
     /// Write the migration that adds `advice`'s index, and open it.
     pub(crate) fn write_index_migration(&self, advice: &Advice) {
+        // Names go into the migration's PHP strings and its file name.
+        let valid = e_laravel::codegen::valid_table;
+        if !valid(&advice.table) || !advice.columns.iter().all(|c| valid(c)) {
+            Self::notify(
+                "Index: a table or column name can't be written into a migration as it is",
+            );
+            return;
+        }
         let root = self.root.get_untracked();
         let path = root
             .join("database/migrations")

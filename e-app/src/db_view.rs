@@ -952,7 +952,15 @@ pub fn database_panel(state: AppState) -> impl IntoView {
                 .cursor(floem::style::CursorStyle::Pointer)
                 .hover(|s| s.color(theme::fg()))
         })
-        .on_click_stop(move |_| state.db.adding.update(|a| *a = !*a));
+        .on_click_stop(move |_| {
+            // Closing the form an edit opened ends the edit, so the next
+            // ＋ adds rather than replaces.
+            if state.db.adding.get_untracked() {
+                state.db.editing_key.set(None);
+                state.db.form.set(crate::state::DbForm::default());
+            }
+            state.db.adding.update(|a| *a = !*a)
+        });
     let rel = label(|| "⇄".to_string())
         .style(|s| {
             s.padding_horiz(8.0)
@@ -1019,7 +1027,10 @@ pub fn database_panel(state: AppState) -> impl IntoView {
     let list = scroll(
         dyn_stack(
             move || state.db.conns.get(),
-            |e| e.key(),
+            // By entry, not just by key: an edited connection is a new entry
+            // with the same key, and a row kept on the old one would lock and
+            // label a connection that's gone.
+            |e| (e.key(), e.serial),
             move |e| conn_row(state, e),
         )
         .style(|s| {
@@ -1584,7 +1595,7 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
         .popout_menu(move || {
             use floem::menu::{Menu, MenuItem};
             let factory = state.db_factory_path();
-            let local = state.db_table_is_local();
+            let local = state.db_table_is_local() && state.db_table_is_apps();
             let mut menu = Menu::new("");
             match factory {
                 Some((model, path)) if path.is_file() => {
@@ -1595,7 +1606,8 @@ pub fn db_result_overlay(state: AppState) -> impl IntoView {
                     }
                     if !local {
                         menu = menu.entry(
-                            MenuItem::new("Seeding runs on local databases only").enabled(false),
+                            MenuItem::new("Seeding writes to the app's own local database (.env)")
+                                .enabled(false),
                         );
                     }
                     menu = menu.separator().entry(
@@ -2015,11 +2027,27 @@ pub fn db_confirm_dialog(state: AppState) -> impl IntoView {
                 .confirm
                 .get()
                 .map(|c| {
-                    c.statements
+                    // A large import is thousands of statements: the first
+                    // hundred are the look, and a line says how many more.
+                    let n = c.statements.len();
+                    let mut shown: Vec<_> = c
+                        .statements
                         .into_iter()
+                        .take(CONFIRM_SHOWN)
                         .enumerate()
                         .map(|(i, s)| (i, s, c.counts))
-                        .collect::<Vec<_>>()
+                        .collect();
+                    if n > CONFIRM_SHOWN {
+                        shown.push((
+                            usize::MAX,
+                            format!(
+                                "… and {} more like these",
+                                group_digits((n - CONFIRM_SHOWN) as u64)
+                            ),
+                            c.counts,
+                        ));
+                    }
+                    shown
                 })
                 .unwrap_or_default()
         },
@@ -2299,7 +2327,15 @@ fn db_edit_popup(state: AppState) -> impl IntoView {
             );
             let doc = editor.doc();
             editor
-                .update(move |_| state.db.edit_value.set(doc.text().to_string()))
+                .update(move |_| {
+                    let text = doc.text().to_string();
+                    // Typing a value is the end of NULL: the text is what's
+                    // meant, not to be dropped on save for a box left ticked.
+                    if !text.is_empty() {
+                        state.db.edit_null.set(false);
+                    }
+                    state.db.edit_value.set(text);
+                })
                 .style(|s| {
                     s.width_full()
                         .height(180.0)
@@ -2497,6 +2533,12 @@ fn db_insert_popup(state: AppState) -> impl IntoView {
             let nullable = f.nullable;
             let val = f.value;
             let is_null = f.is_null;
+            // A value typed in unticks NULL (nullable columns start ticked).
+            floem::reactive::create_effect(move |_| {
+                if val.with(|v| !v.is_empty()) {
+                    is_null.set(false);
+                }
+            });
             let name_lbl = label(move || format!("{name}  {dt}")).style(|s| {
                 s.width(150.0)
                     .flex_shrink(0.0_f32)
@@ -3266,15 +3308,17 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
     });
     let rows = dyn_stack(
         move || {
-            // Newest first.
-            let mut v = state.db.write_log.get();
+            // Newest first, each by its place in the log, which a new
+            // write doesn't move.
+            let mut v: Vec<_> = state.db.write_log.get().into_iter().enumerate().collect();
             v.reverse();
-            v.into_iter().enumerate().collect::<Vec<_>>()
+            v
         },
         |(i, _)| *i,
         move |(_, e)| {
             let fwd = e.forward.clone();
             let rev = e.reverse.clone();
+            let key = e.key.clone();
             let has_rev = rev.is_some();
             let undo = label(|| "Undo".to_string())
                 .style(move |s| {
@@ -3296,7 +3340,7 @@ fn db_write_log_panel(state: AppState) -> impl IntoView {
                 })
                 .on_click_stop(move |_| {
                     if let Some(r) = &rev {
-                        state.db_undo_write(r.clone());
+                        state.db_undo_write(key.clone(), r.clone());
                     }
                 });
             stack((
@@ -3533,25 +3577,88 @@ fn tab_tooltip(sql: &str) -> String {
 
 /// What the last Submit found changed in the database since the grid read
 /// it: nothing was written, and the changes it names are no longer staged.
+/// How many statements the confirmation lists before saying how many more.
+const CONFIRM_SHOWN: usize = 100;
+
 fn conflict_bar(state: AppState) -> impl IntoView {
-    let text =
-        label(move || {
-            let lines = state.db.conflicts.get();
-            let n = lines.len();
-            let head =
-                format!(
+    let head = label(move || {
+        let n = state.db.conflicts.with(Vec::len);
+        format!(
             "✕ Nothing was written: {n} row{} changed since {} read. The table now shows {}.",
             if n == 1 { "" } else { "s" },
             if n == 1 { "it was" } else { "they were" },
-            if n == 1 { "its current value" } else { "their current values" },
-        );
-            std::iter::once(head)
-                .chain(lines.iter().take(5).map(|l| format!("   {l}")))
-                .chain((n > 5).then(|| format!("   … and {} more", n - 5)))
+            if n == 1 {
+                "its current value"
+            } else {
+                "their current values"
+            },
+        )
+    })
+    .style(|s| s.font_size(12.0).color(theme::error()));
+    // A line each, with what you wrote to copy, so it isn't lost.
+    let lines = dyn_stack(
+        move || {
+            state
+                .db
+                .conflicts
+                .get()
+                .into_iter()
+                .take(5)
+                .enumerate()
                 .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .style(|s| s.flex_grow(1.0_f32).font_size(12.0).color(theme::error()));
+        },
+        |(i, l)| (*i, l.text.clone()),
+        move |(_, line)| {
+            let text = line.text.clone();
+            let copyable = !line.mine.is_empty();
+            let mine = crate::db_state::mine_to_copy(&line.mine);
+            stack((
+                label(move || format!("   {text}")).style(|s| {
+                    s.flex_grow(1.0_f32)
+                        .min_width(0.0)
+                        .font_size(12.0)
+                        .color(theme::error())
+                }),
+                label(|| "⧉ Copy mine".to_string())
+                    .style(move |s| {
+                        let s = s
+                            .font_size(11.0)
+                            .padding_horiz(6.0)
+                            .border_radius(4.0)
+                            .color(theme::fg_dim())
+                            .cursor(floem::style::CursorStyle::Pointer)
+                            .hover(|s| s.background(theme::bg_hover()).color(theme::fg()));
+                        if copyable {
+                            s
+                        } else {
+                            s.hide()
+                        }
+                    })
+                    .on_click_stop(move |_| {
+                        let _ = floem::Clipboard::set_contents(mine.clone());
+                    }),
+            ))
+            .style(|s| s.flex_row().items_center().gap(8.0).width_full())
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+    let more = label(move || {
+        let n = state.db.conflicts.with(Vec::len);
+        if n > 5 {
+            format!("   … and {} more", n - 5)
+        } else {
+            String::new()
+        }
+    })
+    .style(move |s| {
+        let s = s.font_size(12.0).color(theme::error());
+        if state.db.conflicts.with(Vec::len) > 5 {
+            s
+        } else {
+            s.hide()
+        }
+    });
+    let text = stack((head, lines, more)).style(|s| s.flex_col().flex_grow(1.0_f32).min_width(0.0));
     let dismiss = label(|| "✕".to_string())
         .style(|s| {
             s.padding_horiz(8.0)

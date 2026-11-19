@@ -200,6 +200,20 @@ pub(crate) enum TextCommand {
 impl From<(&KeyEvent, &SmolStr)> for TextCommand {
     fn from(val: (&keyboard::KeyEvent, &SmolStr)) -> Self {
         let (event, ch) = val;
+        // The letter whatever the case (Caps Lock makes ⌘C a ⌘"C"), and by
+        // the physical key where the layout puts another letter there.
+        let lower = ch.to_lowercase();
+        let ch = match (lower.as_str(), &event.key.physical_key) {
+            ("a" | "c" | "x" | "v", _) => lower,
+            (_, keyboard::PhysicalKey::Code(code)) => match code {
+                keyboard::KeyCode::KeyA => "a".to_string(),
+                keyboard::KeyCode::KeyC => "c".to_string(),
+                keyboard::KeyCode::KeyX => "x".to_string(),
+                keyboard::KeyCode::KeyV => "v".to_string(),
+                _ => lower,
+            },
+            _ => lower,
+        };
         #[cfg(target_os = "macos")]
         match (event.modifiers, ch.as_str()) {
             (Modifiers::META, "a") => Self::SelectAll,

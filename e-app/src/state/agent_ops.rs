@@ -356,6 +356,16 @@ impl AppState {
         }
     }
 
+    /// Paste the clipboard into the agent's terminal.
+    pub fn agent_paste(&self) {
+        let Ok(text) = floem::Clipboard::get_contents() else {
+            return;
+        };
+        if let (false, Some(t)) = (text.is_empty(), self.agent.term.get_untracked()) {
+            t.borrow_mut().paste(&text);
+        }
+    }
+
     /// Send a prompt to the AI agent panel (opening/starting it if needed) and
     /// focus it. Used by "Explain with agent" / "Fix with AI" affordances.
     pub fn send_to_agent(&self, prompt: &str) {

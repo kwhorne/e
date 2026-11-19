@@ -10,6 +10,18 @@
 
 Your shell is taken from `$SHELL`.
 
+## Pasting & copying
+
+- **`⌘V`** pastes the clipboard (on Linux and Windows **`Ctrl+Shift+V`**, where
+  `Ctrl+V` stays the shell's own; **`Shift+Insert`** everywhere). When the
+  shell asks for *bracketed paste*, as zsh, bash and fish do, a pasted block
+  arrives at the prompt as text, to edit or run with Enter, instead of each
+  line running as it lands.
+- **Right-click** the terminal for **Paste** and **Copy screen** (what it
+  shows, as text).
+- Other `⌘` chords go to the editor; they never type their letter into the
+  shell.
+
 ## Multiple terminals
 
 The tab strip at the top of the panel manages multiple sessions:

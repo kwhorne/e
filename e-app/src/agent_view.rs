@@ -161,6 +161,10 @@ fn agent_body(state: AppState) -> impl IntoView {
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
+                if crate::terminal_view::is_paste(ke) {
+                    state.agent_paste();
+                    return EventPropagation::Stop;
+                }
                 if ke.modifiers.meta()
                     && handle_shortcut(
                         state,

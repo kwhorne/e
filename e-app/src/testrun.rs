@@ -400,7 +400,8 @@ fn classify(body: &str) -> (Outcome, Option<String>) {
 /// doesn't know how to ask — better to keep the plain run than to pass a flag
 /// that makes it fail.
 pub fn junit_command(base: &str, report: &Path) -> Option<String> {
-    let r = report.display();
+    // Quoted: `$TMPDIR` may hold a space or a quote.
+    let r = crate::cascade::shell_quote(&report.to_string_lossy());
     let c = base.trim();
     if c.contains("artisan test") || c.contains("phpunit") || c.contains("pest") {
         Some(format!("{c} --log-junit {r}"))
@@ -643,6 +644,14 @@ at tests/Feature/DemoTest.php:7</failure>
         assert!(junit_command("vendor/bin/phpunit", report).is_some());
         // Passing an unknown runner a flag it doesn't take would break the run
         // that used to work.
+        assert_eq!(
+            junit_command(
+                "php artisan test",
+                std::path::Path::new("/var/my tmp/it's.xml")
+            )
+            .as_deref(),
+            Some("php artisan test --log-junit '/var/my tmp/it'\\''s.xml'")
+        );
         assert_eq!(junit_command("cargo test", report), None);
         assert_eq!(junit_command("go test ./...", report), None);
     }

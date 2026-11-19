@@ -177,6 +177,28 @@ impl AppState {
         }
     }
 
+    /// Paste the clipboard into terminal `id`, as typed text (bracketed
+    /// when its program asked for that).
+    pub fn term_paste_to(&self, id: u64) {
+        let Ok(text) = floem::Clipboard::get_contents() else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        self.term_scroll_bottom(Some(id));
+        if let Some(t) = self.term_by_id(id) {
+            t.borrow_mut().paste(&text);
+        }
+    }
+
+    /// Copy what terminal `id` shows to the clipboard.
+    pub fn term_copy_screen(&self, id: u64) {
+        if let Some(t) = self.term_by_id(id) {
+            let _ = floem::Clipboard::set_contents(t.borrow().screen_text());
+        }
+    }
+
     /// Resize every terminal to the pane size.
     pub fn resize_terminal(&self, rows: usize, cols: usize) {
         self.term.sessions.with_untracked(|ts| {

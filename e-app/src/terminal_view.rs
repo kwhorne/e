@@ -121,8 +121,34 @@ pub(crate) fn char_size() -> (f64, f64) {
 }
 
 /// Translate a key event into the bytes to send to the PTY.
+/// Whether `ke` pastes into a terminal: ⌘V on macOS; Ctrl+Shift+V
+/// elsewhere, where Ctrl+V is the shell's own (a literal next key); and
+/// Shift+Insert everywhere. By the physical key too, so a layout or Caps
+/// Lock that changes the letter still pastes.
+pub(crate) fn is_paste(ke: &floem::keyboard::KeyEvent) -> bool {
+    use floem::keyboard::{KeyCode, PhysicalKey};
+    let mods = ke.modifiers;
+    let v = matches!(&ke.key.logical_key, Key::Character(c) if c.eq_ignore_ascii_case("v"))
+        || ke.key.physical_key == PhysicalKey::Code(KeyCode::KeyV);
+    let chord = if cfg!(target_os = "macos") {
+        mods.meta() && !mods.control()
+    } else {
+        mods.control() && mods.shift()
+    };
+    (v && chord)
+        || (mods.shift()
+            && !mods.control()
+            && !mods.meta()
+            && matches!(ke.key.logical_key, Key::Named(NamedKey::Insert)))
+}
+
 pub(crate) fn key_to_bytes(ke: &floem::keyboard::KeyEvent) -> Option<Vec<u8>> {
     let mods = ke.modifiers;
+    // A ⌘ chord is the app's, never a letter for the shell: ⌘V that isn't
+    // a shortcut typed a `v`, ⌘C a `c`.
+    if mods.meta() {
+        return None;
+    }
     match &ke.key.logical_key {
         Key::Character(s) => {
             if mods.control() {
@@ -272,6 +298,20 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
             state.term.open.get();
             state.term.split.get();
         })
+        .context_menu(move || {
+            let id = id_sig.get_untracked();
+            Menu::new("")
+                .entry(MenuItem::new("Paste").action(move || {
+                    if let Some(id) = id {
+                        state.term_paste_to(id);
+                    }
+                }))
+                .entry(MenuItem::new("Copy screen").action(move || {
+                    if let Some(id) = id {
+                        state.term_copy_screen(id);
+                    }
+                }))
+        })
         .on_event_cont(EventListener::FocusGained, move |_| {
             state.term.focused.set(true);
             state.term.focus_pane.set(pane_idx);
@@ -281,6 +321,12 @@ fn term_pane(state: AppState, pane_idx: u8) -> impl IntoView {
         })
         .on_event(EventListener::KeyDown, move |e| {
             if let Event::KeyDown(ke) = e {
+                if is_paste(ke) {
+                    if let Some(id) = id_sig.get_untracked() {
+                        state.term_paste_to(id);
+                    }
+                    return EventPropagation::Stop;
+                }
                 if ke.modifiers.meta()
                     && handle_shortcut(
                         state,

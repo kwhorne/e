@@ -294,10 +294,12 @@ fn sweep_stale_sockets_with_grace(dir: &std::path::Path, grace: Duration) {
             continue;
         }
         let path = entry.path();
+        // A time just ahead of the clock (a file made a moment ago) counts as
+        // fresh — except with no grace at all, when nothing is.
         let fresh = entry
             .metadata()
             .and_then(|m| m.modified())
-            .map(|t| t.elapsed().map(|e| e < grace).unwrap_or(true))
+            .map(|t| t.elapsed().map(|e| e < grace).unwrap_or(!grace.is_zero()))
             .unwrap_or(false);
         if fresh {
             continue;

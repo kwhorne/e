@@ -3314,11 +3314,18 @@ fn same_database(a: &e_db::DbConfig, b: &e_db::DbConfig) -> bool {
         let real = |p: &str| std::fs::canonicalize(p).unwrap_or_else(|_| p.into());
         return real(&a.path) == real(&b.path);
     }
-    let host = |h: &str| match h {
-        "localhost" | "127.0.0.1" | "::1" => "localhost".to_string(),
+    // An empty host is this machine, and port 0 the engine's own: a
+    // connection added by hand with those left out is still .env's database.
+    let host = |h: &str| match h.trim() {
+        "" | "localhost" | "127.0.0.1" | "::1" => "localhost".to_string(),
         other => other.to_ascii_lowercase(),
     };
-    host(&a.host) == host(&b.host) && a.port == b.port && a.database == b.database
+    let port = |c: &e_db::DbConfig| match (c.port, family(&c.engine).as_str()) {
+        (0, "mysql") => 3306,
+        (0, "postgres") => 5432,
+        (p, _) => p,
+    };
+    host(&a.host) == host(&b.host) && port(a) == port(b) && a.database == b.database
 }
 
 /// A row staged for deletion as the database has it, to insert again: the
@@ -3855,6 +3862,28 @@ mod tab_tests {
             row_for_undo(&with_blob, &shown_cols, &shown, &pk, &edits),
             None
         );
+    }
+
+    #[test]
+    fn the_same_database_with_its_defaults_left_out() {
+        let env = e_db::DbConfig {
+            engine: "mysql".into(),
+            host: "127.0.0.1".into(),
+            port: 3306,
+            database: "shop".into(),
+            ..Default::default()
+        };
+        let by_hand = e_db::DbConfig {
+            host: String::new(),
+            port: 0,
+            ..env.clone()
+        };
+        assert!(same_database(&by_hand, &env));
+        let other = e_db::DbConfig {
+            port: 3307,
+            ..env.clone()
+        };
+        assert!(!same_database(&other, &env));
     }
 
     #[test]

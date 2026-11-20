@@ -1012,15 +1012,18 @@ pub fn database_panel(state: AppState) -> impl IntoView {
             move |_| state.db_search_all(),
         );
 
+    // Keyed by the connection being edited (`None` when adding), so ✎ on
+    // another one while the form is open builds it again with that one's
+    // values, not the fields already there.
     let form = dyn_stack(
         move || {
             if state.db.adding.get() {
-                vec![0]
+                vec![state.db.editing_key.get()]
             } else {
                 vec![]
             }
         },
-        |i| *i,
+        |k| k.clone(),
         move |_| add_form(state),
     );
 

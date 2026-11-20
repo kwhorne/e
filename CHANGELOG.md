@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`e --version`** prints the version and exits.
+- **Right-click in an agent's terminal** offers Paste and Copy screen, as
+  the terminal does.
+
+### Fixed
+
+- **The macOS app of 0.22.0–0.29.0 was 0.21.0 inside.** The build put the
+  new program where `CARGO_TARGET_DIR` said and packed the one in `target/`,
+  so the `.dmg` and the `.app.zip` the updater installs had 0.29.0 on the
+  label and 0.21.0 running — which kept finding 0.29.0 "available". The
+  build scripts follow `CARGO_TARGET_DIR` and stop unless the program is the
+  version being built; the updater checks the program too, not only the
+  label. Linux and the `.tar.gz` archives, built by CI, were right.
+- **Editing a connection while the add form was open** showed the empty form
+  instead of the connection's values.
+- **Seed** wasn't offered on the app's database when it was added with the
+  host or port left out.
+- **A snapshot refuses** a database given as a `postgresql://` address and a
+  host or user that starts with `-`.
+
 ## [0.29.0] - 2026-11-19
 
 ### Added

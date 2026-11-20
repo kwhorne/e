@@ -28,6 +28,26 @@ UNIVERSAL=0
 [[ "${1:-}" == "--universal" ]] && UNIVERSAL=1
 
 APP="dist/e.app"
+# Where cargo builds: CARGO_TARGET_DIR when set.
+TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+
+# The program must be the version it's labelled: the bundle's Info.plist
+# says $VERSION whatever binary went in, and releases 0.22.0–0.29.0 shipped
+# a stale one (built into $CARGO_TARGET_DIR, copied from target/).
+verify_version() {
+  local got
+  # Look before running it: a binary from before `--version` would start the
+  # editor instead of answering.
+  if ! LC_ALL=C grep -aqF "$VERSION" "$1"; then
+    echo "error: $1 isn't e $VERSION — a stale build?" >&2
+    exit 1
+  fi
+  got="$("$1" --version 2>/dev/null || true)"
+  if [[ "$got" != "e $VERSION" ]]; then
+    echo "error: $1 says '${got:-nothing}', not 'e $VERSION' — a stale build?" >&2
+    exit 1
+  fi
+}
 
 # --- 1. build the binary ---------------------------------------------------
 if [[ "$UNIVERSAL" == "1" ]]; then
@@ -35,10 +55,18 @@ if [[ "$UNIVERSAL" == "1" ]]; then
   rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null 2>&1 || true
   cargo build --release --bin e --target aarch64-apple-darwin
   cargo build --release --bin e --target x86_64-apple-darwin
-  mkdir -p target/release
-  lipo -create -output target/release/e \
-    target/aarch64-apple-darwin/release/e \
-    target/x86_64-apple-darwin/release/e
+  mkdir -p "$TARGET_DIR/release"
+  # Each slice must be this version before it goes into the universal one
+  # (only the host's can be run, so the other is looked for by its bytes).
+  for slice in aarch64-apple-darwin x86_64-apple-darwin; do
+    if ! LC_ALL=C grep -aqF "$VERSION" "$TARGET_DIR/$slice/release/e"; then
+      echo "error: $TARGET_DIR/$slice/release/e isn't e $VERSION — a stale build?" >&2
+      exit 1
+    fi
+  done
+  lipo -create -output "$TARGET_DIR/release/e" \
+    "$TARGET_DIR/aarch64-apple-darwin/release/e" \
+    "$TARGET_DIR/x86_64-apple-darwin/release/e"
   ARCH_SUFFIX="-universal"
 else
   cargo build --release --bin e
@@ -49,7 +77,8 @@ fi
 echo "==> assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/e "$APP/Contents/MacOS/e"
+cp "$TARGET_DIR/release/e" "$APP/Contents/MacOS/e"
+verify_version "$APP/Contents/MacOS/e"
 cp icons/e.icns "$APP/Contents/Resources/e.icns"
 cat > "$APP/Contents/Resources/Credits.html" <<'CREDITS'
 <!DOCTYPE html><html><head><meta charset="utf-8"><style>

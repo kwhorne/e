@@ -423,12 +423,33 @@ fn verify_bundle(app: &Path, version: &str, requirement: &str) -> Result<()> {
     let plist = std::fs::read_to_string(app.join("Contents/Info.plist"))
         .context("reading the downloaded app's Info.plist")?;
     match plist_string(&plist, "CFBundleShortVersionString") {
-        Some(v) if v == version => Ok(()),
+        Some(v) if v == version => {}
         other => bail!(
             "the downloaded app is version {}, not {version}",
             other.unwrap_or("?")
         ),
     }
+    // The label isn't the program: releases 0.22.0–0.29.0 shipped 0.21.0's
+    // binary under a 0.29.0 Info.plist. The binary itself must be the version.
+    let binary = std::fs::read(app.join("Contents/MacOS/e"))
+        .context("reading the downloaded app's program")?;
+    if !mentions_version(&binary, version) {
+        bail!("the downloaded app says {version}, but its program is another version");
+    }
+    Ok(())
+}
+
+/// Whether `bytes` hold `version` standing on its own — not inside a longer
+/// version (`0.29.10`, `10.29.1`).
+#[cfg(any(target_os = "macos", test))]
+fn mentions_version(bytes: &[u8], version: &str) -> bool {
+    let v = version.as_bytes();
+    let part = |b: u8| b.is_ascii_digit() || b == b'.';
+    bytes.windows(v.len()).enumerate().any(|(i, w)| {
+        w == v
+            && !(i > 0 && part(bytes[i - 1]))
+            && !bytes.get(i + v.len()).is_some_and(|b| part(*b))
+    })
 }
 
 /// Put `new` where `current` is, moving `current` to `aside` first and back
@@ -451,6 +472,14 @@ fn swap_bundle(current: &Path, new: &Path, aside: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_program_is_its_version_only_on_its_own() {
+        assert!(mentions_version(b"\x00junk0.29.1Version", "0.29.1"));
+        assert!(!mentions_version(b"0.21.0 file changed", "0.29.1"));
+        assert!(!mentions_version(b"x0.29.10y", "0.29.1"));
+        assert!(!mentions_version(b"x10.29.1y", "0.29.1"));
+    }
 
     #[test]
     fn reads_the_version_out_of_the_release_redirect() {
@@ -635,12 +664,22 @@ mod tests {
         assert_eq!(bundle_asset("0.20.0"), "e-0.20.0-universal.app.zip");
     }
 
-    /// A minimal app bundle around a copy of `/usr/bin/true`, ad-hoc signed.
+    /// A minimal app bundle, ad-hoc signed, labelled `version`, whose
+    /// program is `program_version`.
     #[cfg(target_os = "macos")]
     fn adhoc_bundle(dir: &Path, version: &str) -> PathBuf {
+        adhoc_bundle_of(dir, version, version)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn adhoc_bundle_of(dir: &Path, version: &str, program_version: &str) -> PathBuf {
         let app = dir.join("e.app");
         std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
-        std::fs::copy("/usr/bin/true", app.join("Contents/MacOS/e")).unwrap();
+        std::fs::write(
+            app.join("Contents/MacOS/e"),
+            format!("#!/bin/sh\necho 'e {program_version}'\n"),
+        )
+        .unwrap();
         std::fs::write(
             app.join("Contents/Info.plist"),
             format!(
@@ -698,6 +737,16 @@ mod tests {
         // A file added after signing breaks the seal.
         std::fs::write(app.join("Contents/MacOS/extra"), "x").unwrap();
         assert!(verify_bundle(&app, "0.20.0", "always").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Labelled as the new version, with another one's program in it.
+        let dir = scratch("stale-program");
+        let app = adhoc_bundle_of(&dir, "0.29.0", "0.21.0");
+        let err = verify_bundle(&app, "0.29.0", "always").unwrap_err();
+        assert!(
+            format!("{err:#}").contains("its program is another version"),
+            "{err:#}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -121,3 +121,9 @@ local changes forward. Record any local patches in this file as they land:
 - **`src/views/editor/text_document.rs`: `OnUpdate::old_text()`.** An update
   listener got the deltas but not the text they apply to, which it needs to
   carry line-anchored state (breakpoints) across an edit.
+- **`src/views/text_input.rs`: copy and paste whatever the case or layout.**
+  `TextCommand::from` matched `(Modifiers::META, "c")` exactly, so with Caps
+  Lock on (`"C"`) or a layout that puts another character on the key, ⌘C, ⌘V,
+  ⌘X and ⌘A did nothing in a `Label`, `RichText` or text input. The character
+  is compared lowercased, and the physical `KeyA`/`KeyC`/`KeyX`/`KeyV` is the
+  fallback.

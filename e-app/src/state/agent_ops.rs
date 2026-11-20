@@ -356,6 +356,13 @@ impl AppState {
         }
     }
 
+    /// Copy what the agent's terminal shows to the clipboard.
+    pub fn agent_copy_screen(&self) {
+        if let Some(t) = self.agent.term.get_untracked() {
+            let _ = floem::Clipboard::set_contents(t.borrow().screen_text());
+        }
+    }
+
     /// Paste the clipboard into the agent's terminal.
     pub fn agent_paste(&self) {
         let Ok(text) = floem::Clipboard::get_contents() else {

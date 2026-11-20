@@ -10,11 +10,32 @@ VERSION="$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' Cargo.toml |
 echo "==> building release binary (e $VERSION)"
 cargo build --release
 
+TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+
+# The program must be the version it's labelled: the bundle's Info.plist
+# says $VERSION whatever binary went in, and releases 0.22.0–0.29.0 shipped
+# a stale one (built into $CARGO_TARGET_DIR, copied from target/).
+verify_version() {
+  local got
+  # Look before running it: a binary from before `--version` would start the
+  # editor instead of answering.
+  if ! LC_ALL=C grep -aqF "$VERSION" "$1"; then
+    echo "error: $1 isn't e $VERSION — a stale build?" >&2
+    exit 1
+  fi
+  got="$("$1" --version 2>/dev/null || true)"
+  if [[ "$got" != "e $VERSION" ]]; then
+    echo "error: $1 says '${got:-nothing}', not 'e $VERSION' — a stale build?" >&2
+    exit 1
+  fi
+}
+
 APP="dist/e.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-cp target/release/e "$APP/Contents/MacOS/e"
+cp "$TARGET_DIR/release/e" "$APP/Contents/MacOS/e"
+verify_version "$APP/Contents/MacOS/e"
 cp icons/e.icns "$APP/Contents/Resources/e.icns"
 cat > "$APP/Contents/Resources/Credits.html" <<'CREDITS'
 <!DOCTYPE html><html><head><meta charset="utf-8"><style>

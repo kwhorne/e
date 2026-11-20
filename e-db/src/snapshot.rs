@@ -81,16 +81,28 @@ fn check_reachable(config: &DbConfig) -> Result<(), String> {
     if config.use_ssh {
         return Err("snapshots of a database behind an SSH tunnel aren't supported".into());
     }
+    if engine_family(&config.engine) == "sqlite" {
+        return Ok(());
+    }
     let db = config.database.trim();
-    if engine_family(&config.engine) != "sqlite"
-        && (db.is_empty()
-            || db.starts_with('-')
-            || db.contains('=')
-            || db.contains(char::is_whitespace))
+    // libpq also takes a URI (`postgresql://…/db`) where a name goes.
+    if db.is_empty()
+        || db.starts_with('-')
+        || db.contains('=')
+        || db.contains("://")
+        || db.contains(char::is_whitespace)
     {
         return Err(format!(
             "“{db}” can't be passed to the dump tools as a database name"
         ));
+    }
+    // A host or user that is a flag would be read as one.
+    for (what, v) in [("host", &config.host), ("user", &config.username)] {
+        if v.trim().starts_with('-') {
+            return Err(format!(
+                "the {what} “{v}” can't be passed to the dump tools"
+            ));
+        }
     }
     Ok(())
 }
@@ -446,13 +458,24 @@ mod tests {
         };
         assert!(check_reachable(&tunnel).is_err());
         // A name that is a flag, or to libpq a whole connection string.
-        for db in ["-h evil", "host=prod dbname=shop", "a b", ""] {
+        for db in [
+            "-h evil",
+            "host=prod dbname=shop",
+            "postgresql://me@prod.example.com/shop",
+            "a b",
+            "",
+        ] {
             let c = DbConfig {
                 database: db.into(),
                 ..base.clone()
             };
             assert!(check_reachable(&c).is_err(), "{db:?}");
         }
+        let flag_host = DbConfig {
+            host: "--help".into(),
+            ..base.clone()
+        };
+        assert!(check_reachable(&flag_host).is_err());
         let restored = restore_snapshot(&tunnel, Path::new("/etc/hosts"));
         assert!(restored.unwrap_err().contains("SSH"));
     }

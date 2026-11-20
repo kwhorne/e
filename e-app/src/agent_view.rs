@@ -153,6 +153,12 @@ fn agent_body(state: AppState) -> impl IntoView {
         .request_focus(move || {
             state.agent.focus_pulse.get();
         })
+        // The same as the terminal's.
+        .context_menu(move || {
+            Menu::new("")
+                .entry(MenuItem::new("Paste").action(move || state.agent_paste()))
+                .entry(MenuItem::new("Copy screen").action(move || state.agent_copy_screen()))
+        })
         .on_event_cont(EventListener::FocusGained, move |_| {
             state.agent.focused.set(true)
         })

@@ -17,7 +17,7 @@ cargo build
 APP="dist/e.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/debug/e "$APP/Contents/MacOS/e"
+cp "${CARGO_TARGET_DIR:-target}/debug/e" "$APP/Contents/MacOS/e"
 cp icons/e.icns "$APP/Contents/Resources/e.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

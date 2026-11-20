@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **laravel-lsp showed "click to install" though it was installed.**
+  `composer global require` puts it in Composer's `vendor/bin`, which isn't
+  on `PATH` unless the shell adds it. `e` now looks there too, after
+  everything the shell put on `PATH`.
+
 ## [0.29.1] - 2026-11-20
 
 ### Added

@@ -45,15 +45,42 @@ pub fn adopt_login_path() {
         HAS_LOGIN_PATH.store(true, Ordering::Relaxed);
         return;
     }
-    let Some(login) = login_shell_path(Duration::from_secs(4)) else {
-        return;
-    };
-    HAS_LOGIN_PATH.store(true, Ordering::Relaxed);
     let current = std::env::var("PATH").unwrap_or_default();
-    let merged = merge_paths(&login, &current);
+    let mut merged = current.clone();
+    if let Some(login) = login_shell_path(Duration::from_secs(4)) {
+        HAS_LOGIN_PATH.store(true, Ordering::Relaxed);
+        merged = merge_paths(&login, &current);
+    }
+    // Last, so it never shadows what the shell put first.
+    let extra: Vec<String> = composer_bin_dirs()
+        .into_iter()
+        .filter(|d| d.is_dir())
+        .map(|d| d.to_string_lossy().into_owned())
+        .collect();
+    merged = merge_paths(&merged, &extra.join(":"));
     if merged != current {
         std::env::set_var("PATH", &merged);
     }
+}
+
+/// Where Composer puts what `composer global require` installs —
+/// `laravel-lsp`, which `e` installs that way, among them. Composer asks to
+/// have it on `PATH` but doesn't put it there, and many shells don't, so a
+/// server it installed looked missing.
+pub fn composer_bin_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = std::env::var_os("COMPOSER_HOME") {
+        dirs.push(std::path::PathBuf::from(home).join("vendor/bin"));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = std::path::PathBuf::from(home);
+        dirs.push(home.join(".composer/vendor/bin"));
+        dirs.push(home.join(".config/composer/vendor/bin"));
+    }
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        dirs.push(std::path::PathBuf::from(xdg).join("composer/vendor/bin"));
+    }
+    dirs
 }
 
 /// `$PATH` as the login shell sets it up. `-ilc`: login *and* interactive, so
@@ -120,6 +147,20 @@ mod tests {
         assert_eq!(extract(out).as_deref(), Some("/a/bin:/b/bin"));
         assert_eq!(extract("nothing here"), None);
         assert_eq!(extract("__E_PATH____E_PATH__"), None);
+    }
+
+    #[test]
+    fn composers_bin_goes_last() {
+        // Appended after the shell's own, never ahead of it.
+        assert_eq!(
+            merge_paths(
+                "/opt/homebrew/bin:/usr/bin",
+                "/Users/me/.composer/vendor/bin"
+            ),
+            "/opt/homebrew/bin:/usr/bin:/Users/me/.composer/vendor/bin"
+        );
+        let dirs = composer_bin_dirs();
+        assert!(dirs.iter().any(|d| d.ends_with(".composer/vendor/bin")));
     }
 
     #[test]

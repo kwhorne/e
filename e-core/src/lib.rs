@@ -8,6 +8,7 @@ pub mod buffer;
 pub mod diff;
 pub mod editorconfig;
 pub mod git;
+pub mod github;
 pub mod language;
 pub mod markdown;
 pub mod syntax;

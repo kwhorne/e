@@ -11,6 +11,18 @@ use floem::IntoView;
 
 use crate::state::AppState;
 use crate::theme;
+/// A style that hides what only makes sense for local changes — open,
+/// revert, ask the agent, ship — while a pull request is under review.
+fn local_only(state: AppState) -> impl Fn(floem::style::Style) -> floem::style::Style {
+    move |s| {
+        if state.review.pr.with(Option::is_some) {
+            s.hide()
+        } else {
+            s
+        }
+    }
+}
+
 fn green() -> Color {
     theme::success()
 }
@@ -187,9 +199,15 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
     let actions = {
         let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
         stack((
-            btn("Open", false).on_click_stop(move |_| state.review_open_file(&p1)),
-            btn("Ask why", false).on_click_stop(move |_| state.review_ask_agent(&p2)),
-            btn("Revert", false).on_click_stop(move |_| state.review_revert_file(&p3)),
+            btn("Open", false)
+                .style(local_only(state))
+                .on_click_stop(move |_| state.review_open_file(&p1)),
+            btn("Ask why", false)
+                .style(local_only(state))
+                .on_click_stop(move |_| state.review_ask_agent(&p2)),
+            btn("Revert", false)
+                .style(local_only(state))
+                .on_click_stop(move |_| state.review_revert_file(&p3)),
             btn("Reviewed →", true).on_click_stop(move |_| state.review_mark_and_next()),
         ))
         .style(|s| s.flex_row().gap(6.0))
@@ -228,7 +246,9 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
             stack((
                 label(move || text.clone())
                     .style(move |s| s.flex_grow(1.0_f32).font_size(11.0).color(color)),
-                btn("Ask", false).on_click_stop(move |_| state.review_ask_flag(&ask)),
+                btn("Ask", false)
+                    .style(local_only(state))
+                    .on_click_stop(move |_| state.review_ask_flag(&ask)),
             ))
             .style(|s| {
                 s.flex_row()
@@ -304,7 +324,11 @@ fn diff_pane(state: AppState, path: Option<String>) -> floem::AnyView {
 
 pub fn review_panel(state: AppState) -> impl IntoView {
     let title = label(move || {
-        if state.review.turn.with(Option::is_some) {
+        if state.review.picking.get() {
+            "Pull requests".to_string()
+        } else if let Some(pr) = state.review.pr.get() {
+            format!("#{}  {}", pr.number, pr.title)
+        } else if state.review.turn.with(Option::is_some) {
             "Review: one turn".to_string()
         } else {
             "Session review".to_string()
@@ -341,8 +365,41 @@ pub fn review_panel(state: AppState) -> impl IntoView {
             .font_size(11.0)
             .color(if all { green() } else { theme::fg_dim() })
     });
-    let ask = btn("Summarize", false).on_click_stop(move |_| state.review_ask_summary());
-    let refresh = btn("Refresh", false).on_click_stop(move |_| state.refresh_review());
+    let ask = btn("Summarize", false)
+        .style(move |s| {
+            if state.review.pr.with(Option::is_some) || state.review.picking.get() {
+                s.hide()
+            } else {
+                s
+            }
+        })
+        .on_click_stop(move |_| state.review_ask_summary());
+    let refresh = btn("Refresh", false).on_click_stop(move |_| {
+        if state.review.picking.get_untracked() {
+            state.review_load_pulls();
+        } else {
+            state.refresh_review();
+        }
+    });
+    // To the open pull requests, and back to the session.
+    let pulls = btn("Pull requests", false)
+        .style(move |s| {
+            if state.review.picking.get() {
+                s.hide()
+            } else {
+                s
+            }
+        })
+        .on_click_stop(move |_| state.review_pick_pull());
+    let session = btn("Session", false)
+        .style(move |s| {
+            if state.review.pr.with(Option::is_some) || state.review.picking.get() {
+                s
+            } else {
+                s.hide()
+            }
+        })
+        .on_click_stop(move |_| state.review_back_to_session());
     let close = label(|| "✕".to_string())
         .style(|s| {
             s.padding_horiz(8.0)
@@ -351,7 +408,10 @@ pub fn review_panel(state: AppState) -> impl IntoView {
                 .hover(|s| s.color(theme::fg()))
         })
         .on_click_stop(move |_| state.review.open.set(false));
-    let header = stack((title, summary, progress, whole, ask, refresh, close)).style(|s| {
+    let header = stack((
+        title, summary, progress, whole, session, pulls, ask, refresh, close,
+    ))
+    .style(|s| {
         s.flex_row()
             .items_center()
             .gap(6.0)
@@ -397,10 +457,12 @@ pub fn review_panel(state: AppState) -> impl IntoView {
     .style(|s| s.flex_col().width_full());
 
     let empty_hint = label(move || {
-        if state.review.busy.get() {
-            "Reading changes…".to_string()
-        } else {
-            "No changes since the session started.".to_string()
+        let pr = state.review.pr.get();
+        match (state.review.busy.get(), pr) {
+            (true, Some(pr)) => format!("Reading #{}…", pr.number),
+            (true, None) => "Reading changes…".to_string(),
+            (false, Some(pr)) => format!("No changes in #{}.", pr.number),
+            (false, None) => "No changes since the session started.".to_string(),
         }
     })
     .style(move |s| {
@@ -412,11 +474,19 @@ pub fn review_panel(state: AppState) -> impl IntoView {
         }
     });
 
-    let left = stack((
+    let files = stack((
         empty_hint,
         scroll(list).style(|s| s.flex_grow(1.0_f32).width_full()),
     ))
-    .style(|s| {
+    .style(move |s| {
+        let s = s.flex_col().size_full();
+        if state.review.picking.get() {
+            s.hide()
+        } else {
+            s
+        }
+    });
+    let left = stack((files, pull_list(state))).style(|s| {
         s.flex_col()
             .width(340.0)
             .height_full()
@@ -440,7 +510,31 @@ pub fn review_panel(state: AppState) -> impl IntoView {
         },
         move |(sel, _)| diff_pane(state, sel),
     )
-    .style(|s| s.flex_col().flex_grow(1.0_f32).height_full());
+    .style(move |s| {
+        if state.review.picking.get() {
+            s.hide()
+        } else {
+            s
+        }
+    });
+    let pick_hint = label(|| {
+        "Pick a pull request to review it here: its diff from GitHub, risk-ranked and \
+         flagged like a session, without checking it out."
+            .to_string()
+    })
+    .style(move |s| {
+        let s = s
+            .padding(24.0)
+            .max_width(460.0)
+            .font_size(12.0)
+            .color(theme::fg_dim());
+        if state.review.picking.get() {
+            s
+        } else {
+            s.hide()
+        }
+    });
+    let right = stack((right, pick_hint)).style(|s| s.flex_col().flex_grow(1.0_f32).height_full());
 
     // ---- Ship bar: readiness checklist + run tests + commit/PR ----------
     let verdict_badge = label(move || match state.review_ship_verdict().readiness {
@@ -534,7 +628,10 @@ pub fn review_panel(state: AppState) -> impl IntoView {
                 .padding_vert(8.0)
                 .border_top(1.0)
                 .border_color(theme::border());
-            if state.review.changeset.with(|cs| cs.is_empty()) {
+            if state.review.changeset.with(|cs| cs.is_empty())
+                || state.review.pr.with(Option::is_some)
+                || state.review.picking.get()
+            {
                 s.hide()
             } else {
                 s
@@ -545,6 +642,7 @@ pub fn review_panel(state: AppState) -> impl IntoView {
         header,
         stack((left, right)).style(|s| s.flex_row().flex_grow(1.0_f32).width_full()),
         ship_bar,
+        pull_bar(state),
     ))
     .style(|s| {
         s.flex_col()
@@ -565,6 +663,114 @@ pub fn review_panel(state: AppState) -> impl IntoView {
             .justify_center()
             .background(Color::from_rgba8(0, 0, 0, 0xCC));
         if state.review.open.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
+/// The open pull requests, a row each; a click reviews one.
+fn pull_list(state: AppState) -> impl IntoView {
+    let status = label(move || state.review.pulls_status.get()).style(move |s| {
+        let s = s.padding(14.0).font_size(12.0).color(theme::fg_dim());
+        if state.review.pulls_status.with(String::is_empty) {
+            s.hide()
+        } else {
+            s
+        }
+    });
+    let rows = dyn_stack(
+        move || state.review.pulls.get(),
+        |pr| (pr.number, pr.head_oid.clone(), pr.checks.clone()),
+        move |pr| {
+            let (title, detail) = crate::review_pulls::pull_line(&pr);
+            let checks = pr.checks.clone();
+            stack((
+                label(move || title.clone()).style(|s| {
+                    s.font_size(12.0)
+                        .color(theme::fg())
+                        .text_ellipsis()
+                        .min_width(0.0)
+                }),
+                label(move || detail.clone()).style(move |s| {
+                    let color = match checks.as_str() {
+                        "fail" => red(),
+                        _ => theme::fg_dim(),
+                    };
+                    s.font_size(11.0)
+                        .color(color)
+                        .text_ellipsis()
+                        .min_width(0.0)
+                }),
+            ))
+            .style(|s| {
+                s.flex_col()
+                    .gap(2.0)
+                    .width_full()
+                    .padding_horiz(12.0)
+                    .padding_vert(6.0)
+                    .border_bottom(1.0)
+                    .border_color(theme::border())
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(|s| s.background(theme::bg_hover()))
+            })
+            .on_click_stop(move |_| state.review_open_pull(pr.clone()))
+        },
+    )
+    .style(|s| s.flex_col().width_full());
+    stack((
+        status,
+        scroll(rows).style(|s| s.flex_grow(1.0_f32).width_full()),
+    ))
+    .style(move |s| {
+        let s = s.flex_col().size_full();
+        if state.review.picking.get() {
+            s
+        } else {
+            s.hide()
+        }
+    })
+}
+
+/// Under a pull request: who, which branches, how its checks stand, what
+/// couldn't be checked — and to GitHub, or to check it out.
+fn pull_bar(state: AppState) -> impl IntoView {
+    let about = label(move || {
+        state
+            .review
+            .pr
+            .get()
+            .map(|pr| crate::review_pulls::pull_line(&pr).1)
+            .unwrap_or_default()
+    })
+    .style(|s| s.font_size(11.0).color(theme::fg_dim()));
+    let note = label(move || state.review.pr_note.get().unwrap_or_default()).style(move |s| {
+        let s = s
+            .flex_grow(1.0_f32)
+            .min_width(0.0)
+            .font_size(11.0)
+            .color(amber());
+        if state.review.pr_note.with(Option::is_none) {
+            s.hide()
+        } else {
+            s
+        }
+    });
+    let spacer = floem::views::empty().style(|s| s.flex_grow(1.0_f32));
+    let github = btn("Open on GitHub", false).on_click_stop(move |_| state.review_pull_on_github());
+    let checkout = btn("Check out", false).on_click_stop(move |_| state.review_checkout_pull());
+    stack((about, note, spacer, github, checkout)).style(move |s| {
+        let s = s
+            .flex_row()
+            .items_center()
+            .gap(8.0)
+            .width_full()
+            .padding_horiz(12.0)
+            .padding_vert(8.0)
+            .border_top(1.0)
+            .border_color(theme::border());
+        if state.review.pr.with(Option::is_some) && !state.review.picking.get() {
             s
         } else {
             s.hide()

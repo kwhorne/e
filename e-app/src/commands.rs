@@ -105,6 +105,7 @@ pub fn dispatch(state: AppState, id: &str) -> bool {
         "agent-send-selection" => state.send_selection_to_agent(),
         "move-class" => state.open_move_class(),
         "session-review" => state.toggle_review(),
+        "review-pull-request" => state.review_pick_pull(),
         "review-measure-evidence" => state.review_measure_evidence(),
         "run-tests" => state.toggle_tdd(),
         "run-test-at-cursor" => state.run_test_at_cursor(),

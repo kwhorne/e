@@ -27,6 +27,20 @@ pub(crate) fn rule_flags(
     repo: &std::path::Path,
     project: &std::path::Path,
 ) -> Vec<Flag> {
+    rule_flags_reading(rules, cs, repo, project, |p| {
+        std::fs::read_to_string(repo.join(p)).ok()
+    })
+}
+
+/// [`rule_flags`], with the changed files read by `read` (a pull request's
+/// are in a commit, not on disk).
+pub(crate) fn rule_flags_reading(
+    rules: &e_review::rules::Rules,
+    cs: &e_review::Changeset,
+    repo: &std::path::Path,
+    project: &std::path::Path,
+    read: impl Fn(&str) -> Option<String>,
+) -> Vec<Flag> {
     if rules.is_empty() {
         return Vec::new();
     }
@@ -43,15 +57,15 @@ pub(crate) fn rule_flags(
                     .join("/"),
             )
         },
-        |p| std::fs::read_to_string(repo.join(p)).ok(),
+        read,
     )
 }
 
-fn unchecked_lookup_flags(
-    repo: &std::path::Path,
+pub(crate) fn unchecked_lookup_flags(
     project: &std::path::Path,
     cs: &e_review::Changeset,
     routes: &[e_laravel::laravel::RouteInfo],
+    read: impl Fn(&str) -> Option<String>,
 ) -> Vec<Flag> {
     let controllers: Vec<&e_review::FileChange> = cs
         .files
@@ -64,7 +78,7 @@ fn unchecked_lookup_flags(
     let checker = e_laravel::authz::Project::new(project);
     let mut out = Vec::new();
     for f in controllers {
-        let Ok(src) = std::fs::read_to_string(repo.join(&f.path)) else {
+        let Some(src) = read(&f.path) else {
             continue;
         };
         // 1-based new-file lines the change added.
@@ -123,8 +137,14 @@ impl AppState {
     pub fn toggle_review(&self) {
         let open = !self.review.open.get_untracked();
         self.review.open.set(open);
-        // Opened by hand, it reviews the session, not a turn.
+        // Opened by hand, it reviews the session, not a turn or a pull request.
         self.review.turn.set(None);
+        if self.review.pr.get_untracked().is_some() {
+            self.review.pr.set(None);
+            self.review.pr_note.set(None);
+            self.review.changeset.set(e_review::Changeset::default());
+        }
+        self.review.picking.set(false);
         if open {
             self.refresh_review();
         }
@@ -133,6 +153,10 @@ impl AppState {
     /// Re-read the session diff and rebuild the changeset (keeping sign-offs).
     pub fn refresh_review(&self) {
         if self.review.busy.get_untracked() {
+            return;
+        }
+        if let Some(pr) = self.review.pr.get_untracked() {
+            self.refresh_pull_review(pr);
             return;
         }
         let Some(root) = self.agent_repo_root() else {
@@ -195,7 +219,9 @@ impl AppState {
             };
             send(diff.map(|diff| {
                 let cs = changeset_from_diff(&diff);
-                let mut unchecked = unchecked_lookup_flags(&root, &project, &cs, &routes);
+                let mut unchecked = unchecked_lookup_flags(&project, &cs, &routes, |p| {
+                    std::fs::read_to_string(root.join(p)).ok()
+                });
                 let example = std::fs::read_to_string(project.join(".env.example")).ok();
                 unchecked.extend(flags::env_example_flags(&cs, example.as_deref()));
                 unchecked.extend(rule_flags(&rules, &cs, &root, &rules_root));
@@ -608,7 +634,9 @@ mod tests {
 +++ b/app/Http/Controllers/OrderController.php\n\
 @@ -6,4 +6,4 @@\n     public function show(Order $order)\n     {\n-        return null;\n+        return $order;\n     }\n";
         let cs = changeset_from_diff(diff);
-        let flags = unchecked_lookup_flags(&root, &root, &cs, &routes);
+        let flags = unchecked_lookup_flags(&root, &cs, &routes, |p| {
+            std::fs::read_to_string(root.join(p)).ok()
+        });
         assert_eq!(flags.len(), 1, "{flags:?}");
         assert_eq!(flags[0].line, 6);
         assert_eq!(flags[0].code, "unchecked-lookup");
@@ -642,4 +670,13 @@ pub struct ReviewPanel {
     /// `None` until someone asks for it — replaying hits the running app.
     pub evidence: floem::reactive::RwSignal<Option<Vec<e_verify::RouteEvidence>>>,
     pub evidence_busy: floem::reactive::RwSignal<bool>,
+    /// The pull request under review, instead of the session.
+    pub pr: floem::reactive::RwSignal<Option<e_core::github::PullRequest>>,
+    /// What couldn't be checked in it, or why it couldn't be read.
+    pub pr_note: floem::reactive::RwSignal<Option<String>>,
+    /// The list of open pull requests is showing, to pick one.
+    pub picking: floem::reactive::RwSignal<bool>,
+    pub pulls: floem::reactive::RwSignal<Vec<e_core::github::PullRequest>>,
+    /// "Asking GitHub…", why the list couldn't be had, or empty once it is.
+    pub pulls_status: floem::reactive::RwSignal<String>,
 }

@@ -263,6 +263,12 @@ impl AppState {
             self.review.changeset.with_untracked(|cs| {
                 json!({
                     "turn": self.review.turn.get_untracked().is_some(),
+                    "pull": self.review.pr.get_untracked().map(|p| p.number),
+                    "pull_note": self.review.pr_note.get_untracked(),
+                    "picking": self.review.picking.get_untracked(),
+                    "pulls": self.review.pulls.with_untracked(|l| l.iter().map(|p| p.number).collect::<Vec<_>>()),
+                    "pulls_status": self.review.pulls_status.get_untracked(),
+                    "busy": self.review.busy.get_untracked(),
                     "summary": cs.summary(),
                     "files": cs.files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
                     "flags": self.review.flags.with_untracked(|f| f

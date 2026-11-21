@@ -73,6 +73,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("agent-send-selection", "Agent: Send Selection to Agent"),
     ("move-class", "Refactor: Move Class…"),
     ("session-review", "Review: Session Changes"),
+    ("review-pull-request", "Review: Pull Requests (GitHub)…"),
     ("review-measure-evidence", "Review: Measure Affected Routes"),
     ("run-tests", "Tests: Runner / Autonomous TDD"),
     ("run-test-at-cursor", "Tests: Run Test at Cursor"),

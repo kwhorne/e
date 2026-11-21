@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same window instead of vim in the terminal. `e <file>` in that terminal
   opens the file in the same window, too. `"terminal_editor": false` turns it
   off.
+- **Review a pull request in the editor.** **Pull requests** in the review
+  panel (or *Review: Pull Requests (GitHub)…*) lists the repository's open pull
+  requests with their checks and review state. A click reviews one the way a
+  session is reviewed: GitHub's diff, ranked by risk and flagged by the same
+  checks and the project's rules, with its files read as the pull request has
+  them. There is no checkout: its commits are fetched without touching a branch.
+  **Open on GitHub** and **Check out** are there when you want them. It uses
+  the GitHub CLI (`gh`).
 
 ### Changed
 

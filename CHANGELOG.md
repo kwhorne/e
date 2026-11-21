@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`e --wait`** (`-w`): opens a file and returns once its tab is closed, for
+  `GIT_EDITOR`, `EDITOR` and the like. In e's own terminal they are set to it,
+  so `git commit`, `git rebase -i` and `crontab -e` open their file in a tab of
+  the same window instead of vim in the terminal. `e <file>` in that terminal
+  opens the file in the same window, too. `"terminal_editor": false` turns it
+  off.
+
+### Changed
+
+- **Cascade uses the agent's name.** With Claude Code, Codex or another ACP
+  agent, the panel's tab and empty state show that agent's name, not Elyra's.
+  The "Add an API key" hint is only shown for Elyra, the one agent that uses
+  those keys.
+
 ## [0.30.0] - 2026-11-21
 
 ### Added

@@ -1374,3 +1374,53 @@ fn a_query_is_explained_and_its_index_added() {
         "{migration}"
     );
 }
+
+#[test]
+#[ignore = "opens a window; run with --ignored"]
+fn e_wait_returns_once_the_tab_is_closed() {
+    let app = App::launch(json!({}));
+    let file = app.project.join("app/Models/Order.php");
+    // As git runs `$GIT_EDITOR <file>` in e's terminal.
+    let mut waiting = Command::new(env!("CARGO_BIN_EXE_e"))
+        .args(["--wait".as_ref(), file.as_os_str()])
+        .env("E_EDITOR_SOCK", app.socket().expect("socket"))
+        .env("HOME", &app.home)
+        .spawn()
+        .expect("e --wait");
+    app.wait_for("the file open", |s| {
+        s["editor"]["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("Order.php"))
+    });
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(
+        waiting.try_wait().unwrap().is_none(),
+        "returned with the tab still open"
+    );
+    app.keys(&["cmd+w"]);
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = waiting.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            start.elapsed() < PATIENCE,
+            "still waiting after the tab closed"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(status.success(), "{status:?}");
+
+    // Without --wait it opens the file in this window and returns at once.
+    let status = Command::new(env!("CARGO_BIN_EXE_e"))
+        .arg(&file)
+        .env("E_EDITOR_SOCK", app.socket().expect("socket"))
+        .status()
+        .expect("e <file>");
+    assert!(status.success());
+    app.wait_for("the file open again", |s| {
+        s["editor"]["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("Order.php"))
+    });
+}

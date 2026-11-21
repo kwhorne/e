@@ -90,7 +90,11 @@ pub fn launch() {
 fn detach_from_terminal() {
     use std::io::IsTerminal;
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if crate::cli::parse(args.iter().cloned()).foreground
+    // `--wait` with no editor to hand the file to: this one is the editor,
+    // and returns when it quits — so it can't let go of the terminal.
+    let cli = crate::cli::parse(args.iter().cloned());
+    if cli.foreground
+        || cli.wait
         || std::env::var_os("E_FOREGROUND").is_some()
         || std::env::var_os("E_DETACHED").is_some()
     {

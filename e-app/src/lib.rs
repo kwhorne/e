@@ -47,6 +47,7 @@ mod dialogs;
 mod diff_view;
 mod editing;
 mod editor_area;
+mod editor_wait;
 use e_laravel::eloquent;
 mod eloquent_helper;
 mod emmet;

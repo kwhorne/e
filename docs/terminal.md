@@ -48,6 +48,13 @@ scrollback). The view stays put while new output streams and snaps back to the
 bottom as soon as you type. ANSI **background colours** are rendered too, so
 `git diff`, coloured error output and search tools keep their highlighting.
 
+## Git's editor
+
+`git commit`, `git rebase -i` and anything else that opens `$EDITOR` open their
+file in a tab of this window, not in vim at the bottom of the terminal. Close the
+tab when you are done and the command carries on. See
+[`e --wait`](getting-started.md#e-as-your-editor---wait).
+
 ## Notes
 
 This is a pragmatic terminal that handles shells and ordinary command output

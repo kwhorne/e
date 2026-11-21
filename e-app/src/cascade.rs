@@ -433,11 +433,17 @@ fn chip_style(s: floem::style::Style) -> floem::style::Style {
 /// The session tab and the ＋ ◷ ⋯ ✕ controls.
 fn header(state: AppState) -> impl IntoView {
     let tab = label(move || {
+        // Elyra's panel is Elyra Cascade; another agent's is its own name.
+        let _ = state.settings.with(|s| s.cascade_agent.clone());
+        let name = match state.cascade_acp() {
+            None => "Elyra Cascade".to_string(),
+            Some(_) => state.cascade_agent_name(),
+        };
         state.agent.chat.with(|c| {
             if c.items.is_empty() {
-                "Elyra Cascade".to_string()
+                name
             } else {
-                "Elyra Cascade Session".to_string()
+                format!("{name} Session")
             }
         })
     })
@@ -608,17 +614,34 @@ fn hero(state: AppState) -> impl IntoView {
     );
 
     let mark = label(|| "⬡".to_string()).style(|s| s.font_size(46.0).color(theme::fg()));
-    let title = label(|| "Elyra Cascade".to_string()).style(|s| {
+    let elyra = move || {
+        let _ = state.settings.with(|s| s.cascade_agent.clone());
+        state.cascade_acp().is_none()
+    };
+    let title = label(move || {
+        if elyra() {
+            "Elyra Cascade".to_string()
+        } else {
+            state.cascade_agent_name()
+        }
+    })
+    .style(|s| {
         s.font_size(21.0)
             .font_bold()
             .color(theme::fg())
             .margin_top(10.0)
     });
-    let sub = label(|| "Describe your task to Elyra".to_string())
-        .style(|s| s.font_size(14.0).color(theme::fg_dim()).margin_top(4.0));
+    let sub = label(move || {
+        let _ = state.settings.with(|s| s.cascade_agent.clone());
+        format!("Describe your task to {}", state.cascade_agent_name())
+    })
+    .style(|s| s.font_size(14.0).color(theme::fg_dim()).margin_top(4.0));
     // Decided once per build of the empty state rather than in the label's
     // closure, which floem re-runs: each check spawns the Keychain tool.
-    let needs_key = !(secrets::any_configured() || secrets::elyra_has_credentials());
+    // Only Elyra uses the keys in Settings; the other agents sign in by
+    // themselves.
+    let needs_key = state.cascade_acp().is_none()
+        && !(secrets::any_configured() || secrets::elyra_has_credentials());
     if std::env::var_os("E_DEBUG_CASCADE").is_some() {
         eprintln!("e: cascade: a key is needed: {needs_key}");
     }

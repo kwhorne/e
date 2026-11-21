@@ -57,7 +57,11 @@ impl AppState {
         let root = self.root.get();
         // The terminal is where CLI agents (Claude Code, Codex …) are run, so it
         // carries the editor's socket.
-        let env = crate::agent_sync::socket_env();
+        let mut env = crate::agent_sync::socket_env();
+        // And `git commit`, `git rebase -i`, `crontab -e` edit in a tab here.
+        env.extend(crate::editor_wait::terminal_env(
+            self.settings.with_untracked(|s| s.terminal_editor),
+        ));
         match Terminal::spawn(&e_term::default_shell(), &root, &env, 24, 100, on_update) {
             Ok(t) => {
                 let id = self.next_term_id.get_untracked();

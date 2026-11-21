@@ -10,6 +10,9 @@
 //! - `{"method":"context"}` → current file, cursor, selection, open files,
 //!   diagnostics and workspace root.
 //! - `{"method":"open","path":"…","line":45,"col":1}` → open + jump.
+//! - `{"method":"edit","path":"…"}` then `{"method":"wait_closed","path":"…",
+//!   "timeout_ms":240000}` → open a file for the person and answer once its
+//!   tab is closed: what `e --wait` (`GIT_EDITOR` in e's terminal) does.
 //! - `{"method":"diagnostics"}` → all problems.
 //! - `{"method":"wait_diagnostics","path":"…","timeout_ms":5000}` → the file's
 //!   problems once the language servers have re-read what you just wrote.
@@ -439,6 +442,8 @@ const METHODS: &[&str] = &[
     "wait_diagnostics",
     "review_summary",
     "open",
+    "edit",
+    "wait_closed",
     "mark",
     "propose_edit",
     "focus",
@@ -529,6 +534,27 @@ fn dispatch(state: AppState, req: &Value, reply: Sender<Value>) {
             state.jump_to(&path_to_uri(path), line() as usize, col() as usize);
             state.set_agent_mark(std::path::PathBuf::from(path), line() as usize);
             json!({"ok": true})
+        }
+        // `e --wait`: a file for the person to edit, and word when it's done.
+        "edit" => {
+            let Some(path) = req.get("path").and_then(|p| p.as_str()) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing path"}));
+                return;
+            };
+            state.socket_edit(path, line() as usize + 1)
+        }
+        "wait_closed" => {
+            let Some(path) = req.get("path").and_then(|p| p.as_str()) else {
+                let _ = reply.send(json!({"ok": false, "error": "missing path"}));
+                return;
+            };
+            let timeout = req
+                .get("timeout_ms")
+                .and_then(|t| t.as_u64())
+                .unwrap_or(240_000)
+                .clamp(200, 240_000);
+            state.socket_wait_closed(path, Duration::from_millis(timeout), reply);
+            return;
         }
         // Ghost marker: show where the agent is looking.
         "mark" => {
@@ -1027,6 +1053,7 @@ fn log_summary(req: &Value) -> String {
     let path = s("path");
     let short = path.rsplit('/').next().unwrap_or(path);
     match req.get("method").and_then(|m| m.as_str()).unwrap_or("") {
+        "edit" | "wait_closed" => short.to_string(),
         "open" | "mark" | "lsp_definition" | "lsp_references" | "lsp_hover"
         | "wait_diagnostics" => {
             let line = req.get("line").and_then(|l| l.as_u64()).unwrap_or(0);

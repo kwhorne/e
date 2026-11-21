@@ -29,7 +29,26 @@ e path/to/file # open a file
 The command returns at once and `e` outlives the terminal, like `code .`. What
 `e` used to print in the terminal — which language server started, what it
 couldn't find — goes to `~/.config/e/e.log`. To keep it attached and read that
-live, run `e --foreground .` (or set `E_FOREGROUND=1`).
+live, run `e --foreground .` (or set `E_FOREGROUND=1`). `e --help` lists the
+options; after `--` every argument is a path (`e -- -notes.md`).
+
+### `e` as your editor (`--wait`)
+
+`e --wait <file>` (`-w`) returns only once the file's tab is closed, which is
+what `git commit`, `git rebase -i`, `crontab -e` and the like wait for. In
+**e's own terminal** this is already set up: `GIT_EDITOR`, `EDITOR` and
+`VISUAL` are `e --wait`, so a commit message or a rebase plan opens in a tab of
+the window you are in. Write it, save, close the tab (`⌘W`), and git carries on.
+`e <file>` without `--wait` opens the file in that window too, and returns at
+once.
+
+Your shell's rc file still has the last word on `EDITOR` and `VISUAL` if it sets
+them; git reads `GIT_EDITOR` first. `"terminal_editor": false` in
+[`config.json`](configuration.md) leaves all three alone. A CLI agent run in the
+terminal inherits them too; agents commit with `-m`, so it rarely comes up.
+
+Elsewhere, `export EDITOR="e --wait"` works as well. With no `e` window to hand
+the file to, `e --wait` starts one for the file and returns when you quit it.
 
 ## The interface
 

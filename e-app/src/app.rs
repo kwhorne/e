@@ -90,7 +90,7 @@ pub fn launch() {
 fn detach_from_terminal() {
     use std::io::IsTerminal;
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|a| a == "--foreground" || a == "-f")
+    if crate::cli::parse(args.iter().cloned()).foreground
         || std::env::var_os("E_FOREGROUND").is_some()
         || std::env::var_os("E_DETACHED").is_some()
     {
@@ -186,9 +186,14 @@ fn detach_from_terminal() {
 /// working directory may be `/` when LaunchServices starts it) opens the same
 /// thing. Flags pass through.
 fn absolute_args(args: &[String], cwd: &std::path::Path) -> Vec<String> {
+    let mut flags = true;
     args.iter()
         .map(|a| {
-            if a.starts_with('-') {
+            if flags && a == "--" {
+                flags = false;
+                return a.clone();
+            }
+            if flags && a.starts_with('-') && a.len() > 1 {
                 return a.clone();
             }
             let p = PathBuf::from(a);
@@ -219,6 +224,10 @@ mod detach_tests {
             cwd.canonicalize().unwrap_or(cwd.clone())
         );
         assert!(Path::new(&out[2]).is_absolute());
+        // A file named like a flag, after `--`, is a path like any other.
+        let out = absolute_args(&["--".into(), "-V".into()], &cwd);
+        assert_eq!(out[0], "--");
+        assert!(Path::new(&out[1]).is_absolute(), "{out:?}");
     }
 }
 
@@ -321,8 +330,8 @@ fn debug_keys() -> bool {
 /// Resolve the CLI argument into `(workspace_root, file_to_open)`.
 fn resolve_args() -> (PathBuf, Option<PathBuf>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    // Flags (`--foreground`) aren't paths.
-    match std::env::args().skip(1).find(|a| !a.starts_with('-')) {
+    // Flags (`--foreground`) aren't paths; after `--` everything is.
+    match crate::cli::current().path {
         // Bare launch (double-click, `e` with no path): reopen the last project.
         None => (crate::config::load_last_project().unwrap_or(cwd), None),
         Some(arg) => {

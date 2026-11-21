@@ -37,6 +37,10 @@ pub fn command_flags() -> &'static str {
 
 const MARKER: &str = "__E_PATH__";
 
+/// What separates `PATH`'s entries: `;` on Windows, where `:` is in the
+/// drive letters.
+const SEP: char = if cfg!(windows) { ';' } else { ':' };
+
 /// Set this process's PATH to the login shell's, merged with what it already
 /// had. Call first thing in `main`, before any thread exists. `E_NO_SHELL_PATH`
 /// skips it.
@@ -57,7 +61,7 @@ pub fn adopt_login_path() {
         .filter(|d| d.is_dir())
         .map(|d| d.to_string_lossy().into_owned())
         .collect();
-    merged = merge_paths(&merged, &extra.join(":"));
+    merged = merge_paths(&merged, &extra.join(&SEP.to_string()));
     if merged != current {
         std::env::set_var("PATH", &merged);
     }
@@ -80,6 +84,15 @@ pub fn composer_bin_dirs() -> Vec<std::path::PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
         dirs.push(std::path::PathBuf::from(xdg).join("composer/vendor/bin"));
     }
+    // Windows: `%APPDATA%\Composer\vendor\bin`.
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        dirs.push(
+            std::path::PathBuf::from(appdata)
+                .join("Composer")
+                .join("vendor")
+                .join("bin"),
+        );
+    }
     dirs
 }
 
@@ -88,6 +101,10 @@ pub fn composer_bin_dirs() -> Vec<std::path::PathBuf> {
 /// friends write) run. `None` when the shell fails or takes longer than
 /// `timeout` — a slow rc file must not hold the window back.
 pub fn login_shell_path(timeout: Duration) -> Option<String> {
+    // No login shell to ask; a Windows app gets the user's PATH as it is.
+    if cfg!(windows) {
+        return None;
+    }
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     let script = format!("printf '{MARKER}%s{MARKER}' \"$PATH\"");
     let mut child = Command::new(&shell)
@@ -129,17 +146,22 @@ pub fn extract(out: &str) -> Option<String> {
 /// duplicates.
 pub fn merge_paths(login: &str, current: &str) -> String {
     let mut out: Vec<&str> = Vec::new();
-    for entry in login.split(':').chain(current.split(':')) {
+    for entry in login.split(SEP).chain(current.split(SEP)) {
         if !entry.is_empty() && !out.contains(&entry) {
             out.push(entry);
         }
     }
-    out.join(":")
+    out.join(&SEP.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A test's `:`-separated PATH, with this platform's separator.
+    fn j(path: &str) -> String {
+        path.replace(':', &SEP.to_string())
+    }
 
     #[test]
     fn extracts_the_path_from_a_chatty_shell() {
@@ -154,26 +176,33 @@ mod tests {
         // Appended after the shell's own, never ahead of it.
         assert_eq!(
             merge_paths(
-                "/opt/homebrew/bin:/usr/bin",
+                &j("/opt/homebrew/bin:/usr/bin"),
                 "/Users/me/.composer/vendor/bin"
             ),
-            "/opt/homebrew/bin:/usr/bin:/Users/me/.composer/vendor/bin"
+            j("/opt/homebrew/bin:/usr/bin:/Users/me/.composer/vendor/bin")
         );
         let dirs = composer_bin_dirs();
+        #[cfg(unix)]
         assert!(dirs.iter().any(|d| d.ends_with(".composer/vendor/bin")));
+        #[cfg(windows)]
+        assert!(dirs.iter().any(|d| d.ends_with("Composer/vendor/bin")));
     }
 
     #[test]
     fn merge_keeps_the_shell_order_and_the_extras() {
         assert_eq!(
-            merge_paths("/opt/homebrew/bin:/usr/bin:/bin", "/usr/bin:/bin:/extra"),
-            "/opt/homebrew/bin:/usr/bin:/bin:/extra"
+            merge_paths(
+                &j("/opt/homebrew/bin:/usr/bin:/bin"),
+                &j("/usr/bin:/bin:/extra")
+            ),
+            j("/opt/homebrew/bin:/usr/bin:/bin:/extra")
         );
         assert_eq!(merge_paths("", "/usr/bin"), "/usr/bin");
-        assert_eq!(merge_paths("/a::/b", "/a"), "/a:/b");
+        assert_eq!(merge_paths(&j("/a::/b"), "/a"), j("/a:/b"));
     }
 
     /// The login shell answers within the timeout and has a PATH.
+    #[cfg(unix)]
     #[test]
     fn the_login_shell_reports_a_path() {
         let path = login_shell_path(Duration::from_secs(20)).expect("login shell answers");

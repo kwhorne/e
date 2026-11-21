@@ -3,11 +3,13 @@
 fn main() {
     // What the build scripts and anyone else can ask: the version this
     // binary is, without starting the editor.
-    if std::env::args()
-        .skip(1)
-        .any(|a| a == "--version" || a == "-V")
-    {
+    let cli = e_app::cli::current();
+    if cli.version {
         println!("e {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if cli.help {
+        print!("{}", e_app::cli::USAGE);
         return;
     }
     e_app::launch();

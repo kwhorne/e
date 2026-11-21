@@ -3320,10 +3320,9 @@ fn same_database(a: &e_db::DbConfig, b: &e_db::DbConfig) -> bool {
         "" | "localhost" | "127.0.0.1" | "::1" => "localhost".to_string(),
         other => other.to_ascii_lowercase(),
     };
-    let port = |c: &e_db::DbConfig| match (c.port, family(&c.engine).as_str()) {
-        (0, "mysql") => 3306,
-        (0, "postgres") => 5432,
-        (p, _) => p,
+    let port = |c: &e_db::DbConfig| match c.port {
+        0 => e_db::engine_default_port(&c.engine),
+        p => p,
     };
     host(&a.host) == host(&b.host) && port(a) == port(b) && a.database == b.database
 }
@@ -3884,6 +3883,19 @@ mod tab_tests {
             ..env.clone()
         };
         assert!(!same_database(&other, &env));
+        // ClickHouse's default is its HTTP port, the one e talks to.
+        let ch = e_db::DbConfig {
+            engine: "clickhouse".into(),
+            port: 8123,
+            ..env.clone()
+        };
+        assert!(same_database(
+            &e_db::DbConfig {
+                port: 0,
+                ..ch.clone()
+            },
+            &ch
+        ));
     }
 
     #[test]

@@ -219,6 +219,33 @@ equally well when the agent ran in an external terminal.
 When you're happy, commit from the [Source Control panel](#the-source-control-panel-2)
 as usual.
 
+## Reviewing a pull request
+
+The same review works on someone else's work: a colleague's pull request,
+Dependabot's, or one a cloud agent opened. In the review panel, click **Pull
+requests**, or run *Review: Pull Requests (GitHub)…* from the palette. It lists
+the repository's open pull requests, each with its author, its branches, a draft
+mark, its checks (✓ passed, ✗ failed, ● running) and its review state. Click one
+to review it.
+
+Its diff is GitHub's (`gh pr diff`), ranked by risk and flagged by the same
+checks as a session: migrations, auth, money, deleted tests, `.env` keys, the
+project's [rules](project-rules.md), unchecked lookups. The checks that read a
+whole file read it as the pull request has it. Its commits are fetched into the
+repository (`refs/pull/<n>/head`) for this without touching a branch or your
+working tree. If they can't be fetched, those checks are skipped, and the bar
+along the bottom says so.
+
+You don't need to check it out. Sign off file by file as with a session.
+**Open on GitHub** takes you to it there, to comment or approve. **Check out**
+puts its branch in your working tree (`gh pr checkout`), and does so only when
+the working tree has no changes. Revert, Ask, Summarize and Commit & PR are for
+your own changes, so they aren't shown. **Session** goes back to what the
+session changed.
+
+It needs the [GitHub CLI](https://cli.github.com), signed in (`gh auth login`).
+Without it, the list says what's missing.
+
 ## Commit history & stash
 
 The panel lists recent commits (hash, summary, author, time), and the Stash /

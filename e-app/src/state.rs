@@ -1878,6 +1878,11 @@ impl AppState {
                 summary: RwSignal::new(None),
                 evidence: RwSignal::new(None),
                 evidence_busy: RwSignal::new(false),
+                pr: RwSignal::new(None),
+                pr_note: RwSignal::new(None),
+                picking: RwSignal::new(false),
+                pulls: RwSignal::new(Vec::new()),
+                pulls_status: RwSignal::new(String::new()),
             },
             git: GitPanel {
                 panel_open: RwSignal::new(false),

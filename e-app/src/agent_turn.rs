@@ -139,6 +139,8 @@ impl AppState {
         let Some(r) = self.receipt_at(index) else {
             return;
         };
+        self.review.pr.set(None);
+        self.review.picking.set(false);
         self.review.turn.set(Some((r.before, r.after)));
         self.review.open.set(true);
         self.refresh_review();

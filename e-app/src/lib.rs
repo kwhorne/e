@@ -110,6 +110,7 @@ mod rename;
 mod rename_preview;
 mod request;
 mod review;
+mod review_pulls;
 mod review_view;
 mod run_consent;
 mod runtime;

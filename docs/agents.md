@@ -268,7 +268,9 @@ to resume typing).
 When a session has touched a lot of files, press **`⌘⌥V`** (*Review: Session
 Changes*) for a risk-ranked review of the whole changeset — sign off file by file,
 ask the agent why it made a change, or revert a single file — without pushing a PR
-first. See [Session review](source-control.md#session-review-v).
+first. See [Session review](source-control.md#session-review-v). The same
+review takes a pull request from GitHub, such as one a cloud agent opened: see
+[Reviewing a pull request](source-control.md#reviewing-a-pull-request).
 
 ## Tips
 

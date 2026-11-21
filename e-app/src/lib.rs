@@ -102,6 +102,7 @@ mod recent;
 mod related_view;
 use e_laravel::relatedfiles;
 use e_laravel::relations;
+pub mod cli;
 mod relations_view;
 mod rename;
 mod rename_preview;

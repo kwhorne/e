@@ -110,11 +110,18 @@ fn check_reachable(config: &DbConfig) -> Result<(), String> {
 /// The `--host`/`--port`/user arguments; no `--port` when none is set, so
 /// the tool's default applies instead of port 0.
 fn server_args(config: &DbConfig, user_flag: &str) -> Vec<String> {
-    let mut args = vec![format!("--host={}", config.host)];
+    let mut args = Vec::new();
+    // No host: the local socket; no user: the tool's own default (the OS
+    // user). `--host=` would ask for neither.
+    if !config.host.trim().is_empty() {
+        args.push(format!("--host={}", config.host.trim()));
+    }
     if config.port != 0 {
         args.push(format!("--port={}", config.port));
     }
-    args.push(format!("{user_flag}={}", config.username));
+    if !config.username.trim().is_empty() {
+        args.push(format!("{user_flag}={}", config.username.trim()));
+    }
     args
 }
 
@@ -439,6 +446,17 @@ mod tests {
             ["--host=127.0.0.1", "--port=5432", "--user=root", "shop"]
         );
         assert!(mysqldump_args(&c).contains(&"--single-transaction".to_string()));
+        // No host or user given: left to the tools, not passed empty.
+        let local = DbConfig {
+            host: " ".into(),
+            username: String::new(),
+            port: 0,
+            ..c.clone()
+        };
+        assert_eq!(mysql_restore_args(&local), ["shop"]);
+        assert!(!pg_dump_args(&local)
+            .iter()
+            .any(|a| a.starts_with("--host") || a.starts_with("--username")));
     }
 
     #[test]

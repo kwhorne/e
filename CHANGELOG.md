@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`e --help`** (`-h`) lists the options instead of opening a window.
+
+### Fixed
+
+- **`e -- -V` opens the file `-V`.** After `--` every argument is a path,
+  where before `--version` was looked for anywhere on the line.
+- **Snapshots of a database with no host or user set** leave `--host` and
+  the user flag off, so `mysqldump` and `pg_dump` use the local socket and
+  the OS user rather than an empty value.
+- **A ClickHouse connection added without a port** is recognised as the one
+  in `.env` on 8123, as MySQL and PostgreSQL ones already were.
+- **Windows: `PATH` is read and written with `;`**, and Composer's global
+  `vendor/bin` there (`%APPDATA%\Composer\vendor\bin`) is found too.
+
 ## [0.29.2] - 2026-11-20
 
 ### Fixed

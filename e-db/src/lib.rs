@@ -949,7 +949,8 @@ pub fn test(config: &DbConfig) -> Result<(), String> {
 // Shell out to the system `ssh` with a local port-forward; it handles key and
 // password auth and is available everywhere. Secrets are fed via SSH_ASKPASS.
 
-fn engine_default_port(engine: &str) -> u16 {
+/// The port `engine`'s server listens on when none is given; 0 for none.
+pub fn engine_default_port(engine: &str) -> u16 {
     match engine {
         "mysql" | "mariadb" => 3306,
         "postgres" | "postgresql" | "pgsql" => 5432,

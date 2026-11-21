@@ -21,7 +21,9 @@ pub use chat::{
     ChatItem, ChatState, ContextUsage, ModelInfo, PermissionAsk, ToolCall, ToolStatus, TurnReceipt,
 };
 pub use client::{pump, AgentClient, Streaming};
-pub use protocol::{parse_event, AgentEvent, PermissionChoice};
+pub use protocol::{
+    parse_event, AgentEvent, FileDiff, OptionChoice, PermissionChoice, SessionOption,
+};
 
 /// Replay a whole JSONL transcript (as emitted by `elyra --mode json`/`rpc`)
 /// through the reducer and return the resulting conversation state. Handy for

@@ -11,7 +11,7 @@ use floem::menu::{Menu, MenuItem};
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
 use floem::unit::Pct;
-use floem::views::{dyn_container, empty, label, stack, Decorators};
+use floem::views::{dyn_container, dyn_stack, empty, label, stack, Decorators};
 use floem::IntoView;
 use serde_json::Value;
 
@@ -204,6 +204,59 @@ impl AppState {
                 eprintln!("e: cascade: set_model failed: {e:#}");
             }
             let _ = client.get_state();
+        }
+    }
+
+    /// Set an ACP agent's session option `id` (its model, its mode) to
+    /// `value`. A model or thinking level is remembered for the agent's next
+    /// session; a mode isn't — a plan mode, or one that asks nothing, should
+    /// be chosen each time.
+    pub fn cascade_set_option(&self, id: &str, value: &str) {
+        let category = self.agent.chat.with_untracked(|c| {
+            c.options
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| o.category.clone())
+                .unwrap_or_default()
+        });
+        if remembered(&category) {
+            let key = format!(
+                "{}/{id}",
+                self.settings.with_untracked(|s| s.cascade_agent.clone())
+            );
+            self.settings.update(|s| {
+                s.cascade_acp_choices.insert(key, value.to_string());
+            });
+            let all = self
+                .settings
+                .with_untracked(|s| s.cascade_acp_choices.clone());
+            config::set_value(
+                "cascade_acp_choices",
+                serde_json::to_value(all).unwrap_or_default(),
+            );
+        }
+        if let Some(client) = self.agent.native_client.get_untracked() {
+            client.set_option(id, value);
+        }
+    }
+
+    /// A new session's options: what was chosen for this agent before, set
+    /// again where the agent still offers it.
+    pub(crate) fn cascade_restore_options(&self) {
+        let agent = self.settings.with_untracked(|s| s.cascade_agent.clone());
+        let choices = self
+            .settings
+            .with_untracked(|s| s.cascade_acp_choices.clone());
+        let Some(client) = self.agent.native_client.get_untracked() else {
+            return;
+        };
+        let options = self.agent.chat.with_untracked(|c| c.options.clone());
+        for o in options.iter().filter(|o| remembered(&o.category)) {
+            if let Some(value) = choices.get(&format!("{agent}/{}", o.id)) {
+                if *value != o.current && o.choices.iter().any(|c| c.value == *value) {
+                    client.set_option(&o.id, value);
+                }
+            }
         }
     }
 
@@ -617,6 +670,12 @@ fn body(state: AppState) -> impl IntoView {
     })
 }
 
+/// Whether an option of `category` is remembered from one session to the
+/// next.
+fn remembered(category: &str) -> bool {
+    matches!(category, "model" | "thought_level")
+}
+
 /// `Claude Opus 5 · high`, or a prompt to pick one.
 fn model_label(state: AppState) -> String {
     state.agent.chat.with(|c| match &c.model {
@@ -678,6 +737,48 @@ fn model_menu(state: AppState) -> Menu {
     menu
 }
 
+/// A chip for an ACP agent's option `id`: the choice in use, and a menu of
+/// the others.
+fn option_chip(state: AppState, id: String) -> impl IntoView {
+    let option = {
+        let id = id.clone();
+        move || {
+            state
+                .agent
+                .chat
+                .with(|c| c.options.iter().find(|o| o.id == id).cloned())
+        }
+    };
+    let shown = option.clone();
+    label(move || {
+        let Some(o) = shown() else {
+            return String::new();
+        };
+        let glyph = if o.category == "mode" { "◇ " } else { "" };
+        format!("{glyph}{}  ▾", o.current_name())
+    })
+    .style(chip_style)
+    .popout_menu(move || {
+        let mut menu = Menu::new("");
+        let Some(o) = option() else {
+            return menu;
+        };
+        for c in &o.choices {
+            let mark = if c.value == o.current { "● " } else { "   " };
+            // A short description fits beside the name; a long one doesn't.
+            let text = if !c.description.is_empty() && c.description.chars().count() <= 60 {
+                format!("{mark}{} — {}", c.name, c.description)
+            } else {
+                format!("{mark}{}", c.name)
+            };
+            let (id, value) = (o.id.clone(), c.value.clone());
+            menu = menu
+                .entry(MenuItem::new(text).action(move || state.cascade_set_option(&id, &value)));
+        }
+        menu
+    })
+}
+
 /// The composer card: the input, then ＋ · mode · model on the left and the
 /// agent badge and send button on the right.
 fn composer_card(state: AppState) -> impl IntoView {
@@ -726,7 +827,28 @@ fn composer_card(state: AppState) -> impl IntoView {
             )
     });
 
-    // Elyra's models; an ACP agent chooses its own, in its own settings.
+    // An ACP agent's own settings for the session — its model, its mode —
+    // a chip each, once the session has opened.
+    let acp_options = dyn_stack(
+        move || {
+            state
+                .agent
+                .chat
+                .with(|c| c.options.iter().map(|o| o.id.clone()).collect::<Vec<_>>())
+        },
+        |id| id.clone(),
+        move |id| option_chip(state, id),
+    )
+    .style(move |s| {
+        let s = s.items_center().gap(4.0);
+        if state.settings.with(|st| st.cascade_agent == "elyra") {
+            s.hide()
+        } else {
+            s
+        }
+    });
+
+    // Elyra's models; an ACP agent's are among its options.
     let model = label(move || model_label(state))
         .style(move |s| {
             let s = chip_style(s);
@@ -818,7 +940,7 @@ fn composer_card(state: AppState) -> impl IntoView {
         }
     });
 
-    let toolbar = stack((attach, mode, model, usage, spacer, badge, send))
+    let toolbar = stack((attach, mode, acp_options, model, usage, spacer, badge, send))
         .style(|s| s.items_center().width_full().gap(2.0).padding_top(6.0));
 
     stack((queue_rows(state), input, toolbar)).style(|s| {

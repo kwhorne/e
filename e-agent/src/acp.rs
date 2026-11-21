@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use crossbeam_channel::Sender;
 use serde_json::{json, Value};
 
-use crate::protocol::{AgentEvent, PermissionChoice};
+use crate::protocol::{AgentEvent, FileDiff, OptionChoice, PermissionChoice, SessionOption};
 
 /// The protocol version spoken (`initialize`'s `protocolVersion`).
 pub const PROTOCOL_VERSION: u64 = 1;
@@ -58,6 +58,25 @@ fn block_text(block: &Value) -> Option<String> {
         .then(|| block.get("text").and_then(Value::as_str))
         .flatten()
         .map(str::to_string)
+}
+
+/// The files a tool call's content changed (its `diff` items).
+fn tool_content_diffs(content: &Value, relative: impl Fn(&str) -> String) -> Vec<FileDiff> {
+    let Some(items) = content.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter(|i| i.get("type").and_then(Value::as_str) == Some("diff"))
+        .map(|i| {
+            let text = |k: &str| i.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+            FileDiff {
+                path: relative(&text("path")),
+                old: text("oldText"),
+                new: text("newText"),
+            }
+        })
+        .collect()
 }
 
 /// A tool call's content as text: its text blocks, and for a diff, which
@@ -295,6 +314,16 @@ impl Translator {
     }
 
     fn tool_progress(&self, id: &str, kind: &str, u: &Value) -> Vec<AgentEvent> {
+        let mut out = Vec::new();
+        if let Some(content) = u.get("content") {
+            let diffs = tool_content_diffs(content, |p| self.relative(p));
+            if !diffs.is_empty() {
+                out.push(AgentEvent::ToolDiff {
+                    id: id.to_string(),
+                    diffs,
+                });
+            }
+        }
         let text = u
             .get("content")
             .and_then(|c| tool_content_text(c, |p| self.relative(p)))
@@ -305,21 +334,23 @@ impl Translator {
                 })
             });
         match u.get("status").and_then(Value::as_str) {
-            Some(s @ ("completed" | "failed")) => vec![AgentEvent::ToolEnd {
+            Some(s @ ("completed" | "failed")) => out.push(AgentEvent::ToolEnd {
                 id: id.to_string(),
                 name: kind.to_string(),
                 result: Value::String(text.unwrap_or_default()),
                 is_error: s == "failed",
-            }],
-            _ => match text {
-                Some(t) => vec![AgentEvent::ToolUpdate {
-                    id: id.to_string(),
-                    name: kind.to_string(),
-                    partial: json!({"content": [{"type": "text", "text": t}]}),
-                }],
-                None => Vec::new(),
-            },
+            }),
+            _ => {
+                if let Some(t) = text {
+                    out.push(AgentEvent::ToolUpdate {
+                        id: id.to_string(),
+                        name: kind.to_string(),
+                        partial: json!({"content": [{"type": "text", "text": t}]}),
+                    });
+                }
+            }
         }
+        out
     }
 
     /// The turn is over: close a message still open.
@@ -360,14 +391,188 @@ pub fn permission(params: &Value) -> (String, Vec<PermissionChoice>) {
     (title, choices)
 }
 
+// ---- Session options ---------------------------------------------------------
+
+/// How an option is set: ACP's config options, or the older mode and model
+/// methods an agent may offer instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Via {
+    /// `session/set_config_option`.
+    Config,
+    /// `session/set_mode`.
+    Mode,
+    /// `session/set_model` (unstable; Claude Code's adapter has it).
+    Model,
+}
+
+/// A config option's choices: a flat list, or groups of them.
+fn choices_of(options: &Value) -> Vec<OptionChoice> {
+    let mut out = Vec::new();
+    for o in options.as_array().into_iter().flatten() {
+        if let Some(inner) = o.get("options") {
+            out.extend(choices_of(inner));
+            continue;
+        }
+        let text = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let value = text("value");
+        if value.is_empty() {
+            continue;
+        }
+        let name = match text("name") {
+            n if n.is_empty() => value.clone(),
+            n => n,
+        };
+        out.push(OptionChoice {
+            value,
+            name,
+            description: text("description"),
+        });
+    }
+    out
+}
+
+/// `configOptions` as options: the menus (`select`), the model first, then
+/// the mode, then the rest in the agent's order. Switches (`boolean`) need
+/// a capability e doesn't claim, so an agent shouldn't send them.
+pub fn config_options(list: &Value) -> Vec<SessionOption> {
+    let mut out: Vec<SessionOption> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|o| o.get("type").and_then(Value::as_str).unwrap_or("select") == "select")
+        .filter_map(|o| {
+            let text = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+            let id = text("id");
+            let choices = choices_of(o.get("options")?);
+            (!id.is_empty() && !choices.is_empty()).then(|| SessionOption {
+                name: match text("name") {
+                    n if n.is_empty() => id.clone(),
+                    n => n,
+                },
+                id,
+                category: text("category"),
+                current: text("currentValue"),
+                choices,
+            })
+        })
+        .collect();
+    let rank = |o: &SessionOption| match o.category.as_str() {
+        "model" => 0,
+        "mode" => 1,
+        _ => 2,
+    };
+    out.sort_by_key(rank);
+    out
+}
+
+/// What a `session/new` result offers: its config options when it has any
+/// (they supersede the rest), else its modes and models.
+pub fn session_options(result: &Value) -> Vec<(SessionOption, Via)> {
+    if let Some(list) = result.get("configOptions").filter(|l| !l.is_null()) {
+        let options = config_options(list);
+        if !options.is_empty() {
+            return options.into_iter().map(|o| (o, Via::Config)).collect();
+        }
+    }
+    let mut out = Vec::new();
+    // `models: {availableModels: [{modelId, name, description}], currentModelId}`.
+    if let Some(models) = result.get("models") {
+        let choices: Vec<OptionChoice> = models
+            .get("availableModels")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|m| {
+                let value = m.get("modelId")?.as_str()?.to_string();
+                Some(OptionChoice {
+                    name: m
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&value)
+                        .to_string(),
+                    description: m
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    value,
+                })
+            })
+            .collect();
+        if !choices.is_empty() {
+            out.push((
+                SessionOption {
+                    id: "model".into(),
+                    name: "Model".into(),
+                    category: "model".into(),
+                    current: models
+                        .get("currentModelId")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    choices,
+                },
+                Via::Model,
+            ));
+        }
+    }
+    // `modes: {availableModes: [{id, name, description}], currentModeId}`.
+    if let Some(modes) = result.get("modes") {
+        let choices: Vec<OptionChoice> = modes
+            .get("availableModes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|m| {
+                let value = m.get("id")?.as_str()?.to_string();
+                Some(OptionChoice {
+                    name: m
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&value)
+                        .to_string(),
+                    description: m
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    value,
+                })
+            })
+            .collect();
+        if !choices.is_empty() {
+            out.push((
+                SessionOption {
+                    id: "mode".into(),
+                    name: "Mode".into(),
+                    category: "mode".into(),
+                    current: modes
+                        .get("currentModeId")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    choices,
+                },
+                Via::Mode,
+            ));
+        }
+    }
+    out
+}
+
 // ---- The connection ---------------------------------------------------------
 
 /// What a request the client sent was.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Pending {
     Initialize,
     NewSession,
     Prompt,
+    /// Option `id` set; `was` its value before, to go back to if refused.
+    SetOption {
+        id: String,
+        was: String,
+    },
 }
 
 #[derive(Default)]
@@ -382,6 +587,8 @@ struct State {
     queue: VecDeque<String>,
     /// Permission requests not yet answered, by their id as JSON.
     asking: Vec<String>,
+    /// The session's options, and how each is set.
+    options: Vec<(SessionOption, Via)>,
 }
 
 /// One ACP connection: what both the client handle and the reader thread
@@ -535,6 +742,85 @@ impl Acp {
         self.queue_update(&VecDeque::new());
     }
 
+    /// The options as they are now, to the app.
+    fn emit_options(&self) {
+        let options = self
+            .state
+            .lock()
+            .expect("acp state")
+            .options
+            .iter()
+            .map(|(o, _)| o.clone())
+            .collect();
+        self.emit(AgentEvent::Options { options });
+    }
+
+    /// Set option `id` to `value`: shown at once, sent to the agent, and
+    /// put back if the agent refuses it.
+    pub(crate) fn set_option(&self, id: &str, value: &str) {
+        let (session, via, was) = {
+            let mut st = self.state.lock().expect("acp state");
+            let Some(session) = st.session.clone() else {
+                return;
+            };
+            let Some((o, via)) = st.options.iter_mut().find(|(o, _)| o.id == id) else {
+                return;
+            };
+            if o.current == value {
+                return;
+            }
+            let was = std::mem::replace(&mut o.current, value.to_string());
+            (session, *via, was)
+        };
+        self.emit_options();
+        let pending = Pending::SetOption {
+            id: id.to_string(),
+            was,
+        };
+        match via {
+            Via::Config => self.request(
+                "session/set_config_option",
+                json!({"sessionId": session, "configId": id, "value": value}),
+                pending,
+            ),
+            Via::Mode => self.request(
+                "session/set_mode",
+                json!({"sessionId": session, "modeId": value}),
+                pending,
+            ),
+            Via::Model => self.request(
+                "session/set_model",
+                json!({"sessionId": session, "modelId": value}),
+                pending,
+            ),
+        }
+    }
+
+    /// A `config_option_update` (the whole set again) or a
+    /// `current_mode_update` (the agent changed its mode itself).
+    fn options_update(&self, u: &Value) {
+        {
+            let mut st = self.state.lock().expect("acp state");
+            match u.get("sessionUpdate").and_then(Value::as_str) {
+                Some("config_option_update") => {
+                    let options = config_options(u.get("configOptions").unwrap_or(&Value::Null));
+                    st.options = options.into_iter().map(|o| (o, Via::Config)).collect();
+                }
+                Some("current_mode_update") => {
+                    let Some(mode) = u.get("currentModeId").and_then(Value::as_str) else {
+                        return;
+                    };
+                    match st.options.iter_mut().find(|(_, via)| *via == Via::Mode) {
+                        Some((o, _)) => o.current = mode.to_string(),
+                        None => return,
+                    }
+                }
+                _ => return,
+            }
+        }
+        self.emit_options();
+    }
+
     /// Answer a permission request with one of its choices.
     pub(crate) fn answer(&self, request_id: &str, choice: &str) {
         self.state
@@ -589,11 +875,17 @@ impl Acp {
                                 .and_then(Value::as_str)
                                 .unwrap_or("")
                                 .to_string();
-                            self.state.lock().expect("acp state").session = Some(sid.clone());
+                            {
+                                let mut st = self.state.lock().expect("acp state");
+                                st.session = Some(sid.clone());
+                                st.options =
+                                    msg.get("result").map(session_options).unwrap_or_default();
+                            }
                             self.emit(AgentEvent::Session {
                                 id: sid,
                                 cwd: self.cwd.clone(),
                             });
+                            self.emit_options();
                             self.next();
                         }
                     },
@@ -622,6 +914,33 @@ impl Acp {
                         self.state.lock().expect("acp state").busy = false;
                         self.emit(AgentEvent::AgentEnd);
                         self.next();
+                    }
+                    Some(Pending::SetOption { id, was }) => {
+                        if let Some(e) = error {
+                            if let Some((o, _)) = self
+                                .state
+                                .lock()
+                                .expect("acp state")
+                                .options
+                                .iter_mut()
+                                .find(|(o, _)| o.id == id)
+                            {
+                                o.current = was;
+                            }
+                            self.emit(AgentEvent::Notice {
+                                text: format!("The agent didn't change its {id}: {e}"),
+                                error: true,
+                            });
+                            self.emit_options();
+                        } else if let Some(list) = msg.pointer("/result/configOptions") {
+                            // The whole set, as the agent has it now.
+                            let options = config_options(list);
+                            if !options.is_empty() {
+                                self.state.lock().expect("acp state").options =
+                                    options.into_iter().map(|o| (o, Via::Config)).collect();
+                                self.emit_options();
+                            }
+                        }
                     }
                     None => {}
                 }
@@ -657,6 +976,13 @@ impl Acp {
             // A notification.
             (Some("session/update"), None) => {
                 if let Some(u) = msg.pointer("/params/update") {
+                    if matches!(
+                        u.get("sessionUpdate").and_then(Value::as_str),
+                        Some("config_option_update" | "current_mode_update")
+                    ) {
+                        self.options_update(u);
+                        return;
+                    }
                     let events = self.translator.lock().expect("acp translator").update(u);
                     for ev in events {
                         self.emit(ev);
@@ -736,9 +1062,12 @@ mod tests {
             "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed",
             "content": [{"type": "diff", "path": "/w/notes.txt", "oldText": "hello\n", "newText": "hello\nworld\n"}]
         }));
+        assert!(
+            matches!(&done[0], AgentEvent::ToolDiff { id, diffs } if id == "c1" && diffs.len() == 1)
+        );
         assert_eq!(
-            done,
-            vec![AgentEvent::ToolEnd {
+            done[1..],
+            [AgentEvent::ToolEnd {
                 id: "c1".into(),
                 name: "tool".into(),
                 result: Value::String("/w/notes.txt: 2 line(s), was 1".into()),
@@ -955,5 +1284,148 @@ mod tests {
             .try_iter()
             .any(|ev| matches!(ev, AgentEvent::Error { message }
             if message.starts_with("Authentication required: the agent isn't signed in"))));
+    }
+
+    /// An open session on a fresh connection, its `session/new` answered
+    /// with `result`; the events so far drained.
+    fn opened(result: Value) -> (Acp, Wire, crossbeam_channel::Receiver<AgentEvent>) {
+        let wire = Wire::default();
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let acp = Acp::new(Arc::new(Mutex::new(wire.clone())), tx, "/w".into());
+        acp.start();
+        let init = wire.sent();
+        acp.receive(&json!({"jsonrpc": "2.0", "id": init[0]["id"], "result": {}}).to_string());
+        let new = wire.sent();
+        let mut result = result;
+        result["sessionId"] = json!("s1");
+        acp.receive(&json!({"jsonrpc": "2.0", "id": new[0]["id"], "result": result}).to_string());
+        (acp, wire, rx)
+    }
+
+    fn last_options(rx: &crossbeam_channel::Receiver<AgentEvent>) -> Option<Vec<SessionOption>> {
+        rx.try_iter()
+            .filter_map(|e| match e {
+                AgentEvent::Options { options } => Some(options),
+                _ => None,
+            })
+            .last()
+    }
+
+    #[test]
+    fn config_options_are_offered_model_first_and_set_by_id() {
+        let (acp, wire, rx) = opened(json!({
+            "configOptions": [
+                {"id": "mode", "name": "Session Mode", "category": "mode", "type": "select",
+                 "currentValue": "ask", "options": [
+                    {"value": "ask", "name": "Ask"}, {"value": "code", "name": "Code"}]},
+                {"id": "model", "name": "Model", "category": "model", "type": "select",
+                 "currentValue": "fast", "options": [
+                    {"group": "a", "name": "Quick", "options": [{"value": "fast", "name": "Fast"}]},
+                    {"group": "b", "name": "Deep", "options": [{"value": "smart", "name": "Smart"}]}]},
+                {"id": "web", "name": "Web", "type": "boolean", "currentValue": true}
+            ],
+            // Superseded by the config options: not offered twice.
+            "modes": {"currentModeId": "ask", "availableModes": [{"id": "ask", "name": "Ask"}]}
+        }));
+        let options = last_options(&rx).expect("offered");
+        assert_eq!(
+            options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+            ["model", "mode"]
+        );
+        assert_eq!(options[0].choices.len(), 2, "groups flattened");
+        assert_eq!(options[0].current_name(), "Fast");
+
+        acp.set_option("model", "smart");
+        let sent = wire.sent();
+        assert_eq!(sent[0]["method"], "session/set_config_option");
+        assert_eq!(
+            sent[0]["params"],
+            json!({"sessionId": "s1", "configId": "model", "value": "smart"})
+        );
+        // Shown at once.
+        assert_eq!(last_options(&rx).unwrap()[0].current, "smart");
+        // Refused: back to what it was, and said.
+        acp.receive(&json!({"jsonrpc": "2.0", "id": sent[0]["id"], "error": {"code": -32602, "message": "no such model"}}).to_string());
+        let events: Vec<AgentEvent> = rx.try_iter().collect();
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::Notice { error: true, text } if text.contains("no such model"))));
+        let back = events.iter().rev().find_map(|e| match e {
+            AgentEvent::Options { options } => Some(options.clone()),
+            _ => None,
+        });
+        assert_eq!(back.unwrap()[0].current, "fast");
+
+        // The agent changes them itself: the whole set again.
+        acp.receive(&json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {
+            "sessionUpdate": "config_option_update",
+            "configOptions": [{"id": "mode", "name": "Mode", "category": "mode", "type": "select",
+                "currentValue": "code", "options": [{"value": "code", "name": "Code"}]}]
+        }}}).to_string());
+        let options = last_options(&rx).unwrap();
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].current, "code");
+        // Setting what is already set sends nothing.
+        acp.set_option("mode", "code");
+        assert!(wire.sent().is_empty());
+    }
+
+    #[test]
+    fn older_agents_offer_modes_and_models_their_own_way() {
+        let (acp, wire, rx) = opened(json!({
+            "modes": {"currentModeId": "default", "availableModes": [
+                {"id": "default", "name": "Always Ask"}, {"id": "plan", "name": "Plan Mode", "description": "Plan only"}]},
+            "models": {"currentModelId": "sonnet", "availableModels": [
+                {"modelId": "sonnet", "name": "Sonnet"}, {"modelId": "opus", "name": "Opus"}]}
+        }));
+        let options = last_options(&rx).unwrap();
+        assert_eq!(options[0].category, "model");
+        assert_eq!(options[1].category, "mode");
+        assert_eq!(options[1].choices[1].description, "Plan only");
+
+        acp.set_option("mode", "plan");
+        let sent = wire.sent();
+        assert_eq!(sent[0]["method"], "session/set_mode");
+        assert_eq!(
+            sent[0]["params"],
+            json!({"sessionId": "s1", "modeId": "plan"})
+        );
+        acp.set_option("model", "opus");
+        let sent = wire.sent();
+        assert_eq!(sent[0]["method"], "session/set_model");
+        assert_eq!(
+            sent[0]["params"],
+            json!({"sessionId": "s1", "modelId": "opus"})
+        );
+        // The agent leaves plan mode by itself.
+        acp.receive(&json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {
+            "sessionUpdate": "current_mode_update", "currentModeId": "default"}}}).to_string());
+        let options = last_options(&rx).unwrap();
+        assert_eq!(options[1].current, "default");
+        assert_eq!(options[0].current, "opus");
+        // An option there isn't, or no options at all, is no request.
+        acp.set_option("speed", "x");
+        assert!(wire.sent().is_empty());
+        assert!(session_options(&json!({"sessionId": "s"})).is_empty());
+    }
+
+    #[test]
+    fn a_diff_is_kept_whole_beside_its_one_line_summary() {
+        let out = Translator::in_dir("/w").update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed",
+            "content": [{"type": "diff", "path": "/w/a.txt", "oldText": "x\n", "newText": "x\ny\n"}]
+        }));
+        assert_eq!(
+            out[0],
+            AgentEvent::ToolDiff {
+                id: "c1".into(),
+                diffs: vec![FileDiff {
+                    path: "a.txt".into(),
+                    old: "x\n".into(),
+                    new: "x\ny\n".into()
+                }]
+            }
+        );
+        assert!(
+            matches!(&out[1], AgentEvent::ToolEnd { result, .. } if result == "a.txt: 2 line(s), was 1")
+        );
     }
 }

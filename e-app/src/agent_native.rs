@@ -359,10 +359,46 @@ fn receipt_card(state: AppState, i: usize) -> impl IntoView {
     })
 }
 
-/// A collapsible-looking card for one tool call: status glyph + name + summary,
-/// and a dimmed monospace preview of the result.
+/// Lines of output a closed card shows.
+const PREVIEW_LINES: usize = 8;
+
+/// Whether a card has more than it shows closed: output past the preview,
+/// or a diff past its first lines.
+fn has_more(tc: &e_agent::ToolCall) -> bool {
+    tc.result
+        .as_ref()
+        .is_some_and(|r| r.lines().count() > PREVIEW_LINES)
+        || tc
+            .diffs
+            .iter()
+            .any(|d| crate::agent_diff::diff_lines(&d.old, &d.new, 1).len() > 12)
+}
+
+/// Whether the output is no more than the diff above it says: a line per
+/// file ("Edited a.php"). An error is always shown.
+fn diff_says_it(tc: &e_agent::ToolCall) -> bool {
+    tc.status != ToolStatus::Error
+        && !tc.diffs.is_empty()
+        && tc.result.as_deref().unwrap_or("").lines().count() <= tc.diffs.len()
+}
+
+/// A card for one tool call: status glyph + name + summary, the files it
+/// changed as small diffs, and a dimmed preview of its output. A click on
+/// the head (▸) opens it to the whole output and diff.
 fn tool_card(state: AppState, i: usize) -> impl IntoView {
+    let open = RwSignal::new(false);
+    let more = move || {
+        state.agent.chat.with(|c| match c.items.get(i) {
+            Some(ChatItem::Tool(tc)) => has_more(tc),
+            _ => false,
+        })
+    };
     let header = label(move || {
+        let arrow = match (more(), open.get()) {
+            (false, _) => "",
+            (true, false) => "▸ ",
+            (true, true) => "▾ ",
+        };
         state.agent.chat.with(|c| match c.items.get(i) {
             Some(ChatItem::Tool(tc)) => {
                 let glyph = match tc.status {
@@ -371,9 +407,9 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
                     ToolStatus::Error => "\u{2717}",   // ✗
                 };
                 if tc.summary.is_empty() {
-                    format!("{glyph}  {}", tc.name)
+                    format!("{arrow}{glyph}  {}", tc.name)
                 } else {
-                    format!("{glyph}  {}  {}", tc.name, tc.summary)
+                    format!("{arrow}{glyph}  {}  {}", tc.name, tc.summary)
                 }
             }
             _ => String::new(),
@@ -388,36 +424,74 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
             },
             _ => theme::fg_dim(),
         });
-        s.font_family(theme::mono_family())
+        let s = s
+            .font_family(theme::mono_family())
             .font_size(12.0)
-            .color(color)
+            .color(color);
+        if more() {
+            s.cursor(floem::style::CursorStyle::Pointer)
+        } else {
+            s
+        }
     })
-    .label_style(|s| s.selectable(true));
+    .on_click_stop(move |_| {
+        if more() {
+            open.update(|o| *o = !*o);
+        }
+    });
+
+    let diffs = crate::agent_diff::diffs_view(
+        state,
+        move || {
+            state.agent.chat.with(|c| match c.items.get(i) {
+                Some(ChatItem::Tool(tc)) => tc.diffs.clone(),
+                _ => Vec::new(),
+            })
+        },
+        move || open.get(),
+    );
 
     let result = label(move || {
         state.agent.chat.with(|c| match c.items.get(i) {
             Some(ChatItem::Tool(tc)) => {
                 let r = tc.result.clone().unwrap_or_default();
+                // A diff says it better than its one-line summary.
+                if diff_says_it(tc) {
+                    return String::new();
+                }
                 // A few lines keep cards compact: the first of a result, the
-                // latest of output still arriving.
+                // latest of output still arriving. Opened, all of it.
                 let all: Vec<&str> = r.lines().collect();
-                if all.len() <= 8 {
-                    all.join("\n")
+                let n = PREVIEW_LINES;
+                if all.len() <= n || open.get() {
+                    r.trim_end().to_string()
                 } else if tc.status == ToolStatus::Running {
-                    format!("…\n{}", all[all.len() - 8..].join("\n"))
+                    format!("…\n{}", all[all.len() - n..].join("\n"))
                 } else {
-                    format!("{}\n…", all[..8].join("\n"))
+                    format!("{}\n…  {} more lines", all[..n].join("\n"), all.len() - n)
                 }
             }
             _ => String::new(),
         })
     })
     .label_style(|s| s.selectable(true))
-    .style(|s| {
-        s.font_family(theme::mono_family())
+    .style(move |s| {
+        let empty = state.agent.chat.with(|c| match c.items.get(i) {
+            Some(ChatItem::Tool(tc)) => {
+                tc.result.as_deref().unwrap_or("").is_empty() || diff_says_it(tc)
+            }
+            _ => true,
+        });
+        let s = s
+            .font_family(theme::mono_family())
             .font_size(11.0)
             .color(theme::fg_dim())
-            .margin_top(4.0)
+            .margin_top(4.0);
+        if empty {
+            s.hide()
+        } else {
+            s
+        }
     });
 
     // The card shows a few lines; these copy it whole.
@@ -427,7 +501,7 @@ fn tool_card(state: AppState, i: usize) -> impl IntoView {
             _ => String::new(),
         })
     };
-    stack((header, result))
+    stack((header, diffs, result))
         .context_menu(move || {
             use floem::menu::{Menu, MenuItem};
             let summary = full(|tc| tc.summary.clone());

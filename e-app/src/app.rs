@@ -536,11 +536,20 @@ fn app_view() -> impl IntoView {
                     || drained
                         .iter()
                         .any(|ev| matches!(ev, e_agent::AgentEvent::CompactionEnd { .. }));
+                // The agent's options, offered for the first time this
+                // session: the model chosen last time is set again.
+                let first_options = chat.with_untracked(|c| c.options.is_empty())
+                    && drained
+                        .iter()
+                        .any(|ev| matches!(ev, e_agent::AgentEvent::Options { options } if !options.is_empty()));
                 chat.update(|c| {
                     for ev in drained {
                         c.apply(ev);
                     }
                 });
+                if first_options {
+                    state.cascade_restore_options();
+                }
                 // What the turn changed, under it.
                 if ended {
                     state.turn_end();

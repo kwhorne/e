@@ -38,6 +38,7 @@ e-laravel          = { workspace = true }
 e-agent            = { workspace = true }
 e-core             = { workspace = true }
 e-db               = { workspace = true }
+similar            = "2"
 e-verify           = { workspace = true }
 e-review           = { workspace = true }
 e-dap              = { workspace = true }

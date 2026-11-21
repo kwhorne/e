@@ -44,6 +44,9 @@ pub struct Settings {
     pub cascade_thinking: String,
     /// `code` (tools on) or `ask` (answer and plan only).
     pub cascade_mode: String,
+    /// The model (and thinking level) last chosen for each ACP agent, as
+    /// `agent/option` → value, set again when its next session opens.
+    pub cascade_acp_choices: std::collections::BTreeMap<String, String>,
     /// The agent Cascade runs: `elyra`, or an ACP agent's id (`claude`,
     /// `codex`, … — see `agent_acp::PROVIDERS`).
     pub cascade_agent: String,
@@ -93,6 +96,7 @@ impl Default for Settings {
             cascade_model: String::new(),
             cascade_thinking: String::new(),
             cascade_mode: "code".to_string(),
+            cascade_acp_choices: Default::default(),
             cascade_agent: "elyra".to_string(),
             editor_integration: true,
             laravel: true,
@@ -173,6 +177,15 @@ pub fn load_settings() -> Settings {
             .unwrap_or_else(|| bool_of("native_agent", d.cascade)),
         cascade_model: str_of("cascade_model"),
         cascade_thinking: str_of("cascade_thinking"),
+        cascade_acp_choices: v
+            .get("cascade_acp_choices")
+            .and_then(|x| x.as_object())
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default(),
         cascade_mode: {
             let m = str_of("cascade_mode");
             if m == "ask" {

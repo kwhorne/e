@@ -2,10 +2,10 @@
 //! Agent Client Protocol (see [`e_agent::acp`]), through the agent's own ACP
 //! mode or an adapter — so Claude Code, Codex, Gemini CLI and the rest get the
 //! same panel: the transcript, turn receipts with Undo, worktree sessions, the
-//! context meter. They differ in what ACP lacks: no steering (a message sent
-//! while the agent works runs next) and no model menu (the agent's own
-//! settings choose it). They ask before acting, and the answer is a card in
-//! the transcript.
+//! context meter, and a chip in the composer for each setting the agent
+//! offers for its session (its model, its mode). They differ in what ACP
+//! lacks: no steering (a message sent while the agent works runs next). They
+//! ask before acting, and the answer is a card in the transcript.
 
 use std::path::Path;
 

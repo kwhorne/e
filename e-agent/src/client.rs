@@ -140,6 +140,14 @@ impl AgentClient {
         self.acp.is_some()
     }
 
+    /// Set one of an ACP agent's session options (its model, its mode) to
+    /// `value`. Elyra's are set by their own commands.
+    pub fn set_option(&self, id: &str, value: &str) {
+        if let Some(acp) = &self.acp {
+            acp.set_option(id, value);
+        }
+    }
+
     /// Answer the agent's permission request `request_id` with `choice`.
     pub fn answer_permission(&self, request_id: &str, choice: &str) {
         if let Some(acp) = &self.acp {

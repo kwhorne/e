@@ -6,6 +6,7 @@
 
 mod about;
 mod agent_acp;
+mod agent_diff;
 mod agent_drive;
 mod agent_links;
 mod agent_native;

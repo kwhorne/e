@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::protocol::AgentEvent;
+use crate::protocol::{AgentEvent, FileDiff, SessionOption};
 
 /// Lifecycle of a single tool call.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +25,8 @@ pub struct ToolCall {
     pub status: ToolStatus,
     /// A trimmed textual preview of the result (or error).
     pub result: Option<String>,
+    /// The files the call changed, before and after.
+    pub diffs: Vec<FileDiff>,
 }
 
 /// What one turn of the agent changed in the working tree — the files, with
@@ -93,7 +95,9 @@ pub struct PermissionAsk {
 }
 
 /// Maximum characters kept for a tool-result preview.
-const RESULT_PREVIEW_LIMIT: usize = 2000;
+/// How much of a tool's output is kept: a card shows a few lines, and all of
+/// this when opened.
+const RESULT_PREVIEW_LIMIT: usize = 20_000;
 
 /// One model the agent can run on, as elyra describes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -164,6 +168,8 @@ pub struct ChatState {
     /// The thinking level in use (`off` … `xhigh`), empty until known.
     pub thinking: String,
     pub session_id: String,
+    /// An ACP agent's settings for the session (its model, its mode).
+    pub options: Vec<SessionOption>,
     /// The session file on disk, when the session is persisted.
     pub session_file: Option<String>,
     /// Messages waiting to steer the running work (delivered after its current
@@ -379,6 +385,7 @@ impl ChatState {
             }
             AgentEvent::ToolStart { id, name, args } => {
                 let summary = summarize_args(&name, &args);
+                let diffs = edit_diffs(&args);
                 self.items.push(ChatItem::Tool(ToolCall {
                     id,
                     name,
@@ -386,6 +393,7 @@ impl ChatState {
                     args,
                     status: ToolStatus::Running,
                     result: None,
+                    diffs,
                 }));
                 // Any text bubble is complete once tools begin.
                 self.cur_assistant = None;
@@ -409,8 +417,23 @@ impl ChatState {
                         tc.args = args;
                     }
                     tc.summary = summarize_args(&tc.name, &tc.args);
+                    let diffs = edit_diffs(&tc.args);
+                    if !diffs.is_empty() {
+                        tc.diffs = diffs;
+                    }
                 }
             }
+            AgentEvent::ToolDiff { id, diffs } => {
+                if let Some(ChatItem::Tool(tc)) = self
+                    .items
+                    .iter_mut()
+                    .rev()
+                    .find(|it| matches!(it, ChatItem::Tool(tc) if tc.id == id))
+                {
+                    tc.diffs = diffs;
+                }
+            }
+            AgentEvent::Options { options } => self.options = options,
             AgentEvent::ToolUpdate { id, partial, .. } => {
                 // Output so far, while the tool runs: the latest of it.
                 if let Some(ChatItem::Tool(tc)) = self
@@ -636,7 +659,9 @@ impl ChatState {
                                     .unwrap_or("")
                                     .to_string();
                                 let args = b.get("arguments").cloned().unwrap_or(Value::Null);
+                                let diffs = edit_diffs(&args);
                                 self.items.push(ChatItem::Tool(ToolCall {
+                                    diffs,
                                     id: b
                                         .get("id")
                                         .and_then(Value::as_str)
@@ -702,6 +727,25 @@ impl ChatState {
 }
 
 /// A short, human one-liner describing a tool call's arguments.
+/// The change an edit's arguments describe: Elyra's `edit` gives the path
+/// and the text replaced (`oldText`, `newText`); others name them
+/// `old_string`, `new_string`.
+fn edit_diffs(args: &Value) -> Vec<FileDiff> {
+    let text = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|k| args.get(*k).and_then(Value::as_str))
+            .map(str::to_string)
+    };
+    let (Some(path), Some(old), Some(new)) = (
+        text(&["path", "file_path", "file"]),
+        text(&["oldText", "old_string", "old_str"]),
+        text(&["newText", "new_string", "new_str"]),
+    ) else {
+        return Vec::new();
+    };
+    vec![FileDiff { path, old, new }]
+}
+
 fn summarize_args(name: &str, args: &Value) -> String {
     let first_str = |keys: &[&str]| -> Option<String> {
         keys.iter()
@@ -1200,7 +1244,7 @@ mod tests {
 
     #[test]
     fn long_result_is_truncated() {
-        let big = "x".repeat(5000);
+        let big = "x".repeat(RESULT_PREVIEW_LIMIT * 2);
         let st = feed(&[
             AgentEvent::ToolStart {
                 id: "t".into(),
@@ -1217,7 +1261,7 @@ mod tests {
         if let ChatItem::Tool(tc) = &st.items[0] {
             let r = tc.result.as_ref().unwrap();
             assert!(r.contains("truncated"));
-            assert!(r.chars().count() < 2100);
+            assert!(r.chars().count() < RESULT_PREVIEW_LIMIT + 100);
         } else {
             panic!();
         }
@@ -1349,5 +1393,43 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn an_edit_shows_what_it_changed() {
+        let st = feed(&[
+            AgentEvent::ToolStart {
+                id: "t".into(),
+                name: "edit".into(),
+                args: serde_json::json!({"path": "app/A.php", "oldText": "a", "newText": "b"}),
+            },
+            AgentEvent::ToolStart {
+                id: "u".into(),
+                name: "edit".into(),
+                args: serde_json::json!({"path": "b.txt"}),
+            },
+            // An ACP agent's diff arrives later, and replaces what was there.
+            AgentEvent::ToolDiff {
+                id: "u".into(),
+                diffs: vec![FileDiff {
+                    path: "b.txt".into(),
+                    old: String::new(),
+                    new: "new\n".into(),
+                }],
+            },
+        ]);
+        let diffs = |i: usize| match &st.items[i] {
+            ChatItem::Tool(tc) => tc.diffs.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(
+            diffs(0),
+            [FileDiff {
+                path: "app/A.php".into(),
+                old: "a".into(),
+                new: "b".into()
+            }]
+        );
+        assert_eq!(diffs(1)[0].new, "new\n");
     }
 }

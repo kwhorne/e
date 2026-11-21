@@ -94,10 +94,61 @@ pub enum AgentEvent {
     },
     /// A line for the transcript from the agent (an ACP `notice`, a plan).
     Notice { text: String, error: bool },
+    /// What a tool call changed, file by file (an ACP `diff`, Elyra's
+    /// `edit` arguments). Replaces what the call showed before.
+    ToolDiff { id: String, diffs: Vec<FileDiff> },
+    /// The settings an ACP agent offers for the session — its model, its
+    /// mode — each with its choices and the one in use. The whole set, each
+    /// time it changes.
+    Options { options: Vec<SessionOption> },
     /// A protocol-level error message.
     Error { message: String },
     /// Any event type we don't specifically model, kept verbatim.
     Other { kind: String, raw: Value },
+}
+
+/// One file a tool call changed: the text before and after — the whole
+/// file, or just the part that changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileDiff {
+    pub path: String,
+    /// Empty for a new file.
+    pub old: String,
+    pub new: String,
+}
+
+/// A setting an agent offers for its session (ACP's session config options,
+/// or its older modes and models): a menu of choices, one of them current.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionOption {
+    /// What it is set by.
+    pub id: String,
+    /// "Model", "Mode".
+    pub name: String,
+    /// `model`, `mode`, `thought_level`, or empty: what it is, for the menu
+    /// to order it by. Not something to rely on.
+    pub category: String,
+    /// The value in use.
+    pub current: String,
+    pub choices: Vec<OptionChoice>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OptionChoice {
+    pub value: String,
+    pub name: String,
+    pub description: String,
+}
+
+impl SessionOption {
+    /// The name of the choice in use, or its value when it isn't a choice.
+    pub fn current_name(&self) -> &str {
+        self.choices
+            .iter()
+            .find(|c| c.value == self.current)
+            .map(|c| c.name.as_str())
+            .unwrap_or(&self.current)
+    }
 }
 
 /// One answer to a permission request.

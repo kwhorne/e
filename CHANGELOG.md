@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tool cards in Cascade open to the whole output.** A card with more than
+  its eight-line preview has a **▸**; a click on its first line shows all of
+  it, and another closes it again.
+- **Edits show what they changed.** A tool call that edits a file shows a small
+  coloured diff on its card: the lines taken out and put in, with a line of
+  context, under the file's name and counts. Click the name to open the file
+  at the change. This works for ACP agents' diffs and for Elyra's `edit`.
+- **Model and mode for ACP agents.** Claude Code, Codex and the other ACP
+  agents get a chip in the composer for each setting they offer for the
+  session, such as the model, the mode (*Plan*, *Accept edits*…) or the
+  thinking level. The chips appear when the panel opens, before the first
+  message. The model and thinking level are remembered per agent; the mode is
+  chosen each session.
+
 - **`e --help`** (`-h`) lists the options instead of opening a window.
 
 ### Fixed

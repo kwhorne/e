@@ -38,7 +38,11 @@ before any API key is stored it says where to add one.
 cards** (tool, one-line summary, running / done / error, a result preview —
 while a tool runs, its latest output as it arrives, so a test run or a build
 shows where it is), dimmed reasoning, and **Copy** on every code block and
-reply.
+reply. A card whose output is longer than its eight-line preview has a **▸**:
+click its first line to open it to the whole output, and again to close it.
+An edit shows what it changed as a small coloured diff — the lines taken out
+(−) and put in (+), with a line around each — under the file's name and its
+counts; click the name to open the file at the change.
 
 **The composer card** at the bottom:
 
@@ -142,11 +146,21 @@ They get the same panel as Elyra — the transcript, tool cards, turn receipts
 with **Review** and **Undo**, worktree sessions and the context meter (when the
 agent reports usage). When one asks before acting, the question is a card in
 the transcript with the agent's own choices (*Allow*, *Always allow*,
-*Reject*…); **Stop** answers an open one as cancelled. What ACP doesn't have:
+*Reject*…); **Stop** answers an open one as cancelled.
+
+**Model and mode.** What the agent offers for its session — its model, its
+modes (*Plan*, *Ask*, *Accept edits*…), a thinking level — shows as chips in the
+composer as soon as the panel opens, so you can choose before the first message
+and change between messages. `e` reads ACP's session config options, or an
+older agent's modes and models. The model and thinking level you pick are
+remembered per agent and set again for its next session; the mode isn't, so a
+plan-only or ask-nothing mode is always a choice you make for the session at
+hand. An agent that offers nothing shows no chips, and its own settings decide.
+
+What ACP doesn't have:
 
 - **No steering.** A message sent while the agent works runs next, when it is
   done; `↵` queues it.
-- **No model menu.** The agent's own settings choose the model.
 - **No compaction from `e`**, and Elyra's API keys aren't passed on — each
   agent uses its own sign-in.
 

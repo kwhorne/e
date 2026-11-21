@@ -12,5 +12,10 @@ fn main() {
         print!("{}", e_app::cli::USAGE);
         return;
     }
+    // In e's terminal: the file opens in that window (and `--wait` waits
+    // for it), instead of a second editor starting.
+    if let Some(code) = e_app::cli::hand_to_running(&cli) {
+        std::process::exit(code);
+    }
     e_app::launch();
 }

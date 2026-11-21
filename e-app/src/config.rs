@@ -44,6 +44,9 @@ pub struct Settings {
     pub cascade_thinking: String,
     /// `code` (tools on) or `ask` (answer and plan only).
     pub cascade_mode: String,
+    /// Make `e --wait` the editor of what runs in e's terminal
+    /// (`GIT_EDITOR`, `EDITOR`, `VISUAL`).
+    pub terminal_editor: bool,
     /// The model (and thinking level) last chosen for each ACP agent, as
     /// `agent/option` → value, set again when its next session opens.
     pub cascade_acp_choices: std::collections::BTreeMap<String, String>,
@@ -96,6 +99,7 @@ impl Default for Settings {
             cascade_model: String::new(),
             cascade_thinking: String::new(),
             cascade_mode: "code".to_string(),
+            terminal_editor: true,
             cascade_acp_choices: Default::default(),
             cascade_agent: "elyra".to_string(),
             editor_integration: true,
@@ -170,6 +174,7 @@ pub fn load_settings() -> Settings {
             d.ask_before_agent_commands,
         ),
         sticky_scroll: bool_of("sticky_scroll", d.sticky_scroll),
+        terminal_editor: bool_of("terminal_editor", d.terminal_editor),
         ai_completion: bool_of("ai_completion", d.ai_completion),
         cascade: v
             .get("cascade")

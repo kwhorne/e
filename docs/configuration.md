@@ -57,6 +57,7 @@ and `keybindings`), which is created on first use.
 | `auto_close` | bool | `true` | Auto-close brackets/quotes |
 | `inlay_hints` | bool | `true` | Show LSP inlay hints |
 | `sticky_scroll` | bool | `true` | Pin enclosing scope at the top |
+| `terminal_editor` | bool | `true` | Make `e --wait` the editor of what runs in e's terminal (`GIT_EDITOR`, `EDITOR`, `VISUAL`), so `git commit` and `git rebase -i` open in a tab. See [`e --wait`](getting-started.md#e-as-your-editor---wait) |
 | `ai_completion` | bool | `false` | Inline AI completion (ghost text) via a local Ollama code model; `Tab` accepts. Model via `E_COMPLETION_MODEL` (default `qwen2.5-coder`). Requires a running Ollama. |
 | `laravel_lsp` | bool | `true` | Run the official [laravel/lsp](https://github.com/laravel/lsp) alongside Intelephense in Laravel projects (and give Blade a language server). Off falls back to `e`'s built-in Laravel intelligence. Restart to apply. See [Languages & LSP](languages-and-lsp.md#the-laravel-language-server). |
 | `cascade` | bool | `false` | Elyra Cascade: render Elyra as a chat panel (session tab, model picker, Code/Ask, streaming markdown, tool cards) instead of the terminal. Other agents always use the terminal. The older `native_agent` key is still read. See [AI Agents](agents.md#elyra-cascade). |

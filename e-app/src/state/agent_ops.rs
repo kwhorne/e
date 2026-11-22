@@ -24,17 +24,33 @@ impl AppState {
                 if self.agent.native_client.get_untracked().is_none() {
                     self.start_native_agent();
                 }
-                // Focus the composer once the panel has actually become visible
-                // (a synchronous focus request while still hidden is dropped).
-                let st = *self;
-                floem::action::exec_after(std::time::Duration::from_millis(30), move |_| {
-                    st.agent.focus_pulse.update(|x| *x += 1);
-                });
             } else if self.agent.term.get_untracked().is_none() {
                 self.start_agent();
             }
-            self.agent.focus_pulse.update(|x| *x += 1);
+            self.focus_agent_soon();
         }
+    }
+
+    /// Give the agent panel the keyboard, now and once it is on screen: a
+    /// focus request for a view that is still hidden, or that the panel is
+    /// only about to build (another agent, a restart), is dropped — and the
+    /// keys went to the editor instead, so a ↓ in Claude Code's "do you trust
+    /// this folder?" never reached it.
+    pub fn focus_agent_soon(&self) {
+        self.agent.focus_pulse.update(|x| *x += 1);
+        let st = *self;
+        floem::action::exec_after(std::time::Duration::from_millis(30), move |_| {
+            st.agent.focus_pulse.update(|x| *x += 1);
+        });
+    }
+
+    /// Has the agent in the panel's terminal exited (it quit, or never got
+    /// past its start)?
+    pub fn agent_exited(&self) -> bool {
+        self.agent
+            .term
+            .get_untracked()
+            .is_some_and(|t| t.borrow().has_exited())
     }
 
     /// Whether the current agent should use the native (elyra RPC) chat panel
@@ -333,7 +349,7 @@ impl AppState {
         } else {
             self.start_agent();
         }
-        self.agent.focus_pulse.update(|x| *x += 1);
+        self.focus_agent_soon();
     }
 
     pub fn restart_agent(&self) {
@@ -347,7 +363,7 @@ impl AppState {
             self.agent.term.set(None);
             self.start_agent();
         }
-        self.agent.focus_pulse.update(|x| *x += 1);
+        self.focus_agent_soon();
     }
 
     pub fn agent_input(&self, bytes: &[u8]) {

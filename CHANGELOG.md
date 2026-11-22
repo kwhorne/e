@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The agent panel takes the keyboard when it opens.** Opening it (⌘L),
+  switching agent or restarting one left the keys with the editor until the
+  panel was clicked, so a ↓ in Claude Code's "do you trust this folder?" never
+  reached it, and the Enter that followed answered *No, exit*.
+- **An agent that has exited says so.** The panel shows "<agent> has exited",
+  and Enter (or ⟳) starts it again, instead of a dead screen.
+- **A launch from the Dock or Finder no longer opens `/`.** With no last
+  project, e opened the folder it was started in, which from the Dock is the
+  filesystem root; it opens the home folder now, and `/` is never reopened as
+  the last project.
+
 ## [0.31.0] - 2026-11-21
 
 ### Added

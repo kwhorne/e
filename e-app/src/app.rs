@@ -233,6 +233,25 @@ mod detach_tests {
         assert_eq!(out[0], "--");
         assert!(Path::new(&out[1]).is_absolute(), "{out:?}");
     }
+
+    #[test]
+    fn a_launch_from_the_dock_opens_home_not_the_root() {
+        use super::bare_launch_root;
+        use std::path::PathBuf;
+        let home = Some("/Users/someone".into());
+        assert_eq!(
+            bare_launch_root(PathBuf::from("/"), home.clone()),
+            PathBuf::from("/Users/someone")
+        );
+        assert_eq!(
+            bare_launch_root(PathBuf::from("/srv/app"), home),
+            PathBuf::from("/srv/app")
+        );
+        assert_eq!(
+            bare_launch_root(PathBuf::from("/"), None),
+            PathBuf::from("/")
+        );
+    }
 }
 
 /// Raise the soft limit on open files. Launched from the Dock it is 256, and
@@ -336,8 +355,14 @@ fn resolve_args() -> (PathBuf, Option<PathBuf>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     // Flags (`--foreground`) aren't paths; after `--` everything is.
     match crate::cli::current().path {
-        // Bare launch (double-click, `e` with no path): reopen the last project.
-        None => (crate::config::load_last_project().unwrap_or(cwd), None),
+        // Bare launch (double-click, `e` with no path): reopen the last project,
+        // else where it was started — but not `/`, where Finder and the Dock
+        // start an app: the home folder then.
+        None => (
+            crate::config::load_last_project()
+                .unwrap_or_else(|| bare_launch_root(cwd, std::env::var_os("HOME"))),
+            None,
+        ),
         Some(arg) => {
             let path = PathBuf::from(arg);
             let path = path.canonicalize().unwrap_or(path);
@@ -348,6 +373,16 @@ fn resolve_args() -> (PathBuf, Option<PathBuf>) {
                 (root, Some(path))
             }
         }
+    }
+}
+
+/// The folder a bare launch opens when there is no last project: where it
+/// was started, unless that is the filesystem root (as from Finder or the
+/// Dock), then the home folder.
+fn bare_launch_root(cwd: PathBuf, home: Option<std::ffi::OsString>) -> PathBuf {
+    match home {
+        Some(home) if cwd.parent().is_none() && !home.is_empty() => PathBuf::from(home),
+        _ => cwd,
     }
 }
 

@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 use floem::event::{Event, EventListener, EventPropagation};
+use floem::keyboard::{Key, NamedKey};
 use floem::menu::{Menu, MenuItem};
 use floem::peniko::Color;
 use floem::reactive::{SignalGet, SignalUpdate, SignalWith};
@@ -137,7 +138,36 @@ fn agent_body(state: AppState) -> impl IntoView {
 
     let body = stack((content, cursor_block)).style(|s| s.size_full());
 
-    scroll(body)
+    // Once the agent has exited (it quit, or never got past its start — say,
+    // "No" to Claude Code's "do you trust this folder?"), the panel says how
+    // to start it again rather than sit there dead.
+    let exited = label(move || {
+        let name = state
+            .current_agent()
+            .map(|a| a.name)
+            .unwrap_or_else(|| "The agent".into());
+        format!("{name} has exited. Press Enter, or ⟳ above, to start it again.")
+    })
+    .style(move |s| {
+        state.term.tick.get();
+        state.agent.term.with(|_| ());
+        let s = s
+            .padding_horiz(10.0)
+            .padding_vert(6.0)
+            .width_full()
+            .font_size(12.0)
+            .color(theme::fg())
+            .background(theme::bg_panel())
+            .border_top(1.0)
+            .border_color(theme::border());
+        if state.agent_exited() {
+            s
+        } else {
+            s.hide()
+        }
+    });
+
+    let screen = scroll(body)
         .style(|s| {
             s.size_full()
                 .flex_grow(1.0_f32)
@@ -181,13 +211,22 @@ fn agent_body(state: AppState) -> impl IntoView {
                 {
                     return EventPropagation::Stop;
                 }
+                if state.agent_exited() {
+                    // Nothing reads what is typed now; Enter starts it again.
+                    if ke.key.logical_key == Key::Named(NamedKey::Enter) {
+                        state.restart_agent();
+                    }
+                    return EventPropagation::Stop;
+                }
                 if let Some(bytes) = key_to_bytes(ke) {
                     state.agent_input(&bytes);
                     return EventPropagation::Stop;
                 }
             }
             EventPropagation::Continue
-        })
+        });
+
+    stack((screen, exited)).style(|s| s.flex_col().size_full().flex_grow(1.0_f32))
 }
 
 /// True when the currently-selected agent should render as the native chat

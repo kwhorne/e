@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-22
+
 ### Fixed
 
 - **The agent panel takes the keyboard when it opens.** Opening it (⌘L),
@@ -2929,7 +2931,8 @@ PRD, phases 1–5. The Database panel (⌘3) is now a complete daily driver.
 - Light/dark themes (`F8`), auto-save, format & trim on save.
 - Session persistence per workspace and a workspace-wide problems panel.
 
-[Unreleased]: https://github.com/kwhorne/e/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/kwhorne/e/compare/v0.31.1...HEAD
+[0.31.1]: https://github.com/kwhorne/e/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/kwhorne/e/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/kwhorne/e/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/kwhorne/e/compare/v0.29.1...v0.29.2

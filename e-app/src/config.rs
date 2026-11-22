@@ -446,7 +446,9 @@ pub fn set_last_update_check(epoch_secs: u64) {
 /// The last opened project directory, if one was recorded and still exists.
 pub fn load_last_project() -> Option<PathBuf> {
     let p = PathBuf::from(read().get("last_project")?.as_str()?);
-    p.is_dir().then_some(p)
+    // `/` is only ever a launch from Finder or the Dock that went wrong, never
+    // a project to come back to.
+    (p.is_dir() && p.parent().is_some()).then_some(p)
 }
 
 /// User-defined snippets, keyed by language id, from the `snippets` section:
